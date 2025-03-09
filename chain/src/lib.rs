@@ -1,5 +1,25 @@
+use serde::{Deserialize, Serialize};
+
 pub mod actors;
 pub mod engine;
+
+#[derive(Deserialize, Serialize)]
+pub struct Config {
+    pub private_key: String,
+    pub share: String,
+    pub identity: String,
+
+    pub port: u16,
+    pub directory: String,
+    pub worker_threads: usize,
+
+    pub allowed_peers: Vec<String>,
+    pub bootstrappers: Vec<String>,
+
+    pub message_size: usize,
+    pub message_backlog: usize,
+    pub mailbox_size: usize,
+}
 
 #[cfg(test)]
 mod tests {
