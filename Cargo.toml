@@ -6,7 +6,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-alto-types = { version = "0.0.1", path = "types" }
+alto-types = { version = "0.0.2", path = "types" }
 commonware-consensus = { version = "0.0.14" }
 commonware-cryptography = { version = "0.0.25" }
 commonware-deployer = { version = "0.0.4" }
