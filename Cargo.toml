@@ -1,0 +1,47 @@
+[workspace]
+members = [
+    "types",
+]
+resolver = "2"
+
+[workspace.dependencies]
+alto-types = { version = "0.0.1", path = "types" }
+commonware-consensus = { version = "0.0.14" }
+commonware-cryptography = { version = "0.0.25" }
+commonware-macros = { version = "0.0.16" }
+commonware-p2p = { version = "0.0.36" }
+commonware-resolver = { version = "0.0.5" }
+commonware-runtime = { version = "0.0.22" }
+commonware-storage = { version = "0.0.17" }
+commonware-stream = { version = "0.0.14" }
+commonware-utils = { version = "0.0.17" }
+thiserror = "2.0.12"
+bytes = "1.7.1"
+rand = "0.8.5"
+prost = "0.13.5"
+prost-build = "0.13.5"
+futures = "0.3.31"
+futures-util = "0.3.31"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
+governor = "0.6.3"
+prometheus-client = "0.22.3"
+
+[profile.bench]
+# Because we enable overflow checks in "release," we should benchmark with them.
+overflow-checks = true
+
+[profile.dev]
+# Although overflow checks are enabled by default in "dev", we explicitly
+# enable them here for clarity.
+overflow-checks = true
+
+[profile.release]
+# To guard against unexpected behavior in production, we enable overflow checks in
+# "release" although they incur some performance penalty.
+overflow-checks = true
+
+[profile.test]
+# Although overflow checks are enabled by default in "test", we explicitly
+# enable them here for clarity.
+overflow-checks = true
