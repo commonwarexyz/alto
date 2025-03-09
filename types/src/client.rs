@@ -2,6 +2,7 @@ use crate::{Block, Finalization, Notarization};
 use commonware_cryptography::bls12381;
 use commonware_utils::{hex, SizedSerialize};
 
+// We hardcode the keys here to guard against silent changes.
 #[repr(u8)]
 pub enum Kind {
     Seed = 0,
