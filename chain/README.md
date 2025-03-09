@@ -22,7 +22,7 @@ cargo install commonware-deployer
 ### Create Deployer Artifacts
 
 ```bash
-cargo run --bin setup -- --peers 16 --bootstrappers 1 --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,me-central-1,af-south-1,sa-east-1 --instance-type c7g.xlarge --storage-size 10 --storage-class gp3 --worker-threads 4 --message-backlog 16384 --mailbox-size 16384 --dashboard dashboard.json --output assets
+cargo run --bin setup -- --peers 10 --bootstrappers 1 --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,me-central-1,af-south-1,sa-east-1 --instance-type c7g.xlarge --storage-size 10 --storage-class gp3 --worker-threads 4 --message-backlog 16384 --mailbox-size 16384 --dashboard dashboard.json --output assets
 ```
 
 ### Build Validator Binary
