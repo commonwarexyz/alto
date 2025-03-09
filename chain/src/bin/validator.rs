@@ -1,4 +1,4 @@
-use alto_chain::Config;
+use alto_chain::{engine, Config};
 use alto_types::P2P_NAMESPACE;
 use axum::{routing::get, serve, Extension, Router};
 use clap::{Arg, Command};
@@ -32,6 +32,11 @@ use tracing::{error, info, Level};
 
 const SYSTEM_METRICS_REFRESH: Duration = Duration::from_secs(5);
 const METRICS_PORT: u16 = 9090;
+
+const VOTER_CHANNEL: u32 = 0;
+const RESOLVER_CHANNEL: u32 = 1;
+const BROADCASTER_CHANNEL: u32 = 2;
+const BACKFILLER_CHANNEL: u32 = 3;
 
 fn main() {
     // Parse arguments
@@ -128,12 +133,35 @@ fn main() {
         // Provide authorized peers
         oracle.register(0, peer_keys.clone()).await;
 
-        // Register flood channel
-        let (mut flood_sender, mut flood_receiver) = network.register(
-            0,
-            Quota::per_second(NonZeroU32::new(u32::MAX).unwrap()),
+        // Register voter channel
+        let voter_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
+        let voter = network.register(VOTER_CHANNEL, voter_limit, config.message_backlog, None);
+
+        // Register resolver channel
+        let resolver_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
+        let resolver = network.register(
+            RESOLVER_CHANNEL,
+            resolver_limit,
             config.message_backlog,
             None,
+        );
+
+        // Register broadcast channel
+        let broadcaster_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
+        let broadcaster = network.register(
+            BROADCASTER_CHANNEL,
+            broadcaster_limit,
+            config.message_backlog,
+            Some(3),
+        );
+
+        // Register backfill channel
+        let backfiller_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
+        let backfiller = network.register(
+            BACKFILLER_CHANNEL,
+            backfiller_limit,
+            config.message_backlog,
+            Some(3),
         );
 
         // Create network
@@ -145,40 +173,14 @@ fn main() {
             .filter(|key| *key != public_key)
             .collect();
 
-        // Create flood
-        let flood_sender = context
-            .with_label("flood_sender")
-            .spawn(move |context| async move {
-                let mut rng = StdRng::seed_from_u64(0);
-                let messages: Counter<u64, AtomicU64> = Counter::default();
-                context.register("messages", "Sent messages", messages.clone());
-                loop {
-                    // Create message
-                    let mut msg = vec![0; config.message_size];
-                    rng.fill_bytes(&mut msg);
+        // Create engine
+        let config = engine::Config {
+            partition_prefix: "engine".to_string(),
+        };
+        let engine = engine::Engine::new(context.with_label("engine"), config).await;
 
-                    // Send to all peers
-                    let recipient_index = rng.gen_range(0..valid_recipients.len());
-                    let recipient = Recipients::One(valid_recipients[recipient_index].clone());
-                    if let Err(e) = flood_sender.send(recipient, msg.into(), false).await {
-                        error!(?e, "could not send flood message");
-                    }
-                    messages.inc();
-                }
-            });
-        let flood_receiver =
-            context
-                .with_label("flood_receiver")
-                .spawn(move |context| async move {
-                    let messages: Counter<u64, AtomicU64> = Counter::default();
-                    context.register("messages", "Received messages", messages.clone());
-                    loop {
-                        if let Err(e) = flood_receiver.recv().await {
-                            error!(?e, "could not receive flood message");
-                        }
-                        messages.inc();
-                    }
-                });
+        // Start engine
+        let engine = engine.start(voter, resolver, broadcaster, backfiller);
 
         // Start system metrics collector
         let system = context.with_label("system").spawn(|context| async move {
@@ -251,8 +253,7 @@ fn main() {
         });
 
         // Wait for any task to error
-        if let Err(e) = try_join_all(vec![p2p, flood_sender, flood_receiver, system, metrics]).await
-        {
+        if let Err(e) = try_join_all(vec![p2p, engine, system, metrics]).await {
             error!(?e, "task failed");
         }
     });
