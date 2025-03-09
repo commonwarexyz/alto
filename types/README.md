@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/alto-types.svg)](https://crates.io/crates/alto-types)
 [![Docs.rs](https://docs.rs/alto-types/badge.svg)](https://docs.rs/alto-types)
 
-TBD
+Common types used throughout `alto`.
 
 ## Status
 
