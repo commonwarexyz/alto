@@ -15,7 +15,6 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 commonware-cryptography = { workspace = true }
-commonware-storage = { workspace = true }
 commonware-utils = { workspace = true }
 bytes =  { workspace = true }
 rand = { workspace = true }
