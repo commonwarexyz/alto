@@ -178,7 +178,7 @@ mod tests {
                     fetch_timeout: Duration::from_secs(1),
                     activity_timeout: 10,
                     max_fetch_count: 10,
-                    max_fetch_size: 10,
+                    max_fetch_size: 1024 * 512,
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                 };
@@ -335,7 +335,7 @@ mod tests {
                     fetch_timeout: Duration::from_secs(1),
                     activity_timeout: 10,
                     max_fetch_count: 10,
-                    max_fetch_size: 10,
+                    max_fetch_size: 1024 * 512,
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                 };
@@ -417,7 +417,7 @@ mod tests {
                 fetch_timeout: Duration::from_secs(1),
                 activity_timeout: 10,
                 max_fetch_count: 10,
-                max_fetch_size: 10,
+                max_fetch_size: 1024 * 512,
                 fetch_concurrent: 10,
                 fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
             };
@@ -549,7 +549,7 @@ mod tests {
                             fetch_timeout: Duration::from_secs(1),
                             activity_timeout: 10,
                             max_fetch_count: 10,
-                            max_fetch_size: 10,
+                            max_fetch_size: 1024 * 512,
                             fetch_concurrent: 10,
                             fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                         };

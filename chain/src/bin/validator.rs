@@ -11,13 +11,12 @@ use commonware_cryptography::{
     Ed25519, Scheme,
 };
 use commonware_deployer::ec2::Peers;
-use commonware_p2p::{authenticated, Receiver, Recipients, Sender};
+use commonware_p2p::authenticated;
 use commonware_runtime::{tokio, Clock, Metrics, Network, Runner, Spawner};
 use commonware_utils::{from_hex_formatted, hex};
 use futures::future::try_join_all;
 use governor::Quota;
-use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
-use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
+use prometheus_client::metrics::gauge::Gauge;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -167,15 +166,24 @@ fn main() {
         // Create network
         let p2p = network.start();
 
-        // Remove self from valid recipients
-        let valid_recipients: Vec<PublicKey> = peer_keys
-            .into_iter()
-            .filter(|key| *key != public_key)
-            .collect();
-
         // Create engine
         let config = engine::Config {
             partition_prefix: "engine".to_string(),
+            signer,
+            identity,
+            share,
+            participants: peer_keys,
+            mailbox_size: config.mailbox_size,
+            backfill_quota: backfiller_limit,
+            leader_timeout: Duration::from_secs(1),
+            notarization_timeout: Duration::from_secs(2),
+            nullify_retry: Duration::from_secs(10),
+            fetch_timeout: Duration::from_secs(2),
+            activity_timeout: 1024,
+            max_fetch_count: 16,
+            max_fetch_size: 1024 * 512,
+            fetch_concurrent: 4,
+            fetch_rate_per_peer: resolver_limit,
         };
         let engine = engine::Engine::new(context.with_label("engine"), config).await;
 
