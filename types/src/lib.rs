@@ -1,4 +1,4 @@
-//! TBD
+//! Common types used throughout `alto`.
 
 mod block;
 pub use block::{Block, Finalized, Notarized};

@@ -6,7 +6,7 @@
 
 ## Primitives
 
-* [types](./types/README.md): TBD
+* [types](./types/README.md): Common types used throughout `alto`.
 
 ## Licensing
 
@@ -14,6 +14,4 @@ This repository is dual-licensed under both the [Apache 2.0](./LICENSE-APACHE) a
 
 ## Support
 
-TBD
-
-If you have any questions about using the Commonware Library, we encourage you to post in [GitHub Discussions](https://github.com/commonwarexyz/monorepo/discussions). We're happy to help!
+If you have any questions about `alto`, we encourage you to post in [GitHub Discussions](https://github.com/commonwarexyz/monorepo/discussions). We're happy to help!
