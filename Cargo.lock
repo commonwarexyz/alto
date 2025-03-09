@@ -76,7 +76,6 @@ dependencies = [
  "commonware-cryptography",
  "commonware-utils",
  "futures",
- "getrandom 0.2.15",
  "rand",
  "reqwest",
  "thiserror 2.0.12",
