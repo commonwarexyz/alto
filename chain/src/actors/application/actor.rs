@@ -8,7 +8,8 @@ use alto_types::{Block, Finalization, Notarization};
 use commonware_consensus::threshold_simplex::Prover;
 use commonware_cryptography::{sha256::Digest, Hasher, Sha256};
 use commonware_macros::select;
-use commonware_runtime::{Handle, Metrics, Spawner};
+use commonware_runtime::{Clock, Handle, Metrics, Spawner};
+use commonware_utils::SystemTimeExt;
 use futures::StreamExt;
 use futures::{channel::mpsc, future::try_join};
 use futures::{channel::oneshot, future};
@@ -48,15 +49,18 @@ fn oneshot_closed_future<T>(sender: &mut oneshot::Sender<T>) -> ChannelClosedFut
 /// Genesis message to use during initialization.
 const GENESIS: &[u8] = b"commonware is neat";
 
+/// Milliseconds in the future to allow for block timestamps.
+const SYNCHRONY_BOUND: u64 = 500;
+
 /// Application actor.
-pub struct Actor<R: Rng + Spawner + Metrics> {
+pub struct Actor<R: Rng + Spawner + Metrics + Clock> {
     context: R,
     prover: Prover<Digest>,
     hasher: Sha256,
     mailbox: mpsc::Receiver<Message>,
 }
 
-impl<R: Rng + Spawner + Metrics> Actor<R> {
+impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
     /// Create a new application actor.
     pub fn new(context: R, config: Config) -> (Self, Supervisor, Mailbox) {
         let (sender, mailbox) = mpsc::channel(config.mailbox_size);
@@ -81,7 +85,7 @@ impl<R: Rng + Spawner + Metrics> Actor<R> {
         // Compute genesis digest
         self.hasher.update(GENESIS);
         let genesis_parent = self.hasher.finalize();
-        let genesis = Block::new(genesis_parent, 0, vec![]);
+        let genesis = Block::new(genesis_parent, 0, 0);
         let genesis_digest = genesis.digest();
         let built: Option<Block> = None;
         let built = Arc::new(Mutex::new(built));
@@ -108,7 +112,7 @@ impl<R: Rng + Spawner + Metrics> Actor<R> {
                     // continue processing other messages)
                     self.context.with_label("propose").spawn({
                         let built = built.clone();
-                        move |_| async move {
+                        move |context| async move {
                             let response_closed = oneshot_closed_future(&mut response);
                             select! {
                                 parent = parent_request => {
@@ -116,7 +120,11 @@ impl<R: Rng + Spawner + Metrics> Actor<R> {
                                     let parent = parent.unwrap();
 
                                     // Create a new block
-                                    let block = Block::new(parent.digest(), parent.height+1, vec![]);
+                                    let mut current = context.current().epoch_millis();
+                                    if current <= parent.timestamp {
+                                        current = parent.timestamp + 1;
+                                    }
+                                    let block = Block::new(parent.digest(), parent.height+1, current);
                                     let digest = block.digest();
                                     {
                                         let mut built = built.lock().unwrap();
@@ -163,7 +171,7 @@ impl<R: Rng + Spawner + Metrics> Actor<R> {
                     // continue processing other messages)
                     self.context.with_label("verify").spawn({
                         let mut syncer = syncer.clone();
-                        move |_| async move {
+                        move |context| async move {
                             let requester =
                                 try_join(parent_request, syncer.get(None, payload).await);
                             let response_closed = oneshot_closed_future(&mut response);
@@ -178,6 +186,15 @@ impl<R: Rng + Spawner + Metrics> Actor<R> {
                                         return;
                                     }
                                     if block.parent != parent.digest() {
+                                        let _ = response.send(false);
+                                        return;
+                                    }
+                                    if block.timestamp <= parent.timestamp {
+                                        let _ = response.send(false);
+                                        return;
+                                    }
+                                    let current = context.current().epoch_millis();
+                                    if block.timestamp > current + SYNCHRONY_BOUND {
                                         let _ = response.send(false);
                                         return;
                                     }
