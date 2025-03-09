@@ -16,7 +16,6 @@ pub struct Config {
     pub allowed_peers: Vec<String>,
     pub bootstrappers: Vec<String>,
 
-    pub message_size: usize,
     pub message_backlog: usize,
     pub mailbox_size: usize,
 }

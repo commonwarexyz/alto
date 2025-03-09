@@ -37,6 +37,16 @@ const RESOLVER_CHANNEL: u32 = 1;
 const BROADCASTER_CHANNEL: u32 = 2;
 const BACKFILLER_CHANNEL: u32 = 3;
 
+const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
+const NOTARIZATION_TIMEOUT: Duration = Duration::from_secs(2);
+const NULLIFY_RETRY: Duration = Duration::from_secs(10);
+const ACTIVITY_TIMEOUT: u64 = 1024;
+const FETCH_TIMEOUT: Duration = Duration::from_secs(2);
+const FETCH_CONCURRENT: usize = 4;
+const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+const MAX_FETCH_COUNT: usize = 16;
+const MAX_FETCH_SIZE: usize = 512 * 1024;
+
 fn main() {
     // Parse arguments
     let matches = Command::new("validator")
@@ -119,7 +129,7 @@ fn main() {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
         SocketAddr::new(*ip, config.port),
         bootstrappers,
-        config.message_size,
+        MAX_MESSAGE_SIZE,
     );
     p2p_cfg.mailbox_size = config.mailbox_size;
 
@@ -175,14 +185,14 @@ fn main() {
             participants: peer_keys,
             mailbox_size: config.mailbox_size,
             backfill_quota: backfiller_limit,
-            leader_timeout: Duration::from_secs(1),
-            notarization_timeout: Duration::from_secs(2),
-            nullify_retry: Duration::from_secs(10),
-            fetch_timeout: Duration::from_secs(2),
-            activity_timeout: 1024,
-            max_fetch_count: 16,
-            max_fetch_size: 1024 * 512,
-            fetch_concurrent: 4,
+            leader_timeout: LEADER_TIMEOUT,
+            notarization_timeout: NOTARIZATION_TIMEOUT,
+            nullify_retry: NULLIFY_RETRY,
+            activity_timeout: ACTIVITY_TIMEOUT,
+            fetch_timeout: FETCH_TIMEOUT,
+            max_fetch_count: MAX_FETCH_COUNT,
+            max_fetch_size: MAX_FETCH_SIZE,
+            fetch_concurrent: FETCH_CONCURRENT,
             fetch_rate_per_peer: resolver_limit,
         };
         let engine = engine::Engine::new(context.with_label("engine"), config).await;
