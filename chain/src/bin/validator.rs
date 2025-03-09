@@ -29,8 +29,8 @@ const METRICS_PORT: u16 = 9090;
 
 fn main() {
     // Parse arguments
-    let matches = Command::new("runner")
-        .about("Spam peers with random messages.")
+    let matches = Command::new("validator")
+        .about("Validator for an alto chain.")
         .arg(Arg::new("peers").long("peers").required(true))
         .arg(Arg::new("config").long("config").required(true))
         .get_matches();

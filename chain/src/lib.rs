@@ -1,44 +1,10 @@
-use commonware_cryptography::{
-    bls12381::primitives::{group, poly::Poly},
-    ed25519::PublicKey,
-    Ed25519,
-};
-use governor::Quota;
-use std::time::Duration;
-
 pub mod actors;
 pub mod engine;
 
-pub struct Config {
-    pub partition_prefix: String,
-    pub signer: Ed25519,
-    pub identity: Poly<group::Public>,
-    pub share: group::Share,
-    pub participants: Vec<PublicKey>,
-    pub mailbox_size: usize,
-    pub backfill_quota: Quota,
-
-    pub leader_timeout: Duration,
-    pub notarization_timeout: Duration,
-    pub nullify_retry: Duration,
-    pub fetch_timeout: Duration,
-    pub activity_timeout: u64,
-    pub max_fetch_count: usize,
-    pub max_fetch_size: usize,
-    pub fetch_concurrent: usize,
-    pub fetch_rate_per_peer: Quota,
-}
-
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::{HashMap, HashSet},
-        num::NonZeroU32,
-        sync::{Arc, Mutex},
-    };
-
     use super::*;
-    use commonware_cryptography::{bls12381::dkg::ops, Scheme};
+    use commonware_cryptography::{bls12381::dkg::ops, ed25519::PublicKey, Ed25519, Scheme};
     use commonware_macros::test_traced;
     use commonware_p2p::simulated::{self, Link, Network, Oracle, Receiver, Sender};
     use commonware_runtime::{
@@ -47,7 +13,14 @@ mod tests {
     };
     use commonware_utils::quorum;
     use engine::Engine;
+    use governor::Quota;
     use rand::{rngs::StdRng, Rng, SeedableRng};
+    use std::time::Duration;
+    use std::{
+        collections::{HashMap, HashSet},
+        num::NonZeroU32,
+        sync::{Arc, Mutex},
+    };
     use tracing::info;
 
     /// Registers all validators using the oracle.
@@ -171,7 +144,7 @@ mod tests {
 
                 // Configure engine
                 let uid = format!("validator-{}", public_key);
-                let config = Config {
+                let config = engine::Config {
                     partition_prefix: uid.clone(),
                     signer: scheme,
                     identity: public.clone(),
@@ -328,7 +301,7 @@ mod tests {
                 // Configure engine
                 let public_key = scheme.public_key();
                 let uid = format!("validator-{}", public_key);
-                let config = Config {
+                let config = engine::Config {
                     partition_prefix: uid.clone(),
                     signer: scheme.clone(),
                     identity: public.clone(),
@@ -410,7 +383,7 @@ mod tests {
             let share = shares[0];
             let public_key = scheme.public_key();
             let uid = format!("validator-{}", public_key);
-            let config = Config {
+            let config = engine::Config {
                 partition_prefix: uid.clone(),
                 signer: scheme.clone(),
                 identity: public.clone(),
@@ -542,7 +515,7 @@ mod tests {
 
                         // Configure engine
                         let uid = format!("validator-{}", public_key);
-                        let config = Config {
+                        let config = engine::Config {
                             partition_prefix: uid.clone(),
                             signer: scheme,
                             identity: public.clone(),

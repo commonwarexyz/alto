@@ -1,21 +1,42 @@
-use crate::{
-    actors::{application, syncer},
-    Config,
-};
+use crate::actors::{application, syncer};
 use alto_types::NAMESPACE;
 use commonware_consensus::threshold_simplex::{self, Engine as Consensus, Prover};
 use commonware_cryptography::{
-    bls12381::primitives::poly::public, ed25519::PublicKey, sha256::Digest, Ed25519, Scheme,
+    bls12381::primitives::{group, poly::public, poly::Poly},
+    ed25519::PublicKey,
+    sha256::Digest,
+    Ed25519, Scheme,
 };
 use commonware_p2p::{Receiver, Sender};
 use commonware_runtime::{Blob, Clock, Handle, Metrics, Spawner, Storage};
 use commonware_storage::journal::variable::{self, Journal};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
+use governor::Quota;
 use rand::{CryptoRng, Rng};
+use std::time::Duration;
 use tracing::{error, warn};
 
-/// Instance of `simplex` consensus engine.
+pub struct Config {
+    pub partition_prefix: String,
+    pub signer: Ed25519,
+    pub identity: Poly<group::Public>,
+    pub share: group::Share,
+    pub participants: Vec<PublicKey>,
+    pub mailbox_size: usize,
+    pub backfill_quota: Quota,
+
+    pub leader_timeout: Duration,
+    pub notarization_timeout: Duration,
+    pub nullify_retry: Duration,
+    pub fetch_timeout: Duration,
+    pub activity_timeout: u64,
+    pub max_fetch_count: usize,
+    pub max_fetch_size: usize,
+    pub fetch_concurrent: usize,
+    pub fetch_rate_per_peer: Quota,
+}
+
 pub struct Engine<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metrics> {
     context: E,
 
