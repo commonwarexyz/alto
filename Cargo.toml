@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "chain",
     "types",
 ]
 resolver = "2"

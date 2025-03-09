@@ -6,6 +6,7 @@
 
 ## Components
 
+* [chain](./chain/README.md): A minimal blockchain built with the [Commonware Library](https://github.com/commonwarexyz/monorepo).
 * [types](./types/README.md): Common types used throughout `alto`.
 
 ## Licensing
