@@ -75,3 +75,5 @@ jobs:
       run: rustup target add wasm32-unknown-unknown
     - name: Build types
       run: cargo build --target wasm32-unknown-unknown --release --manifest-path types/Cargo.toml && du -h target/wasm32-unknown-unknown/release/alto_types.wasm
+    - name: Build client
+      run: cargo build --target wasm32-unknown-unknown --release --manifest-path client/Cargo.toml && du -h target/wasm32-unknown-unknown/release/alto_client.wasm

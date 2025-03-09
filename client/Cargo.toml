@@ -1,0 +1,26 @@
+[package]
+name = "alto-client"
+version = "0.0.2"
+publish = true
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Utilities for interacting with alto."
+readme = "README.md"
+homepage = "https://alto.commonware.xyz"
+repository = "https://github.com/commonwarexyz/alto/tree/main/client"
+documentation = "https://docs.rs/alto-client"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+commonware-cryptography = { workspace = true }
+commonware-utils = { workspace = true }
+bytes =  { workspace = true }
+rand = { workspace = true }
+thiserror = { workspace = true }
+
+# Enable "js" feature when WASM is target
+[target.'cfg(target_arch = "wasm32")'.dependencies.getrandom]
+version = "0.2.15"
+features = ["js"]

@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "chain",
+    "client",
     "types",
 ]
 resolver = "2"
