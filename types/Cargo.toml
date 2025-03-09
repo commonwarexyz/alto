@@ -1,0 +1,20 @@
+[package]
+name = "alto-types"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+commonware-cryptography = { workspace = true }
+commonware-storage = { workspace = true }
+commonware-utils = { workspace = true }
+bytes =  { workspace = true }
+rand = { workspace = true }
+thiserror = { workspace = true }
+
+# Enable "js" feature when WASM is target
+[target.'cfg(target_arch = "wasm32")'.dependencies.getrandom]
+version = "0.2.15"
+features = ["js"]
