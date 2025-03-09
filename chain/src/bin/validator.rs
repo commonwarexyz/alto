@@ -1,14 +1,19 @@
 use alto_chain::Config;
+use alto_types::P2P_NAMESPACE;
 use axum::{routing::get, serve, Extension, Router};
 use clap::{Arg, Command};
 use commonware_cryptography::{
+    bls12381::primitives::{
+        group::{self, Element},
+        poly,
+    },
     ed25519::{PrivateKey, PublicKey},
     Ed25519, Scheme,
 };
 use commonware_deployer::ec2::Peers;
 use commonware_p2p::{authenticated, Receiver, Recipients, Sender};
 use commonware_runtime::{tokio, Clock, Metrics, Network, Runner, Spawner};
-use commonware_utils::{from_hex_formatted, union};
+use commonware_utils::{from_hex_formatted, hex};
 use futures::future::try_join_all;
 use governor::Quota;
 use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
@@ -17,6 +22,7 @@ use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZeroU32,
+    path::PathBuf,
     str::FromStr,
     sync::atomic::{AtomicI64, AtomicU64},
     time::Duration,
@@ -65,13 +71,18 @@ fn main() {
     let key = from_hex_formatted(&config.private_key).expect("Could not parse private key");
     let key = PrivateKey::try_from(key).expect("Private key is invalid");
     let signer = <Ed25519 as Scheme>::from(key).expect("Could not create signer");
+    let share = from_hex_formatted(&config.share).expect("Could not parse share");
+    let share = group::Share::deserialize(&share).expect("Share is invalid");
+    let identity = from_hex_formatted(&config.identity).expect("Could not parse identity");
+    let identity =
+        poly::Public::deserialize(&identity, peers.len() as u32).expect("Identity is invalid");
     let public_key = signer.public_key();
     let ip = peers.get(&public_key).expect("Could not find self in IPs");
     info!(
         ?public_key,
+        identity = hex(&poly::public(&identity).serialize()),
         ?ip,
         port = config.port,
-        message_size = config.message_size,
         "loaded config"
     );
 
@@ -90,7 +101,9 @@ fn main() {
 
     // Initialize runtime
     let cfg = tokio::Config {
+        tcp_nodelay: Some(true),
         threads: config.worker_threads,
+        storage_directory: PathBuf::from(config.directory),
         ..Default::default()
     };
     let (executor, context) = tokio::Executor::init(cfg);
@@ -98,7 +111,7 @@ fn main() {
     // Configure network
     let mut p2p_cfg = authenticated::Config::aggressive(
         signer.clone(),
-        &union(FLOOD_NAMESPACE, b"_P2P"),
+        P2P_NAMESPACE,
         SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
         SocketAddr::new(*ip, config.port),
         bootstrappers,
