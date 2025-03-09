@@ -7,16 +7,16 @@ resolver = "2"
 
 [workspace.dependencies]
 alto-types = { version = "0.0.2", path = "types" }
-commonware-consensus = { version = "0.0.14" }
-commonware-cryptography = { version = "0.0.25" }
-commonware-deployer = { version = "0.0.4" }
-commonware-macros = { version = "0.0.16" }
-commonware-p2p = { version = "0.0.36" }
-commonware-resolver = { version = "0.0.5" }
-commonware-runtime = { version = "0.0.22" }
-commonware-storage = { version = "0.0.17" }
-commonware-stream = { version = "0.0.14" }
-commonware-utils = { version = "0.0.17" }
+commonware-consensus = { version = "0.0.40" }
+commonware-cryptography = { version = "0.0.40" }
+commonware-deployer = { version = "0.0.40" }
+commonware-macros = { version = "0.0.40" }
+commonware-p2p = { version = "0.0.40" }
+commonware-resolver = { version = "0.0.40" }
+commonware-runtime = { version = "0.0.40" }
+commonware-storage = { version = "0.0.40" }
+commonware-stream = { version = "0.0.40" }
+commonware-utils = { version = "0.0.40" }
 thiserror = "2.0.12"
 bytes = "1.7.1"
 rand = "0.8.5"
