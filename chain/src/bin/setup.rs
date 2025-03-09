@@ -64,12 +64,6 @@ fn main() {
                 .value_parser(value_parser!(usize)),
         )
         .arg(
-            Arg::new("message-size")
-                .long("message-size")
-                .required(true)
-                .value_parser(value_parser!(usize)),
-        )
-        .arg(
             Arg::new("message-backlog")
                 .long("message-backlog")
                 .required(true)
@@ -109,9 +103,10 @@ fn main() {
         bootstrappers <= peers,
         "bootstrappers must be less than peers"
     );
-    let peer_schemes = (0..peers)
+    let mut peer_schemes = (0..peers)
         .map(|_| Ed25519::new(&mut OsRng))
         .collect::<Vec<_>>();
+    peer_schemes.sort_by_key(|scheme| scheme.public_key());
     let allowed_peers: Vec<String> = peer_schemes
         .iter()
         .map(|scheme| scheme.public_key().to_string())
@@ -146,7 +141,6 @@ fn main() {
     let storage_size = *matches.get_one::<i32>("storage_size").unwrap();
     let storage_class = matches.get_one::<String>("storage_class").unwrap();
     let worker_threads = *matches.get_one::<usize>("worker-threads").unwrap();
-    let message_size = *matches.get_one::<usize>("message-size").unwrap();
     let message_backlog = *matches.get_one::<usize>("message-backlog").unwrap();
     let mailbox_size = *matches.get_one::<usize>("mailbox-size").unwrap();
     let mut instance_configs = Vec::new();
@@ -157,11 +151,16 @@ fn main() {
         let peer_config_file = format!("{}.yaml", name);
         let peer_config = Config {
             private_key: scheme.private_key().to_string(),
+            share: hex(&shares[index].serialize()),
+            identity: hex(&identity.serialize()),
+
             port: PORT,
+            directory: "/home/ubuntu/data".to_string(),
+            worker_threads,
+
             allowed_peers: allowed_peers.clone(),
             bootstrappers: bootstrappers.clone(),
-            worker_threads,
-            message_size,
+
             message_backlog,
             mailbox_size,
         };
