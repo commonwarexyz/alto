@@ -1,3 +1,5 @@
+//! Client for interacting with `alto`.
+
 use commonware_cryptography::{bls12381, sha256::Digest};
 use commonware_utils::hex;
 use thiserror::Error;
