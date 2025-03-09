@@ -10,12 +10,8 @@ pub mod client;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use commonware_cryptography::{hash, sha256::Digest, Bls12381, Ed25519, Scheme};
+    use commonware_cryptography::{hash, Bls12381, Scheme};
     use rand::{rngs::StdRng, SeedableRng};
-
-    fn test_digest(value: usize) -> Digest {
-        hash(&value.to_be_bytes())
-    }
 
     #[test]
     fn test_seed() {
@@ -31,7 +27,7 @@ mod tests {
 
         // Check seed serialization
         let serialized = seed.serialize();
-        let deserialized = Seed::deserialize(&network.public_key(), &serialized).unwrap();
+        let deserialized = Seed::deserialize(Some(&network.public_key()), &serialized).unwrap();
         assert_eq!(seed.view, deserialized.view);
     }
 
@@ -54,7 +50,10 @@ mod tests {
         let serialized = seed.serialize();
 
         // Deserialize seed
-        assert!(Seed::deserialize(&network.public_key(), &serialized).is_none());
+        assert!(Seed::deserialize(Some(&network.public_key()), &serialized).is_none());
+
+        // Deserialize seed with no public key
+        assert!(Seed::deserialize(None, &serialized).is_some());
     }
 
     #[test]
@@ -71,7 +70,8 @@ mod tests {
 
         // Check nullification serialization
         let serialized = nullification.serialize();
-        let deserialized = Nullification::deserialize(&network.public_key(), &serialized).unwrap();
+        let deserialized =
+            Nullification::deserialize(Some(&network.public_key()), &serialized).unwrap();
         assert_eq!(nullification.view, deserialized.view);
     }
 
@@ -94,7 +94,10 @@ mod tests {
         let serialized = nullification.serialize();
 
         // Deserialize nullification
-        assert!(Nullification::deserialize(&network.public_key(), &serialized).is_none());
+        assert!(Nullification::deserialize(Some(&network.public_key()), &serialized).is_none());
+
+        // Deserialize nullification with no public key
+        assert!(Nullification::deserialize(None, &serialized).is_some());
     }
 
     #[test]
@@ -103,35 +106,20 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0);
         let mut network = Bls12381::new(&mut rng);
 
-        // Create batch proofs
-        let mut batch_proofs = Vec::new();
-        for i in 0..10 {
-            let sequencer = Ed25519::new(&mut rng).public_key();
-            let batch_digest = test_digest(i);
-            let batch_payload = Proof::payload(&sequencer, 0, &batch_digest, 0);
-            let batch_signature = network.sign(Some(BATCH_NAMESPACE), &batch_payload);
-            let batch_proof = Proof::new(sequencer, 0, batch_digest, 0, batch_signature);
-            batch_proofs.push(batch_proof);
-        }
-
         // Create block
         let parent_digest = hash(&[0; 32]);
         let height = 0;
-        let block = Block::new(parent_digest, height, batch_proofs.clone());
+        let timestamp = 1;
+        let block = Block::new(parent_digest, height, timestamp);
         let block_digest = block.digest();
 
         // Check block serialization
         let serialized = block.serialize();
-        let deserialized = Block::deserialize(&network.public_key(), &serialized).unwrap();
+        let deserialized = Block::deserialize(&serialized).unwrap();
         assert_eq!(block_digest, deserialized.digest());
-        for (batch_proof, deserialized) in batch_proofs.iter().zip(deserialized.batches.iter()) {
-            assert_eq!(batch_proof.digest(), deserialized.digest());
-            assert_eq!(batch_proof.sequencer, deserialized.sequencer);
-            assert_eq!(batch_proof.height, deserialized.height);
-            assert_eq!(batch_proof.batch, deserialized.batch);
-            assert_eq!(batch_proof.epoch, deserialized.epoch);
-            assert_eq!(batch_proof.signature, deserialized.signature);
-        }
+        assert_eq!(block.parent, deserialized.parent);
+        assert_eq!(block.height, deserialized.height);
+        assert_eq!(block.timestamp, deserialized.timestamp);
 
         // Create notarization
         let view = 0;
@@ -142,7 +130,8 @@ mod tests {
 
         // Check notarization serialization
         let serialized = notarization.serialize();
-        let deserialized = Notarization::deserialize(&network.public_key(), &serialized).unwrap();
+        let deserialized =
+            Notarization::deserialize(Some(&network.public_key()), &serialized).unwrap();
         assert_eq!(notarization.view, deserialized.view);
         assert_eq!(notarization.parent, deserialized.parent);
         assert_eq!(notarization.payload, deserialized.payload);
@@ -155,7 +144,8 @@ mod tests {
 
         // Check finalization serialization
         let serialized = finalization.serialize();
-        let deserialized = Finalization::deserialize(&network.public_key(), &serialized).unwrap();
+        let deserialized =
+            Finalization::deserialize(Some(&network.public_key()), &serialized).unwrap();
         assert_eq!(finalization.view, deserialized.view);
         assert_eq!(finalization.parent, deserialized.parent);
         assert_eq!(finalization.payload, deserialized.payload);
@@ -167,21 +157,11 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0);
         let mut network = Bls12381::new(&mut rng);
 
-        // Create batch proofs
-        let mut batch_proofs = Vec::new();
-        for i in 0..10 {
-            let sequencer = Ed25519::new(&mut rng).public_key();
-            let batch_digest = test_digest(i);
-            let batch_payload = Proof::payload(&sequencer, 0, &batch_digest, 0);
-            let batch_signature = network.sign(Some(BATCH_NAMESPACE), &batch_payload);
-            let batch_proof = Proof::new(sequencer, 0, batch_digest, 0, batch_signature);
-            batch_proofs.push(batch_proof);
-        }
-
         // Create block
         let parent_digest = hash(&[0; 32]);
         let height = 0;
-        let block = Block::new(parent_digest, height, batch_proofs.clone());
+        let timestamp = 1;
+        let block = Block::new(parent_digest, height, timestamp);
 
         // Create notarization
         let view = 0;
@@ -195,8 +175,12 @@ mod tests {
 
         // Check notarization serialization
         let serialized = notarization.serialize();
-        let result = Notarization::deserialize(&network.public_key(), &serialized);
+        let result = Notarization::deserialize(Some(&network.public_key()), &serialized);
         assert!(result.is_none());
+
+        // Check notarization serialization with no public key
+        let result = Notarization::deserialize(None, &serialized);
+        assert!(result.is_some());
 
         // Create finalization
         let finalize_payload = Finalization::payload(view, parent_view, &block.digest());
@@ -208,7 +192,11 @@ mod tests {
 
         // Check finalization serialization
         let serialized = finalization.serialize();
-        let result = Finalization::deserialize(&network.public_key(), &serialized);
+        let result = Finalization::deserialize(Some(&network.public_key()), &serialized);
         assert!(result.is_none());
+
+        // Check finalization serialization with no public key
+        let result = Finalization::deserialize(None, &serialized);
+        assert!(result.is_some());
     }
 }
