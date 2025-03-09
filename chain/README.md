@@ -50,7 +50,7 @@ deployer ec2 create --config config.yaml
 
 ## Monitor Performance on Grafana
 
-Visit `http://<monitoring-ip>:3000/d/validator`
+Visit `http://<monitoring-ip>:3000/d/chain`
 
 _This dashboard is only accessible from the IP used to deploy the infrastructure._
 
