@@ -3,7 +3,7 @@ use alto_types::{
     Block, Finalization, Finalized, Kind, Notarization, Notarized, Nullification, Seed,
 };
 use futures::{channel::mpsc::unbounded, Stream, StreamExt};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{connect_async, tungstenite::Message as TMessage};
 
 fn seed_upload_path(base: String) -> String {
     format!("{}/seed", base)
@@ -37,26 +37,26 @@ fn finalization_get_path(base: String, query: &IndexQuery) -> String {
     format!("{}/finalization/{}", base, query.serialize())
 }
 
-fn consensus_register_path(base: String) -> String {
-    format!("{}/consensus/ws", base)
-}
-
-pub enum BlockPayload {
-    Finalized(Box<Finalized>),
-    Block(Block),
-}
-
-pub enum ConsensusMessage {
-    Seed(Seed),
-    Nullification(Nullification),
-    Notarization(Notarized),
-    Finalization(Finalized),
-}
-
 /// There is no block upload path. Blocks are uploaded as a byproduct of notarization
 /// and finalization uploads.
 fn block_get_path(base: String, query: &Query) -> String {
     format!("{}/block/{}", base, query.serialize())
+}
+
+fn register_path(base: String) -> String {
+    format!("{}/consensus/ws", base)
+}
+
+pub enum Payload {
+    Finalized(Box<Finalized>),
+    Block(Block),
+}
+
+pub enum Message {
+    Seed(Seed),
+    Nullification(Nullification),
+    Notarization(Notarized),
+    Finalization(Finalized),
 }
 
 impl Client {
@@ -235,7 +235,7 @@ impl Client {
         Ok(result)
     }
 
-    pub async fn block_get(&self, query: Query) -> Result<BlockPayload, Error> {
+    pub async fn block_get(&self, query: Query) -> Result<Payload, Error> {
         // Get the block
         let client = reqwest::Client::new();
         let result = client
@@ -253,7 +253,7 @@ impl Client {
             Query::Latest => {
                 let result =
                     Finalized::deserialize(Some(&self.public), &bytes).ok_or(Error::InvalidData)?;
-                BlockPayload::Finalized(Box::new(result))
+                Payload::Finalized(Box::new(result))
             }
             Query::Index(index) => {
                 let result =
@@ -261,24 +261,22 @@ impl Client {
                 if result.block.height != index {
                     return Err(Error::InvalidData);
                 }
-                BlockPayload::Finalized(Box::new(result))
+                Payload::Finalized(Box::new(result))
             }
             Query::Digest(digest) => {
                 let result = Block::deserialize(&bytes).ok_or(Error::InvalidData)?;
                 if result.digest() != digest {
                     return Err(Error::InvalidData);
                 }
-                BlockPayload::Block(result)
+                Payload::Block(result)
             }
         };
         Ok(result)
     }
 
-    pub async fn consensus_register(
-        &self,
-    ) -> Result<impl Stream<Item = Result<ConsensusMessage, Error>>, Error> {
+    pub async fn register(&self) -> Result<impl Stream<Item = Result<Message, Error>>, Error> {
         // Connect to the websocket endpoint
-        let (stream, _) = connect_async(consensus_register_path(self.ws_uri.clone()))
+        let (stream, _) = connect_async(register_path(self.ws_uri.clone()))
             .await
             .map_err(Error::from)?;
         let (_, read) = stream.split();
@@ -289,7 +287,7 @@ impl Client {
         tokio::spawn(async move {
             read.for_each(|message| async {
                 match message {
-                    Ok(Message::Binary(data)) => {
+                    Ok(TMessage::Binary(data)) => {
                         // Get kind
                         let kind = data[0];
                         let Some(kind) = Kind::from_u8(kind) else {
@@ -302,16 +300,15 @@ impl Client {
                         match kind {
                             Kind::Seed => {
                                 if let Some(seed) = Seed::deserialize(Some(&public), data) {
-                                    let _ = sender.unbounded_send(Ok(ConsensusMessage::Seed(seed)));
+                                    let _ = sender.unbounded_send(Ok(Message::Seed(seed)));
                                 } else {
                                     let _ = sender.unbounded_send(Err(Error::InvalidData));
                                 }
                             }
                             Kind::Notarization => {
                                 if let Some(payload) = Notarized::deserialize(Some(&public), data) {
-                                    let _ = sender.unbounded_send(Ok(
-                                        ConsensusMessage::Notarization(payload),
-                                    ));
+                                    let _ =
+                                        sender.unbounded_send(Ok(Message::Notarization(payload)));
                                 } else {
                                     let _ = sender.unbounded_send(Err(Error::InvalidData));
                                 }
@@ -320,18 +317,16 @@ impl Client {
                                 if let Some(nullification) =
                                     Nullification::deserialize(Some(&public), data)
                                 {
-                                    let _ = sender.unbounded_send(Ok(
-                                        ConsensusMessage::Nullification(nullification),
-                                    ));
+                                    let _ = sender
+                                        .unbounded_send(Ok(Message::Nullification(nullification)));
                                 } else {
                                     let _ = sender.unbounded_send(Err(Error::InvalidData));
                                 }
                             }
                             Kind::Finalization => {
                                 if let Some(payload) = Finalized::deserialize(Some(&public), data) {
-                                    let _ = sender.unbounded_send(Ok(
-                                        ConsensusMessage::Finalization(payload),
-                                    ));
+                                    let _ =
+                                        sender.unbounded_send(Ok(Message::Finalization(payload)));
                                 } else {
                                     let _ = sender.unbounded_send(Err(Error::InvalidData));
                                 }
