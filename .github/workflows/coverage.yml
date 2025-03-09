@@ -21,12 +21,6 @@ jobs:
       uses: ./.github/actions/setup
       with:
         rust-version: ${{ steps.rust-version.outputs.rust_version}}
-    - name: Remove examples
-      # Reduces compilation time on code we exclude from coverage
-      run: rm -rf examples
-    - name: Remove examples from Cargo.toml
-      run: |
-        sed -i.bak '/examples/d' Cargo.toml
     - name: Install cargo-llvm-cov
       uses: taiki-e/install-action@cargo-llvm-cov
     - name: Generate coverage report
