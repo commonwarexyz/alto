@@ -1,11 +1,10 @@
 mod block;
-pub use block::Block;
+pub use block::{Block, Finalized, Notarized};
 mod consensus;
 pub use consensus::{
-    Finalization, Notarization, Nullification, Seed, FINALIZE_NAMESPACE, NAMESPACE,
+    Finalization, Kind, Notarization, Nullification, Seed, FINALIZE_NAMESPACE, NAMESPACE,
     NOTARIZE_NAMESPACE, NULLIFY_NAMESPACE, SEED_NAMESPACE,
 };
-pub mod client;
 
 #[cfg(test)]
 mod tests {

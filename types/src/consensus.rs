@@ -1,7 +1,7 @@
 use bytes::{Buf, BufMut};
 use commonware_cryptography::sha256::Digest;
 use commonware_cryptography::{bls12381, Bls12381, Scheme};
-use commonware_utils::{Array, SizedSerialize};
+use commonware_utils::{hex, Array, SizedSerialize};
 
 // We don't use functions here to guard against silent changes.
 pub const NAMESPACE: &[u8] = b"_ALTO";
@@ -9,6 +9,36 @@ pub const SEED_NAMESPACE: &[u8] = b"_ALTO_SEED";
 pub const NOTARIZE_NAMESPACE: &[u8] = b"_ALTO_NOTARIZE";
 pub const NULLIFY_NAMESPACE: &[u8] = b"_ALTO_NULLIFY";
 pub const FINALIZE_NAMESPACE: &[u8] = b"_ALTO_FINALIZE";
+
+// We hardcode the keys here to guard against silent changes.
+#[repr(u8)]
+pub enum Kind {
+    Seed = 0,
+    Notarization = 1,
+    Nullification = 2,
+    Finalization = 3,
+}
+
+impl Kind {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Seed),
+            1 => Some(Self::Notarization),
+            2 => Some(Self::Nullification),
+            3 => Some(Self::Finalization),
+            _ => None,
+        }
+    }
+
+    pub fn to_hex(&self) -> String {
+        match self {
+            Self::Seed => hex(&[0]),
+            Self::Notarization => hex(&[1]),
+            Self::Nullification => hex(&[2]),
+            Self::Finalization => hex(&[3]),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Seed {

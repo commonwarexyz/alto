@@ -1,5 +1,6 @@
+use crate::{Finalization, Notarization};
 use bytes::{Buf, BufMut};
-use commonware_cryptography::{sha256::Digest, Hasher, Sha256};
+use commonware_cryptography::{bls12381::PublicKey, sha256::Digest, Hasher, Sha256};
 use commonware_utils::{Array, SizedSerialize};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -71,4 +72,68 @@ impl Block {
 impl SizedSerialize for Block {
     const SERIALIZED_LEN: usize =
         Digest::SERIALIZED_LEN + u64::SERIALIZED_LEN + u64::SERIALIZED_LEN;
+}
+
+pub struct Notarized {
+    pub proof: Notarization,
+    pub block: Block,
+}
+
+impl Notarized {
+    pub fn new(proof: Notarization, block: Block) -> Self {
+        Self { proof, block }
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let block = self.block.serialize();
+        let mut bytes = Vec::with_capacity(Notarization::SERIALIZED_LEN + block.len());
+        bytes.extend_from_slice(&self.proof.serialize());
+        bytes.extend_from_slice(&block);
+        bytes
+    }
+
+    pub fn deserialize(public: Option<&PublicKey>, bytes: &[u8]) -> Option<Self> {
+        // Deserialize the proof and block
+        let (proof, block) = bytes.split_at_checked(Notarization::SERIALIZED_LEN)?;
+        let proof = Notarization::deserialize(public, proof)?;
+        let block = Block::deserialize(block)?;
+
+        // Ensure the proof is for the block
+        if proof.payload != block.digest() {
+            return None;
+        }
+        Some(Self { proof, block })
+    }
+}
+
+pub struct Finalized {
+    pub proof: Finalization,
+    pub block: Block,
+}
+
+impl Finalized {
+    pub fn new(proof: Finalization, block: Block) -> Self {
+        Self { proof, block }
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let block = self.block.serialize();
+        let mut bytes = Vec::with_capacity(Finalization::SERIALIZED_LEN + block.len());
+        bytes.extend_from_slice(&self.proof.serialize());
+        bytes.extend_from_slice(&block);
+        bytes
+    }
+
+    pub fn deserialize(public: Option<&PublicKey>, bytes: &[u8]) -> Option<Self> {
+        // Deserialize the proof and block
+        let (proof, block) = bytes.split_at_checked(Finalization::SERIALIZED_LEN)?;
+        let proof = Finalization::deserialize(public, proof)?;
+        let block = Block::deserialize(block)?;
+
+        // Ensure the proof is for the block
+        if proof.payload != block.digest() {
+            return None;
+        }
+        Some(Self { proof, block })
+    }
 }
