@@ -3,10 +3,15 @@
 mod block;
 pub use block::{Block, Finalized, Notarized};
 mod consensus;
-pub use consensus::{
-    Finalization, Kind, Notarization, Nullification, Seed, FINALIZE_NAMESPACE, NAMESPACE,
-    NOTARIZE_NAMESPACE, NULLIFY_NAMESPACE, SEED_NAMESPACE,
-};
+pub use consensus::{Finalization, Kind, Notarization, Nullification, Seed};
+
+// We don't use functions here to guard against silent changes.
+pub const NAMESPACE: &[u8] = b"_ALTO";
+pub const P2P_NAMESPACE: &[u8] = b"_ALTO_P2P";
+pub const SEED_NAMESPACE: &[u8] = b"_ALTO_SEED";
+pub const NOTARIZE_NAMESPACE: &[u8] = b"_ALTO_NOTARIZE";
+pub const NULLIFY_NAMESPACE: &[u8] = b"_ALTO_NULLIFY";
+pub const FINALIZE_NAMESPACE: &[u8] = b"_ALTO_FINALIZE";
 
 #[cfg(test)]
 mod tests {
