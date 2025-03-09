@@ -1,4 +1,4 @@
-use crate::{Batch, Block, Finalization, Notarization, Proof};
+use crate::{Block, Finalization, Notarization};
 use commonware_cryptography::bls12381;
 use commonware_utils::{hex, SizedSerialize};
 
@@ -49,11 +49,11 @@ impl NotarizationPayload {
         bytes
     }
 
-    pub fn deserialize(public: &bls12381::PublicKey, bytes: &[u8]) -> Option<Self> {
+    pub fn deserialize(public: Option<&bls12381::PublicKey>, bytes: &[u8]) -> Option<Self> {
         // Deserialize the proof and block
         let (proof, block) = bytes.split_at_checked(Notarization::SERIALIZED_LEN)?;
         let proof = Notarization::deserialize(public, proof)?;
-        let block = Block::deserialize(public, block)?;
+        let block = Block::deserialize(block)?;
 
         // Ensure the proof is for the block
         if proof.payload != block.digest() {
@@ -81,11 +81,11 @@ impl FinalizationPayload {
         bytes
     }
 
-    pub fn deserialize(public: &bls12381::PublicKey, bytes: &[u8]) -> Option<Self> {
+    pub fn deserialize(public: Option<&bls12381::PublicKey>, bytes: &[u8]) -> Option<Self> {
         // Deserialize the proof and block
         let (proof, block) = bytes.split_at_checked(Finalization::SERIALIZED_LEN)?;
         let proof = Finalization::deserialize(public, proof)?;
-        let block = Block::deserialize(public, block)?;
+        let block = Block::deserialize(block)?;
 
         // Ensure the proof is for the block
         if proof.payload != block.digest() {
