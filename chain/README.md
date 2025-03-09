@@ -36,7 +36,7 @@ docker build -t validator-builder .
 #### Compile Binary for ARM64
 
 ```bash
-docker run -it -v ${PWD}/../..:/alto validator-builder
+docker run -it -v ${PWD}/..:/alto validator-builder
 ```
 
 _Emitted binary `validator` is placed in `assets`._
@@ -59,7 +59,7 @@ _This dashboard is only accessible from the IP used to deploy the infrastructure
 ### Re-Compile Binary for ARM64
 
 ```bash
-docker run -it -v ${PWD}/../..:/alto validator-builder
+docker run -it -v ${PWD}/..:/alto validator-builder
 ```
 
 ### Restart Validator Binary on EC2 Instances
