@@ -27,4 +27,4 @@ WORKDIR /alto
 
 # Build the binary
 ENTRYPOINT ["/bin/bash", "-c"]
-CMD ["cd chain && cargo build --release --bin validator --target aarch64-unknown-linux-gnu && cp ../../target/aarch64-unknown-linux-gnu/release/validator assets"]
+CMD ["cd chain && cargo build --release --bin validator --target aarch64-unknown-linux-gnu && cp ../target/aarch64-unknown-linux-gnu/release/validator assets"]
