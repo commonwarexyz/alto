@@ -10,10 +10,7 @@ use crate::actors::syncer::{
     handler,
     key::{self, MultiIndex, Value},
 };
-use alto_types::{
-    client::{FinalizationPayload, NotarizationPayload},
-    Block, Finalization,
-};
+use alto_types::{Block, Finalization, Finalized, Notarized};
 use commonware_cryptography::{bls12381, ed25519::PublicKey, sha256::Digest};
 use commonware_macros::select;
 use commonware_p2p::{utils::requester, Receiver, Recipients, Sender};
@@ -281,7 +278,6 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
         let blocks = Wrapped::new(self.blocks);
         let (mut indexer_sender, mut indexer_receiver) = mpsc::channel::<()>(1);
         self.context.with_label("indexer").spawn({
-            let public = self.public.clone();
             let mut resolver = resolver.clone();
             let last_view_processed = last_view_processed.clone();
             let verified = verified.clone();
@@ -322,8 +318,8 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                         resolver
                             .cancel(MultiIndex::new(Value::Finalized(next)))
                             .await;
-                        let block = Block::deserialize(&public, &block)
-                            .expect("Failed to deserialize block");
+                        let block =
+                            Block::deserialize(&block).expect("Failed to deserialize block");
                         resolver
                             .cancel(MultiIndex::new(Value::Digest(block.digest())))
                             .await;
@@ -339,7 +335,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                             .await
                             .expect("Failed to get finalization");
                         if let Some(finalization) = finalization {
-                            let finalization = Finalization::deserialize(&public, &finalization)
+                            let finalization = Finalization::deserialize(None, &finalization)
                                 .expect("Failed to deserialize finalization");
                             *last_view_processed.lock().await = finalization.view;
                         }
@@ -356,7 +352,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                 .await
                                 .expect("Failed to get finalized block")
                                 .expect("Gapped block missing");
-                            let gapped_block = Block::deserialize(&public, &gapped_block)
+                            let gapped_block = Block::deserialize(&gapped_block)
                                 .expect("Failed to deserialize block");
 
                             // Attempt to repair one block from other sources
@@ -366,7 +362,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                 .await
                                 .expect("Failed to get verified block");
                             if let Some(verified) = verified {
-                                let verified = Block::deserialize(&public, &verified)
+                                let verified = Block::deserialize(&verified)
                                     .expect("Failed to deserialize block");
                                 blocks
                                     .put(verified.height, target_block, verified.serialize().into())
@@ -380,9 +376,8 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                 .await
                                 .expect("Failed to get notarized block");
                             if let Some(notarization) = notarization {
-                                let notarization =
-                                    NotarizationPayload::deserialize(&public, &notarization)
-                                        .expect("Failed to deserialize block");
+                                let notarization = Notarized::deserialize(None, &notarization)
+                                    .expect("Failed to deserialize block");
                                 blocks
                                     .put(
                                         notarization.block.height,
@@ -485,7 +480,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                             // Check if in verified blocks
                             if block.is_none() {
                                 if let Some(verified) = verified.get(Identifier::Key(&proof.payload)).await.expect("Failed to get verified block") {
-                                    block = Some(Block::deserialize(&self.public, &verified).expect("Failed to deserialize block"));
+                                    block = Some(Block::deserialize(&verified).expect("Failed to deserialize block"));
                                 }
                             }
 
@@ -494,7 +489,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                 let view = proof.view;
                                 let height = block.height;
                                 let digest = proof.payload.clone();
-                                let notarization = NotarizationPayload::new(proof, block);
+                                let notarization = Notarized::new(proof, block);
                                 notarized
                                     .put(view, digest, notarization.serialize().into())
                                     .await
@@ -521,14 +516,14 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                             // Check if in verified
                             if block.is_none() {
                                 if let Some(verified) = verified.get(Identifier::Key(&proof.payload)).await.expect("Failed to get verified block") {
-                                    block = Some(Block::deserialize(&self.public, &verified).expect("Failed to deserialize block"));
+                                    block = Some(Block::deserialize(&verified).expect("Failed to deserialize block"));
                                 }
                             }
 
                             // Check if in notarized
                             if block.is_none() {
                                 if let Some(notarized) = notarized.get(Identifier::Key(&proof.payload)).await.expect("Failed to get notarized block") {
-                                    block = Some(NotarizationPayload::deserialize(&self.public, &notarized).expect("Failed to deserialize block").block);
+                                    block = Some(Notarized::deserialize(None, &notarized).expect("Failed to deserialize block").block);
                                 }
                             }
 
@@ -586,7 +581,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                             // Check verified blocks
                             let block = verified.get(Identifier::Key(&payload)).await.expect("Failed to get verified block");
                             if let Some(block) = block {
-                                let block = Block::deserialize(&self.public, &block).expect("Failed to deserialize block");
+                                let block = Block::deserialize(&block).expect("Failed to deserialize block");
                                 debug!(height = block.height, "found block in verified");
                                 let _ = response.send(block);
                                 continue;
@@ -595,7 +590,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                             // Check if in notarized blocks
                             let notarization = notarized.get(Identifier::Key(&payload)).await.expect("Failed to get notarized block");
                             if let Some(notarization) = notarization {
-                                let notarization = NotarizationPayload::deserialize(&self.public, &notarization).expect("Failed to deserialize block");
+                                let notarization = Notarized::deserialize(None, &notarization).expect("Failed to deserialize block");
                                 let block = notarization.block;
                                 debug!(height = block.height, "found block in notarized");
                                 let _ = response.send(block);
@@ -605,7 +600,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                             // Check if in finalized blocks
                             let block = blocks.get(Identifier::Key(&payload)).await.expect("Failed to get finalized block");
                             if let Some(block) = block {
-                                let block = Block::deserialize(&self.public, &block).expect("Failed to deserialize block");
+                                let block = Block::deserialize(&block).expect("Failed to deserialize block");
                                 debug!(height = block.height, "found block in finalized");
                                 let _ = response.send(block);
                                 continue;
@@ -626,7 +621,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                 // Handle incoming broadcasts
                 broadcast_message = broadcast_network.1.recv() => {
                     let (sender, message) = broadcast_message.expect("Broadcast closed");
-                    let Some(block) = Block::deserialize(&self.public, &message) else {
+                    let Some(block) = Block::deserialize(&message) else {
                         warn!(?sender, "failed to deserialize block");
                         continue;
                     };
@@ -662,7 +657,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                         debug!(height, "finalization missing on request");
                                         continue;
                                     };
-                                    let finalization = Finalization::deserialize(&self.public, &finalization).expect("Failed to deserialize finalization");
+                                    let finalization = Finalization::deserialize(None, &finalization).expect("Failed to deserialize finalization");
 
                                     // Get block
                                     let block = blocks.get(Identifier::Index(height)).await.expect("Failed to get finalized block");
@@ -670,10 +665,10 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                         debug!(height, "finalized block missing on request");
                                         continue;
                                     };
-                                    let block = Block::deserialize(&self.public, &block).expect("Failed to deserialize block");
+                                    let block = Block::deserialize(&block).expect("Failed to deserialize block");
 
                                     // Send finalization
-                                    let payload = FinalizationPayload::new(finalization, block);
+                                    let payload = Finalized::new(finalization, block);
                                     let _ = response.send(payload.serialize().into());
                                 },
                                 key::Value::Digest(digest) => {
@@ -693,7 +688,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                     // Get notarized block
                                     let notarization = notarized.get(Identifier::Key(&digest)).await.expect("Failed to get notarized block");
                                     if let Some(notarized) = notarization {
-                                        let notarization = NotarizationPayload::deserialize(&self.public, &notarized).expect("Failed to deserialize notarization");
+                                        let notarization = Notarized::deserialize(None, &notarized).expect("Failed to deserialize notarization");
                                         let _ = response.send(notarization.block.serialize().into());
                                         continue;
                                     }
@@ -714,7 +709,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                             match key.to_value() {
                                 key::Value::Notarized(view) => {
                                     // Parse notarization
-                                    let Some(notarization) = NotarizationPayload::deserialize(&self.public, &value) else {
+                                    let Some(notarization) = Notarized::deserialize(Some(&self.public), &value) else {
                                         let _ = response.send(false);
                                         continue;
                                     };
@@ -743,7 +738,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                 },
                                 key::Value::Finalized(height) => {
                                     // Parse finalization
-                                    let Some(finalization) = FinalizationPayload::deserialize(&self.public, &value) else {
+                                    let Some(finalization) = Finalized::deserialize(Some(&self.public), &value) else {
                                         let _ = response.send(false);
                                         continue;
                                     };
@@ -783,7 +778,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                 },
                                 key::Value::Digest(digest) => {
                                     // Parse block
-                                    let block = Block::deserialize(&self.public, &value).expect("Failed to deserialize block");
+                                    let block = Block::deserialize(&value).expect("Failed to deserialize block");
 
                                     // Ensure the received payload is for the correct digest
                                     if block.digest() != digest {
