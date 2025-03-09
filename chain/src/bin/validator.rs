@@ -13,7 +13,7 @@ use commonware_cryptography::{
 use commonware_deployer::ec2::Peers;
 use commonware_p2p::authenticated;
 use commonware_runtime::{tokio, Clock, Metrics, Network, Runner, Spawner};
-use commonware_utils::{from_hex_formatted, hex};
+use commonware_utils::{from_hex_formatted, hex, quorum};
 use futures::future::try_join_all;
 use governor::Quota;
 use prometheus_client::metrics::gauge::Gauge;
@@ -77,6 +77,7 @@ fn main() {
         })
         .collect();
     info!(peers = peers.len(), "loaded peers");
+    let peers_u32 = peers.len() as u32;
 
     // Load config
     let config_file = matches.get_one::<String>("config").unwrap();
@@ -87,9 +88,9 @@ fn main() {
     let signer = <Ed25519 as Scheme>::from(key).expect("Could not create signer");
     let share = from_hex_formatted(&config.share).expect("Could not parse share");
     let share = group::Share::deserialize(&share).expect("Share is invalid");
+    let threshold = quorum(peers_u32).expect("unable to derive quorum");
     let identity = from_hex_formatted(&config.identity).expect("Could not parse identity");
-    let identity =
-        poly::Public::deserialize(&identity, peers.len() as u32).expect("Identity is invalid");
+    let identity = poly::Public::deserialize(&identity, threshold).expect("Identity is invalid");
     let public_key = signer.public_key();
     let ip = peers.get(&public_key).expect("Could not find self in IPs");
     info!(
