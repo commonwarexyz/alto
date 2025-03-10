@@ -1,7 +1,62 @@
+use std::future::Future;
+
+use bytes::Bytes;
+use commonware_cryptography::bls12381;
 use serde::{Deserialize, Serialize};
 
 pub mod actors;
 pub mod engine;
+
+/// Trait for interacting with an indexer.
+pub trait Indexer: Clone + Send + Sync + 'static {
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    /// Create a new indexer with the given URI and public key.
+    fn new(uri: &str, public: bls12381::PublicKey) -> Self;
+
+    /// Upload a seed to the indexer.
+    fn seed_upload(&self, seed: Bytes) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Upload a notarization to the indexer.
+    fn notarization_upload(
+        &self,
+        notarized: Bytes,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Upload a finalization to the indexer.
+    fn finalization_upload(
+        &self,
+        finalized: Bytes,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+impl Indexer for alto_client::Client {
+    type Error = alto_client::Error;
+    fn new(uri: &str, public: bls12381::PublicKey) -> Self {
+        Self::new(uri, public)
+    }
+
+    fn seed_upload(
+        &self,
+        seed: bytes::Bytes,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.seed_upload(seed)
+    }
+
+    fn notarization_upload(
+        &self,
+        notarization: bytes::Bytes,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.notarization_upload(notarization)
+    }
+
+    fn finalization_upload(
+        &self,
+        finalization: bytes::Bytes,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.finalization_upload(finalization)
+    }
+}
 
 #[derive(Deserialize, Serialize)]
 pub struct Config {

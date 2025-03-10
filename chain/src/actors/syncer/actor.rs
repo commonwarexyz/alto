@@ -6,11 +6,13 @@ use super::{
     ingress::{Mailbox, Message},
     Config,
 };
-use crate::actors::syncer::{
-    handler,
-    key::{self, MultiIndex, Value},
+use crate::{
+    actors::syncer::{
+        handler,
+        key::{self, MultiIndex, Value},
+    },
+    Indexer,
 };
-use alto_client::Client;
 use alto_types::{Block, Finalization, Finalized, Notarized};
 use bytes::Bytes;
 use commonware_cryptography::{bls12381, ed25519::PublicKey, sha256::Digest};
@@ -44,7 +46,7 @@ use std::{
 use tracing::{debug, info, warn};
 
 /// Application actor.
-pub struct Actor<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> {
+pub struct Actor<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Indexer> {
     context: R,
     public_key: PublicKey,
     public: bls12381::PublicKey,
@@ -53,7 +55,7 @@ pub struct Actor<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<
     mailbox_size: usize,
     backfill_quota: Quota,
     activity_timeout: u64,
-    client: Option<Client>,
+    indexer: Option<I>,
 
     // Blocks verified stored by view<>digest
     verified: Archive<TwoCap, Digest, B, R>,
@@ -76,9 +78,9 @@ pub struct Actor<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<
     contiguous_height: Gauge,
 }
 
-impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B, R> {
+impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Indexer> Actor<B, R, I> {
     /// Create a new application actor.
-    pub async fn init(context: R, config: Config) -> (Self, Mailbox) {
+    pub async fn init(context: R, config: Config<I>) -> (Self, Mailbox) {
         // Initialize verified blocks
         let verified_journal = Journal::init(
             context.with_label("verified_journal"),
@@ -197,13 +199,6 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
 
         // Initialize mailbox
         let (sender, mailbox) = mpsc::channel(config.mailbox_size);
-
-        // Initialize client
-        let mut client = None;
-        if let Some(indexer) = config.indexer {
-            client = Some(Client::new(&indexer, config.identity.into()));
-            info!(indexer, "initialized indexer client");
-        }
         (
             Self {
                 context,
@@ -214,7 +209,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                 mailbox_size: config.mailbox_size,
                 backfill_quota: config.backfill_quota,
                 activity_timeout: config.activity_timeout,
-                client,
+                indexer: config.indexer,
 
                 verified: verified_archive,
                 notarized: notarized_archive,
@@ -484,15 +479,16 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                         }
                         Message::Notarized { proof, seed } => {
                             // Upload seed to indexer (if available)
-                            if let Some(client) = self.client.as_ref() {
+                            if let Some(indexer) = self.indexer.as_ref() {
                                 self.context.with_label("indexer").spawn({
-                                    let client = client.clone();
+                                    let indexer = indexer.clone();
                                     let view = proof.view;
                                     move |_| async move {
                                         let seed = seed.serialize().into();
-                                        let result = client.seed_upload(seed).await;
+                                        let result = indexer.seed_upload(seed).await;
                                         if let Err(e) = result {
                                             warn!(?e, "failed to upload seed");
+                                            return;
                                         }
                                         debug!(view, "seed uploaded to indexer");
                                     }
@@ -526,15 +522,16 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                 debug!(view, height, "notarized block stored");
 
                                 // Upload to indexer (if available)
-                                if let Some(client) = self.client.as_ref() {
+                                if let Some(indexer) = self.indexer.as_ref() {
                                     self.context.with_label("indexer").spawn({
-                                        let client = client.clone();
+                                        let indexer = indexer.clone();
                                         move |_| async move {
-                                            let result = client
+                                            let result = indexer
                                                 .notarization_upload(notarization)
                                                 .await;
                                             if let Err(e) = result {
                                                 warn!(?e, "failed to upload notarization");
+                                                return;
                                             }
                                             debug!(view, "notarization uploaded to indexer");
                                         }
@@ -553,15 +550,16 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                         }
                         Message::Finalized { proof, seed } => {
                             // Upload seed to indexer (if available)
-                            if let Some(client) = self.client.as_ref() {
+                            if let Some(indexer) = self.indexer.as_ref() {
                                 self.context.with_label("indexer").spawn({
-                                    let client = client.clone();
+                                    let indexer = indexer.clone();
                                     let view = proof.view;
                                     move |_| async move {
                                         let seed = seed.serialize().into();
-                                        let result = client.seed_upload(seed).await;
+                                        let result = indexer.seed_upload(seed).await;
                                         if let Err(e) = result {
                                             warn!(?e, "failed to upload seed");
+                                            return;
                                         }
                                         debug!(view, "seed uploaded to indexer");
                                     }
@@ -625,16 +623,17 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                 self.finalized_height.set(height as i64);
 
                                 // Upload to indexer (if available)
-                                if let Some(client) = self.client.as_ref() {
+                                if let Some(indexer) = self.indexer.as_ref() {
                                     self.context.with_label("indexer").spawn({
-                                        let client = client.clone();
+                                        let indexer = indexer.clone();
                                         let finalization = Finalized::new(proof, block).serialize().into();
                                         move |_| async move {
-                                            let result = client
+                                            let result = indexer
                                                 .finalization_upload(finalization)
                                                 .await;
                                             if let Err(e) = result {
                                                 warn!(?e, "failed to upload finalization");
+                                                return;
                                             }
                                             debug!(height, "finalization uploaded to indexer");
                                         }

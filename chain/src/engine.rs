@@ -1,4 +1,7 @@
-use crate::actors::{application, syncer};
+use crate::{
+    actors::{application, syncer},
+    Indexer,
+};
 use alto_types::NAMESPACE;
 use commonware_consensus::threshold_simplex::{self, Engine as Consensus, Prover};
 use commonware_cryptography::{
@@ -17,7 +20,7 @@ use rand::{CryptoRng, Rng};
 use std::time::Duration;
 use tracing::{error, warn};
 
-pub struct Config {
+pub struct Config<I: Indexer> {
     pub partition_prefix: String,
     pub signer: Ed25519,
     pub identity: Poly<group::Public>,
@@ -36,14 +39,18 @@ pub struct Config {
     pub fetch_concurrent: usize,
     pub fetch_rate_per_peer: Quota,
 
-    pub indexer: Option<String>,
+    pub indexer: Option<I>,
 }
 
-pub struct Engine<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metrics> {
+pub struct Engine<
+    B: Blob,
+    E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metrics,
+    I: Indexer,
+> {
     context: E,
 
     application: application::Actor<E>,
-    syncer: syncer::Actor<B, E>,
+    syncer: syncer::Actor<B, E, I>,
     syncer_mailbox: syncer::Mailbox,
     consensus: Consensus<
         B,
@@ -57,8 +64,10 @@ pub struct Engine<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Stora
     >,
 }
 
-impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metrics> Engine<B, E> {
-    pub async fn new(context: E, cfg: Config) -> Self {
+impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metrics, I: Indexer>
+    Engine<B, E, I>
+{
+    pub async fn new(context: E, cfg: Config<I>) -> Self {
         // Create the application
         let public = public(&cfg.identity);
         let (application, supervisor, application_mailbox) = application::Actor::new(
