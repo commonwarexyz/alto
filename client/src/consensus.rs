@@ -62,8 +62,8 @@ pub enum Message {
 impl Client {
     pub async fn seed_upload(&self, seed: Seed) -> Result<(), Error> {
         let request = seed.serialize();
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .post(seed_upload_path(self.uri.clone()))
             .body(request)
             .send()
@@ -77,8 +77,8 @@ impl Client {
 
     pub async fn seed_get(&self, query: IndexQuery) -> Result<Seed, Error> {
         // Get the seed
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .get(seed_get_path(self.uri.clone(), &query))
             .send()
             .await
@@ -103,8 +103,8 @@ impl Client {
 
     pub async fn nullification_upload(&self, nullification: Nullification) -> Result<(), Error> {
         let request = nullification.serialize();
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .post(nullification_upload_path(self.uri.clone()))
             .body(request)
             .send()
@@ -118,8 +118,8 @@ impl Client {
 
     pub async fn nullification_get(&self, query: IndexQuery) -> Result<Nullification, Error> {
         // Get the nullification
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .get(nullification_get_path(self.uri.clone(), &query))
             .send()
             .await
@@ -149,8 +149,8 @@ impl Client {
         block: Block,
     ) -> Result<(), Error> {
         let request = Notarized::new(proof, block).serialize();
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .post(notarization_upload_path(self.uri.clone()))
             .body(request)
             .send()
@@ -164,8 +164,8 @@ impl Client {
 
     pub async fn notarization_get(&self, query: IndexQuery) -> Result<Notarized, Error> {
         // Get the notarization
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .get(notarization_get_path(self.uri.clone(), &query))
             .send()
             .await
@@ -195,8 +195,8 @@ impl Client {
         block: Block,
     ) -> Result<(), Error> {
         let request = Finalized::new(proof, block).serialize();
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .post(finalization_upload_path(self.uri.clone()))
             .body(request)
             .send()
@@ -210,8 +210,8 @@ impl Client {
 
     pub async fn finalization_get(&self, query: IndexQuery) -> Result<Finalized, Error> {
         // Get the finalization
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .get(finalization_get_path(self.uri.clone(), &query))
             .send()
             .await
@@ -237,8 +237,8 @@ impl Client {
 
     pub async fn block_get(&self, query: Query) -> Result<Payload, Error> {
         // Get the block
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .get(block_get_path(self.uri.clone(), &query))
             .send()
             .await
