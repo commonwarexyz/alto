@@ -29,4 +29,6 @@ pub struct Config {
     pub backfill_quota: Quota,
 
     pub activity_timeout: u64,
+
+    pub indexer: Option<String>,
 }

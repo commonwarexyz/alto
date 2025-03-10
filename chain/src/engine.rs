@@ -83,6 +83,7 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
                 mailbox_size: cfg.mailbox_size,
                 backfill_quota: cfg.backfill_quota,
                 activity_timeout: cfg.activity_timeout,
+                indexer: cfg.indexer,
             },
         )
         .await;

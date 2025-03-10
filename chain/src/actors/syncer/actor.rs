@@ -10,6 +10,7 @@ use crate::actors::syncer::{
     handler,
     key::{self, MultiIndex, Value},
 };
+use alto_client::Client;
 use alto_types::{Block, Finalization, Finalized, Notarized};
 use commonware_cryptography::{bls12381, ed25519::PublicKey, sha256::Digest};
 use commonware_macros::select;
@@ -51,6 +52,7 @@ pub struct Actor<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<
     mailbox_size: usize,
     backfill_quota: Quota,
     activity_timeout: u64,
+    client: Option<Client>,
 
     // Blocks verified stored by view<>digest
     verified: Archive<TwoCap, Digest, B, R>,
@@ -194,6 +196,13 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
 
         // Initialize mailbox
         let (sender, mailbox) = mpsc::channel(config.mailbox_size);
+
+        // Initialize client
+        let mut client = None;
+        if let Some(indexer) = config.indexer {
+            client = Some(Client::new(&indexer, config.identity.into()));
+            info!(indexer, "initialized indexer client");
+        }
         (
             Self {
                 context,
@@ -204,6 +213,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                 mailbox_size: config.mailbox_size,
                 backfill_quota: config.backfill_quota,
                 activity_timeout: config.activity_timeout,
+                client,
 
                 verified: verified_archive,
                 notarized: notarized_archive,
@@ -292,8 +302,6 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                 } else {
                     0
                 };
-
-                // TODO: need to handle finalization from finalization gaps (may never exist for a height where we finalize a notarize in a later view)
 
                 // Index all finalized blocks
                 //
