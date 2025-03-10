@@ -1,5 +1,6 @@
 use crate::{Client, Error, IndexQuery, Query};
-use alto_types::{Block, Finalization, Finalized, Kind, Notarization, Notarized, Seed};
+use alto_types::{Block, Finalized, Kind, Notarized, Seed};
+use bytes::Bytes;
 use futures::{channel::mpsc::unbounded, Stream, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::Message as TMessage};
 
@@ -49,12 +50,11 @@ pub enum Message {
 }
 
 impl Client {
-    pub async fn seed_upload(&self, seed: Seed) -> Result<(), Error> {
-        let request = seed.serialize();
+    pub async fn seed_upload(&self, seed: Bytes) -> Result<(), Error> {
         let result = self
             .client
             .post(seed_upload_path(self.uri.clone()))
-            .body(request)
+            .body(seed)
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -90,16 +90,11 @@ impl Client {
         Ok(result)
     }
 
-    pub async fn notarization_upload(
-        &self,
-        proof: Notarization,
-        block: Block,
-    ) -> Result<(), Error> {
-        let request = Notarized::new(proof, block).serialize();
+    pub async fn notarization_upload(&self, notarized: Bytes) -> Result<(), Error> {
         let result = self
             .client
             .post(notarization_upload_path(self.uri.clone()))
-            .body(request)
+            .body(notarized)
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -136,16 +131,11 @@ impl Client {
         Ok(result)
     }
 
-    pub async fn finalization_upload(
-        &self,
-        proof: Finalization,
-        block: Block,
-    ) -> Result<(), Error> {
-        let request = Finalized::new(proof, block).serialize();
+    pub async fn finalization_upload(&self, finalized: Bytes) -> Result<(), Error> {
         let result = self
             .client
             .post(finalization_upload_path(self.uri.clone()))
-            .body(request)
+            .body(finalized)
             .send()
             .await
             .map_err(Error::Reqwest)?;

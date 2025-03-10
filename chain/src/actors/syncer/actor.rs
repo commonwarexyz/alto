@@ -12,6 +12,7 @@ use crate::actors::syncer::{
 };
 use alto_client::Client;
 use alto_types::{Block, Finalization, Finalized, Notarized};
+use bytes::Bytes;
 use commonware_cryptography::{bls12381, ed25519::PublicKey, sha256::Digest};
 use commonware_macros::select;
 use commonware_p2p::{utils::requester, Receiver, Recipients, Sender};
@@ -483,6 +484,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                             if let Some(client) = self.client.as_ref() {
                                 let client = client.clone();
                                 let view = proof.view;
+                                let seed = seed.serialize().into();
                                 self.context.with_label("indexer").spawn(
                                     move |_| async move {
                                         let result = client.seed_upload(seed).await;
@@ -511,9 +513,10 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                 let view = proof.view;
                                 let height = block.height;
                                 let digest = proof.payload.clone();
-                                let notarization = Notarized::new(proof.clone(), block.clone());
+                                let notarization = Notarized::new(proof, block);
+                                let notarization: Bytes = notarization.serialize().into();
                                 notarized
-                                    .put(view, digest, notarization.serialize().into())
+                                    .put(view, digest, notarization.clone())
                                     .await
                                     .expect("Failed to insert notarized block");
                                 debug!(view, height, "notarized block stored");
@@ -524,7 +527,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                     self.context.with_label("indexer").spawn(
                                         move |_| async move {
                                             let result = client
-                                                .notarization_upload(proof, block)
+                                                .notarization_upload(notarization)
                                                 .await;
                                             if let Err(e) = result {
                                                 warn!(?e, "failed to upload notarization");
@@ -548,6 +551,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                             if let Some(client) = self.client.as_ref() {
                                 let client = client.clone();
                                 let view = proof.view;
+                                let seed = seed.serialize().into();
                                 self.context.with_label("indexer").spawn(
                                     move |_| async move {
                                         let result = client.seed_upload(seed).await;
@@ -617,10 +621,11 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                 // Upload to indexer (if available)
                                 if let Some(client) = self.client.as_ref() {
                                     let client = client.clone();
+                                    let finalization = Finalized::new(proof, block).serialize().into();
                                     self.context.with_label("indexer").spawn(
                                         move |_| async move {
                                             let result = client
-                                                .finalization_upload(proof, block)
+                                                .finalization_upload(finalization)
                                                 .await;
                                             if let Err(e) = result {
                                                 warn!(?e, "failed to upload finalization");
