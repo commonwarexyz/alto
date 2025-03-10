@@ -8,6 +8,7 @@
 
 * [chain](./chain/README.md): A minimal blockchain built with the [Commonware Library](https://github.com/commonwarexyz/monorepo).
 * [client](./client/README.md): Client for interacting with `alto`.
+* [inspector](./inspector/README.md): Monitor `alto` activity.
 * [types](./types/README.md): Common types used throughout `alto`.
 
 ## Licensing

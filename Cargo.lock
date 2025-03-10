@@ -85,6 +85,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "alto-inspector"
+version = "0.0.2"
+dependencies = [
+ "alto-client",
+ "alto-types",
+ "bytes",
+ "clap",
+ "commonware-cryptography",
+ "commonware-utils",
+ "futures",
+ "rand",
+ "thiserror 2.0.12",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "alto-types"
 version = "0.0.2"
 dependencies = [
