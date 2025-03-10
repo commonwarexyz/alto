@@ -124,7 +124,7 @@ fn main() {
     let (identity, shares) = ops::generate_shares(&mut OsRng, None, peers_u32, threshold);
     info!(
         identity = hex(&poly::public(&identity).serialize()),
-        "generated consensus key"
+        "generated network key"
     );
 
     // Generate instance configurations
