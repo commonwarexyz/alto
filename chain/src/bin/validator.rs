@@ -195,6 +195,7 @@ fn main() {
             max_fetch_size: MAX_FETCH_SIZE,
             fetch_concurrent: FETCH_CONCURRENT,
             fetch_rate_per_peer: resolver_limit,
+            indexer: config.indexer,
         };
         let engine = engine::Engine::new(context.with_label("engine"), config).await;
 
