@@ -1,8 +1,9 @@
 use alto_client::{consensus::Message, Client};
 use clap::{value_parser, Arg, Command};
 use commonware_cryptography::bls12381::PublicKey;
-use commonware_utils::from_hex_formatted;
+use commonware_utils::{from_hex_formatted, SystemTimeExt};
 use futures::StreamExt;
+use std::time;
 use tracing::info;
 
 #[tokio::main]
@@ -13,13 +14,13 @@ async fn main() {
         .arg(
             Arg::new("indexer")
                 .long("indexer")
-                .required(false)
+                .required(true)
                 .value_parser(value_parser!(String)),
         )
         .arg(
             Arg::new("identity")
                 .long("identity")
-                .required(false)
+                .required(true)
                 .value_parser(value_parser!(String)),
         )
         .get_matches();
@@ -41,25 +42,30 @@ async fn main() {
         .register()
         .await
         .expect("Failed to connect to indexer");
+    info!("connected to indexer");
     while let Some(message) = stream.next().await {
         let message = message.expect("Failed to receive message");
         match message {
             Message::Seed(seed) => {
-                info!(view = seed.view, "seed");
+                info!(view = seed.view, signature = ?seed.signature, "seed");
             }
             Message::Notarization(notarized) => {
+                let now = time::SystemTime::now().epoch_millis();
                 info!(
                     view = notarized.proof.view,
                     height = notarized.block.height,
                     timestamp = notarized.block.timestamp,
+                    age = now - notarized.block.timestamp,
                     digest = ?notarized.block.digest(),
                     "notarized");
             }
             Message::Finalization(finalized) => {
+                let now = time::SystemTime::now().epoch_millis();
                 info!(
                     view = finalized.proof.view,
                     height = finalized.block.height,
                     timestamp = finalized.block.timestamp,
+                    age = now - finalized.block.timestamp,
                     digest = ?finalized.block.digest(),
                     "finalized"
                 );

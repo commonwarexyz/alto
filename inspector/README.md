@@ -8,3 +8,9 @@ Monitor `alto` activity.
 ## Status
 
 `alto-inspector` is **ALPHA** software and is not yet recommended for production use. Developers should expect breaking changes and occasional instability.
+
+## Usage
+
+```bash
+cargo run --release -- --indexer <indexer URL> --identity <identity>
+```
