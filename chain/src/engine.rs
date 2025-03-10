@@ -35,6 +35,8 @@ pub struct Config {
     pub max_fetch_size: usize,
     pub fetch_concurrent: usize,
     pub fetch_rate_per_peer: Quota,
+
+    pub indexer: Option<String>,
 }
 
 pub struct Engine<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metrics> {
@@ -81,6 +83,7 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
                 mailbox_size: cfg.mailbox_size,
                 backfill_quota: cfg.backfill_quota,
                 activity_timeout: cfg.activity_timeout,
+                indexer: cfg.indexer,
             },
         )
         .await;

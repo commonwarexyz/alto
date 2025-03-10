@@ -1,0 +1,25 @@
+[package]
+name = "alto-inspector"
+version = "0.0.2"
+publish = true
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Monitor alto activity."
+readme = "README.md"
+homepage = "https://alto.commonware.xyz"
+repository = "https://github.com/commonwarexyz/alto/tree/main/inspector"
+documentation = "https://docs.rs/alto-inspector"
+
+[dependencies]
+commonware-cryptography = { workspace = true }
+commonware-utils = { workspace = true }
+alto-types = { workspace = true }
+alto-client = { workspace = true }
+bytes =  { workspace = true }
+rand = { workspace = true }
+thiserror = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { version = "1.40.0", features = ["full"] }
+futures = { workspace = true }

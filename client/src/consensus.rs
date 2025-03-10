@@ -1,7 +1,5 @@
 use crate::{Client, Error, IndexQuery, Query};
-use alto_types::{
-    Block, Finalization, Finalized, Kind, Notarization, Notarized, Nullification, Seed,
-};
+use alto_types::{Block, Finalization, Finalized, Kind, Notarization, Notarized, Seed};
 use futures::{channel::mpsc::unbounded, Stream, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::Message as TMessage};
 
@@ -11,14 +9,6 @@ fn seed_upload_path(base: String) -> String {
 
 fn seed_get_path(base: String, query: &IndexQuery) -> String {
     format!("{}/seed/{}", base, query.serialize())
-}
-
-fn nullification_upload_path(base: String) -> String {
-    format!("{}/nullification", base)
-}
-
-fn nullification_get_path(base: String, query: &IndexQuery) -> String {
-    format!("{}/nullification/{}", base, query.serialize())
 }
 
 fn notarization_upload_path(base: String) -> String {
@@ -54,7 +44,6 @@ pub enum Payload {
 
 pub enum Message {
     Seed(Seed),
-    Nullification(Nullification),
     Notarization(Notarized),
     Finalization(Finalized),
 }
@@ -62,8 +51,8 @@ pub enum Message {
 impl Client {
     pub async fn seed_upload(&self, seed: Seed) -> Result<(), Error> {
         let request = seed.serialize();
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .post(seed_upload_path(self.uri.clone()))
             .body(request)
             .send()
@@ -77,8 +66,8 @@ impl Client {
 
     pub async fn seed_get(&self, query: IndexQuery) -> Result<Seed, Error> {
         // Get the seed
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .get(seed_get_path(self.uri.clone(), &query))
             .send()
             .await
@@ -101,56 +90,14 @@ impl Client {
         Ok(result)
     }
 
-    pub async fn nullification_upload(&self, nullification: Nullification) -> Result<(), Error> {
-        let request = nullification.serialize();
-        let client = reqwest::Client::new();
-        let result = client
-            .post(nullification_upload_path(self.uri.clone()))
-            .body(request)
-            .send()
-            .await
-            .map_err(Error::Reqwest)?;
-        if !result.status().is_success() {
-            return Err(Error::Failed(result.status()));
-        }
-        Ok(())
-    }
-
-    pub async fn nullification_get(&self, query: IndexQuery) -> Result<Nullification, Error> {
-        // Get the nullification
-        let client = reqwest::Client::new();
-        let result = client
-            .get(nullification_get_path(self.uri.clone(), &query))
-            .send()
-            .await
-            .map_err(Error::Reqwest)?;
-        if !result.status().is_success() {
-            return Err(Error::Failed(result.status()));
-        }
-        let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let result =
-            Nullification::deserialize(Some(&self.public), &bytes).ok_or(Error::InvalidData)?;
-
-        // Verify the nullification matches the query
-        match query {
-            IndexQuery::Latest => {}
-            IndexQuery::Index(index) => {
-                if result.view != index {
-                    return Err(Error::InvalidData);
-                }
-            }
-        }
-        Ok(result)
-    }
-
     pub async fn notarization_upload(
         &self,
         proof: Notarization,
         block: Block,
     ) -> Result<(), Error> {
         let request = Notarized::new(proof, block).serialize();
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .post(notarization_upload_path(self.uri.clone()))
             .body(request)
             .send()
@@ -164,8 +111,8 @@ impl Client {
 
     pub async fn notarization_get(&self, query: IndexQuery) -> Result<Notarized, Error> {
         // Get the notarization
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .get(notarization_get_path(self.uri.clone(), &query))
             .send()
             .await
@@ -195,8 +142,8 @@ impl Client {
         block: Block,
     ) -> Result<(), Error> {
         let request = Finalized::new(proof, block).serialize();
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .post(finalization_upload_path(self.uri.clone()))
             .body(request)
             .send()
@@ -210,8 +157,8 @@ impl Client {
 
     pub async fn finalization_get(&self, query: IndexQuery) -> Result<Finalized, Error> {
         // Get the finalization
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .get(finalization_get_path(self.uri.clone(), &query))
             .send()
             .await
@@ -237,8 +184,8 @@ impl Client {
 
     pub async fn block_get(&self, query: Query) -> Result<Payload, Error> {
         // Get the block
-        let client = reqwest::Client::new();
-        let result = client
+        let result = self
+            .client
             .get(block_get_path(self.uri.clone(), &query))
             .send()
             .await
@@ -313,16 +260,7 @@ impl Client {
                                     let _ = sender.unbounded_send(Err(Error::InvalidData));
                                 }
                             }
-                            Kind::Nullification => {
-                                if let Some(nullification) =
-                                    Nullification::deserialize(Some(&public), data)
-                                {
-                                    let _ = sender
-                                        .unbounded_send(Ok(Message::Nullification(nullification)));
-                                } else {
-                                    let _ = sender.unbounded_send(Err(Error::InvalidData));
-                                }
-                            }
+                            Kind::Nullification => {} // Ignore nullifications
                             Kind::Finalization => {
                                 if let Some(payload) = Finalized::deserialize(Some(&public), data) {
                                     let _ =

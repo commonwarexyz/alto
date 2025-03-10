@@ -18,6 +18,8 @@ pub struct Config {
 
     pub message_backlog: usize,
     pub mailbox_size: usize,
+
+    pub indexer: Option<String>,
 }
 
 #[cfg(test)]
@@ -180,6 +182,7 @@ mod tests {
                     max_fetch_size: 1024 * 512,
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                    indexer: None,
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -337,6 +340,7 @@ mod tests {
                     max_fetch_size: 1024 * 512,
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                    indexer: None,
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -419,6 +423,7 @@ mod tests {
                 max_fetch_size: 1024 * 512,
                 fetch_concurrent: 10,
                 fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                indexer: None,
             };
             let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -551,6 +556,7 @@ mod tests {
                             max_fetch_size: 1024 * 512,
                             fetch_concurrent: 10,
                             fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                            indexer: None,
                         };
                         let engine = Engine::new(context.with_label(&uid), config).await;
 

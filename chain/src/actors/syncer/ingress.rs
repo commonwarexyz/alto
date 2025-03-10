@@ -1,4 +1,4 @@
-use alto_types::{Block, Finalization, Notarization};
+use alto_types::{Block, Finalization, Notarization, Seed};
 use commonware_cryptography::sha256::Digest;
 use futures::{
     channel::{mpsc, oneshot},
@@ -21,9 +21,11 @@ pub enum Message {
     },
     Notarized {
         proof: Notarization,
+        seed: Seed,
     },
     Finalized {
         proof: Finalization,
+        seed: Seed,
     },
 }
 
@@ -68,16 +70,16 @@ impl Mailbox {
             .expect("Failed to send lock");
     }
 
-    pub async fn notarized(&mut self, proof: Notarization) {
+    pub async fn notarized(&mut self, proof: Notarization, seed: Seed) {
         self.sender
-            .send(Message::Notarized { proof })
+            .send(Message::Notarized { proof, seed })
             .await
             .expect("Failed to send lock");
     }
 
-    pub async fn finalized(&mut self, proof: Finalization) {
+    pub async fn finalized(&mut self, proof: Finalization, seed: Seed) {
         self.sender
-            .send(Message::Finalized { proof })
+            .send(Message::Finalized { proof, seed })
             .await
             .expect("Failed to send lock");
     }

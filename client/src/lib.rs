@@ -51,10 +51,13 @@ pub enum Error {
     InvalidData,
 }
 
+#[derive(Clone)]
 pub struct Client {
     uri: String,
     ws_uri: String,
     public: bls12381::PublicKey,
+
+    client: reqwest::Client,
 }
 
 impl Client {
@@ -65,6 +68,8 @@ impl Client {
             uri,
             ws_uri,
             public,
+
+            client: reqwest::Client::new(),
         }
     }
 }

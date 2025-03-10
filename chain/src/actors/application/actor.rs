@@ -4,7 +4,7 @@ use super::{
     Config,
 };
 use crate::actors::syncer;
-use alto_types::{Block, Finalization, Notarization};
+use alto_types::{Block, Finalization, Notarization, Seed};
 use commonware_consensus::threshold_simplex::Prover;
 use commonware_cryptography::{sha256::Digest, Hasher, Sha256};
 use commonware_macros::select;
@@ -215,21 +215,23 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                 }
                 Message::Prepared { proof, payload } => {
                     // Parse the proof
-                    let (view, parent, _, signature, _) =
+                    let (view, parent, _, signature, seed) =
                         self.prover.deserialize_notarization(proof).unwrap();
                     let notarization = Notarization::new(view, parent, payload, signature.into());
+                    let seed = Seed::new(view, seed.into());
 
                     // Send the notarization to the syncer
-                    syncer.notarized(notarization).await;
+                    syncer.notarized(notarization, seed).await;
                 }
                 Message::Finalized { proof, payload } => {
                     // Parse the proof
-                    let (view, parent, _, signature, _) =
+                    let (view, parent, _, signature, seed) =
                         self.prover.deserialize_finalization(proof.clone()).unwrap();
                     let finalization = Finalization::new(view, parent, payload, signature.into());
+                    let seed = Seed::new(view, seed.into());
 
                     // Send the finalization to the syncer
-                    syncer.finalized(finalization).await;
+                    syncer.finalized(finalization, seed).await;
                 }
             }
         }
