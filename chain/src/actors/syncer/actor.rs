@@ -478,7 +478,21 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                 .await
                                 .expect("Failed to insert verified block");
                         }
-                        Message::Notarized { proof } => {
+                        Message::Notarized { proof, seed } => {
+                            // Upload seed to indexer (if available)
+                            if let Some(client) = self.client.as_ref() {
+                                let client = client.clone();
+                                let view = proof.view;
+                                self.context.with_label("indexer").spawn(
+                                    move |_| async move {
+                                        let result = client.seed_upload(seed).await;
+                                        if let Err(e) = result {
+                                            warn!(?e, "failed to upload seed");
+                                        }
+                                        debug!(view, "seed uploaded to indexer");
+                                    });
+                            }
+
                             // Check if in buffer
                             let mut block = None;
                             if let Some(buffered) = buffer.get(&proof.payload) {
@@ -529,7 +543,21 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                             outstanding_notarize.insert(proof.view);
                             resolver.fetch(MultiIndex::new(Value::Notarized(proof.view))).await;
                         }
-                        Message::Finalized { proof } => {
+                        Message::Finalized { proof, seed } => {
+                            // Upload seed to indexer (if available)
+                            if let Some(client) = self.client.as_ref() {
+                                let client = client.clone();
+                                let view = proof.view;
+                                self.context.with_label("indexer").spawn(
+                                    move |_| async move {
+                                        let result = client.seed_upload(seed).await;
+                                        if let Err(e) = result {
+                                            warn!(?e, "failed to upload seed");
+                                        }
+                                        debug!(view, "seed uploaded to indexer");
+                                    });
+                            }
+
                             // Check if in buffer
                             let mut block = None;
                             if let Some(buffered) = buffer.get(&proof.payload){
