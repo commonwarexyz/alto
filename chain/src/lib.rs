@@ -199,7 +199,7 @@ mod tests {
                 let metrics = context.encode();
 
                 // Iterate over all lines
-                let mut failed = false;
+                let mut success = false;
                 for line in metrics.lines() {
                     // Ensure it is a metrics line
                     if !line.starts_with("validator-") {
@@ -217,16 +217,16 @@ mod tests {
                         assert_eq!(value, 0);
                     }
 
-                    // If ends with indexed_height, ensure it is at least required_container
-                    if metric.ends_with("_syncer_indexed_height") {
+                    // If ends with contiguous_height, ensure it is at least required_container
+                    if metric.ends_with("_syncer_contiguous_height") {
                         let value = value.parse::<u64>().unwrap();
-                        if value < required_container {
-                            failed = true;
+                        if value >= required_container {
+                            success = true;
                             break;
                         }
                     }
                 }
-                if !failed {
+                if !success {
                     break;
                 }
 
@@ -357,7 +357,7 @@ mod tests {
                 let metrics = context.encode();
 
                 // Iterate over all lines
-                let mut failed = false;
+                let mut success = true;
                 for line in metrics.lines() {
                     // Ensure it is a metrics line
                     if !line.starts_with("validator-") {
@@ -375,16 +375,16 @@ mod tests {
                         assert_eq!(value, 0);
                     }
 
-                    // If ends with indexed_height, ensure it is at least required_container
-                    if metric.ends_with("_syncer_indexed_height") {
+                    // If ends with contiguous_height, ensure it is at least required_container
+                    if metric.ends_with("_syncer_contiguous_height") {
                         let value = value.parse::<u64>().unwrap();
-                        if value < initial_container_required {
-                            failed = true;
+                        if value >= initial_container_required {
+                            success = true;
                             break;
                         }
                     }
                 }
-                if !failed {
+                if success {
                     break;
                 }
 
@@ -438,7 +438,7 @@ mod tests {
                 let metrics = context.encode();
 
                 // Iterate over all lines
-                let mut failed = false;
+                let mut success = false;
                 for line in metrics.lines() {
                     // Ensure it is a metrics line
                     if !line.starts_with("validator-") {
@@ -456,16 +456,16 @@ mod tests {
                         assert_eq!(value, 0);
                     }
 
-                    // If ends with indexed_height, ensure it is at least required_container
-                    if metric.ends_with("_syncer_indexed_height") {
+                    // If ends with contiguous_height, ensure it is at least required_container
+                    if metric.ends_with("_syncer_contiguous_height") {
                         let value = value.parse::<u64>().unwrap();
-                        if value < final_container_required {
-                            failed = true;
+                        if value >= final_container_required {
+                            success = true;
                             break;
                         }
                     }
                 }
-                if !failed {
+                if success {
                     break;
                 }
 
@@ -576,7 +576,7 @@ mod tests {
                                 let metrics = context.encode();
 
                                 // Iterate over all lines
-                                let mut failed = false;
+                                let mut success = false;
                                 for line in metrics.lines() {
                                     // Ensure it is a metrics line
                                     if !line.starts_with("validator-") {
@@ -594,16 +594,16 @@ mod tests {
                                         assert_eq!(value, 0);
                                     }
 
-                                    // If ends with indexed_height, ensure it is at least required_container
-                                    if metric.ends_with("_syncer_indexed_height") {
+                                    // If ends with contiguous_height, ensure it is at least required_container
+                                    if metric.ends_with("_syncer_contiguous_height") {
                                         let value = value.parse::<u64>().unwrap();
-                                        if value < required_container {
-                                            failed = true;
+                                        if value >= required_container {
+                                            success = true;
                                             break;
                                         }
                                     }
                                 }
-                                if !failed {
+                                if success {
                                     break;
                                 }
 
@@ -625,5 +625,128 @@ mod tests {
         }
         assert!(runs > 1);
         info!(runs, "unclean shutdown recovery worked");
+    }
+
+    #[test_traced]
+    fn test_indexer() {
+        // Create context
+        let n = 5;
+        let threshold = quorum(n).unwrap();
+        let required_container = 10;
+        let (executor, mut context, _) = Executor::timed(Duration::from_secs(30));
+        executor.start(async move {
+            // Create simulated network
+            let (network, mut oracle) = Network::new(
+                context.with_label("network"),
+                simulated::Config {
+                    max_size: 1024 * 1024,
+                },
+            );
+
+            // Start network
+            network.start();
+
+            // Register participants
+            let mut schemes = Vec::new();
+            let mut validators = Vec::new();
+            for i in 0..n {
+                let scheme = Ed25519::from_seed(i as u64);
+                let pk = scheme.public_key();
+                schemes.push(scheme);
+                validators.push(pk);
+            }
+            validators.sort();
+            schemes.sort_by_key(|s| s.public_key());
+            let mut registrations = register_validators(&mut oracle, &validators).await;
+
+            // Link all validators
+            let link = Link {
+                latency: 10.0,
+                jitter: 1.0,
+                success_rate: 1.0,
+            };
+            link_validators(&mut oracle, &validators, link, None).await;
+
+            // Derive threshold
+            let (public, shares) = ops::generate_shares(&mut context, None, n, threshold);
+
+            // Create instances
+            let mut public_keys = HashSet::new();
+            for (idx, scheme) in schemes.into_iter().enumerate() {
+                // Create scheme context
+                let public_key = scheme.public_key();
+                public_keys.insert(public_key.clone());
+
+                // Configure engine
+                let uid = format!("validator-{}", public_key);
+                let config = engine::Config {
+                    partition_prefix: uid.clone(),
+                    signer: scheme,
+                    identity: public.clone(),
+                    share: shares[idx],
+                    participants: validators.clone(),
+                    mailbox_size: 1024,
+                    backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                    leader_timeout: Duration::from_secs(1),
+                    notarization_timeout: Duration::from_secs(2),
+                    nullify_retry: Duration::from_secs(10),
+                    fetch_timeout: Duration::from_secs(1),
+                    activity_timeout: 10,
+                    max_fetch_count: 10,
+                    max_fetch_size: 1024 * 512,
+                    fetch_concurrent: 10,
+                    fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                    indexer: None,
+                };
+                let engine = Engine::new(context.with_label(&uid), config).await;
+
+                // Get networking
+                let (voter, resolver, broadcast, backfill) =
+                    registrations.remove(&public_key).unwrap();
+
+                // Start engine
+                engine.start(voter, resolver, broadcast, backfill);
+            }
+
+            // Poll metrics
+            loop {
+                let metrics = context.encode();
+
+                // Iterate over all lines
+                let mut success = false;
+                for line in metrics.lines() {
+                    // Ensure it is a metrics line
+                    if !line.starts_with("validator-") {
+                        continue;
+                    }
+
+                    // Split metric and value
+                    let mut parts = line.split_whitespace();
+                    let metric = parts.next().unwrap();
+                    let value = parts.next().unwrap();
+
+                    // If ends with peers_blocked, ensure it is zero
+                    if metric.ends_with("_peers_blocked") {
+                        let value = value.parse::<u64>().unwrap();
+                        assert_eq!(value, 0);
+                    }
+
+                    // If ends with contiguous_height, ensure it is at least required_container
+                    if metric.ends_with("_syncer_contiguous_height") {
+                        let value = value.parse::<u64>().unwrap();
+                        if value >= required_container {
+                            success = true;
+                            break;
+                        }
+                    }
+                }
+                if success {
+                    break;
+                }
+
+                // Still waiting for all validators to complete
+                context.sleep(Duration::from_secs(1)).await;
+            }
+        });
     }
 }
