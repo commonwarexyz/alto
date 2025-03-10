@@ -51,6 +51,7 @@ pub enum Error {
     InvalidData,
 }
 
+#[derive(Clone)]
 pub struct Client {
     uri: String,
     ws_uri: String,

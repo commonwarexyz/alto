@@ -497,12 +497,26 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                 let view = proof.view;
                                 let height = block.height;
                                 let digest = proof.payload.clone();
-                                let notarization = Notarized::new(proof, block);
+                                let notarization = Notarized::new(proof.clone(), block.clone());
                                 notarized
                                     .put(view, digest, notarization.serialize().into())
                                     .await
                                     .expect("Failed to insert notarized block");
                                 debug!(view, height, "notarized block stored");
+
+                                // Upload to indexer (if available)
+                                if let Some(client) = self.client.as_ref() {
+                                    let client = client.clone();
+                                    self.context.with_label("indexer").spawn(
+                                        move |_| async move {
+                                            let result = client
+                                                .notarization_upload(proof, block)
+                                                .await;
+                                            if let Err(e) = result {
+                                                warn!(?e, "failed to upload notarization");
+                                            }
+                                    });
+                                }
                                 continue;
                             }
 
@@ -570,6 +584,20 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
 
                                 // Update metrics
                                 self.latest_height.set(height as i64);
+
+                                // Upload to indexer (if available)
+                                if let Some(client) = self.client.as_ref() {
+                                    let client = client.clone();
+                                    self.context.with_label("indexer").spawn(
+                                        move |_| async move {
+                                            let result = client
+                                                .finalization_upload(proof, block)
+                                                .await;
+                                            if let Err(e) = result {
+                                                warn!(?e, "failed to upload finalization");
+                                            }
+                                    });
+                                }
                                 continue;
                             }
 
