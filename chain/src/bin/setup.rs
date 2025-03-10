@@ -87,6 +87,12 @@ fn main() {
                 .required(true)
                 .value_parser(value_parser!(String)),
         )
+        .arg(
+            Arg::new("indexer")
+                .long("indexer")
+                .required(false)
+                .value_parser(value_parser!(String)),
+        )
         .get_matches();
 
     // Create logger
@@ -143,6 +149,7 @@ fn main() {
     let worker_threads = *matches.get_one::<usize>("worker-threads").unwrap();
     let message_backlog = *matches.get_one::<usize>("message-backlog").unwrap();
     let mailbox_size = *matches.get_one::<usize>("mailbox-size").unwrap();
+    let indexer = matches.get_one::<String>("indexer").cloned();
     let mut instance_configs = Vec::new();
     let mut peer_configs = Vec::new();
     for (index, scheme) in peer_schemes.iter().enumerate() {
@@ -163,6 +170,8 @@ fn main() {
 
             message_backlog,
             mailbox_size,
+
+            indexer: indexer.clone(),
         };
         peer_configs.push((peer_config_file.clone(), peer_config));
 

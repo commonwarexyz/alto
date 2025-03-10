@@ -18,6 +18,8 @@ pub struct Config {
 
     pub message_backlog: usize,
     pub mailbox_size: usize,
+
+    pub indexer: Option<String>,
 }
 
 #[cfg(test)]
