@@ -312,7 +312,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "engine_syncer_latest_height{job=~\"$Validator\", region=~\"$Region\"}",
+                    "expr": "engine_syncer_finalized_height{job=~\"$Validator\", region=~\"$Region\"}",
                     "fullMetaSearch": false,
                     "includeNullMetadata": true,
                     "legendFormat": "{{job}} ({{instance}})",
