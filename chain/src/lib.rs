@@ -93,39 +93,54 @@ mod tests {
     use engine::{Config, Engine};
     use governor::Quota;
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use std::time::Duration;
     use std::{
         collections::{HashMap, HashSet},
         num::NonZeroU32,
         sync::{Arc, Mutex},
     };
+    use std::{sync::atomic::AtomicBool, time::Duration};
     use tracing::info;
 
     /// MockIndexer is a simple indexer implementation for testing.
     #[derive(Clone)]
     struct MockIndexer {
         public: bls12381::PublicKey,
+
+        seed_seen: Arc<AtomicBool>,
+        notarization_seen: Arc<AtomicBool>,
+        finalization_seen: Arc<AtomicBool>,
     }
 
     impl Indexer for MockIndexer {
         type Error = std::io::Error;
 
         fn new(_: &str, public: bls12381::PublicKey) -> Self {
-            MockIndexer { public }
+            MockIndexer {
+                public,
+                seed_seen: Arc::new(AtomicBool::new(false)),
+                notarization_seen: Arc::new(AtomicBool::new(false)),
+                finalization_seen: Arc::new(AtomicBool::new(false)),
+            }
         }
 
         async fn seed_upload(&self, seed: Bytes) -> Result<(), Self::Error> {
             Seed::deserialize(Some(&self.public), &seed).unwrap();
+            self.seed_seen
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             Ok(())
         }
 
         async fn notarization_upload(&self, notarized: Bytes) -> Result<(), Self::Error> {
             Notarized::deserialize(Some(&self.public), &notarized).unwrap();
+            self.notarization_seen
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             Ok(())
         }
 
         async fn finalization_upload(&self, finalized: Bytes) -> Result<(), Self::Error> {
             Finalized::deserialize(Some(&self.public), &finalized).unwrap();
+            self.finalization_seen
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             Ok(())
         }
     }
@@ -757,9 +772,7 @@ mod tests {
             let (public, shares) = ops::generate_shares(&mut context, None, n, threshold);
 
             // Define mock indexer
-            let indexer = MockIndexer {
-                public: poly::public(&public).into(),
-            };
+            let indexer = MockIndexer::new("", poly::public(&public).into());
 
             // Create instances
             let mut public_keys = HashSet::new();
@@ -840,6 +853,13 @@ mod tests {
             }
 
             // Check indexer uploads
+            assert!(indexer.seed_seen.load(std::sync::atomic::Ordering::Relaxed));
+            assert!(indexer
+                .notarization_seen
+                .load(std::sync::atomic::Ordering::Relaxed));
+            assert!(indexer
+                .finalization_seen
+                .load(std::sync::atomic::Ordering::Relaxed));
         });
     }
 }
