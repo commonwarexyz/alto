@@ -515,6 +515,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                             if let Err(e) = result {
                                                 warn!(?e, "failed to upload notarization");
                                             }
+                                            debug!(view, "notarization uploaded to indexer");
                                     });
                                 }
                                 continue;
@@ -596,6 +597,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>> Actor<B,
                                             if let Err(e) = result {
                                                 warn!(?e, "failed to upload finalization");
                                             }
+                                            debug!(height, "finalization uploaded to indexer");
                                     });
                                 }
                                 continue;
