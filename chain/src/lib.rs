@@ -1,7 +1,62 @@
+use std::future::Future;
+
+use bytes::Bytes;
+use commonware_cryptography::bls12381;
 use serde::{Deserialize, Serialize};
 
 pub mod actors;
 pub mod engine;
+
+/// Trait for interacting with an indexer.
+pub trait Indexer: Clone + Send + Sync + 'static {
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    /// Create a new indexer with the given URI and public key.
+    fn new(uri: &str, public: bls12381::PublicKey) -> Self;
+
+    /// Upload a seed to the indexer.
+    fn seed_upload(&self, seed: Bytes) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Upload a notarization to the indexer.
+    fn notarization_upload(
+        &self,
+        notarized: Bytes,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Upload a finalization to the indexer.
+    fn finalization_upload(
+        &self,
+        finalized: Bytes,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+impl Indexer for alto_client::Client {
+    type Error = alto_client::Error;
+    fn new(uri: &str, public: bls12381::PublicKey) -> Self {
+        Self::new(uri, public)
+    }
+
+    fn seed_upload(
+        &self,
+        seed: bytes::Bytes,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.seed_upload(seed)
+    }
+
+    fn notarization_upload(
+        &self,
+        notarization: bytes::Bytes,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.notarization_upload(notarization)
+    }
+
+    fn finalization_upload(
+        &self,
+        finalization: bytes::Bytes,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.finalization_upload(finalization)
+    }
+}
 
 #[derive(Deserialize, Serialize)]
 pub struct Config {
@@ -25,6 +80,8 @@ pub struct Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alto_types::{Finalized, Notarized, Seed};
+    use bls12381::primitives::poly;
     use commonware_cryptography::{bls12381::dkg::ops, ed25519::PublicKey, Ed25519, Scheme};
     use commonware_macros::test_traced;
     use commonware_p2p::simulated::{self, Link, Network, Oracle, Receiver, Sender};
@@ -33,16 +90,60 @@ mod tests {
         Clock, Metrics, Runner, Spawner,
     };
     use commonware_utils::quorum;
-    use engine::Engine;
+    use engine::{Config, Engine};
     use governor::Quota;
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use std::time::Duration;
     use std::{
         collections::{HashMap, HashSet},
         num::NonZeroU32,
         sync::{Arc, Mutex},
     };
+    use std::{sync::atomic::AtomicBool, time::Duration};
     use tracing::info;
+
+    /// MockIndexer is a simple indexer implementation for testing.
+    #[derive(Clone)]
+    struct MockIndexer {
+        public: bls12381::PublicKey,
+
+        seed_seen: Arc<AtomicBool>,
+        notarization_seen: Arc<AtomicBool>,
+        finalization_seen: Arc<AtomicBool>,
+    }
+
+    impl Indexer for MockIndexer {
+        type Error = std::io::Error;
+
+        fn new(_: &str, public: bls12381::PublicKey) -> Self {
+            MockIndexer {
+                public,
+                seed_seen: Arc::new(AtomicBool::new(false)),
+                notarization_seen: Arc::new(AtomicBool::new(false)),
+                finalization_seen: Arc::new(AtomicBool::new(false)),
+            }
+        }
+
+        async fn seed_upload(&self, seed: Bytes) -> Result<(), Self::Error> {
+            Seed::deserialize(Some(&self.public), &seed).unwrap();
+            self.seed_seen
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            Ok(())
+        }
+
+        async fn notarization_upload(&self, notarized: Bytes) -> Result<(), Self::Error> {
+            Notarized::deserialize(Some(&self.public), &notarized).unwrap();
+            self.notarization_seen
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            Ok(())
+        }
+
+        async fn finalization_upload(&self, finalized: Bytes) -> Result<(), Self::Error> {
+            Finalized::deserialize(Some(&self.public), &finalized).unwrap();
+            self.finalization_seen
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            Ok(())
+        }
+    }
 
     /// Registers all validators using the oracle.
     async fn register_validators(
@@ -165,7 +266,7 @@ mod tests {
 
                 // Configure engine
                 let uid = format!("validator-{}", public_key);
-                let config = engine::Config {
+                let config: Config<MockIndexer> = engine::Config {
                     partition_prefix: uid.clone(),
                     signer: scheme,
                     identity: public.clone(),
@@ -323,7 +424,7 @@ mod tests {
                 // Configure engine
                 let public_key = scheme.public_key();
                 let uid = format!("validator-{}", public_key);
-                let config = engine::Config {
+                let config: Config<MockIndexer> = engine::Config {
                     partition_prefix: uid.clone(),
                     signer: scheme.clone(),
                     identity: public.clone(),
@@ -406,7 +507,7 @@ mod tests {
             let share = shares[0];
             let public_key = scheme.public_key();
             let uid = format!("validator-{}", public_key);
-            let config = engine::Config {
+            let config: Config<MockIndexer> = engine::Config {
                 partition_prefix: uid.clone(),
                 signer: scheme.clone(),
                 identity: public.clone(),
@@ -539,7 +640,7 @@ mod tests {
 
                         // Configure engine
                         let uid = format!("validator-{}", public_key);
-                        let config = engine::Config {
+                        let config: Config<MockIndexer> = engine::Config {
                             partition_prefix: uid.clone(),
                             signer: scheme,
                             identity: public.clone(),
@@ -670,6 +771,9 @@ mod tests {
             // Derive threshold
             let (public, shares) = ops::generate_shares(&mut context, None, n, threshold);
 
+            // Define mock indexer
+            let indexer = MockIndexer::new("", poly::public(&public).into());
+
             // Create instances
             let mut public_keys = HashSet::new();
             for (idx, scheme) in schemes.into_iter().enumerate() {
@@ -679,7 +783,7 @@ mod tests {
 
                 // Configure engine
                 let uid = format!("validator-{}", public_key);
-                let config = engine::Config {
+                let config: Config<MockIndexer> = engine::Config {
                     partition_prefix: uid.clone(),
                     signer: scheme,
                     identity: public.clone(),
@@ -696,7 +800,7 @@ mod tests {
                     max_fetch_size: 1024 * 512,
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
-                    indexer: None,
+                    indexer: Some(indexer.clone()),
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -747,6 +851,15 @@ mod tests {
                 // Still waiting for all validators to complete
                 context.sleep(Duration::from_secs(1)).await;
             }
+
+            // Check indexer uploads
+            assert!(indexer.seed_seen.load(std::sync::atomic::Ordering::Relaxed));
+            assert!(indexer
+                .notarization_seen
+                .load(std::sync::atomic::Ordering::Relaxed));
+            assert!(indexer
+                .finalization_seen
+                .load(std::sync::atomic::Ordering::Relaxed));
         });
     }
 }

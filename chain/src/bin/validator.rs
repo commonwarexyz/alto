@@ -1,4 +1,5 @@
 use alto_chain::{engine, Config};
+use alto_client::Client;
 use alto_types::P2P_NAMESPACE;
 use axum::{routing::get, serve, Extension, Router};
 use clap::{Arg, Command};
@@ -91,11 +92,12 @@ fn main() {
     let threshold = quorum(peers_u32).expect("unable to derive quorum");
     let identity = from_hex_formatted(&config.identity).expect("Could not parse identity");
     let identity = poly::Public::deserialize(&identity, threshold).expect("Identity is invalid");
+    let identity_public = poly::public(&identity);
     let public_key = signer.public_key();
     let ip = peers.get(&public_key).expect("Could not find self in IPs");
     info!(
         ?public_key,
-        identity = hex(&poly::public(&identity).serialize()),
+        identity = hex(&identity_public.serialize()),
         ?ip,
         port = config.port,
         "loaded config"
@@ -177,6 +179,12 @@ fn main() {
         // Create network
         let p2p = network.start();
 
+        // Create indexer
+        let mut indexer = None;
+        if let Some(uri) = config.indexer {
+            indexer = Some(Client::new(&uri, identity_public.into()));
+        }
+
         // Create engine
         let config = engine::Config {
             partition_prefix: "engine".to_string(),
@@ -195,7 +203,7 @@ fn main() {
             max_fetch_size: MAX_FETCH_SIZE,
             fetch_concurrent: FETCH_CONCURRENT,
             fetch_rate_per_peer: resolver_limit,
-            indexer: config.indexer,
+            indexer,
         };
         let engine = engine::Engine::new(context.with_label("engine"), config).await;
 
