@@ -22,14 +22,16 @@ cargo install commonware-deployer
 ### Create Deployer Artifacts
 
 ```bash
-cargo run --bin setup -- --peers 10 --bootstrappers 2 --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,eu-north-1,ap-south-1,sa-east-1,eu-central-1,ap-northeast-2,ap-southeast-2 --instance-type c7g.xlarge --storage-size 10 --storage-class gp3 --worker-threads 4 --message-backlog 16384 --mailbox-size 16384 --dashboard dashboard.json --output assets
+cargo run --bin setup -- generate --peers 10 --bootstrappers 2 --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,eu-north-1,ap-south-1,sa-east-1,eu-central-1,ap-northeast-2,ap-southeast-2 --instance-type c7g.xlarge --storage-size 10 --storage-class gp3 --worker-threads 4 --message-backlog 16384 --mailbox-size 16384 --dashboard dashboard.json --output assets
 ```
 
-#### [Optional] Upload Consensus Artifacts to Indexer
+### [Optional] Configure Indexer Upload
 
 ```bash
---indexer <indexer URL>
+cargo run --bin setup -- indexer --dir assets --url <indexer URL>
 ```
+
+_The indexer URL is configured separately because it is typically only known after the threshold key is generated (derived in `setup generate`)._
 
 ### Build Validator Binary
 

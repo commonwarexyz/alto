@@ -1,5 +1,5 @@
 use alto_chain::Config;
-use clap::{value_parser, Arg, Command};
+use clap::{value_parser, Arg, ArgMatches, Command};
 use commonware_cryptography::{
     bls12381::{
         dkg::ops,
@@ -10,104 +10,165 @@ use commonware_cryptography::{
 use commonware_deployer::ec2;
 use commonware_utils::{hex, quorum};
 use rand::{rngs::OsRng, seq::IteratorRandom};
-use tracing::info;
+use std::fs;
+use tracing::{error, info};
 use uuid::Uuid;
 
 const BINARY_NAME: &str = "validator";
 const PORT: u16 = 4545;
 
 fn main() {
-    // Parse arguments
-    let matches = Command::new("setup")
-        .about("Generate configuration files for an alto chain.")
-        .arg(
-            Arg::new("peers")
-                .long("peers")
-                .required(true)
-                .value_parser(value_parser!(usize)),
-        )
-        .arg(
-            Arg::new("bootstrappers")
-                .long("bootstrappers")
-                .required(true)
-                .value_parser(value_parser!(usize)),
-        )
-        .arg(
-            Arg::new("regions")
-                .long("regions")
-                .required(true)
-                .value_delimiter(',')
-                .value_parser(value_parser!(String)),
-        )
-        .arg(
-            Arg::new("instance_type")
-                .long("instance-type")
-                .required(true)
-                .value_parser(value_parser!(String)),
-        )
-        .arg(
-            Arg::new("storage_size")
-                .long("storage-size")
-                .required(true)
-                .value_parser(value_parser!(i32)),
-        )
-        .arg(
-            Arg::new("storage_class")
-                .long("storage-class")
-                .required(true)
-                .value_parser(value_parser!(String)),
-        )
-        .arg(
-            Arg::new("worker-threads")
-                .long("worker-threads")
-                .required(true)
-                .value_parser(value_parser!(usize)),
-        )
-        .arg(
-            Arg::new("message-backlog")
-                .long("message-backlog")
-                .required(true)
-                .value_parser(value_parser!(usize)),
-        )
-        .arg(
-            Arg::new("mailbox-size")
-                .long("mailbox-size")
-                .required(true)
-                .value_parser(value_parser!(usize)),
-        )
-        .arg(
-            Arg::new("dashboard")
-                .long("dashboard")
-                .required(true)
-                .value_parser(value_parser!(String)),
-        )
-        .arg(
-            Arg::new("output")
-                .long("output")
-                .required(true)
-                .value_parser(value_parser!(String)),
-        )
-        .arg(
-            Arg::new("indexer")
-                .long("indexer")
-                .required(false)
-                .value_parser(value_parser!(String)),
-        )
-        .get_matches();
-
-    // Create logger
+    // Initialize logger
     tracing_subscriber::fmt().init();
+
+    // Define the main command with subcommands
+    let app = Command::new("setup")
+        .about("Manage configuration files for an alto chain.")
+        .subcommand(
+            Command::new("generate")
+                .about("Generate configuration files for an alto chain")
+                .arg(
+                    Arg::new("peers")
+                        .long("peers")
+                        .required(true)
+                        .value_parser(value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("bootstrappers")
+                        .long("bootstrappers")
+                        .required(true)
+                        .value_parser(value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("regions")
+                        .long("regions")
+                        .required(true)
+                        .value_delimiter(',')
+                        .value_parser(value_parser!(String)),
+                )
+                .arg(
+                    Arg::new("instance_type")
+                        .long("instance-type")
+                        .required(true)
+                        .value_parser(value_parser!(String)),
+                )
+                .arg(
+                    Arg::new("storage_size")
+                        .long("storage-size")
+                        .required(true)
+                        .value_parser(value_parser!(i32)),
+                )
+                .arg(
+                    Arg::new("storage_class")
+                        .long("storage-class")
+                        .required(true)
+                        .value_parser(value_parser!(String)),
+                )
+                .arg(
+                    Arg::new("worker_threads")
+                        .long("worker-threads")
+                        .required(true)
+                        .value_parser(value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("message_backlog")
+                        .long("message-backlog")
+                        .required(true)
+                        .value_parser(value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("mailbox_size")
+                        .long("mailbox-size")
+                        .required(true)
+                        .value_parser(value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("dashboard")
+                        .long("dashboard")
+                        .required(true)
+                        .value_parser(value_parser!(String)),
+                )
+                .arg(
+                    Arg::new("output")
+                        .long("output")
+                        .required(true)
+                        .value_parser(value_parser!(String)),
+                ),
+        )
+        .subcommand(
+            Command::new("indexer")
+                .about("Add indexer support for an alto chain.")
+                .arg(
+                    Arg::new("dir")
+                        .long("dir")
+                        .required(true)
+                        .value_parser(value_parser!(String)),
+                )
+                .arg(
+                    Arg::new("url")
+                        .long("url")
+                        .required(true)
+                        .value_parser(value_parser!(String)),
+                ),
+        );
+
+    // Parse arguments
+    let matches = app.get_matches();
+
+    // Handle subcommands
+    match matches.subcommand() {
+        Some(("generate", sub_matches)) => generate(sub_matches),
+        Some(("indexer", sub_matches)) => indexer(sub_matches),
+        _ => {
+            eprintln!("Invalid subcommand. Use 'generate' or 'indexer'.");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn generate(sub_matches: &ArgMatches) {
+    // Extract arguments
+    let peers = *sub_matches.get_one::<usize>("peers").unwrap();
+    let bootstrappers = *sub_matches.get_one::<usize>("bootstrappers").unwrap();
+    let regions = sub_matches
+        .get_many::<String>("regions")
+        .unwrap()
+        .cloned()
+        .collect::<Vec<_>>();
+    let instance_type = sub_matches
+        .get_one::<String>("instance_type")
+        .unwrap()
+        .clone();
+    let storage_size = *sub_matches.get_one::<i32>("storage_size").unwrap();
+    let storage_class = sub_matches
+        .get_one::<String>("storage_class")
+        .unwrap()
+        .clone();
+    let worker_threads = *sub_matches.get_one::<usize>("worker_threads").unwrap();
+    let message_backlog = *sub_matches.get_one::<usize>("message_backlog").unwrap();
+    let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
+    let dashboard = sub_matches.get_one::<String>("dashboard").unwrap().clone();
+    let output = sub_matches.get_one::<String>("output").unwrap().clone();
+
+    // Construct output path
+    let raw_current_dir = std::env::current_dir().unwrap();
+    let current_dir = raw_current_dir.to_str().unwrap();
+    let output = format!("{}/{}", current_dir, output);
+
+    // Check if output directory exists
+    if fs::metadata(&output).is_ok() {
+        error!("output directory already exists: {}", output);
+        std::process::exit(1);
+    }
 
     // Generate UUID
     let tag = Uuid::new_v4().to_string();
     info!(tag, "generated deployment tag");
 
     // Generate peers
-    let peers = *matches.get_one::<usize>("peers").unwrap();
-    let bootstrappers = *matches.get_one::<usize>("bootstrappers").unwrap();
     assert!(
         bootstrappers <= peers,
-        "bootstrappers must be less than peers"
+        "bootstrappers must be less than or equal to peers"
     );
     let mut peer_schemes = (0..peers)
         .map(|_| Ed25519::new(&mut OsRng))
@@ -134,22 +195,10 @@ fn main() {
     );
 
     // Generate instance configurations
-    let regions = matches
-        .get_many::<String>("regions")
-        .unwrap()
-        .cloned()
-        .collect::<Vec<_>>();
     assert!(
         regions.len() <= peers,
         "must be at least one peer per specified region"
     );
-    let instance_type = matches.get_one::<String>("instance_type").unwrap();
-    let storage_size = *matches.get_one::<i32>("storage_size").unwrap();
-    let storage_class = matches.get_one::<String>("storage_class").unwrap();
-    let worker_threads = *matches.get_one::<usize>("worker-threads").unwrap();
-    let message_backlog = *matches.get_one::<usize>("message-backlog").unwrap();
-    let mailbox_size = *matches.get_one::<usize>("mailbox-size").unwrap();
-    let indexer = matches.get_one::<String>("indexer").cloned();
     let mut instance_configs = Vec::new();
     let mut peer_configs = Vec::new();
     for (index, scheme) in peer_schemes.iter().enumerate() {
@@ -171,7 +220,7 @@ fn main() {
             message_backlog,
             mailbox_size,
 
-            indexer: indexer.clone(),
+            indexer: None,
         };
         peer_configs.push((peer_config_file.clone(), peer_config));
 
@@ -208,28 +257,90 @@ fn main() {
     };
 
     // Write configuration files
-    let raw_current_dir = std::env::current_dir().unwrap();
-    let current_dir = raw_current_dir.to_str().unwrap();
-    let output = matches.get_one::<String>("output").unwrap();
-    let output = format!("{}/{}", current_dir, output);
-    assert!(
-        !std::path::Path::new(&output).exists(),
-        "output directory already exists"
-    );
-    std::fs::create_dir_all(output.clone()).unwrap();
-    let dashboard = matches.get_one::<String>("dashboard").unwrap().clone();
-    std::fs::copy(
+    fs::create_dir_all(&output).unwrap();
+    fs::copy(
         format!("{}/{}", current_dir, dashboard),
         format!("{}/dashboard.json", output),
     )
     .unwrap();
     for (peer_config_file, peer_config) in peer_configs {
         let path = format!("{}/{}", output, peer_config_file);
-        let file = std::fs::File::create(path).unwrap();
+        let file = fs::File::create(&path).unwrap();
         serde_yaml::to_writer(file, &peer_config).unwrap();
     }
     let path = format!("{}/config.yaml", output);
-    let file = std::fs::File::create(path.clone()).unwrap();
+    let file = fs::File::create(&path).unwrap();
     serde_yaml::to_writer(file, &config).unwrap();
     info!(path, "wrote configuration files");
+}
+
+fn indexer(sub_matches: &ArgMatches) {
+    // Extract arguments
+    let dir = sub_matches.get_one::<String>("dir").unwrap().clone();
+    let url = sub_matches.get_one::<String>("url").unwrap().clone();
+
+    // Construct directory path
+    let raw_current_dir = std::env::current_dir().unwrap();
+    let current_dir = raw_current_dir.to_str().unwrap();
+    let dir = format!("{}/{}", current_dir, dir);
+
+    // Check if directory exists
+    if fs::metadata(&dir).is_err() {
+        error!("directory does not exist: {}", dir);
+        std::process::exit(1);
+    }
+
+    // Iterate over all peer configuration files and add indexer URL
+    for entry in fs::read_dir(&dir).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
+                if file_name.ends_with(".yaml") && file_name != "config.yaml" {
+                    let relative_path = path.strip_prefix(&dir).unwrap();
+                    match fs::read_to_string(&path) {
+                        Ok(content) => match serde_yaml::from_str::<Config>(&content) {
+                            Ok(mut config) => {
+                                config.indexer = Some(url.clone());
+                                match serde_yaml::to_string(&config) {
+                                    Ok(updated_content) => {
+                                        if let Err(e) = fs::write(&path, updated_content) {
+                                            error!(
+                                                path = ?relative_path,
+                                                error = ?e,
+                                                "failed to write",
+                                            );
+                                        } else {
+                                            info!(path = ?relative_path, "updated");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            path = ?relative_path,
+                                            error = ?e,
+                                            "failed to serialize config",
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                error!(
+                                    path = ?relative_path,
+                                    error = ?e,
+                                    "failed to parse"
+                                );
+                            }
+                        },
+                        Err(e) => {
+                            error!(
+                                path = ?relative_path,
+                                error = ?e,
+                                "failed to read",
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
