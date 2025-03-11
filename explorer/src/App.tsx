@@ -536,7 +536,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
     }
   } else {
     // Timed out
-    inBarText = "TIMED OUT";
+    inBarText = "";
   }
 
   return (
