@@ -484,7 +484,7 @@ const App: React.FC = () => {
           <LegendItem color="#aaa" label="Seed to Notarized" />
           <LegendItem color="#d9ead3ff" label="Notarized to Finalized" />
           <LegendItem color="#274e13ff" label="Finalization Point" />
-          <LegendItem color="#f4ccccff" label="Timed Out" />
+          <LegendItem color="#f4ccccff" label="Nullified" />
         </div>
 
         {/* Bars */}
@@ -622,7 +622,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     }
   } else {
     // Timed out
-    inBarText = "TIMED OUT";
+    inBarText = "NULLIFIED";
   }
 
   return (
