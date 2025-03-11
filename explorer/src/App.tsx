@@ -44,7 +44,7 @@ interface ViewData {
 
 const TIMEOUT_DURATION = 2000; // 2 seconds
 
-// Custom marker icons - updated for monochrome style
+// Custom marker icons - updated for monochrome style with circular appearance
 const createCustomIcon = (status: ViewStatus) => {
   const color =
     status === "growing" ? "#aaa" :
@@ -61,8 +61,8 @@ const createCustomIcon = (status: ViewStatus) => {
       border-radius: 50%;
       border: 1px solid black;
     "></div>`,
-    iconSize: [15, 15],
-    iconAnchor: [8, 8]
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
   });
 };
 
@@ -429,7 +429,7 @@ const App: React.FC = () => {
           </div>
           <div className="logo-line">
             <span className="vertical-logo-symbol">|</span>
-            <span className="logo-text"> alto </span>
+            <span className="logo-text"> commonware </span>
             <span className="vertical-logo-symbol"> </span>
           </div>
           <div className="logo-line">
@@ -512,11 +512,6 @@ const App: React.FC = () => {
       </main>
 
       <footer className="footer">
-        <div className="socials">
-          <a href="#">Documentation</a>
-          <a href="#">GitHub</a>
-          <a href="#">Benchmarks</a>
-        </div>
         &copy; {new Date().getFullYear()} Commonware, Inc. All rights reserved.
       </footer>
     </div>
@@ -643,7 +638,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
       <div className="view-info" style={{ width: `${viewInfoWidth}px` }}>
         <div className="view-number">{view}</div>
         <div className="view-signature">
-          {signature ? shortenUint8Array(signature) : "Skipped"}
+          {signature ? shortenUint8Array(signature) : ""}
         </div>
       </div>
 

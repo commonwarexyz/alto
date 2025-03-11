@@ -262,10 +262,10 @@ body {
   transition: left 0.1s linear;
 }
 
-/* Custom marker icons - monochrome versions */
-.custom-div-icon {
-  border: 1px solid black !important;
-  background-color: white !important;
+/* Custom marker icons - pure circles without box container */
+.leaflet-div-icon {
+  background: transparent;
+  border: none;
 }
 
 /* Footer */
