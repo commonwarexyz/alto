@@ -368,20 +368,6 @@ const App: React.FC = () => {
       </header>
 
       <main style={{ padding: "20px" }}>
-        {/* Stats Cards */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "20px",
-          marginBottom: "20px"
-        }}>
-          <StatCard title="Total Views" value={statsData.totalViews} color="#90CAF9" />
-          <StatCard title="Finalized" value={statsData.finalized} color="#81C784" />
-          <StatCard title="Notarized" value={statsData.notarized} color="#AED581" />
-          <StatCard title="Growing" value={statsData.growing} color="#E0E0E0" />
-          <StatCard title="Timed Out" value={statsData.timedOut} color="#EF9A9A" />
-        </div>
-
         {/* Map */}
         <div style={{
           height: "400px",
@@ -453,41 +439,6 @@ const App: React.FC = () => {
           ))}
         </div>
       </main>
-    </div>
-  );
-};
-
-interface StatCardProps {
-  title: string;
-  value: number;
-  color: string;
-}
-
-const StatCard: React.FC<StatCardProps> = ({ title, value, color }) => {
-  return (
-    <div style={{
-      background: "#1c1c1c",
-      borderRadius: "8px",
-      padding: "15px",
-      boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
-      borderLeft: `4px solid ${color}`
-    }}>
-      <h3 style={{
-        margin: "0 0 10px 0",
-        color: "#aaa",
-        fontSize: "14px",
-        fontWeight: "400"
-      }}>
-        {title}
-      </h3>
-      <p style={{
-        margin: 0,
-        fontSize: "24px",
-        fontWeight: "600",
-        color: "#fff"
-      }}>
-        {value}
-      </p>
     </div>
   );
 };
