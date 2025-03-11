@@ -752,7 +752,7 @@ function shortenUint8Array(arr: Uint8Array | undefined): string {
   const lastPart = fullHex.slice(-3);
 
   // Return formatted string with first and last parts
-  return `${firstPart}...${lastPart}`;
+  return `${firstPart}..${lastPart}`;
 }
 
 export default App;
