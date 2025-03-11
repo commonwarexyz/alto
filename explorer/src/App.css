@@ -75,24 +75,25 @@ body {
 .legend-container {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding: 10px;
-  background: white;
-  border: 1px solid #ccc;
+  gap: 8px;
   font-family: 'Consolas', monospace;
+  justify-content: flex-end;
 }
 
 .legend-item {
   display: flex;
   align-items: center;
   gap: 5px;
+  padding: 2px 6px;
+  border-radius: 0;
+  background-color: #fafafa;
+  border: 1px solid #eee;
 }
 
 .legend-color {
   width: 12px;
   height: 12px;
-  border: 1px solid black;
+  border: 1px solid #888;
 }
 
 .legend-label {
@@ -101,6 +102,15 @@ body {
 }
 
 /* Bars container */
+.bars-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .bars-container {
   background: white;
   border: 1px solid #ccc;
@@ -111,7 +121,7 @@ body {
 }
 
 .bars-title {
-  margin: 0 0 16px 0;
+  margin: 0;
   font-size: 18px;
   font-weight: normal;
   font-family: 'Consolas', monospace;
@@ -286,15 +296,6 @@ body {
     margin-bottom: 20px;
   }
 
-  .legend-label {
-    font-size: 14px;
-  }
-
-  .bars-title {
-    font-size: 20px;
-    margin-bottom: 20px;
-  }
-
   .bar-row {
     margin-bottom: 20px;
   }
@@ -311,6 +312,22 @@ body {
   .view-signature {
     font-size: 12px;
   }
+
+  .bars-header {
+    margin-bottom: 20px;
+  }
+
+  .bars-title {
+    font-size: 20px;
+  }
+
+  .legend-label {
+    font-size: 14px;
+  }
+
+  .legend-item {
+    padding: 2px 8px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -326,23 +343,8 @@ body {
     height: 250px;
   }
 
-  .legend-container {
-    justify-content: space-between;
-    gap: 6px;
-    padding: 8px;
-  }
-
-  .legend-item {
-    font-size: 10px;
-  }
-
   .bars-container {
     padding: 10px 4px 10px 12px;
-  }
-
-  .bars-title {
-    font-size: 16px;
-    margin-bottom: 12px;
   }
 
   .bar-row {
@@ -380,6 +382,38 @@ body {
   .latency-text {
     font-size: 9px;
   }
+
+  .bars-header {
+    flex-direction: column;
+    align-items: flex-start;
+    margin-bottom: 12px;
+    gap: 8px;
+  }
+
+  .bars-title {
+    font-size: 16px;
+  }
+
+  .legend-container {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .legend-item {
+    font-size: 10px;
+    padding: 1px 4px;
+  }
+
+  .legend-color {
+    width: 10px;
+    height: 10px;
+  }
+
+  .legend-label {
+    font-size: 10px;
+  }
 }
 
 /* Fix for Leaflet popups */
@@ -402,4 +436,40 @@ body {
 /* Style override for map tiles to use monochrome */
 .leaflet-tile {
   filter: grayscale(100%) !important;
+}
+
+/* Public Key Display */
+.public-key-display {
+  background-color: #f4f4f4;
+  border: 1px solid #ddd;
+  padding: 8px;
+  margin-bottom: 16px;
+  word-break: break-all;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+}
+
+.public-key-label {
+  font-weight: bold;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+
+.public-key-value {
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 480px) {
+  .public-key-display {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .public-key-label {
+    margin-right: 0;
+  }
 }

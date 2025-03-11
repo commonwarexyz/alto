@@ -83,6 +83,18 @@ export function parse_block(bytes) {
     return ret;
 }
 
+/**
+ * @param {Uint8Array} seed
+ * @param {number} participants
+ * @returns {number}
+ */
+export function leader_index(seed, participants) {
+    const ptr0 = passArray8ToWasm0(seed, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.leader_index(ptr0, len0, participants);
+    return ret >>> 0;
+}
+
 async function __wbg_load(module, imports) {
     if (typeof Response === 'function' && module instanceof Response) {
         if (typeof WebAssembly.instantiateStreaming === 'function') {

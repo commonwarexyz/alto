@@ -1,8 +1,7 @@
+use crate::{leader_index as compute_leader_index, Block, Finalized, Notarized, Seed};
 use commonware_cryptography::bls12381::PublicKey;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
-
-use crate::{Block, Finalized, Notarized, Seed};
 
 #[derive(Serialize)]
 pub struct SeedJs {
@@ -126,4 +125,9 @@ pub fn parse_block(bytes: Vec<u8>) -> JsValue {
         }
         None => JsValue::NULL,
     }
+}
+
+#[wasm_bindgen]
+pub fn leader_index(seed: Vec<u8>, participants: usize) -> usize {
+    compute_leader_index(&seed, participants)
 }

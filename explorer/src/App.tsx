@@ -2,8 +2,8 @@ import React, { useEffect, useState, useRef } from "react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { LatLng, DivIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
-import init, { parse_seed, parse_notarized, parse_finalized } from "./alto_types/alto_types.js";
-import { WS_URL, PUBLIC_KEY, LOCATIONS } from "./config";
+import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
+import { WS_URL, PUBLIC_KEY, LOCATIONS, PUBLIC_KEY_HEX } from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, BlockJs } from "./types";
 import "./App.css";
 
@@ -11,8 +11,8 @@ type ViewStatus = "growing" | "notarized" | "finalized" | "timed_out";
 
 interface ViewData {
   view: number;
-  location: [number, number];
-  locationName: string;
+  location?: [number, number];
+  locationName?: string;
   status: ViewStatus;
   startTime: number;
   notarizationTime?: number;
@@ -200,8 +200,6 @@ const App: React.FC = () => {
 
         // Add any missed views as skipped/timed out
         for (let missedView = startViewIndex; missedView < view; missedView++) {
-          const locationIndex = missedView % LOCATIONS.length;
-
           // Check if this view already exists
           const existingIndex = newViews.findIndex(v => v.view === missedView);
 
@@ -209,8 +207,8 @@ const App: React.FC = () => {
             // Only add if it doesn't already exist
             newViews.unshift({
               view: missedView,
-              location: LOCATIONS[locationIndex][0],
-              locationName: LOCATIONS[locationIndex][1],
+              location: undefined,
+              locationName: undefined,
               status: "timed_out",
               startTime: Date.now(),
             });
@@ -235,7 +233,7 @@ const App: React.FC = () => {
       }
 
       // Create the new view data
-      const locationIndex = view % LOCATIONS.length;
+      const locationIndex = leader_index(seed.signature, LOCATIONS.length);
       const newView: ViewData = {
         view,
         location: LOCATIONS[locationIndex][0],
@@ -316,11 +314,10 @@ const App: React.FC = () => {
       }
 
       // If view doesn't exist, create it
-      const locationIndex = view % LOCATIONS.length;
       return [{
         view,
-        location: LOCATIONS[locationIndex][0],
-        locationName: LOCATIONS[locationIndex][1],
+        location: undefined,
+        locationName: undefined,
         status: "notarized",
         startTime: Date.now(),
         notarizationTime: Date.now(),
@@ -361,11 +358,10 @@ const App: React.FC = () => {
       }
 
       // If view doesn't exist, create it
-      const locationIndex = view % LOCATIONS.length;
       return [{
         view,
-        location: LOCATIONS[locationIndex][0],
-        locationName: LOCATIONS[locationIndex][1],
+        location: undefined,
+        locationName: undefined,
         status: "finalized",
         startTime: Date.now(),
         finalizationTime: Date.now(),
@@ -422,6 +418,12 @@ const App: React.FC = () => {
       </header>
 
       <main className="app-main">
+        {/* Network Key */}
+        <div className="public-key-display">
+          <span className="public-key-label">Network Key:</span>
+          <span className="public-key-value">{PUBLIC_KEY_HEX}</span>
+        </div>
+
         {/* Map */}
         <div className="map-container">
           <MapContainer center={center} zoom={isMobile ? 1 : 2} style={{ height: "100%", width: "100%" }}>
@@ -429,7 +431,7 @@ const App: React.FC = () => {
               url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             />
-            {views.length > 0 && (
+            {views.length > 0 && views[0].location !== undefined && (
               <Marker
                 key={views[0].view}
                 position={views[0].location}
@@ -453,17 +455,17 @@ const App: React.FC = () => {
           </MapContainer>
         </div>
 
-        {/* Legend */}
-        <div className="legend-container">
-          <LegendItem color="#aaa" label="Notarization" />
-          <LegendItem color="#d9ead3ff" label="Finalization" />
-          <LegendItem color="#274e13ff" label="Finalized" />
-          <LegendItem color="#f4ccccff" label="Skipped" />
-        </div>
-
-        {/* Bars */}
+        {/* Bars with integrated legend */}
         <div className="bars-container">
-          <h2 className="bars-title">Consensus Views</h2>
+          <div className="bars-header">
+            <h2 className="bars-title">Views</h2>
+            <div className="legend-container">
+              <LegendItem color="#aaa" label="Notarization" />
+              <LegendItem color="#d9ead3ff" label="Finalization" />
+              <LegendItem color="#274e13ff" label="Finalized" />
+              <LegendItem color="#f4ccccff" label="Skipped" />
+            </div>
+          </div>
           <div className="bars-list">
             {views.slice(0, 100).map((viewData) => (
               <Bar
