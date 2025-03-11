@@ -56,3 +56,31 @@ find . -name "Cargo.toml" | while read -r cargo_file; do
     echo "Updated ${cargo_file}"
   fi
 done
+
+# Handle explorer/package.json
+if [ -f "explorer/package.json" ]; then
+  # Create a temporary file
+  temp_file=$(mktemp)
+  changed=false
+
+  # Read the file line by line and process it directly
+  while IFS= read -r line || [ -n "$line" ]; do  # The -n "$line" part handles the last line if it doesn't end with newline
+    # Look directly for the version line
+    if [[ "${line}" =~ ^[[:space:]]*\"version\":[[:space:]]*\"([0-9]+\.[0-9]+\.[0-9]+)\".*$ ]]; then
+      old="${BASH_REMATCH[1]}"
+      new="$(bump_version "${old}")"
+      line="${line/${old}/${new}}"
+      changed=true
+    fi
+    # Write to temp file, preserving line endings
+    echo "$line" >> "$temp_file"
+  done < "explorer/package.json"
+
+  # If we changed anything, replace the original file
+  if ${changed}; then
+    mv "$temp_file" "explorer/package.json"
+    echo "Updated explorer/package.json"
+  else
+    rm "$temp_file"
+  fi
+fi
