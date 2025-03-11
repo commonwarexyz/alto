@@ -1,38 +1,405 @@
-.App {
-  text-align: center;
+/* Base styles */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+body {
+  margin: 0;
+  font-family: 'Consolas', monospace;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: #282c34;
+/* Main container */
+.app-container {
+  padding: 0;
+  background-color: white;
+  color: black;
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+/* Header styles */
+.app-header {
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-direction: column;
+}
+
+.app-title {
+  display: none;
+  /* Hidden as we'll use the ASCII logo instead */
+}
+
+/* Logo styling */
+.logo-container {
+  width: 100%;
+}
+
+.logo-line {
+  display: flex;
+  font-size: 1.4em;
+  white-space: pre;
+}
+
+/* Main content area */
+.app-main {
+  padding: 16px;
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+
+/* Map container */
+.map-container {
+  height: 300px;
+  margin-bottom: 16px;
+  border: 1px solid #ccc;
+  border-radius: 0;
+  overflow: hidden;
+}
+
+/* Override Leaflet styles for monochrome look */
+.leaflet-container {
+  background-color: white !important;
+}
+
+/* Legend */
+.legend-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px;
+  background: white;
+  border: 1px solid #ccc;
+  font-family: 'Consolas', monospace;
+}
+
+.legend-item {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+  gap: 5px;
 }
 
-.App-link {
-  color: #61dafb;
+.legend-color {
+  width: 12px;
+  height: 12px;
+  border: 1px solid black;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
+.legend-label {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Bars container */
+.bars-container {
+  background: white;
+  border: 1px solid #ccc;
+  padding: 12px 8px 12px 12px;
+  width: 100%;
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+.bars-title {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  font-weight: normal;
+  font-family: 'Consolas', monospace;
+}
+
+.bars-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+/* Individual bar rows */
+.bar-row {
+  display: flex;
+  margin-bottom: 16px;
+  font-size: 14px;
+  width: 100%;
+  max-width: 100%;
+  font-family: 'Consolas', monospace;
+}
+
+.view-info {
+  flex-shrink: 0;
+  text-align: right;
+  margin-right: 8px;
+}
+
+.view-number {
+  font-weight: normal;
+  color: black;
+}
+
+.view-signature {
+  font-size: 11px;
+  color: #444;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.bar-container {
+  position: relative;
+  flex-grow: 1;
+  max-width: calc(100% - 60px);
+  overflow: hidden;
+  width: 100%;
+}
+
+.bar-main {
+  height: 24px;
+  position: relative;
+  border-radius: 0;
+  overflow: hidden;
+  transition: width 0.1s linear;
+  background-color: #eee;
+  border: 1px solid #ccc;
+  max-width: 100%;
+}
+
+.bar-segment {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  color: black;
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bar-segment.growing {
+  background-color: #ddd;
+  border-right: 1px solid #aaa;
+}
+
+.bar-segment.finalized {
+  background-color: #d9ead3ff;
+  z-index: 1;
+  border-right: 1px solid #888;
+}
+
+.bar-segment.timed-out {
+  background-color: #f4ccccff;
+  width: 100% !important;
+  right: 0;
+  max-width: 100%;
+  text-decoration: line-through;
+}
+
+.marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  z-index: 2;
+}
+
+.notarization-marker {
+  background-color: black;
+}
+
+.finalization-marker {
+  width: 2px;
+  background-color: black;
+  z-index: 3;
+}
+
+.timing-info {
+  position: relative;
+  height: 20px;
+  margin-top: 2px;
+}
+
+.latency-text {
+  position: absolute;
+  color: #444;
+  font-size: 11px;
+  white-space: nowrap;
+  transition: left 0.1s linear;
+}
+
+/* Custom marker icons - pure circles without box container */
+.leaflet-div-icon {
+  background: transparent;
+  border: none;
+}
+
+/* Footer */
+.footer {
+  text-align: left;
+  padding: 10px 16px;
+  border-top: 1px solid #ddd;
+  margin-top: 20px;
+}
+
+.footer .socials {
+  margin-bottom: 10px;
+}
+
+.footer .socials a {
+  margin-right: 10px;
+  color: black;
+  text-decoration: none;
+}
+
+.footer .socials a:hover {
+  text-decoration: underline;
+}
+
+/* Media Queries */
+@media (min-width: 768px) {
+  .app-header {
+    padding: 20px;
+    flex-direction: row;
   }
-  to {
-    transform: rotate(360deg);
+
+  .connection-status {
+    margin-top: 0;
   }
+
+  .app-main {
+    padding: 20px;
+  }
+
+  .map-container {
+    height: 400px;
+    margin-bottom: 20px;
+  }
+
+  .legend-label {
+    font-size: 14px;
+  }
+
+  .bars-title {
+    font-size: 20px;
+    margin-bottom: 20px;
+  }
+
+  .bar-row {
+    margin-bottom: 20px;
+  }
+
+  .bar-segment {
+    font-size: 13px;
+    padding: 0 10px;
+  }
+
+  .latency-text {
+    font-size: 12px;
+  }
+
+  .view-signature {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-header {
+    padding: 12px;
+  }
+
+  .app-main {
+    padding: 12px 8px;
+  }
+
+  .map-container {
+    height: 250px;
+  }
+
+  .legend-container {
+    justify-content: space-between;
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .legend-item {
+    font-size: 10px;
+  }
+
+  .bars-container {
+    padding: 10px 4px 10px 12px;
+  }
+
+  .bars-title {
+    font-size: 16px;
+    margin-bottom: 12px;
+  }
+
+  .bar-row {
+    margin-bottom: 12px;
+    width: 100%;
+  }
+
+  .view-info {
+    width: 50px !important;
+    margin-right: 4px;
+    flex-shrink: 0;
+  }
+
+  .bar-container {
+    max-width: calc(100% - 54px);
+  }
+
+  .view-number {
+    font-size: 12px;
+  }
+
+  .view-signature {
+    font-size: 9px;
+  }
+
+  .bar-main {
+    height: 22px;
+  }
+
+  .bar-segment {
+    font-size: 10px;
+    padding: 0 4px;
+  }
+
+  .latency-text {
+    font-size: 9px;
+  }
+}
+
+/* Fix for Leaflet popups */
+.leaflet-popup-content {
+  margin: 8px;
+  min-width: 150px;
+  font-family: 'Consolas', monospace;
+  color: black;
+}
+
+.leaflet-container {
+  font: inherit;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 0;
+  border: 1px solid #ccc;
+}
+
+/* Style override for map tiles to use monochrome */
+.leaflet-tile {
+  filter: grayscale(100%) !important;
 }
