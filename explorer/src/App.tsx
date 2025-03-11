@@ -163,7 +163,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleSeed = (seed: SeedJs) => {
-    const view = seed.view;
+    const view = seed.view + 1; // Next view is determined by seed - 1
     setViews((prevViews) => {
       let newViews = [...prevViews];
 
