@@ -553,17 +553,18 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
     totalWidth = maxWidth;
   }
 
-  // Format text display
-  let text = "";
+  // Format timing texts
+  let inBarText = ""; // Text to display inside the bar (block info only)
+  let latencyText = ""; // Text to display below the bar (timing info)
+
   if (status === "growing") {
     const elapsed = currentTime - startTime;
-    text = `Latency: ${(elapsed / 1000).toFixed(2)}s`;
+    latencyText = `${(elapsed / 1000).toFixed(2)}s`;
   } else if (status === "notarized") {
     const latency = notarizationTime ? (notarizationTime - startTime) / 1000 : 0;
+    latencyText = `${latency.toFixed(2)}s`;
     if (block) {
-      text = `Notarized | Latency: ${latency.toFixed(2)}s | Height: ${block.height} | Digest: ${shortenUint8Array(block.digest)}`;
-    } else {
-      text = `Notarized | Latency: ${latency.toFixed(2)}s`;
+      inBarText = `#${block.height} | 0x${shortenUint8Array(block.digest, 6)}`;
     }
   } else if (status === "finalized") {
     // Get seed to notarization time
@@ -571,23 +572,27 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
     // Get notarization to finalization time
     const finalizeLatency = (finalizationTime && notarizationTime) ?
       (finalizationTime - notarizationTime) / 1000 : 0;
-    // Get total latency
-    const totalLatency = finalizationTime ? (finalizationTime - startTime) / 1000 : 0;
 
+    // Position timing text at appropriate positions
     if (block) {
-      text = `Finalized | Seed→Notarized: ${notarizeLatency.toFixed(2)}s | Notarized→Finalized: ${finalizeLatency.toFixed(2)}s | Total: ${totalLatency.toFixed(2)}s | Height: ${block.height} | Digest: ${shortenUint8Array(block.digest)}`;
-    } else {
-      text = `Finalized | Seed→Notarized: ${notarizeLatency.toFixed(2)}s | Notarized→Finalized: ${finalizeLatency.toFixed(2)}s | Total: ${totalLatency.toFixed(2)}s`;
+      inBarText = `#${block.height} | 0x${shortenUint8Array(block.digest, 6)}`;
     }
+
+    latencyText = `${notarizeLatency.toFixed(2)}s`;
   } else {
-    text = "TIMED OUT";
+    // Timed out
+    inBarText = "TIMED OUT";
   }
+
+  // Get display status text
+  const statusText = status === "growing" ? "" :
+    status === "notarized" ? "Notarized" :
+      status === "finalized" ? "Finalized" : "";
 
   return (
     <div style={{
       display: "flex",
-      alignItems: "center",
-      marginBottom: "12px",
+      marginBottom: "20px", // More space for timing text below
       fontSize: "14px"
     }}>
       <div style={{
@@ -611,90 +616,144 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
           {signature ? shortenUint8Array(signature) : "Skipped"}
         </div>
       </div>
-      <div
-        style={{
-          height: "32px", // Taller for better visibility of segments
+
+      <div style={{ position: "relative" }}>
+        {/* Main bar container */}
+        <div style={{
+          height: "26px",
           position: "relative",
           width: `${totalWidth}px`,
           borderRadius: "4px",
           overflow: "hidden",
           transition: "width 0.1s linear",
-          backgroundColor: "#333", // Darker base color
+          backgroundColor: "#333",
           boxShadow: "0 1px 3px rgba(0,0,0,0.3)"
-        }}
-      >
-        {/* Base bar - grey represents time from seed receipt to notarization (or current time if growing) */}
-        <div style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          height: "100%",
-          width: status === "timed_out" ? "100%" :
-            (status === "growing" ? "100%" :
-              `${notarizedWidth}px`),
-          backgroundColor: status === "timed_out" ? "#F44336" : "#555",
-          borderRadius: "4px"
-        }} />
-
-        {/* Notarized to finalized segment */}
-        {status === "finalized" && finalizedWidth > 0 && (
-          <div style={{
-            position: "absolute",
-            top: 0,
-            left: `${notarizedWidth}px`,
-            height: "100%",
-            width: `${finalizedWidth}px`,
-            backgroundColor: "#2E7D32", // Darker green
-            zIndex: 1
-          }} />
-        )}
-
-        {/* Marker for notarization point */}
-        {(status === "notarized" || status === "finalized") && (
-          <div style={{
-            position: "absolute",
-            left: `${notarizedWidth - 1}px`,
-            top: 0,
-            bottom: 0,
-            width: "2px",
-            backgroundColor: "#4CAF50", // Green
-            zIndex: 2
-          }} />
-        )}
-
-        {/* Marker for finalization point */}
-        {status === "finalized" && (
-          <div style={{
-            position: "absolute",
-            right: 0,
-            top: 0,
-            bottom: 0,
-            width: "3px",
-            backgroundColor: "#1B5E20", // Dark green
-            zIndex: 3
-          }} />
-        )}
-
-        {/* Text overlay */}
-        <div style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          display: "flex",
-          alignItems: "center",
-          padding: "0 10px",
-          color: "white",
-          fontSize: "13px",
-          fontWeight: status === "timed_out" ? "bold" : "normal",
-          textShadow: "0 1px 2px rgba(0,0,0,0.5)",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          zIndex: 4
         }}>
-          {text}
+          {/* Base bar - grey represents time from seed receipt to notarization (or current time if growing) */}
+          <div style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            height: "100%",
+            width: status === "timed_out" ? "100%" :
+              (status === "growing" ? "100%" :
+                `${notarizedWidth}px`),
+            backgroundColor: status === "timed_out" ? "#F44336" : "#555",
+            borderRadius: "4px",
+            display: "flex",
+            alignItems: "center",
+            paddingLeft: "10px",
+            paddingRight: "10px",
+            color: "white",
+            fontSize: "13px",
+            overflow: "hidden",
+            whiteSpace: "nowrap",
+            textOverflow: "ellipsis"
+          }}>
+            {inBarText}
+          </div>
+
+          {/* Notarized to finalized segment */}
+          {status === "finalized" && finalizedWidth > 0 && (
+            <div style={{
+              position: "absolute",
+              top: 0,
+              left: `${notarizedWidth}px`,
+              height: "100%",
+              width: `${finalizedWidth}px`,
+              backgroundColor: "#2E7D32", // Darker green
+              zIndex: 1
+            }} />
+          )}
+
+          {/* Marker for notarization point */}
+          {(status === "notarized" || status === "finalized") && (
+            <div style={{
+              position: "absolute",
+              left: `${notarizedWidth - 1}px`,
+              top: 0,
+              bottom: 0,
+              width: "2px",
+              backgroundColor: "#4CAF50", // Green
+              zIndex: 2
+            }} />
+          )}
+
+          {/* Marker for finalization point */}
+          {status === "finalized" && (
+            <div style={{
+              position: "absolute",
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: "3px",
+              backgroundColor: "#1B5E20", // Dark green
+              zIndex: 3
+            }} />
+          )}
+
+          {/* Status text overlay only for notarized/finalized */}
+          {statusText && (
+            <div style={{
+              position: "absolute",
+              top: 0,
+              left: status === "finalized" ? `${notarizedWidth + 5}px` : "10px",
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              color: "white",
+              fontSize: "13px",
+              fontWeight: "bold",
+              textShadow: "0 1px 2px rgba(0,0,0,0.5)",
+              zIndex: 4
+            }}>
+              {statusText}
+            </div>
+          )}
+        </div>
+
+        {/* Timing information underneath */}
+        <div style={{ position: "relative", height: "20px", marginTop: "2px" }}>
+          {/* Latency at notarization point */}
+          {(status === "notarized" || status === "finalized") && notarizedWidth > 0 && (
+            <div style={{
+              position: "absolute",
+              left: `${notarizedWidth - 30}px`, // Position under the notarization marker
+              color: "#aaa",
+              fontSize: "12px",
+              whiteSpace: "nowrap"
+            }}>
+              {latencyText}
+            </div>
+          )}
+
+          {/* Latency for growing bars - follows the tip */}
+          {status === "growing" && (
+            <div style={{
+              position: "absolute",
+              left: `${totalWidth - 30}px`, // Position under the growing bar tip
+              color: "#aaa",
+              fontSize: "12px",
+              whiteSpace: "nowrap",
+              transition: "left 0.1s linear"
+            }}>
+              {latencyText}
+            </div>
+          )}
+
+          {/* Finalization latency marker */}
+          {status === "finalized" && finalizedWidth > 0 && (
+            <div style={{
+              position: "absolute",
+              left: `${totalWidth - 30}px`, // Position under the finalization marker
+              color: "#aaa",
+              fontSize: "12px",
+              whiteSpace: "nowrap"
+            }}>
+              {(finalizationTime && notarizationTime) ?
+                `${((finalizationTime - notarizationTime) / 1000).toFixed(2)}s` : ""}
+            </div>
+          )}
         </div>
       </div>
     </div>
