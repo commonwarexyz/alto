@@ -3,29 +3,9 @@ import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { LatLng, DivIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized } from "./alto_types/alto_types.js";
-import { WS_URL, PUBLIC_KEY } from "./config";
+import { WS_URL, PUBLIC_KEY, LOCATIONS } from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, BlockJs } from "./types";
 import "./App.css";
-
-// Array of locations for deterministic mapping
-const locations: [number, number][] = [
-  [37.7749, -122.4194], // San Francisco
-  [51.5074, -0.1278],   // London
-  [35.6895, 139.6917],  // Tokyo
-  [-33.8688, 151.2093], // Sydney
-  [55.7558, 37.6173],   // Moscow
-  [-23.5505, -46.6333], // Sao Paulo
-  [28.6139, 77.2090],   // New Delhi
-  [40.7128, -74.0060],  // New York
-  [19.4326, -99.1332],  // Mexico City
-  [31.2304, 121.4737],  // Shanghai
-];
-
-// Location names for popups
-const locationNames: string[] = [
-  "San Francisco", "London", "Tokyo", "Sydney", "Moscow",
-  "Sao Paulo", "New Delhi", "New York", "Mexico City", "Shanghai"
-];
 
 type ViewStatus = "growing" | "notarized" | "finalized" | "timed_out";
 
@@ -220,7 +200,7 @@ const App: React.FC = () => {
 
         // Add any missed views as skipped/timed out
         for (let missedView = startViewIndex; missedView < view; missedView++) {
-          const locationIndex = missedView % locations.length;
+          const locationIndex = missedView % LOCATIONS.length;
 
           // Check if this view already exists
           const existingIndex = newViews.findIndex(v => v.view === missedView);
@@ -229,8 +209,8 @@ const App: React.FC = () => {
             // Only add if it doesn't already exist
             newViews.unshift({
               view: missedView,
-              location: locations[locationIndex],
-              locationName: locationNames[locationIndex],
+              location: LOCATIONS[locationIndex][0],
+              locationName: LOCATIONS[locationIndex][1],
               status: "timed_out",
               startTime: Date.now(),
             });
@@ -255,11 +235,11 @@ const App: React.FC = () => {
       }
 
       // Create the new view data
-      const locationIndex = view % locations.length;
+      const locationIndex = view % LOCATIONS.length;
       const newView: ViewData = {
         view,
-        location: locations[locationIndex],
-        locationName: locationNames[locationIndex],
+        location: LOCATIONS[locationIndex][0],
+        locationName: LOCATIONS[locationIndex][1],
         status: "growing",
         startTime: Date.now(),
         signature: seed.signature,
@@ -336,11 +316,11 @@ const App: React.FC = () => {
       }
 
       // If view doesn't exist, create it
-      const locationIndex = view % locations.length;
+      const locationIndex = view % LOCATIONS.length;
       return [{
         view,
-        location: locations[locationIndex],
-        locationName: locationNames[locationIndex],
+        location: LOCATIONS[locationIndex][0],
+        locationName: LOCATIONS[locationIndex][1],
         status: "notarized",
         startTime: Date.now(),
         notarizationTime: Date.now(),
@@ -381,11 +361,11 @@ const App: React.FC = () => {
       }
 
       // If view doesn't exist, create it
-      const locationIndex = view % locations.length;
+      const locationIndex = view % LOCATIONS.length;
       return [{
         view,
-        location: locations[locationIndex],
-        locationName: locationNames[locationIndex],
+        location: LOCATIONS[locationIndex][0],
+        locationName: LOCATIONS[locationIndex][1],
         status: "finalized",
         startTime: Date.now(),
         finalizationTime: Date.now(),
