@@ -574,10 +574,16 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
 
   if (status === "growing") {
     const elapsed = currentTime - startTime;
-    growingLatencyText = `${Math.round(elapsed)}ms`;
+    // Only show latency if it's positive
+    if (elapsed > 1) {
+      growingLatencyText = `${Math.round(elapsed)}ms`;
+    }
   } else if (status === "notarized") {
     const latency = notarizationTime ? (notarizationTime - startTime) : 0;
-    notarizedLatencyText = `${Math.round(latency)}ms`;
+    // Only show latency if it's positive
+    if (latency > 1) {
+      notarizedLatencyText = `${Math.round(latency)}ms`;
+    }
     // Format inBarText for block information
     if (block) {
       inBarText = isMobile ? `#${block.height}` : `#${block.height} | ${shortenUint8Array(block.digest)}`;
@@ -588,9 +594,14 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     // Get total time (seed to finalization)
     const totalLatency = finalizationTime ? (finalizationTime - startTime) : 0;
 
-    // Set latency text
-    notarizedLatencyText = `${Math.round(notarizeLatency)}ms`;
-    finalizedLatencyText = `${Math.round(totalLatency)}ms`; // Show total time at finalization point
+    // Set latency text only if values are positive
+    if (notarizeLatency > 1) {
+      notarizedLatencyText = `${Math.round(notarizeLatency)}ms`;
+    }
+
+    if (totalLatency > 1) {
+      finalizedLatencyText = `${Math.round(totalLatency)}ms`; // Show total time at finalization point
+    }
 
     // Set block info
     if (block) {
@@ -655,8 +666,8 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
           {/* Only show timing if not skipped */}
           {signature && (
             <>
-              {/* Latency at notarization point */}
-              {(status === "notarized" || status === "finalized") && notarizedWidth > 0 && (
+              {/* Latency at notarization point - only show if text exists */}
+              {(status === "notarized" || status === "finalized") && notarizedWidth > 0 && notarizedLatencyText && (
                 <div
                   className="latency-text notarized-latency"
                   style={{
@@ -667,8 +678,8 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
                 </div>
               )}
 
-              {/* Latency for growing bars - follows the tip */}
-              {status === "growing" && (
+              {/* Latency for growing bars - follows the tip - only show if text exists */}
+              {status === "growing" && growingLatencyText && (
                 <div
                   className="latency-text growing-latency"
                   style={{
@@ -679,8 +690,8 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
                 </div>
               )}
 
-              {/* Total latency marker for finalized views */}
-              {status === "finalized" && (
+              {/* Total latency marker for finalized views - only show if text exists */}
+              {status === "finalized" && finalizedLatencyText && (
                 <div
                   className="latency-text finalized-latency"
                   style={{
