@@ -181,6 +181,21 @@ const App: React.FC = () => {
         }
       }
 
+      // Check if this view already exists
+      const existingIndex = newViews.findIndex(v => v.view === view);
+      if (existingIndex !== -1) {
+        // If it exists and is already finalized or notarized, don't update it
+        const existingStatus = newViews[existingIndex].status;
+        if (existingStatus === "finalized" || existingStatus === "notarized") {
+          return newViews;
+        }
+
+        // If it exists but is in another state, update it
+        if (newViews[existingIndex].timeoutId) {
+          clearTimeout(newViews[existingIndex].timeoutId);
+        }
+      }
+
       // Add new view
       const locationIndex = view % locations.length;
       const newView: ViewData = {
@@ -191,12 +206,27 @@ const App: React.FC = () => {
         startTime: Date.now(),
         signature: seed.signature,
       };
+
+      // Only set timeout for growing views
       const timeoutId = setTimeout(() => {
-        setViews((prev) =>
-          prev.map((v) => (v.view === view ? { ...v, status: "timed_out" } : v))
-        );
+        setViews((prev) => {
+          return prev.map((v) => {
+            // Only time out views that are still in growing state
+            if (v.view === view && v.status === "growing") {
+              return { ...v, status: "timed_out", timeoutId: undefined };
+            }
+            return v;
+          });
+        });
       }, TIMEOUT_DURATION);
-      newViews.unshift({ ...newView, timeoutId });
+
+      if (existingIndex !== -1) {
+        // Replace existing view
+        newViews[existingIndex] = { ...newView, timeoutId };
+      } else {
+        // Add new view
+        newViews.unshift({ ...newView, timeoutId });
+      }
 
       setLastObservedView(view);
       return newViews;
@@ -209,7 +239,16 @@ const App: React.FC = () => {
       const index = prevViews.findIndex((v) => v.view === view);
       if (index !== -1) {
         const viewData = prevViews[index];
-        if (viewData.timeoutId) clearTimeout(viewData.timeoutId);
+        // Clear timeout if it exists
+        if (viewData.timeoutId) {
+          clearTimeout(viewData.timeoutId);
+        }
+
+        // Only update if not already finalized (finalized is the final state)
+        if (viewData.status === "finalized") {
+          return prevViews;
+        }
+
         const updatedView: ViewData = {
           ...viewData,
           status: "notarized",
@@ -217,12 +256,14 @@ const App: React.FC = () => {
           block: notarized.block,
           timeoutId: undefined,
         };
+
         return [
           ...prevViews.slice(0, index),
           updatedView,
           ...prevViews.slice(index + 1),
         ];
       }
+
       // If view doesn't exist, create it
       const locationIndex = view % locations.length;
       return [{
@@ -243,7 +284,16 @@ const App: React.FC = () => {
       const index = prevViews.findIndex((v) => v.view === view);
       if (index !== -1) {
         const viewData = prevViews[index];
-        if (viewData.timeoutId) clearTimeout(viewData.timeoutId);
+        // Clear timeout if it exists
+        if (viewData.timeoutId) {
+          clearTimeout(viewData.timeoutId);
+        }
+
+        // If already finalized, don't update
+        if (viewData.status === "finalized") {
+          return prevViews;
+        }
+
         const updatedView: ViewData = {
           ...viewData,
           status: "finalized",
@@ -251,12 +301,14 @@ const App: React.FC = () => {
           block: finalized.block,
           timeoutId: undefined,
         };
+
         return [
           ...prevViews.slice(0, index),
           updatedView,
           ...prevViews.slice(index + 1),
         ];
       }
+
       // If view doesn't exist, create it
       const locationIndex = view % locations.length;
       return [{
