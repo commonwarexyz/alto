@@ -523,34 +523,27 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
   const growthRate = maxWidth / TIMEOUT_DURATION; // pixels per ms
 
   let width: number;
-  let backgroundColor: string;
   let text: string = "";
-  let borderColor: string = "transparent";
 
   if (status === "growing") {
     const elapsed = currentTime - startTime;
     width = Math.min(elapsed * growthRate, maxWidth);
-    backgroundColor = "#555";
     text = `Latency: ${(elapsed / 1000).toFixed(1)}s`;
-  } else if (status === "notarized") {
-    const endTime = notarizationTime!;
+  } else if (status === "notarized" || status === "finalized") {
+    const endTime = status === "notarized" ? notarizationTime! : finalizationTime!;
     const latency = (endTime - startTime) / 1000;
     width = Math.min((endTime - startTime) * growthRate, maxWidth);
-    backgroundColor = "#4CAF50";
-    text = `Notarized | Latency: ${latency.toFixed(1)}s | Height: ${block?.height} | Digest: ${shortenUint8Array(block?.digest)}`;
-    borderColor = "#2E7D32";
-  } else if (status === "finalized") {
-    const endTime = finalizationTime!;
-    const latency = (endTime - startTime) / 1000;
-    width = Math.min((endTime - startTime) * growthRate, maxWidth);
-    backgroundColor = "#388E3C";
-    text = `Finalized | Latency: ${latency.toFixed(1)}s | Height: ${block?.height} | Digest: ${shortenUint8Array(block?.digest)}`;
-    borderColor = "#1B5E20";
+
+    // For notarized and finalized, the text includes more details
+    if (block) {
+      text = `${status === "finalized" ? "Finalized" : "Notarized"} | Latency: ${latency.toFixed(1)}s | Height: ${block.height} | Digest: ${shortenUint8Array(block.digest)}`;
+    } else {
+      text = `${status === "finalized" ? "Finalized" : "Notarized"} | Latency: ${latency.toFixed(1)}s`;
+    }
   } else {
+    // Timed out
     width = maxWidth;
-    backgroundColor = "#F44336";
     text = "TIMED OUT";
-    borderColor = "#D32F2F";
   }
 
   return (
@@ -581,17 +574,28 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
           {signature ? shortenUint8Array(signature) : "Skipped"}
         </div>
       </div>
-      <div style={{
-        height: "24px",
-        backgroundColor,
-        width: `${width}px`,
-        position: "relative",
-        transition: "width 0.1s linear, background-color 0.3s ease",
-        borderRadius: "4px",
-        overflow: "hidden",
-        border: `1px solid ${borderColor}`,
-        boxShadow: "0 1px 3px rgba(0,0,0,0.2)"
-      }}>
+      <div
+        style={{
+          height: "24px",
+          position: "relative",
+          width: `${width}px`,
+          borderRadius: "4px",
+          overflow: "hidden",
+          transition: "width 0.1s linear"
+        }}
+      >
+        {/* Base bar - always grey to show latency */}
+        <div style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          height: "100%",
+          width: "100%",
+          backgroundColor: status === "timed_out" ? "#F44336" : "#555",
+          borderRadius: "4px"
+        }} />
+
+        {/* Text overlay */}
         <div style={{
           position: "absolute",
           top: 0,
@@ -606,10 +610,13 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
           textShadow: "0 1px 2px rgba(0,0,0,0.5)",
           whiteSpace: "nowrap",
           overflow: "hidden",
-          textOverflow: "ellipsis"
+          textOverflow: "ellipsis",
+          zIndex: 2
         }}>
           {text}
         </div>
+
+        {/* Finalized indicator cap */}
         {status === "finalized" && (
           <div style={{
             position: "absolute",
@@ -618,6 +625,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
             bottom: 0,
             width: "5px",
             backgroundColor: "#1B5E20",
+            zIndex: 1
           }} />
         )}
       </div>
