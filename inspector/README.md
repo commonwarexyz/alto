@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/alto-inspector.svg)](https://crates.io/crates/alto-inspector)
 [![Docs.rs](https://docs.rs/alto-inspector/badge.svg)](https://docs.rs/alto-inspector)
 
-Monitor `alto` activity.
+Inspect `alto` activity.
 
 ## Status
 

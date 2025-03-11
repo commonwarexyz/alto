@@ -17,7 +17,7 @@ mod utils;
 #[tokio::main]
 async fn main() {
     let matches = Command::new("inspector")
-        .about("Monitor alto activity.")
+        .about("Inspect alto activity.")
         .arg(
             Arg::new("verbose")
                 .short('v')
