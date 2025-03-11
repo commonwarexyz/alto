@@ -38,29 +38,6 @@ body {
   /* Hidden as we'll use the ASCII logo instead */
 }
 
-.connection-status {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-  margin-top: 10px;
-  align-self: flex-end;
-}
-
-.status-indicator {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-
-.status-indicator.connected {
-  background: #000;
-}
-
-.status-indicator.disconnected {
-  background: #888;
-}
-
 /* Logo styling */
 .logo-container {
   width: 100%;
@@ -216,13 +193,13 @@ body {
 }
 
 .bar-segment.finalized {
-  background-color: #aaa;
+  background-color: #d9ead3ff;
   z-index: 1;
   border-right: 1px solid #888;
 }
 
 .bar-segment.timed-out {
-  background-color: #ccc;
+  background-color: #f4ccccff;
   width: 100% !important;
   right: 0;
   max-width: 100%;

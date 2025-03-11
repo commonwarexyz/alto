@@ -48,9 +48,9 @@ const TIMEOUT_DURATION = 2000; // 2 seconds
 const createCustomIcon = (status: ViewStatus) => {
   const color =
     status === "growing" ? "#aaa" :
-      status === "notarized" ? "#666" :
-        status === "finalized" ? "#000" :
-          "#ccc"; // timed_out
+      status === "notarized" ? "#d9ead3ff" :
+        status === "finalized" ? "#274e13ff" :
+          "#f4ccccff"; // timed_out
 
   return new DivIcon({
     className: "custom-div-icon",
@@ -482,9 +482,9 @@ const App: React.FC = () => {
         {/* Legend */}
         <div className="legend-container">
           <LegendItem color="#aaa" label="Seed to Notarized" />
-          <LegendItem color="#666" label="Notarized to Finalized" />
-          <LegendItem color="#000" label="Finalization Point" />
-          <LegendItem color="#ccc" label="Timed Out" />
+          <LegendItem color="#d9ead3ff" label="Notarized to Finalized" />
+          <LegendItem color="#274e13ff" label="Finalization Point" />
+          <LegendItem color="#f4ccccff" label="Timed Out" />
         </div>
 
         {/* Bars */}
@@ -659,16 +659,6 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
               style={{
                 left: `${notarizedWidth}px`,
                 width: `${finalizedWidth}px`,
-              }}
-            />
-          )}
-
-          {/* Marker for notarization point */}
-          {(status === "notarized" || status === "finalized") && (
-            <div
-              className="marker notarization-marker"
-              style={{
-                left: `${notarizedWidth - 1}px`,
               }}
             />
           )}
