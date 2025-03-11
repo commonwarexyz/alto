@@ -694,44 +694,49 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
 
         {/* Timing information underneath */}
         <div style={{ position: "relative", height: "20px", marginTop: "2px" }}>
-          {/* Latency at notarization point */}
-          {(status === "notarized" || status === "finalized") && notarizedWidth > 0 && (
-            <div style={{
-              position: "absolute",
-              left: `${notarizedWidth - 30}px`, // Position under the notarization marker
-              color: "#aaa",
-              fontSize: "12px",
-              whiteSpace: "nowrap"
-            }}>
-              {notarizedLatencyText}
-            </div>
-          )}
+          {/* Only show timing if not skipped */}
+          {signature && (
+            <>
+              {/* Latency at notarization point */}
+              {(status === "notarized" || status === "finalized") && notarizedWidth > 0 && (
+                <div style={{
+                  position: "absolute",
+                  left: `${notarizedWidth - 30}px`, // Position under the notarization marker
+                  color: "#aaa",
+                  fontSize: "12px",
+                  whiteSpace: "nowrap"
+                }}>
+                  {notarizedLatencyText}
+                </div>
+              )}
 
-          {/* Latency for growing bars - follows the tip */}
-          {status === "growing" && (
-            <div style={{
-              position: "absolute",
-              left: `${totalWidth - 30}px`, // Position under the growing bar tip
-              color: "#aaa",
-              fontSize: "12px",
-              whiteSpace: "nowrap",
-              transition: "left 0.1s linear"
-            }}>
-              {growingLatencyText}
-            </div>
-          )}
+              {/* Latency for growing bars - follows the tip */}
+              {status === "growing" && (
+                <div style={{
+                  position: "absolute",
+                  left: `${totalWidth - 30}px`, // Position under the growing bar tip
+                  color: "#aaa",
+                  fontSize: "12px",
+                  whiteSpace: "nowrap",
+                  transition: "left 0.1s linear"
+                }}>
+                  {growingLatencyText}
+                </div>
+              )}
 
-          {/* Total latency marker for finalized views */}
-          {status === "finalized" && (
-            <div style={{
-              position: "absolute",
-              left: `${totalWidth - 30}px`, // Position under the finalization marker
-              color: "#aaa",
-              fontSize: "12px",
-              whiteSpace: "nowrap"
-            }}>
-              {finalizedLatencyText}
-            </div>
+              {/* Total latency marker for finalized views */}
+              {status === "finalized" && (
+                <div style={{
+                  position: "absolute",
+                  left: `${totalWidth - 30}px`, // Position under the finalization marker
+                  color: "#aaa",
+                  fontSize: "12px",
+                  whiteSpace: "nowrap"
+                }}>
+                  {finalizedLatencyText}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
