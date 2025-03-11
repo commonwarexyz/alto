@@ -376,7 +376,7 @@ const App: React.FC = () => {
           WebkitBackgroundClip: "text",
           WebkitTextFillColor: "transparent"
         }}>
-          Alto Blockchain Explorer
+          Alto
         </h1>
         <div style={{
           display: "flex",
