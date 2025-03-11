@@ -1,80 +1,76 @@
-import React, { useEffect, useState, useRef } from "react";
-import { Line } from "react-chartjs-2";
-import {
-  Chart as ChartJS,
-  LineElement,
-  PointElement,
-  LinearScale,
-  TimeScale,
-  Title,
-  Tooltip,
-  Legend,
-} from "chart.js";
-import "chartjs-adapter-date-fns";
+import React, { useEffect, useState } from "react";
+import { MapContainer, TileLayer, Marker } from "react-leaflet";
+import { LatLng } from "leaflet";
+import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized } from "./alto_types/alto_types.js";
 import { WS_URL, PUBLIC_KEY } from "./config";
-import { SeedJs, NotarizedJs, FinalizedJs } from "./types";
+import { SeedJs, NotarizedJs, FinalizedJs, BlockJs } from "./types";
 
-ChartJS.register(LineElement, PointElement, LinearScale, TimeScale, Title, Tooltip, Legend);
+// Array of locations for deterministic mapping
+const locations: [number, number][] = [
+  [37.7749, -122.4194], // San Francisco
+  [51.5074, -0.1278],   // London
+  [35.6895, 139.6917],  // Tokyo
+  [-33.8688, 151.2093], // Sydney
+  [55.7558, 37.6173],   // Moscow
+  [-23.5505, -46.6333], // Sao Paulo
+  [28.6139, 77.2090],   // New Delhi
+  [40.7128, -74.0060],  // New York
+  [19.4326, -99.1332],  // Mexico City
+  [31.2304, 121.4737],  // Shanghai
+];
 
+type ViewStatus = "growing" | "notarized" | "finalized" | "timed_out";
 
-type ConsensusEvent =
-  | { type: "Seed"; data: SeedJs; timestamp: number }
-  | { type: "Notarization"; data: NotarizedJs; timestamp: number }
-  | { type: "Finalization"; data: FinalizedJs; timestamp: number };
+interface ViewData {
+  view: number;
+  location: [number, number];
+  status: ViewStatus;
+  startTime: number;
+  notarizationTime?: number;
+  finalizationTime?: number;
+  signature?: Uint8Array;
+  block?: BlockJs;
+  timeoutId?: NodeJS.Timeout;
+}
+
+const TIMEOUT_DURATION = 10000; // 10 seconds
 
 const App: React.FC = () => {
-  const [events, setEvents] = useState<ConsensusEvent[]>([]);
-  const [finalizationCounts, setFinalizationCounts] = useState<number[]>(Array(60).fill(0));
-  const wsRef = useRef<WebSocket | null>(null);
-  const chartRef = useRef<ChartJS<"line"> | null>(null);
+  const [views, setViews] = useState<ViewData[]>([]);
+  const [lastObservedView, setLastObservedView] = useState<number | null>(null);
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
-  // Initialize WASM and WebSocket
+  // Update current time every 100ms for real-time bar growth
+  useEffect(() => {
+    const interval = setInterval(() => setCurrentTime(Date.now()), 100);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Initialize WebSocket
   useEffect(() => {
     const setup = async () => {
       await init();
-
       const ws = new WebSocket(WS_URL);
       ws.binaryType = "arraybuffer";
-      wsRef.current = ws;
 
       ws.onmessage = (event) => {
         const data = new Uint8Array(event.data);
         const kind = data[0];
         const payload = data.slice(1);
-        console.log(`Kind: ${kind}, Payload length: ${payload.length}`);
 
         switch (kind) {
           case 0: // Seed
             const seed = parse_seed(PUBLIC_KEY, payload);
-            if (seed) {
-              setEvents((prev) => [
-                { type: "Seed", data: seed, timestamp: Date.now() },
-                ...prev.slice(0, 99), // Limit to 100 events
-              ]);
-            }
+            if (seed) handleSeed(seed);
             break;
           case 1: // Notarization
             const notarized = parse_notarized(PUBLIC_KEY, payload);
-            if (notarized) {
-              setEvents((prev) => [
-                { type: "Notarization", data: notarized, timestamp: Date.now() },
-                ...prev.slice(0, 99),
-              ]);
-            }
+            if (notarized) handleNotarization(notarized);
             break;
           case 3: // Finalization
             const finalized = parse_finalized(PUBLIC_KEY, payload);
-            if (finalized) {
-              setEvents((prev) => [
-                { type: "Finalization", data: finalized, timestamp: Date.now() },
-                ...prev.slice(0, 99),
-              ]);
-              setFinalizationCounts((prev) => [prev[0] + 1, ...prev.slice(0, -1)]);
-            }
-            break;
-          default:
-            // Ignore other kinds (e.g., Nullification)
+            if (finalized) handleFinalization(finalized);
             break;
         }
       };
@@ -84,89 +80,220 @@ const App: React.FC = () => {
     };
 
     setup();
-
-    return () => {
-      if (wsRef.current) wsRef.current.close();
-    };
   }, []);
 
-  // Update chart every second
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setFinalizationCounts((prev) => [0, ...prev.slice(0, -1)]);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
+  const handleSeed = (seed: SeedJs) => {
+    const view = seed.view;
+    setViews((prevViews) => {
+      let newViews = [...prevViews];
 
-  // Chart data
-  const chartData = {
-    labels: Array.from({ length: 60 }, (_, i) => new Date(Date.now() - (59 - i) * 1000)),
-    datasets: [
-      {
-        label: "Finalizations per Second",
-        data: finalizationCounts,
-        borderColor: "#00ff99",
-        backgroundColor: "rgba(0, 255, 153, 0.2)",
-        fill: true,
-      },
-    ],
+      // Handle skipped views
+      if (lastObservedView !== null && view > lastObservedView + 1) {
+        for (let missedView = lastObservedView + 1; missedView < view; missedView++) {
+          newViews.unshift({
+            view: missedView,
+            location: locations[missedView % locations.length],
+            status: "timed_out",
+            startTime: Date.now(),
+          });
+        }
+      }
+
+      // Add new view
+      const newView: ViewData = {
+        view,
+        location: locations[view % locations.length],
+        status: "growing",
+        startTime: Date.now(),
+        signature: seed.signature,
+      };
+      const timeoutId = setTimeout(() => {
+        setViews((prev) =>
+          prev.map((v) => (v.view === view ? { ...v, status: "timed_out" } : v))
+        );
+      }, TIMEOUT_DURATION);
+      newViews.unshift({ ...newView, timeoutId });
+
+      setLastObservedView(view);
+      return newViews;
+    });
   };
 
-  const chartOptions = {
-    scales: {
-      x: { type: "time" as const, time: { unit: "second" as const } },
-      y: { beginAtZero: true, title: { display: true, text: "Finalizations" } },
-    },
-    animation: { duration: 500 },
+  const handleNotarization = (notarized: NotarizedJs) => {
+    const view = notarized.proof.view;
+    setViews((prevViews) => {
+      const index = prevViews.findIndex((v) => v.view === view);
+      if (index !== -1) {
+        const viewData = prevViews[index];
+        if (viewData.timeoutId) clearTimeout(viewData.timeoutId);
+        const updatedView: ViewData = {
+          ...viewData,
+          status: "notarized",
+          notarizationTime: Date.now(),
+          block: notarized.block,
+          timeoutId: undefined,
+        };
+        return [
+          ...prevViews.slice(0, index),
+          updatedView,
+          ...prevViews.slice(index + 1),
+        ];
+      }
+      // If view doesn’t exist, create it
+      return [{
+        view,
+        location: locations[view % locations.length],
+        status: "notarized",
+        startTime: Date.now(),
+        notarizationTime: Date.now(),
+        block: notarized.block,
+      }, ...prevViews];
+    });
   };
 
-  // Format event for display
-  const formatEvent = (event: ConsensusEvent) => {
-    const age = Math.floor((Date.now() - event.timestamp) / 1000);
-    switch (event.type) {
-      case "Seed":
-        return `Seed | View: ${event.data.view} | Age: ${age}s`;
-      case "Notarization":
-        const n = event.data as NotarizedJs;
-        return `Notarization | View: ${n.proof.view} | Height: ${n.block.height} | Timestamp: ${n.block.timestamp} | Age: ${age}s`;
-      case "Finalization":
-        const f = event.data as FinalizedJs;
-        return `Finalization | View: ${f.proof.view} | Height: ${f.block.height} | Timestamp: ${f.block.timestamp} | Age: ${age}s`;
-    }
+  const handleFinalization = (finalized: FinalizedJs) => {
+    const view = finalized.proof.view;
+    setViews((prevViews) => {
+      const index = prevViews.findIndex((v) => v.view === view);
+      if (index !== -1) {
+        const viewData = prevViews[index];
+        if (viewData.timeoutId) clearTimeout(viewData.timeoutId);
+        const updatedView: ViewData = {
+          ...viewData,
+          status: "finalized",
+          finalizationTime: Date.now(),
+          block: finalized.block,
+          timeoutId: undefined,
+        };
+        return [
+          ...prevViews.slice(0, index),
+          updatedView,
+          ...prevViews.slice(index + 1),
+        ];
+      }
+      // If view doesn’t exist, create it
+      return [{
+        view,
+        location: locations[view % locations.length],
+        status: "finalized",
+        startTime: Date.now(),
+        finalizationTime: Date.now(),
+        block: finalized.block,
+      }, ...prevViews];
+    });
   };
+
+  // Define center using LatLng
+  const center = new LatLng(0, 0);
 
   return (
     <div style={{ padding: "20px", background: "#1a1a1a", color: "#fff", fontFamily: "Arial" }}>
       <h1 style={{ textAlign: "center", color: "#00ff99" }}>Alto Blockchain Explorer</h1>
 
-      <section style={{ marginBottom: "40px" }}>
-        <h2>Consensus Stream</h2>
-        <ul style={{ listStyle: "none", padding: 0, maxHeight: "400px", overflowY: "auto" }}>
-          {events.map((event, index) => (
-            <li
-              key={index}
-              style={{
-                padding: "10px",
-                background: "#333",
-                marginBottom: "5px",
-                borderRadius: "5px",
-                transition: "all 0.3s",
-              }}
-            >
-              {formatEvent(event)}
-            </li>
-          ))}
-        </ul>
-      </section>
+      {/* Map */}
+      <div style={{ height: "400px", marginBottom: "20px" }}>
+        <MapContainer center={center} zoom={1} style={{ height: "100%", width: "100%" }}>
+          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          {views.length > 0 && <Marker position={views[0].location} />}
+        </MapContainer>
+      </div>
 
-      <section>
-        <h2>Finalization Rate</h2>
-        <div style={{ maxWidth: "800px", margin: "0 auto" }}>
-          <Line data={chartData} options={chartOptions} />
-        </div>
-      </section>
+      {/* Bars */}
+      <div>
+        {views.slice(0, 100).map((viewData) => (
+          <Bar key={viewData.view} viewData={viewData} currentTime={currentTime} />
+        ))}
+      </div>
     </div>
   );
 };
+
+interface BarProps {
+  viewData: ViewData;
+  currentTime: number;
+}
+
+const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
+  const { view, status, startTime, notarizationTime, finalizationTime, signature, block } = viewData;
+
+  const maxWidth = 500; // pixels
+  const growthRate = maxWidth / TIMEOUT_DURATION; // pixels per ms
+
+  let width: number;
+  let color: string;
+  let text: string = "";
+
+  if (status === "growing") {
+    const elapsed = currentTime - startTime;
+    width = Math.min(elapsed * growthRate, maxWidth);
+    color = "grey";
+    text = `Latency: ${(elapsed / 1000).toFixed(1)}s`;
+  } else if (status === "notarized" || status === "finalized") {
+    const endTime = finalizationTime || notarizationTime!;
+    const latency = (endTime - startTime) / 1000;
+    width = (endTime - startTime) * growthRate;
+    color = "green";
+    text = `${status === "finalized" ? "Finalized" : "Notarized"} | Latency: ${latency.toFixed(1)}s | Height: ${block?.height} | Digest: ${shortenUint8Array(block?.digest)}`;
+  } else {
+    width = maxWidth;
+    color = "red";
+    text = "TIMED OUT";
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", marginBottom: "10px" }}>
+      <div style={{ width: "100px", textAlign: "right", marginRight: "10px" }}>
+        <div>{view}</div>
+        <div style={{ fontSize: "0.8em" }}>
+          {signature ? shortenUint8Array(signature) : "Skipped"}
+        </div>
+      </div>
+      <div
+        style={{
+          height: "20px",
+          backgroundColor: color,
+          width: `${width}px`,
+          position: "relative",
+          transition: "width 0.1s linear",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "white",
+            fontSize: "0.9em",
+          }}
+        >
+          {text}
+        </div>
+        {status === "finalized" && (
+          <div
+            style={{
+              position: "absolute",
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: "5px",
+              backgroundColor: "darkgreen",
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
+
+function shortenUint8Array(arr: Uint8Array | undefined, length: number = 4): string {
+  if (!arr) return "";
+  const hex = Array.from(arr.slice(0, length), (b) => b.toString(16).padStart(2, "0")).join("");
+  return `0x${hex}...`;
+}
 
 export default App;
