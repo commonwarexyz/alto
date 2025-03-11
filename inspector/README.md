@@ -25,7 +25,7 @@ cargo install alto-inspector
 
 ## Usage
 
-_Use `-v` or `--verbose` to enable verbose logging. Use `--times` to perform some operation multiple times using a pre-established connection._
+_Use `-v` or `--verbose` to enable verbose logging. Use `--times` to perform some operation multiple times using a pre-established connection (much faster)._
 
 ### Get the latest seed
 
