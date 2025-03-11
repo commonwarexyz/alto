@@ -11,8 +11,8 @@ type ViewStatus = "growing" | "notarized" | "finalized" | "timed_out";
 
 interface ViewData {
   view: number;
-  location: [number, number];
-  locationName: string;
+  location?: [number, number];
+  locationName?: string;
   status: ViewStatus;
   startTime: number;
   notarizationTime?: number;
@@ -200,8 +200,6 @@ const App: React.FC = () => {
 
         // Add any missed views as skipped/timed out
         for (let missedView = startViewIndex; missedView < view; missedView++) {
-          const locationIndex = missedView % LOCATIONS.length;
-
           // Check if this view already exists
           const existingIndex = newViews.findIndex(v => v.view === missedView);
 
@@ -209,8 +207,8 @@ const App: React.FC = () => {
             // Only add if it doesn't already exist
             newViews.unshift({
               view: missedView,
-              location: LOCATIONS[locationIndex][0],
-              locationName: LOCATIONS[locationIndex][1],
+              location: undefined,
+              locationName: undefined,
               status: "timed_out",
               startTime: Date.now(),
             });
@@ -316,11 +314,10 @@ const App: React.FC = () => {
       }
 
       // If view doesn't exist, create it
-      const locationIndex = view % LOCATIONS.length;
       return [{
         view,
-        location: LOCATIONS[locationIndex][0],
-        locationName: LOCATIONS[locationIndex][1],
+        location: undefined,
+        locationName: undefined,
         status: "notarized",
         startTime: Date.now(),
         notarizationTime: Date.now(),
@@ -361,11 +358,10 @@ const App: React.FC = () => {
       }
 
       // If view doesn't exist, create it
-      const locationIndex = view % LOCATIONS.length;
       return [{
         view,
-        location: LOCATIONS[locationIndex][0],
-        locationName: LOCATIONS[locationIndex][1],
+        location: undefined,
+        locationName: undefined,
         status: "finalized",
         startTime: Date.now(),
         finalizationTime: Date.now(),
@@ -429,7 +425,7 @@ const App: React.FC = () => {
               url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             />
-            {views.length > 0 && (
+            {views.length > 0 && views[0].location !== undefined && (
               <Marker
                 key={views[0].view}
                 position={views[0].location}
