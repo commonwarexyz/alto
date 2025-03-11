@@ -458,48 +458,66 @@ interface BarProps {
   viewData: ViewData;
   currentTime: number;
   isMobile: boolean;
-  maxContainerWidth?: number; // Make it optional
+  maxContainerWidth?: number;
 }
 
 const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   const { view, status, startTime, notarizationTime, finalizationTime, signature, block } = viewData;
+  const [measuredWidth, setMeasuredWidth] = useState(isMobile ? 200 : 500); // Reasonable default
+  const barContainerRef = useRef<HTMLDivElement>(null);
 
-  // Calculate max width based on container size rather than window
-  // This prevents bars from exceeding their container width
-  const maxWidth = isMobile ? Math.min(window.innerWidth - 120, 300) :
-    Math.min(800, window.innerWidth - 150);
-  const growthRate = maxWidth / TIMEOUT_DURATION; // pixels per ms
+  // Measure width after component mounts and on resize
+  useEffect(() => {
+    const updateWidth = () => {
+      if (barContainerRef.current) {
+        const width = barContainerRef.current.clientWidth - (isMobile ? 4 : 8);
+        setMeasuredWidth(width);
+      }
+    };
+
+    // Initial measurement
+    updateWidth();
+
+    // Add resize listener
+    window.addEventListener('resize', updateWidth);
+
+    return () => {
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, [isMobile]);
+
+  const viewInfoWidth = isMobile ? 50 : 80;
+  const growthRate = measuredWidth / TIMEOUT_DURATION; // pixels per ms
   const minBarWidth = isMobile ? 20 : 30; // minimum width for completed bars
 
   // Calculate widths for different stages
-  let totalWidth: number;
-  let notarizedWidth: number = 0;
-  let finalizedWidth: number = 0;
+  let totalWidth = 0;
+  let notarizedWidth = 0;
+  let finalizedWidth = 0;
 
   // Calculate the current or final width
   if (status === "growing") {
     const elapsed = currentTime - startTime;
-    // Start from 0 width to avoid the flash effect
-    totalWidth = elapsed <= 50 ? 0 : Math.min(elapsed * growthRate, maxWidth);
+    totalWidth = elapsed <= 50 ? 0 : Math.min(elapsed * growthRate, measuredWidth);
   } else if (status === "notarized" || status === "finalized") {
     // Calculate notarization segment
     if (notarizationTime) {
       const notarizeElapsed = notarizationTime - startTime;
-      notarizedWidth = Math.min(notarizeElapsed * growthRate, maxWidth);
+      notarizedWidth = Math.min(notarizeElapsed * growthRate, measuredWidth);
       notarizedWidth = Math.max(notarizedWidth, minBarWidth); // Ensure minimum width
     }
 
     // Calculate finalization segment (if applicable)
     if (status === "finalized" && finalizationTime && notarizationTime) {
       const finalizeElapsed = finalizationTime - notarizationTime;
-      finalizedWidth = Math.min(finalizeElapsed * growthRate, maxWidth - notarizedWidth);
+      finalizedWidth = Math.min(finalizeElapsed * growthRate, measuredWidth - notarizedWidth);
       finalizedWidth = Math.max(finalizedWidth, minBarWidth / 2); // Ensure minimum width
     }
 
     totalWidth = notarizedWidth + finalizedWidth;
   } else {
     // Timed out
-    totalWidth = maxWidth;
+    totalWidth = measuredWidth;
   }
 
   // Format timing texts
@@ -537,8 +555,6 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     inBarText = "TIMED OUT";
   }
 
-  const viewInfoWidth = isMobile ? 60 : 80;
-
   return (
     <div className="bar-row">
       <div className="view-info" style={{ width: `${viewInfoWidth}px` }}>
@@ -548,7 +564,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
         </div>
       </div>
 
-      <div className="bar-container">
+      <div className="bar-container" ref={barContainerRef}>
         {/* Main bar container */}
         <div
           className="bar-main"
@@ -608,7 +624,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
                 <div
                   className="latency-text notarized-latency"
                   style={{
-                    left: `${notarizedWidth - (isMobile ? 20 : 30)}px`,
+                    left: `${Math.max(0, notarizedWidth - (isMobile ? 20 : 30))}px`,
                   }}
                 >
                   {notarizedLatencyText}
@@ -620,7 +636,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
                 <div
                   className="latency-text growing-latency"
                   style={{
-                    left: `${totalWidth - (isMobile ? 20 : 30)}px`,
+                    left: `${Math.max(0, totalWidth - (isMobile ? 20 : 30))}px`,
                   }}
                 >
                   {growingLatencyText}
@@ -632,7 +648,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
                 <div
                   className="latency-text finalized-latency"
                   style={{
-                    left: `${totalWidth - (isMobile ? 20 : 30)}px`,
+                    left: `${Math.max(0, totalWidth - (isMobile ? 20 : 30))}px`,
                   }}
                 >
                   {finalizedLatencyText}

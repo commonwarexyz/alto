@@ -112,7 +112,8 @@ body {
 .bars-container {
   background: #1c1c1c;
   border-radius: 8px;
-  padding: 16px;
+  padding: 12px 8px 12px 12px;
+  /* Asymmetric padding: top right bottom left */
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   width: 100%;
   overflow-x: hidden;
@@ -130,6 +131,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  width: 100%;
 }
 
 /* Individual bar rows */
@@ -144,7 +146,7 @@ body {
 .view-info {
   flex-shrink: 0;
   text-align: right;
-  margin-right: 12px;
+  margin-right: 8px;
 }
 
 .view-number {
@@ -162,9 +164,10 @@ body {
 .bar-container {
   position: relative;
   flex-grow: 1;
-  max-width: 100%;
+  max-width: calc(100% - 60px);
   overflow: hidden;
   /* Ensure no overflow */
+  width: 100%;
 }
 
 .bar-main {
@@ -292,7 +295,7 @@ body {
   }
 
   .app-main {
-    padding: 12px;
+    padding: 12px 8px;
   }
 
   .map-container {
@@ -301,7 +304,8 @@ body {
 
   .legend-container {
     justify-content: space-between;
-    gap: 8px;
+    gap: 6px;
+    padding: 8px;
   }
 
   .legend-item {
@@ -309,7 +313,8 @@ body {
   }
 
   .bars-container {
-    padding: 12px;
+    padding: 10px 4px 10px 12px;
+    /* Asymmetric: top right bottom left */
   }
 
   .bars-title {
@@ -319,11 +324,17 @@ body {
 
   .bar-row {
     margin-bottom: 12px;
+    width: 100%;
   }
 
   .view-info {
     width: 50px !important;
-    margin-right: 8px;
+    margin-right: 4px;
+    flex-shrink: 0;
+  }
+
+  .bar-container {
+    max-width: calc(100% - 54px);
   }
 
   .view-number {
@@ -340,7 +351,7 @@ body {
 
   .bar-segment {
     font-size: 10px;
-    padding: 0 6px;
+    padding: 0 4px;
   }
 
   .latency-text {
