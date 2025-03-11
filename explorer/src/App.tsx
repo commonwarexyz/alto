@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { MapContainer, TileLayer, Marker } from "react-leaflet";
 import { LatLng } from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -39,11 +39,15 @@ const TIMEOUT_DURATION = 10000; // 10 seconds
 const App: React.FC = () => {
   const [views, setViews] = useState<ViewData[]>([]);
   const [lastObservedView, setLastObservedView] = useState<number | null>(null);
-  const [currentTime, setCurrentTime] = useState(Date.now());
+  const currentTimeRef = useRef(Date.now());
 
-  // Update current time every 100ms for real-time bar growth
+  // Update current time every 100ms and force re-render for growing bars
   useEffect(() => {
-    const interval = setInterval(() => setCurrentTime(Date.now()), 100);
+    const interval = setInterval(() => {
+      currentTimeRef.current = Date.now();
+      // Trigger re-render by updating views with a new array reference
+      setViews((prev) => [...prev]);
+    }, 100);
     return () => clearInterval(interval);
   }, []);
 
@@ -201,7 +205,7 @@ const App: React.FC = () => {
       {/* Bars */}
       <div>
         {views.slice(0, 100).map((viewData) => (
-          <Bar key={viewData.view} viewData={viewData} currentTime={currentTime} />
+          <Bar key={viewData.view} viewData={viewData} currentTime={currentTimeRef.current} />
         ))}
       </div>
     </div>
