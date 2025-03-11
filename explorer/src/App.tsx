@@ -426,7 +426,7 @@ const App: React.FC = () => {
 
         {/* Map */}
         <div className="map-container">
-          <MapContainer center={center} zoom={isMobile ? 1 : 2} style={{ height: "100%", width: "100%" }}>
+          <MapContainer center={center} zoom={1} style={{ height: "100%", width: "100%" }}>
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
@@ -477,12 +477,12 @@ const App: React.FC = () => {
             ))}
           </div>
         </div>
-      </main>
+      </main >
 
       <footer className="footer">
         &copy; {new Date().getFullYear()} Commonware, Inc. All rights reserved.
       </footer>
-    </div>
+    </div >
   );
 };
 
