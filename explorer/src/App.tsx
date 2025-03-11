@@ -612,7 +612,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
           textOverflow: "ellipsis",
           overflow: "hidden"
         }}>
-          {signature ? shortenUint8Array(signature) : "Skipped"}
+          {signature ? shortenUint8Array(signature) : ""}
         </div>
       </div>
 
