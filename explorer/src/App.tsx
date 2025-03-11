@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef } from "react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import { LatLng, Icon, DivIcon } from "leaflet";
+import { LatLng, DivIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized } from "./alto_types/alto_types.js";
 import { WS_URL, PUBLIC_KEY } from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, BlockJs } from "./types";
+import "./App.css";
 
 // Array of locations for deterministic mapping
 const locations: [number, number][] = [
@@ -77,8 +78,26 @@ const App: React.FC = () => {
     growing: 0,
     timedOut: 0
   });
+  const [isMobile, setIsMobile] = useState<boolean>(false);
   const currentTimeRef = useRef(Date.now());
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Check for mobile viewport
+  useEffect(() => {
+    const checkIfMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+
+    // Initial check
+    checkIfMobile();
+
+    // Add resize listener
+    window.addEventListener('resize', checkIfMobile);
+
+    return () => {
+      window.removeEventListener('resize', checkIfMobile);
+    };
+  }, []);
 
   // Update current time every 100ms to force re-render for growing bars
   useEffect(() => {
@@ -353,56 +372,19 @@ const App: React.FC = () => {
   const center = new LatLng(20, 0);
 
   return (
-    <div style={{
-      padding: "0",
-      background: "#121212",
-      color: "#eee",
-      fontFamily: "Inter, system-ui, sans-serif",
-      minHeight: "100vh"
-    }}>
-      <header style={{
-        padding: "20px",
-        background: "#1c1c1c",
-        borderBottom: "1px solid #333",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center"
-      }}>
-        <h1 style={{
-          margin: 0,
-          fontSize: "28px",
-          fontWeight: "600",
-          background: "linear-gradient(to right, #00ff99, #33ccff)",
-          WebkitBackgroundClip: "text",
-          WebkitTextFillColor: "transparent"
-        }}>
-          Alto
-        </h1>
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "10px"
-        }}>
-          <div style={{
-            width: "10px",
-            height: "10px",
-            borderRadius: "50%",
-            background: isConnected ? "#4CAF50" : "#F44336"
-          }}></div>
+    <div className="app-container">
+      <header className="app-header">
+        <h1 className="app-title">Alto</h1>
+        <div className="connection-status">
+          <div className={`status-indicator ${isConnected ? "connected" : "disconnected"}`}></div>
           <span>{isConnected ? "Connected" : "Disconnected"}</span>
         </div>
       </header>
 
-      <main style={{ padding: "20px" }}>
+      <main className="app-main">
         {/* Map */}
-        <div style={{
-          height: "400px",
-          marginBottom: "20px",
-          borderRadius: "8px",
-          overflow: "hidden",
-          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)"
-        }}>
-          <MapContainer center={center} zoom={2} style={{ height: "100%", width: "100%" }}>
+        <div className="map-container">
+          <MapContainer center={center} zoom={isMobile ? 1 : 2} style={{ height: "100%", width: "100%" }}>
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
@@ -432,14 +414,7 @@ const App: React.FC = () => {
         </div>
 
         {/* Legend */}
-        <div style={{
-          display: "flex",
-          gap: "15px",
-          marginBottom: "20px",
-          padding: "10px",
-          background: "#1c1c1c",
-          borderRadius: "6px"
-        }}>
+        <div className="legend-container">
           <LegendItem color="#555" label="Seed to Notarized" />
           <LegendItem color="#2E7D32" label="Notarized to Finalized" />
           <LegendItem color="#1B5E20" label="Finalization Point" />
@@ -447,22 +422,18 @@ const App: React.FC = () => {
         </div>
 
         {/* Bars */}
-        <div style={{
-          background: "#1c1c1c",
-          borderRadius: "8px",
-          padding: "20px",
-          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)"
-        }}>
-          <h2 style={{
-            margin: "0 0 20px 0",
-            fontSize: "20px",
-            fontWeight: "500"
-          }}>
-            Consensus Views
-          </h2>
-          {views.slice(0, 100).map((viewData) => (
-            <Bar key={viewData.view} viewData={viewData} currentTime={currentTimeRef.current} />
-          ))}
+        <div className="bars-container">
+          <h2 className="bars-title">Consensus Views</h2>
+          <div className="bars-list">
+            {views.slice(0, 100).map((viewData) => (
+              <Bar
+                key={viewData.view}
+                viewData={viewData}
+                currentTime={currentTimeRef.current}
+                isMobile={isMobile}
+              />
+            ))}
+          </div>
         </div>
       </main>
     </div>
@@ -476,14 +447,9 @@ interface LegendItemProps {
 
 const LegendItem: React.FC<LegendItemProps> = ({ color, label }) => {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-      <div style={{
-        width: "12px",
-        height: "12px",
-        background: color,
-        borderRadius: "3px"
-      }}></div>
-      <span style={{ fontSize: "14px" }}>{label}</span>
+    <div className="legend-item">
+      <div className="legend-color" style={{ backgroundColor: color }}></div>
+      <span className="legend-label">{label}</span>
     </div>
   );
 };
@@ -491,14 +457,19 @@ const LegendItem: React.FC<LegendItemProps> = ({ color, label }) => {
 interface BarProps {
   viewData: ViewData;
   currentTime: number;
+  isMobile: boolean;
+  maxContainerWidth?: number; // Make it optional
 }
 
-const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
+const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   const { view, status, startTime, notarizationTime, finalizationTime, signature, block } = viewData;
 
-  const maxWidth = 800; // pixels - increased to show more detail
-  const growthRate = maxWidth / TIMEOUT_DURATION; // pixels per ms - more pixels per ms for zoomed in view
-  const minBarWidth = 30; // minimum width for completed bars that happened very quickly
+  // Calculate max width based on container size rather than window
+  // This prevents bars from exceeding their container width
+  const maxWidth = isMobile ? Math.min(window.innerWidth - 120, 300) :
+    Math.min(800, window.innerWidth - 150);
+  const growthRate = maxWidth / TIMEOUT_DURATION; // pixels per ms
+  const minBarWidth = isMobile ? 20 : 30; // minimum width for completed bars
 
   // Calculate widths for different stages
   let totalWidth: number;
@@ -508,7 +479,8 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
   // Calculate the current or final width
   if (status === "growing") {
     const elapsed = currentTime - startTime;
-    totalWidth = Math.min(elapsed * growthRate, maxWidth);
+    // Start from 0 width to avoid the flash effect
+    totalWidth = elapsed <= 50 ? 0 : Math.min(elapsed * growthRate, maxWidth);
   } else if (status === "notarized" || status === "finalized") {
     // Calculate notarization segment
     if (notarizationTime) {
@@ -544,7 +516,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
     notarizedLatencyText = `${Math.round(latency)}ms`;
     // Format inBarText for block information
     if (block) {
-      inBarText = `#${block.height} | ${shortenUint8Array(block.digest)}`;
+      inBarText = isMobile ? `#${block.height}` : `#${block.height} | ${shortenUint8Array(block.digest)}`;
     }
   } else if (status === "finalized") {
     // Get seed to notarization time
@@ -558,158 +530,111 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
 
     // Set block info
     if (block) {
-      inBarText = `#${block.height} | ${shortenUint8Array(block.digest)}`;
+      inBarText = isMobile ? `#${block.height}` : `#${block.height} | ${shortenUint8Array(block.digest)}`;
     }
   } else {
     // Timed out
     inBarText = "TIMED OUT";
   }
 
+  const viewInfoWidth = isMobile ? 60 : 80;
+
   return (
-    <div style={{
-      display: "flex",
-      marginBottom: "20px", // More space for timing text below
-      fontSize: "14px"
-    }}>
-      <div style={{
-        width: "80px",
-        textAlign: "right",
-        marginRight: "15px",
-        flexShrink: 0
-      }}>
-        <div style={{
-          fontWeight: "500",
-          color: "#fff"
-        }}>
-          {view}
-        </div>
-        <div style={{
-          fontSize: "12px",
-          color: "#888",
-          textOverflow: "ellipsis",
-          overflow: "hidden"
-        }}>
-          {signature ? shortenUint8Array(signature) : "Skipped"}
+    <div className="bar-row">
+      <div className="view-info" style={{ width: `${viewInfoWidth}px` }}>
+        <div className="view-number">{view}</div>
+        <div className="view-signature">
+          {signature ? shortenUint8Array(signature, isMobile ? 4 : 6) : "Skipped"}
         </div>
       </div>
 
-      <div style={{ position: "relative" }}>
+      <div className="bar-container">
         {/* Main bar container */}
-        <div style={{
-          height: "26px",
-          position: "relative",
-          width: `${totalWidth}px`,
-          borderRadius: "4px",
-          overflow: "hidden",
-          transition: "width 0.1s linear",
-          backgroundColor: "#333",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.3)"
-        }}>
+        <div
+          className="bar-main"
+          style={{
+            width: `${totalWidth}px`,
+          }}
+        >
           {/* Base bar - grey represents time from seed receipt to notarization (or current time if growing) */}
-          <div style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            height: "100%",
-            width: status === "timed_out" ? "100%" :
-              (status === "growing" ? "100%" :
-                `${notarizedWidth}px`),
-            backgroundColor: status === "timed_out" ? "#F44336" : "#555",
-            borderRadius: "4px",
-            display: "flex",
-            alignItems: "center",
-            paddingLeft: "10px",
-            paddingRight: "10px",
-            color: "white",
-            fontSize: "13px",
-            overflow: "hidden",
-            whiteSpace: "nowrap",
-            textOverflow: "ellipsis"
-          }}>
+          <div
+            className={`bar-segment ${status === "timed_out" ? "timed-out" : "growing"}`}
+            style={{
+              width: status === "timed_out" ? "100%" : (status === "growing" ? "100%" : `${notarizedWidth}px`),
+            }}
+          >
             {inBarText}
           </div>
 
           {/* Notarized to finalized segment */}
           {status === "finalized" && finalizedWidth > 0 && (
-            <div style={{
-              position: "absolute",
-              top: 0,
-              left: `${notarizedWidth}px`,
-              height: "100%",
-              width: `${finalizedWidth}px`,
-              backgroundColor: "#2E7D32", // Darker green
-              zIndex: 1
-            }} />
+            <div
+              className="bar-segment finalized"
+              style={{
+                left: `${notarizedWidth}px`,
+                width: `${finalizedWidth}px`,
+              }}
+            />
           )}
 
-          {/* Marker for notarization point - now same color as base bar */}
+          {/* Marker for notarization point */}
           {(status === "notarized" || status === "finalized") && (
-            <div style={{
-              position: "absolute",
-              left: `${notarizedWidth - 1}px`,
-              top: 0,
-              bottom: 0,
-              width: "2px",
-              backgroundColor: "#555", // Same as base bar color
-              zIndex: 2
-            }} />
+            <div
+              className="marker notarization-marker"
+              style={{
+                left: `${notarizedWidth - 1}px`,
+              }}
+            />
           )}
 
           {/* Marker for finalization point */}
           {status === "finalized" && (
-            <div style={{
-              position: "absolute",
-              right: 0,
-              top: 0,
-              bottom: 0,
-              width: "3px",
-              backgroundColor: "#1B5E20", // Dark green
-              zIndex: 3
-            }} />
+            <div
+              className="marker finalization-marker"
+              style={{
+                right: 0,
+              }}
+            />
           )}
         </div>
 
         {/* Timing information underneath */}
-        <div style={{ position: "relative", height: "20px", marginTop: "2px" }}>
+        <div className="timing-info">
           {/* Only show timing if not skipped */}
           {signature && (
             <>
               {/* Latency at notarization point */}
               {(status === "notarized" || status === "finalized") && notarizedWidth > 0 && (
-                <div style={{
-                  position: "absolute",
-                  left: `${notarizedWidth - 30}px`, // Position under the notarization marker
-                  color: "#aaa",
-                  fontSize: "12px",
-                  whiteSpace: "nowrap"
-                }}>
+                <div
+                  className="latency-text notarized-latency"
+                  style={{
+                    left: `${notarizedWidth - (isMobile ? 20 : 30)}px`,
+                  }}
+                >
                   {notarizedLatencyText}
                 </div>
               )}
 
               {/* Latency for growing bars - follows the tip */}
               {status === "growing" && (
-                <div style={{
-                  position: "absolute",
-                  left: `${totalWidth - 30}px`, // Position under the growing bar tip
-                  color: "#aaa",
-                  fontSize: "12px",
-                  whiteSpace: "nowrap",
-                  transition: "left 0.1s linear"
-                }}>
+                <div
+                  className="latency-text growing-latency"
+                  style={{
+                    left: `${totalWidth - (isMobile ? 20 : 30)}px`,
+                  }}
+                >
                   {growingLatencyText}
                 </div>
               )}
 
               {/* Total latency marker for finalized views */}
               {status === "finalized" && (
-                <div style={{
-                  position: "absolute",
-                  left: `${totalWidth - 30}px`, // Position under the finalization marker
-                  color: "#aaa",
-                  fontSize: "12px",
-                  whiteSpace: "nowrap"
-                }}>
+                <div
+                  className="latency-text finalized-latency"
+                  style={{
+                    left: `${totalWidth - (isMobile ? 20 : 30)}px`,
+                  }}
+                >
                   {finalizedLatencyText}
                 </div>
               )}
@@ -721,17 +646,17 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
   );
 };
 
-function shortenUint8Array(arr: Uint8Array | undefined): string {
+function shortenUint8Array(arr: Uint8Array | undefined, length: number = 3): string {
   if (!arr || arr.length === 0) return "";
 
   // Convert the entire array to hex
   const fullHex = Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
 
   // Get first 'length' bytes (2 hex chars per byte)
-  const firstPart = fullHex.slice(0, 3);
+  const firstPart = fullHex.slice(0, length);
 
   // Get last 'length' bytes
-  const lastPart = fullHex.slice(-3);
+  const lastPart = fullHex.slice(-length);
 
   // Return formatted string with first and last parts
   return `${firstPart}..${lastPart}`;

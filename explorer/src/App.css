@@ -1,38 +1,363 @@
-.App {
-  text-align: center;
+/* Base styles */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: #282c34;
+/* Main container */
+.app-container {
+  padding: 0;
+  background: #121212;
+  color: #eee;
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+/* Header styles */
+.app-header {
+  padding: 16px;
+  background: #1c1c1c;
+  border-bottom: 1px solid #333;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.app-title {
+  margin: 0;
+  font-size: clamp(22px, 5vw, 28px);
+  font-weight: 600;
+  background: linear-gradient(to right, #00ff99, #33ccff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: clamp(12px, 3vw, 14px);
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.status-indicator.connected {
+  background: #4CAF50;
+}
+
+.status-indicator.disconnected {
+  background: #F44336;
+}
+
+/* Main content area */
+.app-main {
+  padding: 16px;
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+
+/* Map container */
+.map-container {
+  height: 300px;
+  margin-bottom: 16px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Legend */
+.legend-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px;
+  background: #1c1c1c;
+  border-radius: 6px;
+}
+
+.legend-item {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
+  gap: 5px;
+}
+
+.legend-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.legend-label {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Bars container */
+.bars-container {
+  background: #1c1c1c;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  width: 100%;
+  overflow-x: hidden;
+  /* Prevent horizontal scrolling */
+  max-width: 100%;
+}
+
+.bars-title {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.bars-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Individual bar rows */
+.bar-row {
+  display: flex;
+  margin-bottom: 16px;
+  font-size: 14px;
+  width: 100%;
+  max-width: 100%;
+}
+
+.view-info {
+  flex-shrink: 0;
+  text-align: right;
+  margin-right: 12px;
+}
+
+.view-number {
+  font-weight: 500;
+  color: #fff;
+}
+
+.view-signature {
+  font-size: 11px;
+  color: #888;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.bar-container {
+  position: relative;
+  flex-grow: 1;
+  max-width: 100%;
+  overflow: hidden;
+  /* Ensure no overflow */
+}
+
+.bar-main {
+  height: 26px;
+  position: relative;
+  border-radius: 4px;
+  overflow: hidden;
+  transition: width 0.1s linear;
+  /* Smoother transition */
+  background-color: #333;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  max-width: 100%;
+  /* Ensure it doesn't exceed container */
+}
+
+.bar-segment {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
   color: white;
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.App-link {
-  color: #61dafb;
+.bar-segment.growing {
+  background-color: #555;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
+.bar-segment.finalized {
+  background-color: #2E7D32;
+  z-index: 1;
+}
+
+.bar-segment.timed-out {
+  background-color: #F44336;
+  width: 100% !important;
+  right: 0;
+  max-width: 100%;
+}
+
+.marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  z-index: 2;
+}
+
+.notarization-marker {
+  background-color: #555;
+}
+
+.finalization-marker {
+  width: 3px;
+  background-color: #1B5E20;
+  z-index: 3;
+}
+
+.timing-info {
+  position: relative;
+  height: 20px;
+  margin-top: 2px;
+}
+
+.latency-text {
+  position: absolute;
+  color: #aaa;
+  font-size: 11px;
+  white-space: nowrap;
+  transition: left 0.1s linear;
+}
+
+/* Media Queries */
+@media (min-width: 768px) {
+  .app-header {
+    padding: 20px;
   }
-  to {
-    transform: rotate(360deg);
+
+  .app-main {
+    padding: 20px;
   }
+
+  .map-container {
+    height: 400px;
+    margin-bottom: 20px;
+  }
+
+  .legend-label {
+    font-size: 14px;
+  }
+
+  .bars-title {
+    font-size: 20px;
+    margin-bottom: 20px;
+  }
+
+  .bar-row {
+    margin-bottom: 20px;
+  }
+
+  .bar-segment {
+    font-size: 13px;
+    padding: 0 10px;
+  }
+
+  .latency-text {
+    font-size: 12px;
+  }
+
+  .view-signature {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-header {
+    padding: 12px;
+  }
+
+  .app-main {
+    padding: 12px;
+  }
+
+  .map-container {
+    height: 250px;
+  }
+
+  .legend-container {
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .legend-item {
+    font-size: 10px;
+  }
+
+  .bars-container {
+    padding: 12px;
+  }
+
+  .bars-title {
+    font-size: 16px;
+    margin-bottom: 12px;
+  }
+
+  .bar-row {
+    margin-bottom: 12px;
+  }
+
+  .view-info {
+    width: 50px !important;
+    margin-right: 8px;
+  }
+
+  .view-number {
+    font-size: 12px;
+  }
+
+  .view-signature {
+    font-size: 9px;
+  }
+
+  .bar-main {
+    height: 22px;
+  }
+
+  .bar-segment {
+    font-size: 10px;
+    padding: 0 6px;
+  }
+
+  .latency-text {
+    font-size: 9px;
+  }
+}
+
+/* Fix for Leaflet popups on mobile */
+.leaflet-popup-content {
+  margin: 8px;
+  min-width: 150px;
+}
+
+.leaflet-container {
+  font: inherit;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 4px;
 }
