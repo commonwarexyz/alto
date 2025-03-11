@@ -25,7 +25,7 @@ cargo install alto-inspector
 
 ## Usage
 
-_Use `-v` or `--verbose` to enable verbose logging. Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
+_Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
 
 ### Get the latest seed
 
