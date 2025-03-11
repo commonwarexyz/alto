@@ -45,19 +45,13 @@ interface ViewData {
 const TIMEOUT_DURATION = 2000; // 2 seconds
 
 // Custom marker icons - updated for monochrome style with circular appearance
-const createCustomIcon = (status: ViewStatus) => {
-  const color =
-    status === "growing" ? "#aaa" :
-      status === "notarized" ? "#d9ead3ff" :
-        status === "finalized" ? "#274e13ff" :
-          "#f4ccccff"; // timed_out
-
+const createCustomIcon = () => {
   return new DivIcon({
     className: "custom-div-icon",
     html: `<div style="
-      background-color: ${color};
-      width: 20px;
-      height: 20px;
+      background-color: #aaa;
+      width: 16px;
+      height: 16px;
       border-radius: 50%;
       border: 1px solid black;
     "></div>`,
@@ -459,7 +453,7 @@ const App: React.FC = () => {
               <Marker
                 key={views[0].view}
                 position={views[0].location}
-                icon={createCustomIcon(views[0].status)}
+                icon={createCustomIcon()}
               >
                 <Popup>
                   <div>
