@@ -4,6 +4,7 @@ mod block;
 pub use block::{Block, Finalized, Notarized};
 mod consensus;
 pub use consensus::{Finalization, Kind, Notarization, Nullification, Seed};
+pub mod wasm;
 
 // We don't use functions here to guard against silent changes.
 pub const NAMESPACE: &[u8] = b"_ALTO";
