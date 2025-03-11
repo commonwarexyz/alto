@@ -34,7 +34,7 @@ fn block_get_path(base: String, query: &Query) -> String {
     format!("{}/block/{}", base, query.serialize())
 }
 
-fn register_path(base: String) -> String {
+fn listen_path(base: String) -> String {
     format!("{}/consensus/ws", base)
 }
 
@@ -211,9 +211,9 @@ impl Client {
         Ok(result)
     }
 
-    pub async fn register(&self) -> Result<impl Stream<Item = Result<Message, Error>>, Error> {
+    pub async fn listen(&self) -> Result<impl Stream<Item = Result<Message, Error>>, Error> {
         // Connect to the websocket endpoint
-        let (stream, _) = connect_async(register_path(self.ws_uri.clone()))
+        let (stream, _) = connect_async(listen_path(self.ws_uri.clone()))
             .await
             .map_err(Error::from)?;
         let (_, read) = stream.split();
