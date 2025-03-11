@@ -40,7 +40,10 @@ pub struct FinalizedJs {
 
 #[wasm_bindgen]
 pub fn parse_seed(public_key: Option<Vec<u8>>, bytes: Vec<u8>) -> JsValue {
-    let public = public_key.and_then(|pk| PublicKey::try_from(pk).ok());
+    let mut public = None;
+    if let Some(pk) = public_key {
+        public = Some(PublicKey::try_from(pk).expect("invalid public key"));
+    }
     match Seed::deserialize(public.as_ref(), &bytes) {
         Some(s) => {
             let seed_js = SeedJs {
@@ -54,8 +57,11 @@ pub fn parse_seed(public_key: Option<Vec<u8>>, bytes: Vec<u8>) -> JsValue {
 }
 
 #[wasm_bindgen]
-pub fn parse_notarized(bytes: Vec<u8>, public_key: Option<Vec<u8>>) -> JsValue {
-    let public = public_key.and_then(|pk| PublicKey::try_from(pk).ok());
+pub fn parse_notarized(public_key: Option<Vec<u8>>, bytes: Vec<u8>) -> JsValue {
+    let mut public = None;
+    if let Some(pk) = public_key {
+        public = Some(PublicKey::try_from(pk).expect("invalid public key"));
+    }
     match Notarized::deserialize(public.as_ref(), &bytes) {
         Some(n) => {
             let notarized_js = NotarizedJs {
@@ -79,8 +85,11 @@ pub fn parse_notarized(bytes: Vec<u8>, public_key: Option<Vec<u8>>) -> JsValue {
 }
 
 #[wasm_bindgen]
-pub fn parse_finalized(bytes: Vec<u8>, public_key: Option<Vec<u8>>) -> JsValue {
-    let public = public_key.and_then(|pk| PublicKey::try_from(pk).ok());
+pub fn parse_finalized(public_key: Option<Vec<u8>>, bytes: Vec<u8>) -> JsValue {
+    let mut public = None;
+    if let Some(pk) = public_key {
+        public = Some(PublicKey::try_from(pk).expect("invalid public key"));
+    }
     match Finalized::deserialize(public.as_ref(), &bytes) {
         Some(f) => {
             let finalized_js = FinalizedJs {
