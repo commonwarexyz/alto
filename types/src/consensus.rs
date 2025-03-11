@@ -2,7 +2,7 @@ use crate::{FINALIZE_NAMESPACE, NOTARIZE_NAMESPACE, NULLIFY_NAMESPACE, SEED_NAME
 use bytes::{Buf, BufMut};
 use commonware_cryptography::sha256::Digest;
 use commonware_cryptography::{bls12381, Bls12381, Scheme};
-use commonware_utils::{hex, Array, SizedSerialize};
+use commonware_utils::{hex, modulo, Array, SizedSerialize};
 
 // We hardcode the keys here to guard against silent changes.
 #[repr(u8)]
@@ -288,4 +288,8 @@ impl SizedSerialize for Finalization {
         + u64::SERIALIZED_LEN
         + Digest::SERIALIZED_LEN
         + bls12381::Signature::SERIALIZED_LEN;
+}
+
+pub fn leader_index(seed: &[u8], participants: usize) -> usize {
+    modulo(seed, participants as u64) as usize
 }

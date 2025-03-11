@@ -1,3 +1,4 @@
+use alto_types::leader_index;
 use commonware_consensus::{
     threshold_simplex::View, Activity, Proof, Supervisor as Su, ThresholdSupervisor as TSu,
 };
@@ -8,7 +9,6 @@ use commonware_cryptography::{
     },
     ed25519::PublicKey,
 };
-use commonware_utils::modulo;
 use std::collections::HashMap;
 
 /// Implementation of `commonware-consensus::Supervisor`.
@@ -73,8 +73,8 @@ impl TSu for Supervisor {
 
     fn leader(&self, _: Self::Index, seed: Self::Seed) -> Option<Self::PublicKey> {
         let seed = seed.serialize();
-        let index = modulo(&seed, self.participants.len() as u64);
-        Some(self.participants[index as usize].clone())
+        let index = leader_index(&seed, self.participants.len());
+        Some(self.participants[index].clone())
     }
 
     fn identity(&self, _: Self::Index) -> Option<&Self::Identity> {

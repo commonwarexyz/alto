@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { LatLng, DivIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
-import init, { parse_seed, parse_notarized, parse_finalized } from "./alto_types/alto_types.js";
+import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
 import { WS_URL, PUBLIC_KEY, LOCATIONS } from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, BlockJs } from "./types";
 import "./App.css";
@@ -235,7 +235,7 @@ const App: React.FC = () => {
       }
 
       // Create the new view data
-      const locationIndex = view % LOCATIONS.length;
+      const locationIndex = leader_index(seed.signature, LOCATIONS.length);
       const newView: ViewData = {
         view,
         location: LOCATIONS[locationIndex][0],
