@@ -75,11 +75,11 @@ async fn main() {
                         .help("Hex-encoded public key of the identity"),
                 )
                 .arg(
-                    Arg::new("times")
-                        .long("times")
-                        .help("Number of times to make the request")
+                    Arg::new("prepare")
+                        .long("prepare")
+                        .help("Prepare the connection for some request to get a more accurate latency observation")
                         .required(false)
-                        .value_parser(value_parser!(usize)),
+                        .action(clap::ArgAction::SetTrue),
                 ),
         )
         .get_matches();
@@ -120,7 +120,6 @@ async fn main() {
     }
     // Handle 'get' subcommand
     else if let Some(matches) = matches.subcommand_matches("get") {
-        let times = *matches.get_one::<usize>("times").unwrap_or(&1usize);
         let type_ = matches.get_one::<String>("type").unwrap();
         let query_str = matches.get_one::<String>("query").unwrap();
         let indexer = matches.get_one::<String>("indexer").unwrap();
@@ -128,48 +127,51 @@ async fn main() {
         let identity = from_hex_formatted(identity).expect("Failed to decode identity");
         let identity = PublicKey::try_from(identity).expect("Invalid identity");
         let client = Client::new(indexer, identity);
+        let prepare_flag = matches.get_flag("prepare");
 
-        for time in 0..times {
-            if times > 1 {
-                info!(current = time + 1, max = times, "request");
+        // Prepare the connection
+        if prepare_flag {
+            client.health().await.expect("Failed to prepare connection");
+            info!("connection prepared");
+        }
+
+        // Service the request
+        let start = std::time::Instant::now();
+        match type_.as_str() {
+            "seed" => {
+                let query = parse_index_query(query_str).expect("Invalid query");
+                let seed = client.seed_get(query).await.expect("Failed to get seed");
+                log_latency(start);
+                log_seed(seed);
             }
-            let start = std::time::Instant::now();
-            match type_.as_str() {
-                "seed" => {
-                    let query = parse_index_query(query_str).expect("Invalid query");
-                    let seed = client.seed_get(query).await.expect("Failed to get seed");
-                    log_latency(start);
-                    log_seed(seed);
-                }
-                "notarization" => {
-                    let query = parse_index_query(query_str).expect("Invalid query");
-                    let notarized = client
-                        .notarization_get(query)
-                        .await
-                        .expect("Failed to get notarization");
-                    log_latency(start);
-                    log_notarization(notarized);
-                }
-                "finalization" => {
-                    let query = parse_index_query(query_str).expect("Invalid query");
-                    let finalized = client
-                        .finalization_get(query)
-                        .await
-                        .expect("Failed to get finalization");
-                    log_latency(start);
-                    log_finalization(finalized);
-                }
-                "block" => {
-                    let query = parse_query(query_str).expect("Invalid query");
-                    let payload = client.block_get(query).await.expect("Failed to get block");
-                    log_latency(start);
-                    match payload {
-                        Payload::Finalized(finalized) => log_finalization(*finalized),
-                        Payload::Block(block) => log_block(block),
-                    }
-                }
-                _ => unreachable!(),
+            "notarization" => {
+                let query = parse_index_query(query_str).expect("Invalid query");
+                let notarized = client
+                    .notarization_get(query)
+                    .await
+                    .expect("Failed to get notarization");
+                log_latency(start);
+                log_notarization(notarized);
             }
+            "finalization" => {
+                let query = parse_index_query(query_str).expect("Invalid query");
+                let finalized = client
+                    .finalization_get(query)
+                    .await
+                    .expect("Failed to get finalization");
+                log_latency(start);
+                log_finalization(finalized);
+            }
+            "block" => {
+                let query = parse_query(query_str).expect("Invalid query");
+                let payload = client.block_get(query).await.expect("Failed to get block");
+                log_latency(start);
+                match payload {
+                    Payload::Finalized(finalized) => log_finalization(*finalized),
+                    Payload::Block(block) => log_block(block),
+                }
+            }
+            _ => unreachable!(),
         }
     }
 }
