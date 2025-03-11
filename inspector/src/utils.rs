@@ -5,39 +5,66 @@ use commonware_utils::{SizedSerialize, SystemTimeExt};
 use std::time;
 use tracing::{debug, info};
 
+// Define enums for query kinds
+pub enum IndexQueryKind {
+    Single(IndexQuery),
+    Range(u64, u64),
+}
+
+pub enum QueryKind {
+    Single(Query),
+    Range(u64, u64),
+}
+
 // Parse IndexQuery for seed, notarization, and finalization
-pub fn parse_index_query(query: &str) -> Option<IndexQuery> {
+pub fn parse_index_query(query: &str) -> Option<IndexQueryKind> {
     if query == "latest" {
-        Some(IndexQuery::Latest)
+        Some(IndexQueryKind::Single(IndexQuery::Latest))
+    } else if let Some((start, end)) = parse_range(query) {
+        Some(IndexQueryKind::Range(start, end))
     } else if let Ok(index) = query.parse::<u64>() {
-        Some(IndexQuery::Index(index))
+        Some(IndexQueryKind::Single(IndexQuery::Index(index)))
     } else {
         None
     }
 }
 
 // Parse Query for block
-pub fn parse_query(query: &str) -> Option<Query> {
+pub fn parse_query(query: &str) -> Option<QueryKind> {
     if query == "latest" {
-        Some(Query::Latest)
+        Some(QueryKind::Single(Query::Latest))
+    } else if let Some((start, end)) = parse_range(query) {
+        Some(QueryKind::Range(start, end))
     } else if let Ok(index) = query.parse::<u64>() {
-        Some(Query::Index(index))
+        Some(QueryKind::Single(Query::Index(index)))
     } else {
-        let bytes = commonware_utils::from_hex(query).expect("Failed to decode hex");
-        let digest: [u8; Digest::SERIALIZED_LEN] = bytes.try_into().expect("Invalid digest length");
-        Some(Query::Digest(digest.into()))
+        let bytes = commonware_utils::from_hex(query)?;
+        let digest: [u8; Digest::SERIALIZED_LEN] = bytes.try_into().ok()?;
+        Some(QueryKind::Single(Query::Digest(digest.into())))
     }
 }
 
-const MS_PER_SECOND: u64 = 1000;
-const MS_PER_HOUR: u64 = 3_600_000; // 60 * 60 * 1000
-const MS_PER_DAY: u64 = 86_400_000; // 24 * 3_600_000
+// Helper function to parse range queries
+fn parse_range(query: &str) -> Option<(u64, u64)> {
+    let parts: Vec<&str> = query.split("..").collect();
+    if parts.len() == 2 {
+        let start = parts[0].parse::<u64>().ok()?;
+        let end = parts[1].parse::<u64>().ok()?;
+        if start <= end {
+            Some((start, end))
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
 
-/// Formats the age in milliseconds into a human-readable string.
-/// - Less than 1 second: "Xms" (e.g., "500ms")
-/// - Less than 1 hour: "X.Ys" (e.g., "5.0s")
-/// - Less than 1 day: "X.Yh" (e.g., "19.1h")
-/// - Otherwise: "Xd Yh" (e.g., "2d 3h")
+// Existing logging functions remain unchanged
+const MS_PER_SECOND: u64 = 1000;
+const MS_PER_HOUR: u64 = 3_600_000;
+const MS_PER_DAY: u64 = 86_400_000;
+
 pub fn format_age(age: u64) -> String {
     if age < MS_PER_SECOND {
         format!("{}ms", age)

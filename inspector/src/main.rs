@@ -1,6 +1,6 @@
 use alto_client::{
     consensus::{Message, Payload},
-    Client,
+    Client, IndexQuery, Query,
 };
 use clap::{value_parser, Arg, Command};
 use commonware_cryptography::bls12381::PublicKey;
@@ -9,14 +9,13 @@ use futures::StreamExt;
 use tracing::{info, Level};
 use utils::{
     log_block, log_finalization, log_latency, log_notarization, log_seed, parse_index_query,
-    parse_query,
+    parse_query, IndexQueryKind, QueryKind,
 };
 
 mod utils;
 
 #[tokio::main]
 async fn main() {
-    // Define CLI structure with subcommands
     let matches = Command::new("inspector")
         .about("Monitor alto activity.")
         .arg(
@@ -58,7 +57,7 @@ async fn main() {
                     Arg::new("query")
                         .required(true)
                         .value_parser(value_parser!(String))
-                        .help("Query parameter (e.g., 'latest', number, or hex digest for block)"),
+                        .help("Query parameter (e.g., 'latest', number, range like '23..45', or hex digest for block)"),
                 )
                 .arg(
                     Arg::new("indexer")
@@ -84,7 +83,6 @@ async fn main() {
         )
         .get_matches();
 
-    // Set logging level based on verbosity flag
     let log_level = if matches.get_flag("verbose") {
         Level::DEBUG
     } else {
@@ -92,7 +90,6 @@ async fn main() {
     };
     tracing_subscriber::fmt().with_max_level(log_level).init();
 
-    // Handle 'listen' subcommand
     if let Some(matches) = matches.subcommand_matches("listen") {
         let indexer = matches.get_one::<String>("indexer").unwrap();
         let identity = matches.get_one::<String>("identity").unwrap();
@@ -100,26 +97,17 @@ async fn main() {
         let identity = PublicKey::try_from(identity).expect("Invalid identity");
         let client = Client::new(indexer, identity);
 
-        // Stream consensus messages
         let mut stream = client.listen().await.expect("Failed to connect to indexer");
         info!("listening for consensus messages...");
         while let Some(message) = stream.next().await {
             let message = message.expect("Failed to receive message");
             match message {
-                Message::Seed(seed) => {
-                    log_seed(seed);
-                }
-                Message::Notarization(notarized) => {
-                    log_notarization(notarized);
-                }
-                Message::Finalization(finalized) => {
-                    log_finalization(finalized);
-                }
+                Message::Seed(seed) => log_seed(seed),
+                Message::Notarization(notarized) => log_notarization(notarized),
+                Message::Finalization(finalized) => log_finalization(finalized),
             }
         }
-    }
-    // Handle 'get' subcommand
-    else if let Some(matches) = matches.subcommand_matches("get") {
+    } else if let Some(matches) = matches.subcommand_matches("get") {
         let type_ = matches.get_one::<String>("type").unwrap();
         let query_str = matches.get_one::<String>("query").unwrap();
         let indexer = matches.get_one::<String>("indexer").unwrap();
@@ -129,46 +117,109 @@ async fn main() {
         let client = Client::new(indexer, identity);
         let prepare_flag = matches.get_flag("prepare");
 
-        // Prepare the connection
         if prepare_flag {
             client.health().await.expect("Failed to prepare connection");
             info!("connection prepared");
         }
 
-        // Service the request
-        let start = std::time::Instant::now();
         match type_.as_str() {
             "seed" => {
-                let query = parse_index_query(query_str).expect("Invalid query");
-                let seed = client.seed_get(query).await.expect("Failed to get seed");
-                log_latency(start);
-                log_seed(seed);
+                let query_kind = parse_index_query(query_str).expect("Invalid query");
+                match query_kind {
+                    IndexQueryKind::Single(query) => {
+                        let start = std::time::Instant::now();
+                        let seed = client.seed_get(query).await.expect("Failed to get seed");
+                        log_latency(start);
+                        log_seed(seed);
+                    }
+                    IndexQueryKind::Range(start_view, end_view) => {
+                        for view in start_view..end_view {
+                            let start = std::time::Instant::now();
+                            let query = IndexQuery::Index(view);
+                            let seed = client.seed_get(query).await.expect("Failed to get seed");
+                            log_latency(start);
+                            log_seed(seed);
+                        }
+                    }
+                }
             }
             "notarization" => {
-                let query = parse_index_query(query_str).expect("Invalid query");
-                let notarized = client
-                    .notarization_get(query)
-                    .await
-                    .expect("Failed to get notarization");
-                log_latency(start);
-                log_notarization(notarized);
+                let query_kind = parse_index_query(query_str).expect("Invalid query");
+                match query_kind {
+                    IndexQueryKind::Single(query) => {
+                        let start = std::time::Instant::now();
+                        let notarized = client
+                            .notarization_get(query)
+                            .await
+                            .expect("Failed to get notarization");
+                        log_latency(start);
+                        log_notarization(notarized);
+                    }
+                    IndexQueryKind::Range(start_view, end_view) => {
+                        for view in start_view..end_view {
+                            let start = std::time::Instant::now();
+                            let query = IndexQuery::Index(view);
+                            let notarized = client
+                                .notarization_get(query)
+                                .await
+                                .expect("Failed to get notarization");
+                            log_latency(start);
+                            log_notarization(notarized);
+                        }
+                    }
+                }
             }
             "finalization" => {
-                let query = parse_index_query(query_str).expect("Invalid query");
-                let finalized = client
-                    .finalization_get(query)
-                    .await
-                    .expect("Failed to get finalization");
-                log_latency(start);
-                log_finalization(finalized);
+                let query_kind = parse_index_query(query_str).expect("Invalid query");
+                match query_kind {
+                    IndexQueryKind::Single(query) => {
+                        let start = std::time::Instant::now();
+                        let finalized = client
+                            .finalization_get(query)
+                            .await
+                            .expect("Failed to get finalization");
+                        log_latency(start);
+                        log_finalization(finalized);
+                    }
+                    IndexQueryKind::Range(start_view, end_view) => {
+                        for view in start_view..end_view {
+                            let start = std::time::Instant::now();
+                            let query = IndexQuery::Index(view);
+                            let finalized = client
+                                .finalization_get(query)
+                                .await
+                                .expect("Failed to get finalization");
+                            log_latency(start);
+                            log_finalization(finalized);
+                        }
+                    }
+                }
             }
             "block" => {
-                let query = parse_query(query_str).expect("Invalid query");
-                let payload = client.block_get(query).await.expect("Failed to get block");
-                log_latency(start);
-                match payload {
-                    Payload::Finalized(finalized) => log_finalization(*finalized),
-                    Payload::Block(block) => log_block(block),
+                let query_kind = parse_query(query_str).expect("Invalid query");
+                match query_kind {
+                    QueryKind::Single(query) => {
+                        let start = std::time::Instant::now();
+                        let payload = client.block_get(query).await.expect("Failed to get block");
+                        log_latency(start);
+                        match payload {
+                            Payload::Finalized(finalized) => log_finalization(*finalized),
+                            Payload::Block(block) => log_block(block),
+                        }
+                    }
+                    QueryKind::Range(start_height, end_height) => {
+                        for height in start_height..end_height {
+                            let start = std::time::Instant::now();
+                            let query = Query::Index(height);
+                            let payload =
+                                client.block_get(query).await.expect("Failed to get block");
+                            log_latency(start);
+                            match payload {
+                                Payload::Finalized(finalized) => log_finalization(*finalized),
+                                Payload::Block(block) => log_block(block),
+                            }
+                        }
+                    }
                 }
             }
             _ => unreachable!(),

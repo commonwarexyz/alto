@@ -39,6 +39,12 @@ inspector get seed latest --indexer <indexer URL> --identity <identity>
 inspector get notarization 100 --indexer <indexer URL> --identity <identity>
 ```
 
+### Get the notarizations between views 100 to 110
+
+```bash
+inspector get notarization 100..110 --indexer <indexer URL> --identity <identity>
+```
+
 ### Get the finalization for view 50
 
 ```bash
@@ -55,6 +61,12 @@ inspector get block latest --indexer <indexer URL> --identity <identity>
 
 ```bash
 inspector get block 10 --indexer <indexer URL> --identity <identity>
+```
+
+### Get the blocks between heights 10 and 20
+
+```bash
+inspector get block 10..20 --indexer <indexer URL> --identity <identity>
 ```
 
 ### Get the block with a specific digest
