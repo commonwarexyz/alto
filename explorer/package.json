@@ -1,6 +1,6 @@
 {
   "name": "explorer",
-  "version": "0.0.1",
+  "version": "0.0.4",
   "private": true,
   "dependencies": {
     "@testing-library/dom": "^10.4.0",
