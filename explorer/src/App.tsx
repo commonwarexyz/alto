@@ -76,6 +76,7 @@ const App: React.FC = () => {
   const [views, setViews] = useState<ViewData[]>([]);
   const [lastObservedView, setLastObservedView] = useState<number | null>(null);
   const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
   const currentTimeRef = useRef(Date.now());
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -310,6 +311,7 @@ const App: React.FC = () => {
 
       ws.onopen = () => {
         console.log("WebSocket connected");
+        setIsConnected(true);
       };
 
       ws.onmessage = (event) => {
@@ -335,10 +337,12 @@ const App: React.FC = () => {
 
       ws.onerror = (error) => {
         console.error("WebSocket error:", error);
+        setIsConnected(false);
       };
 
       ws.onclose = () => {
         console.log("WebSocket closed, trying to reconnect in 5 seconds");
+        setIsConnected(false);
         setTimeout(connectWebSocket, 5000);
       };
     };
@@ -396,6 +400,10 @@ const App: React.FC = () => {
             <span className="horizontal-logo-symbol">-</span>
             <span className="edge-logo-symbol">+</span>
           </div>
+        </div>
+        <div className="connection-status">
+          <div className={`status-indicator ${isConnected ? "connected" : "disconnected"}`}></div>
+          <span>{isConnected ? "Connected" : "Disconnected"}</span>
         </div>
       </header>
 

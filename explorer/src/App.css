@@ -473,3 +473,26 @@ body {
     margin-right: 0;
   }
 }
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  margin-top: 10px;
+  align-self: flex-end;
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.status-indicator.connected {
+  background: #000;
+}
+
+.status-indicator.disconnected {
+  background: #888;
+}
