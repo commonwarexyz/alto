@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
-import { MapContainer, TileLayer, Marker } from "react-leaflet";
-import { LatLng } from "leaflet";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { LatLng, Icon, DivIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized } from "./alto_types/alto_types.js";
 import { WS_URL, PUBLIC_KEY } from "./config";
@@ -20,11 +20,18 @@ const locations: [number, number][] = [
   [31.2304, 121.4737],  // Shanghai
 ];
 
+// Location names for popups
+const locationNames: string[] = [
+  "San Francisco", "London", "Tokyo", "Sydney", "Moscow",
+  "Sao Paulo", "New Delhi", "New York", "Mexico City", "Shanghai"
+];
+
 type ViewStatus = "growing" | "notarized" | "finalized" | "timed_out";
 
 interface ViewData {
   view: number;
   location: [number, number];
+  locationName: string;
   status: ViewStatus;
   startTime: number;
   notarizationTime?: number;
@@ -35,28 +42,83 @@ interface ViewData {
 }
 
 const TIMEOUT_DURATION = 10000; // 10 seconds
+// We'll only display the latest view on the map
+
+// Custom marker icons
+const createCustomIcon = (status: ViewStatus) => {
+  const color =
+    status === "growing" ? "#808080" :
+      status === "notarized" ? "#4CAF50" :
+        status === "finalized" ? "#1B5E20" :
+          "#F44336"; // timed_out
+
+  return new DivIcon({
+    className: "custom-div-icon",
+    html: `<div style="
+      background-color: ${color};
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 2px solid white;
+      box-shadow: 0 0 4px rgba(0,0,0,0.4);
+    "></div>`,
+    iconSize: [15, 15],
+    iconAnchor: [8, 8]
+  });
+};
 
 const App: React.FC = () => {
   const [views, setViews] = useState<ViewData[]>([]);
   const [lastObservedView, setLastObservedView] = useState<number | null>(null);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [statsData, setStatsData] = useState({
+    totalViews: 0,
+    finalized: 0,
+    notarized: 0,
+    growing: 0,
+    timedOut: 0
+  });
   const currentTimeRef = useRef(Date.now());
+  const wsRef = useRef<WebSocket | null>(null);
 
-  // Update current time every 100ms and force re-render for growing bars
+  // Update current time every 100ms to force re-render for growing bars
   useEffect(() => {
     const interval = setInterval(() => {
       currentTimeRef.current = Date.now();
-      // Trigger re-render by updating views with a new array reference
-      setViews((prev) => [...prev]);
+      // Force re-render without relying on state updates
+      setViews(views => [...views]);
     }, 100);
     return () => clearInterval(interval);
   }, []);
+
+  // Update stats whenever views change
+  useEffect(() => {
+    const stats = {
+      totalViews: views.length,
+      finalized: views.filter((v: ViewData) => v.status === "finalized").length,
+      notarized: views.filter((v: ViewData) => v.status === "notarized").length,
+      growing: views.filter((v: ViewData) => v.status === "growing").length,
+      timedOut: views.filter((v: ViewData) => v.status === "timed_out").length
+    };
+    setStatsData(stats);
+  }, [views]);
 
   // Initialize WebSocket
   useEffect(() => {
     const setup = async () => {
       await init();
+      connectWebSocket();
+    };
+
+    const connectWebSocket = () => {
       const ws = new WebSocket(WS_URL);
+      wsRef.current = ws;
       ws.binaryType = "arraybuffer";
+
+      ws.onopen = () => {
+        console.log("WebSocket connected");
+        setIsConnected(true);
+      };
 
       ws.onmessage = (event) => {
         const data = new Uint8Array(event.data);
@@ -79,11 +141,25 @@ const App: React.FC = () => {
         }
       };
 
-      ws.onerror = () => console.error("WebSocket error");
-      ws.onclose = () => console.log("WebSocket closed");
+      ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+        setIsConnected(false);
+      };
+
+      ws.onclose = () => {
+        console.log("WebSocket closed, trying to reconnect in 5 seconds");
+        setIsConnected(false);
+        setTimeout(connectWebSocket, 5000);
+      };
     };
 
     setup();
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
   }, []);
 
   const handleSeed = (seed: SeedJs) => {
@@ -94,9 +170,11 @@ const App: React.FC = () => {
       // Handle skipped views
       if (lastObservedView !== null && view > lastObservedView + 1) {
         for (let missedView = lastObservedView + 1; missedView < view; missedView++) {
+          const locationIndex = missedView % locations.length;
           newViews.unshift({
             view: missedView,
-            location: locations[missedView % locations.length],
+            location: locations[locationIndex],
+            locationName: locationNames[locationIndex],
             status: "timed_out",
             startTime: Date.now(),
           });
@@ -104,9 +182,11 @@ const App: React.FC = () => {
       }
 
       // Add new view
+      const locationIndex = view % locations.length;
       const newView: ViewData = {
         view,
-        location: locations[view % locations.length],
+        location: locations[locationIndex],
+        locationName: locationNames[locationIndex],
         status: "growing",
         startTime: Date.now(),
         signature: seed.signature,
@@ -143,10 +223,12 @@ const App: React.FC = () => {
           ...prevViews.slice(index + 1),
         ];
       }
-      // If view doesn’t exist, create it
+      // If view doesn't exist, create it
+      const locationIndex = view % locations.length;
       return [{
         view,
-        location: locations[view % locations.length],
+        location: locations[locationIndex],
+        locationName: locationNames[locationIndex],
         status: "notarized",
         startTime: Date.now(),
         notarizationTime: Date.now(),
@@ -175,10 +257,12 @@ const App: React.FC = () => {
           ...prevViews.slice(index + 1),
         ];
       }
-      // If view doesn’t exist, create it
+      // If view doesn't exist, create it
+      const locationIndex = view % locations.length;
       return [{
         view,
-        location: locations[view % locations.length],
+        location: locations[locationIndex],
+        locationName: locationNames[locationIndex],
         status: "finalized",
         startTime: Date.now(),
         finalizationTime: Date.now(),
@@ -188,26 +272,189 @@ const App: React.FC = () => {
   };
 
   // Define center using LatLng
-  const center = new LatLng(0, 0);
+  const center = new LatLng(20, 0);
 
   return (
-    <div style={{ padding: "20px", background: "#1a1a1a", color: "#fff", fontFamily: "Arial" }}>
-      <h1 style={{ textAlign: "center", color: "#00ff99" }}>Alto Blockchain Explorer</h1>
+    <div style={{
+      padding: "0",
+      background: "#121212",
+      color: "#eee",
+      fontFamily: "Inter, system-ui, sans-serif",
+      minHeight: "100vh"
+    }}>
+      <header style={{
+        padding: "20px",
+        background: "#1c1c1c",
+        borderBottom: "1px solid #333",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center"
+      }}>
+        <h1 style={{
+          margin: 0,
+          fontSize: "28px",
+          fontWeight: "600",
+          background: "linear-gradient(to right, #00ff99, #33ccff)",
+          WebkitBackgroundClip: "text",
+          WebkitTextFillColor: "transparent"
+        }}>
+          Alto Blockchain Explorer
+        </h1>
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "10px"
+        }}>
+          <div style={{
+            width: "10px",
+            height: "10px",
+            borderRadius: "50%",
+            background: isConnected ? "#4CAF50" : "#F44336"
+          }}></div>
+          <span>{isConnected ? "Connected" : "Disconnected"}</span>
+        </div>
+      </header>
 
-      {/* Map */}
-      <div style={{ height: "400px", marginBottom: "20px" }}>
-        <MapContainer center={center} zoom={1} style={{ height: "100%", width: "100%" }}>
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          {views.length > 0 && <Marker position={views[0].location} />}
-        </MapContainer>
-      </div>
+      <main style={{ padding: "20px" }}>
+        {/* Stats Cards */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: "20px",
+          marginBottom: "20px"
+        }}>
+          <StatCard title="Total Views" value={statsData.totalViews} color="#90CAF9" />
+          <StatCard title="Finalized" value={statsData.finalized} color="#81C784" />
+          <StatCard title="Notarized" value={statsData.notarized} color="#AED581" />
+          <StatCard title="Growing" value={statsData.growing} color="#E0E0E0" />
+          <StatCard title="Timed Out" value={statsData.timedOut} color="#EF9A9A" />
+        </div>
 
-      {/* Bars */}
-      <div>
-        {views.slice(0, 100).map((viewData) => (
-          <Bar key={viewData.view} viewData={viewData} currentTime={currentTimeRef.current} />
-        ))}
-      </div>
+        {/* Map */}
+        <div style={{
+          height: "400px",
+          marginBottom: "20px",
+          borderRadius: "8px",
+          overflow: "hidden",
+          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)"
+        }}>
+          <MapContainer center={center} zoom={2} style={{ height: "100%", width: "100%" }}>
+            <TileLayer
+              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            />
+            {views.length > 0 && (
+              <Marker
+                key={views[0].view}
+                position={views[0].location}
+                icon={createCustomIcon(views[0].status)}
+              >
+                <Popup>
+                  <div>
+                    <strong>View: {views[0].view}</strong><br />
+                    Location: {views[0].locationName}<br />
+                    Status: {views[0].status}<br />
+                    {views[0].block && (
+                      <>Block Height: {views[0].block.height}<br /></>
+                    )}
+                    {views[0].startTime && (
+                      <>Start Time: {new Date(views[0].startTime).toLocaleTimeString()}<br /></>
+                    )}
+                  </div>
+                </Popup>
+              </Marker>
+            )}
+          </MapContainer>
+        </div>
+
+        {/* Legend */}
+        <div style={{
+          display: "flex",
+          gap: "15px",
+          marginBottom: "20px",
+          padding: "10px",
+          background: "#1c1c1c",
+          borderRadius: "6px"
+        }}>
+          <LegendItem color="#808080" label="Growing" />
+          <LegendItem color="#4CAF50" label="Notarized" />
+          <LegendItem color="#1B5E20" label="Finalized" />
+          <LegendItem color="#F44336" label="Timed Out" />
+        </div>
+
+        {/* Bars */}
+        <div style={{
+          background: "#1c1c1c",
+          borderRadius: "8px",
+          padding: "20px",
+          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)"
+        }}>
+          <h2 style={{
+            margin: "0 0 20px 0",
+            fontSize: "20px",
+            fontWeight: "500"
+          }}>
+            Consensus Views
+          </h2>
+          {views.slice(0, 100).map((viewData) => (
+            <Bar key={viewData.view} viewData={viewData} currentTime={currentTimeRef.current} />
+          ))}
+        </div>
+      </main>
+    </div>
+  );
+};
+
+interface StatCardProps {
+  title: string;
+  value: number;
+  color: string;
+}
+
+const StatCard: React.FC<StatCardProps> = ({ title, value, color }) => {
+  return (
+    <div style={{
+      background: "#1c1c1c",
+      borderRadius: "8px",
+      padding: "15px",
+      boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+      borderLeft: `4px solid ${color}`
+    }}>
+      <h3 style={{
+        margin: "0 0 10px 0",
+        color: "#aaa",
+        fontSize: "14px",
+        fontWeight: "400"
+      }}>
+        {title}
+      </h3>
+      <p style={{
+        margin: 0,
+        fontSize: "24px",
+        fontWeight: "600",
+        color: "#fff"
+      }}>
+        {value}
+      </p>
+    </div>
+  );
+};
+
+interface LegendItemProps {
+  color: string;
+  label: string;
+}
+
+const LegendItem: React.FC<LegendItemProps> = ({ color, label }) => {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+      <div style={{
+        width: "12px",
+        height: "12px",
+        background: color,
+        borderRadius: "3px"
+      }}></div>
+      <span style={{ fontSize: "14px" }}>{label}</span>
     </div>
   );
 };
@@ -224,70 +471,102 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
   const growthRate = maxWidth / TIMEOUT_DURATION; // pixels per ms
 
   let width: number;
-  let color: string;
+  let backgroundColor: string;
   let text: string = "";
+  let borderColor: string = "transparent";
 
   if (status === "growing") {
     const elapsed = currentTime - startTime;
     width = Math.min(elapsed * growthRate, maxWidth);
-    color = "grey";
+    backgroundColor = "#555";
     text = `Latency: ${(elapsed / 1000).toFixed(1)}s`;
-  } else if (status === "notarized" || status === "finalized") {
-    const endTime = finalizationTime || notarizationTime!;
+  } else if (status === "notarized") {
+    const endTime = notarizationTime!;
     const latency = (endTime - startTime) / 1000;
-    width = (endTime - startTime) * growthRate;
-    color = "green";
-    text = `${status === "finalized" ? "Finalized" : "Notarized"} | Latency: ${latency.toFixed(1)}s | Height: ${block?.height} | Digest: ${shortenUint8Array(block?.digest)}`;
+    width = Math.min((endTime - startTime) * growthRate, maxWidth);
+    backgroundColor = "#4CAF50";
+    text = `Notarized | Latency: ${latency.toFixed(1)}s | Height: ${block?.height} | Digest: ${shortenUint8Array(block?.digest)}`;
+    borderColor = "#2E7D32";
+  } else if (status === "finalized") {
+    const endTime = finalizationTime!;
+    const latency = (endTime - startTime) / 1000;
+    width = Math.min((endTime - startTime) * growthRate, maxWidth);
+    backgroundColor = "#388E3C";
+    text = `Finalized | Latency: ${latency.toFixed(1)}s | Height: ${block?.height} | Digest: ${shortenUint8Array(block?.digest)}`;
+    borderColor = "#1B5E20";
   } else {
     width = maxWidth;
-    color = "red";
+    backgroundColor = "#F44336";
     text = "TIMED OUT";
+    borderColor = "#D32F2F";
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", marginBottom: "10px" }}>
-      <div style={{ width: "100px", textAlign: "right", marginRight: "10px" }}>
-        <div>{view}</div>
-        <div style={{ fontSize: "0.8em" }}>
+    <div style={{
+      display: "flex",
+      alignItems: "center",
+      marginBottom: "12px",
+      fontSize: "14px"
+    }}>
+      <div style={{
+        width: "80px",
+        textAlign: "right",
+        marginRight: "15px",
+        flexShrink: 0
+      }}>
+        <div style={{
+          fontWeight: "500",
+          color: "#fff"
+        }}>
+          {view}
+        </div>
+        <div style={{
+          fontSize: "12px",
+          color: "#888",
+          textOverflow: "ellipsis",
+          overflow: "hidden"
+        }}>
           {signature ? shortenUint8Array(signature) : "Skipped"}
         </div>
       </div>
-      <div
-        style={{
-          height: "20px",
-          backgroundColor: color,
-          width: `${width}px`,
-          position: "relative",
-          transition: "width 0.1s linear",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "white",
-            fontSize: "0.9em",
-          }}
-        >
+      <div style={{
+        height: "24px",
+        backgroundColor,
+        width: `${width}px`,
+        position: "relative",
+        transition: "width 0.1s linear, background-color 0.3s ease",
+        borderRadius: "4px",
+        overflow: "hidden",
+        border: `1px solid ${borderColor}`,
+        boxShadow: "0 1px 3px rgba(0,0,0,0.2)"
+      }}>
+        <div style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: "flex",
+          alignItems: "center",
+          padding: "0 10px",
+          color: "white",
+          fontSize: "13px",
+          textShadow: "0 1px 2px rgba(0,0,0,0.5)",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis"
+        }}>
           {text}
         </div>
         {status === "finalized" && (
-          <div
-            style={{
-              position: "absolute",
-              right: 0,
-              top: 0,
-              bottom: 0,
-              width: "5px",
-              backgroundColor: "darkgreen",
-            }}
-          />
+          <div style={{
+            position: "absolute",
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: "5px",
+            backgroundColor: "#1B5E20",
+          }} />
         )}
       </div>
     </div>
