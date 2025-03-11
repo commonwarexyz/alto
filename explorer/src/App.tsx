@@ -44,13 +44,13 @@ interface ViewData {
 
 const TIMEOUT_DURATION = 2000; // 2 seconds
 
-// Custom marker icons
+// Custom marker icons - updated for monochrome style
 const createCustomIcon = (status: ViewStatus) => {
   const color =
-    status === "growing" ? "#808080" :
-      status === "notarized" ? "#4CAF50" :
-        status === "finalized" ? "#1B5E20" :
-          "#F44336"; // timed_out
+    status === "growing" ? "#aaa" :
+      status === "notarized" ? "#666" :
+        status === "finalized" ? "#000" :
+          "#ccc"; // timed_out
 
   return new DivIcon({
     className: "custom-div-icon",
@@ -59,11 +59,42 @@ const createCustomIcon = (status: ViewStatus) => {
       width: 12px;
       height: 12px;
       border-radius: 50%;
-      border: 2px solid white;
-      box-shadow: 0 0 4px rgba(0,0,0,0.4);
+      border: 1px solid black;
     "></div>`,
     iconSize: [15, 15],
     iconAnchor: [8, 8]
+  });
+};
+
+// ASCII Logo animation logic
+const initializeLogoAnimations = () => {
+  const horizontalSymbols = [" ", "*", "+", "-", "~"];
+  const verticalSymbols = [" ", "*", "+", "|"];
+  const edgeSymbols = [" ", "*", "+"];
+
+  function getRandomItem(arr: string[]) {
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  function getRandomDuration(min: number) {
+    return Math.random() * (10000 - min) + min;
+  }
+
+  function updateSymbol(symbol: Element, choices: string[]) {
+    symbol.textContent = getRandomItem(choices);
+    setTimeout(() => updateSymbol(symbol, choices), getRandomDuration(500));
+  }
+
+  document.querySelectorAll('.horizontal-logo-symbol').forEach(symbol => {
+    setTimeout(() => updateSymbol(symbol, horizontalSymbols), getRandomDuration(1500));
+  });
+
+  document.querySelectorAll('.vertical-logo-symbol').forEach(symbol => {
+    setTimeout(() => updateSymbol(symbol, verticalSymbols), getRandomDuration(1500));
+  });
+
+  document.querySelectorAll('.edge-logo-symbol').forEach(symbol => {
+    setTimeout(() => updateSymbol(symbol, edgeSymbols), getRandomDuration(1500));
   });
 };
 
@@ -81,6 +112,11 @@ const App: React.FC = () => {
   const [isMobile, setIsMobile] = useState<boolean>(false);
   const currentTimeRef = useRef(Date.now());
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Initialize logo animations
+  useEffect(() => {
+    initializeLogoAnimations();
+  }, []);
 
   // Check for mobile viewport
   useEffect(() => {
@@ -374,7 +410,45 @@ const App: React.FC = () => {
   return (
     <div className="app-container">
       <header className="app-header">
-        <h1 className="app-title">Alto</h1>
+        <div className="logo-container">
+          <div className="logo-line">
+            <span className="edge-logo-symbol">+</span>
+            <span className="horizontal-logo-symbol">~</span>
+            <span className="horizontal-logo-symbol"> </span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="horizontal-logo-symbol">+</span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="horizontal-logo-symbol">+</span>
+            <span className="horizontal-logo-symbol"> </span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="horizontal-logo-symbol">+</span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="horizontal-logo-symbol">~</span>
+            <span className="horizontal-logo-symbol">~</span>
+            <span className="edge-logo-symbol">*</span>
+          </div>
+          <div className="logo-line">
+            <span className="vertical-logo-symbol">|</span>
+            <span className="logo-text"> alto </span>
+            <span className="vertical-logo-symbol"> </span>
+          </div>
+          <div className="logo-line">
+            <span className="edge-logo-symbol">*</span>
+            <span className="horizontal-logo-symbol">~</span>
+            <span className="horizontal-logo-symbol">+</span>
+            <span className="horizontal-logo-symbol">+</span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="horizontal-logo-symbol"> </span>
+            <span className="horizontal-logo-symbol">~</span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="horizontal-logo-symbol">+</span>
+            <span className="horizontal-logo-symbol"> </span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="horizontal-logo-symbol">*</span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="edge-logo-symbol">+</span>
+          </div>
+        </div>
         <div className="connection-status">
           <div className={`status-indicator ${isConnected ? "connected" : "disconnected"}`}></div>
           <span>{isConnected ? "Connected" : "Disconnected"}</span>
@@ -386,7 +460,7 @@ const App: React.FC = () => {
         <div className="map-container">
           <MapContainer center={center} zoom={isMobile ? 1 : 2} style={{ height: "100%", width: "100%" }}>
             <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             />
             {views.length > 0 && (
@@ -415,10 +489,10 @@ const App: React.FC = () => {
 
         {/* Legend */}
         <div className="legend-container">
-          <LegendItem color="#555" label="Seed to Notarized" />
-          <LegendItem color="#2E7D32" label="Notarized to Finalized" />
-          <LegendItem color="#1B5E20" label="Finalization Point" />
-          <LegendItem color="#F44336" label="Timed Out" />
+          <LegendItem color="#aaa" label="Seed to Notarized" />
+          <LegendItem color="#666" label="Notarized to Finalized" />
+          <LegendItem color="#000" label="Finalization Point" />
+          <LegendItem color="#ccc" label="Timed Out" />
         </div>
 
         {/* Bars */}
@@ -436,6 +510,15 @@ const App: React.FC = () => {
           </div>
         </div>
       </main>
+
+      <footer className="footer">
+        <div className="socials">
+          <a href="#">Documentation</a>
+          <a href="#">GitHub</a>
+          <a href="#">Benchmarks</a>
+        </div>
+        &copy; {new Date().getFullYear()} Commonware, Inc. All rights reserved.
+      </footer>
     </div>
   );
 };

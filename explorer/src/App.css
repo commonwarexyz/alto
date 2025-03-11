@@ -7,7 +7,7 @@
 
 body {
   margin: 0;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Consolas', monospace;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -15,38 +15,37 @@ body {
 /* Main container */
 .app-container {
   padding: 0;
-  background: #121212;
-  color: #eee;
+  background-color: white;
+  color: black;
   min-height: 100vh;
   width: 100%;
   overflow-x: hidden;
+  max-width: 800px;
+  margin: 0 auto;
 }
 
 /* Header styles */
 .app-header {
   padding: 16px;
-  background: #1c1c1c;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid #ddd;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-direction: column;
 }
 
 .app-title {
-  margin: 0;
-  font-size: clamp(22px, 5vw, 28px);
-  font-weight: 600;
-  background: linear-gradient(to right, #00ff99, #33ccff);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  display: none;
+  /* Hidden as we'll use the ASCII logo instead */
 }
 
 .connection-status {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: clamp(12px, 3vw, 14px);
+  font-size: 14px;
+  margin-top: 10px;
+  align-self: flex-end;
 }
 
 .status-indicator {
@@ -56,11 +55,22 @@ body {
 }
 
 .status-indicator.connected {
-  background: #4CAF50;
+  background: #000;
 }
 
 .status-indicator.disconnected {
-  background: #F44336;
+  background: #888;
+}
+
+/* Logo styling */
+.logo-container {
+  width: 100%;
+}
+
+.logo-line {
+  display: flex;
+  font-size: 1.4em;
+  white-space: pre;
 }
 
 /* Main content area */
@@ -75,9 +85,14 @@ body {
 .map-container {
   height: 300px;
   margin-bottom: 16px;
-  border-radius: 8px;
+  border: 1px solid #ccc;
+  border-radius: 0;
   overflow: hidden;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Override Leaflet styles for monochrome look */
+.leaflet-container {
+  background-color: white !important;
 }
 
 /* Legend */
@@ -87,8 +102,9 @@ body {
   gap: 12px;
   margin-bottom: 16px;
   padding: 10px;
-  background: #1c1c1c;
-  border-radius: 6px;
+  background: white;
+  border: 1px solid #ccc;
+  font-family: 'Consolas', monospace;
 }
 
 .legend-item {
@@ -100,7 +116,7 @@ body {
 .legend-color {
   width: 12px;
   height: 12px;
-  border-radius: 3px;
+  border: 1px solid black;
 }
 
 .legend-label {
@@ -110,21 +126,19 @@ body {
 
 /* Bars container */
 .bars-container {
-  background: #1c1c1c;
-  border-radius: 8px;
+  background: white;
+  border: 1px solid #ccc;
   padding: 12px 8px 12px 12px;
-  /* Asymmetric padding: top right bottom left */
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   width: 100%;
   overflow-x: hidden;
-  /* Prevent horizontal scrolling */
   max-width: 100%;
 }
 
 .bars-title {
   margin: 0 0 16px 0;
   font-size: 18px;
-  font-weight: 500;
+  font-weight: normal;
+  font-family: 'Consolas', monospace;
 }
 
 .bars-list {
@@ -141,6 +155,7 @@ body {
   font-size: 14px;
   width: 100%;
   max-width: 100%;
+  font-family: 'Consolas', monospace;
 }
 
 .view-info {
@@ -150,13 +165,13 @@ body {
 }
 
 .view-number {
-  font-weight: 500;
-  color: #fff;
+  font-weight: normal;
+  color: black;
 }
 
 .view-signature {
   font-size: 11px;
-  color: #888;
+  color: #444;
   text-overflow: ellipsis;
   overflow: hidden;
 }
@@ -166,21 +181,18 @@ body {
   flex-grow: 1;
   max-width: calc(100% - 60px);
   overflow: hidden;
-  /* Ensure no overflow */
   width: 100%;
 }
 
 .bar-main {
-  height: 26px;
+  height: 24px;
   position: relative;
-  border-radius: 4px;
+  border-radius: 0;
   overflow: hidden;
   transition: width 0.1s linear;
-  /* Smoother transition */
-  background-color: #333;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  background-color: #eee;
+  border: 1px solid #ccc;
   max-width: 100%;
-  /* Ensure it doesn't exceed container */
 }
 
 .bar-segment {
@@ -188,11 +200,11 @@ body {
   top: 0;
   left: 0;
   height: 100%;
-  border-radius: 4px;
+  border-radius: 0;
   display: flex;
   align-items: center;
   padding: 0 10px;
-  color: white;
+  color: black;
   font-size: 12px;
   overflow: hidden;
   white-space: nowrap;
@@ -200,19 +212,22 @@ body {
 }
 
 .bar-segment.growing {
-  background-color: #555;
+  background-color: #ddd;
+  border-right: 1px solid #aaa;
 }
 
 .bar-segment.finalized {
-  background-color: #2E7D32;
+  background-color: #aaa;
   z-index: 1;
+  border-right: 1px solid #888;
 }
 
 .bar-segment.timed-out {
-  background-color: #F44336;
+  background-color: #ccc;
   width: 100% !important;
   right: 0;
   max-width: 100%;
+  text-decoration: line-through;
 }
 
 .marker {
@@ -224,12 +239,12 @@ body {
 }
 
 .notarization-marker {
-  background-color: #555;
+  background-color: black;
 }
 
 .finalization-marker {
-  width: 3px;
-  background-color: #1B5E20;
+  width: 2px;
+  background-color: black;
   z-index: 3;
 }
 
@@ -241,16 +256,49 @@ body {
 
 .latency-text {
   position: absolute;
-  color: #aaa;
+  color: #444;
   font-size: 11px;
   white-space: nowrap;
   transition: left 0.1s linear;
+}
+
+/* Custom marker icons - monochrome versions */
+.custom-div-icon {
+  border: 1px solid black !important;
+  background-color: white !important;
+}
+
+/* Footer */
+.footer {
+  text-align: left;
+  padding: 10px 16px;
+  border-top: 1px solid #ddd;
+  margin-top: 20px;
+}
+
+.footer .socials {
+  margin-bottom: 10px;
+}
+
+.footer .socials a {
+  margin-right: 10px;
+  color: black;
+  text-decoration: none;
+}
+
+.footer .socials a:hover {
+  text-decoration: underline;
 }
 
 /* Media Queries */
 @media (min-width: 768px) {
   .app-header {
     padding: 20px;
+    flex-direction: row;
+  }
+
+  .connection-status {
+    margin-top: 0;
   }
 
   .app-main {
@@ -314,7 +362,6 @@ body {
 
   .bars-container {
     padding: 10px 4px 10px 12px;
-    /* Asymmetric: top right bottom left */
   }
 
   .bars-title {
@@ -359,10 +406,12 @@ body {
   }
 }
 
-/* Fix for Leaflet popups on mobile */
+/* Fix for Leaflet popups */
 .leaflet-popup-content {
   margin: 8px;
   min-width: 150px;
+  font-family: 'Consolas', monospace;
+  color: black;
 }
 
 .leaflet-container {
@@ -370,5 +419,11 @@ body {
 }
 
 .leaflet-popup-content-wrapper {
-  border-radius: 4px;
+  border-radius: 0;
+  border: 1px solid #ccc;
+}
+
+/* Style override for map tiles to use monochrome */
+.leaflet-tile {
+  filter: grayscale(100%) !important;
 }
