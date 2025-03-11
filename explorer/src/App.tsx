@@ -44,33 +44,57 @@ interface ViewData {
 
 const TIMEOUT_DURATION = 2000; // 2 seconds
 
-// Custom marker icons
-const createCustomIcon = (status: ViewStatus) => {
-  const color =
-    status === "growing" ? "#808080" :
-      status === "notarized" ? "#4CAF50" :
-        status === "finalized" ? "#1B5E20" :
-          "#F44336"; // timed_out
-
+// Custom marker icons - updated for monochrome style with circular appearance
+const createCustomIcon = () => {
   return new DivIcon({
     className: "custom-div-icon",
     html: `<div style="
-      background-color: ${color};
-      width: 12px;
-      height: 12px;
+      background-color: #aaa;
+      width: 16px;
+      height: 16px;
       border-radius: 50%;
-      border: 2px solid white;
-      box-shadow: 0 0 4px rgba(0,0,0,0.4);
+      border: 1px solid black;
     "></div>`,
-    iconSize: [15, 15],
-    iconAnchor: [8, 8]
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+  });
+};
+
+// ASCII Logo animation logic
+const initializeLogoAnimations = () => {
+  const horizontalSymbols = [" ", "*", "+", "-", "~"];
+  const verticalSymbols = [" ", "*", "+", "|"];
+  const edgeSymbols = [" ", "*", "+"];
+
+  function getRandomItem(arr: string[]) {
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  function getRandomDuration(min: number) {
+    return Math.random() * (10000 - min) + min;
+  }
+
+  function updateSymbol(symbol: Element, choices: string[]) {
+    symbol.textContent = getRandomItem(choices);
+    setTimeout(() => updateSymbol(symbol, choices), getRandomDuration(500));
+  }
+
+  document.querySelectorAll('.horizontal-logo-symbol').forEach(symbol => {
+    setTimeout(() => updateSymbol(symbol, horizontalSymbols), getRandomDuration(1500));
+  });
+
+  document.querySelectorAll('.vertical-logo-symbol').forEach(symbol => {
+    setTimeout(() => updateSymbol(symbol, verticalSymbols), getRandomDuration(1500));
+  });
+
+  document.querySelectorAll('.edge-logo-symbol').forEach(symbol => {
+    setTimeout(() => updateSymbol(symbol, edgeSymbols), getRandomDuration(1500));
   });
 };
 
 const App: React.FC = () => {
   const [views, setViews] = useState<ViewData[]>([]);
   const [lastObservedView, setLastObservedView] = useState<number | null>(null);
-  const [isConnected, setIsConnected] = useState<boolean>(false);
   const [statsData, setStatsData] = useState({
     totalViews: 0,
     finalized: 0,
@@ -81,6 +105,11 @@ const App: React.FC = () => {
   const [isMobile, setIsMobile] = useState<boolean>(false);
   const currentTimeRef = useRef(Date.now());
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Initialize logo animations
+  useEffect(() => {
+    initializeLogoAnimations();
+  }, []);
 
   // Check for mobile viewport
   useEffect(() => {
@@ -135,7 +164,6 @@ const App: React.FC = () => {
 
       ws.onopen = () => {
         console.log("WebSocket connected");
-        setIsConnected(true);
       };
 
       ws.onmessage = (event) => {
@@ -161,12 +189,10 @@ const App: React.FC = () => {
 
       ws.onerror = (error) => {
         console.error("WebSocket error:", error);
-        setIsConnected(false);
       };
 
       ws.onclose = () => {
         console.log("WebSocket closed, trying to reconnect in 5 seconds");
-        setIsConnected(false);
         setTimeout(connectWebSocket, 5000);
       };
     };
@@ -374,10 +400,44 @@ const App: React.FC = () => {
   return (
     <div className="app-container">
       <header className="app-header">
-        <h1 className="app-title">Alto</h1>
-        <div className="connection-status">
-          <div className={`status-indicator ${isConnected ? "connected" : "disconnected"}`}></div>
-          <span>{isConnected ? "Connected" : "Disconnected"}</span>
+        <div className="logo-container">
+          <div className="logo-line">
+            <span className="edge-logo-symbol">+</span>
+            <span className="horizontal-logo-symbol">~</span>
+            <span className="horizontal-logo-symbol"> </span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="horizontal-logo-symbol">+</span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="horizontal-logo-symbol">+</span>
+            <span className="horizontal-logo-symbol"> </span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="horizontal-logo-symbol">+</span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="horizontal-logo-symbol">~</span>
+            <span className="horizontal-logo-symbol">~</span>
+            <span className="edge-logo-symbol">*</span>
+          </div>
+          <div className="logo-line">
+            <span className="vertical-logo-symbol">|</span>
+            <span className="logo-text"> commonware </span>
+            <span className="vertical-logo-symbol"> </span>
+          </div>
+          <div className="logo-line">
+            <span className="edge-logo-symbol">*</span>
+            <span className="horizontal-logo-symbol">~</span>
+            <span className="horizontal-logo-symbol">+</span>
+            <span className="horizontal-logo-symbol">+</span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="horizontal-logo-symbol"> </span>
+            <span className="horizontal-logo-symbol">~</span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="horizontal-logo-symbol">+</span>
+            <span className="horizontal-logo-symbol"> </span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="horizontal-logo-symbol">*</span>
+            <span className="horizontal-logo-symbol">-</span>
+            <span className="edge-logo-symbol">+</span>
+          </div>
         </div>
       </header>
 
@@ -386,14 +446,14 @@ const App: React.FC = () => {
         <div className="map-container">
           <MapContainer center={center} zoom={isMobile ? 1 : 2} style={{ height: "100%", width: "100%" }}>
             <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             />
             {views.length > 0 && (
               <Marker
                 key={views[0].view}
                 position={views[0].location}
-                icon={createCustomIcon(views[0].status)}
+                icon={createCustomIcon()}
               >
                 <Popup>
                   <div>
@@ -415,10 +475,10 @@ const App: React.FC = () => {
 
         {/* Legend */}
         <div className="legend-container">
-          <LegendItem color="#555" label="Seed to Notarized" />
-          <LegendItem color="#2E7D32" label="Notarized to Finalized" />
-          <LegendItem color="#1B5E20" label="Finalization Point" />
-          <LegendItem color="#F44336" label="Timed Out" />
+          <LegendItem color="#aaa" label="Seed to Notarized" />
+          <LegendItem color="#d9ead3ff" label="Notarized to Finalized" />
+          <LegendItem color="#274e13ff" label="Finalization Point" />
+          <LegendItem color="#f4ccccff" label="Nullified" />
         </div>
 
         {/* Bars */}
@@ -436,6 +496,10 @@ const App: React.FC = () => {
           </div>
         </div>
       </main>
+
+      <footer className="footer">
+        &copy; {new Date().getFullYear()} Commonware, Inc. All rights reserved.
+      </footer>
     </div>
   );
 };
@@ -552,7 +616,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     }
   } else {
     // Timed out
-    inBarText = "TIMED OUT";
+    inBarText = "NULLIFIED";
   }
 
   return (
@@ -560,7 +624,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
       <div className="view-info" style={{ width: `${viewInfoWidth}px` }}>
         <div className="view-number">{view}</div>
         <div className="view-signature">
-          {signature ? shortenUint8Array(signature) : "Skipped"}
+          {signature ? shortenUint8Array(signature) : ""}
         </div>
       </div>
 
@@ -589,16 +653,6 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
               style={{
                 left: `${notarizedWidth}px`,
                 width: `${finalizedWidth}px`,
-              }}
-            />
-          )}
-
-          {/* Marker for notarization point */}
-          {(status === "notarized" || status === "finalized") && (
-            <div
-              className="marker notarization-marker"
-              style={{
-                left: `${notarizedWidth - 1}px`,
               }}
             />
           )}
