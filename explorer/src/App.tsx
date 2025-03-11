@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { LatLng, DivIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
-import { WS_URL, PUBLIC_KEY, LOCATIONS } from "./config";
+import { WS_URL, PUBLIC_KEY, LOCATIONS, PUBLIC_KEY_HEX } from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, BlockJs } from "./types";
 import "./App.css";
 
@@ -418,6 +418,12 @@ const App: React.FC = () => {
       </header>
 
       <main className="app-main">
+        {/* Network Key */}
+        <div className="public-key-display">
+          <span className="public-key-label">Network Key:</span>
+          <span className="public-key-value">{PUBLIC_KEY_HEX}</span>
+        </div>
+
         {/* Map */}
         <div className="map-container">
           <MapContainer center={center} zoom={isMobile ? 1 : 2} style={{ height: "100%", width: "100%" }}>
@@ -459,7 +465,7 @@ const App: React.FC = () => {
 
         {/* Bars */}
         <div className="bars-container">
-          <h2 className="bars-title">Consensus Views</h2>
+          <h2 className="bars-title">Views</h2>
           <div className="bars-list">
             {views.slice(0, 100).map((viewData) => (
               <Bar
