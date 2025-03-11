@@ -455,17 +455,17 @@ const App: React.FC = () => {
           </MapContainer>
         </div>
 
-        {/* Legend */}
-        <div className="legend-container">
-          <LegendItem color="#aaa" label="Notarization" />
-          <LegendItem color="#d9ead3ff" label="Finalization" />
-          <LegendItem color="#274e13ff" label="Finalized" />
-          <LegendItem color="#f4ccccff" label="Skipped" />
-        </div>
-
-        {/* Bars */}
+        {/* Bars with integrated legend */}
         <div className="bars-container">
-          <h2 className="bars-title">Views</h2>
+          <div className="bars-header">
+            <h2 className="bars-title">Views</h2>
+            <div className="legend-container">
+              <LegendItem color="#aaa" label="Notarization" />
+              <LegendItem color="#d9ead3ff" label="Finalization" />
+              <LegendItem color="#274e13ff" label="Finalized" />
+              <LegendItem color="#f4ccccff" label="Skipped" />
+            </div>
+          </div>
           <div className="bars-list">
             {views.slice(0, 100).map((viewData) => (
               <Bar
