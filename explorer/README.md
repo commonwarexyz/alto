@@ -4,8 +4,7 @@
 
 ```typescript
 // TODO: Replace this with the indexer URL
-export const INDEXER_URL = "http://localhost:4000";
-export const WS_URL = "ws://localhost:4000/consensus/ws";
+export const INDEXER_URL = "ws://localhost:4000/consensus/ws";
 
 // TODO: Replace this with the consensus threshold key
 export const PUBLIC_KEY_HEX = "976ab7efaef8a73690b9067690ac7541bc34f74b2543e8db16b5bf63aec487758ca98efdf5c9fcf1154941d8a8a1ec3d";
