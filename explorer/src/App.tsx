@@ -42,7 +42,7 @@ interface ViewData {
   timeoutId?: NodeJS.Timeout;
 }
 
-const TIMEOUT_DURATION = 2000; // 2 seconds
+const TIMEOUT_DURATION = 1500; // 1.5 seconds
 
 // Custom marker icons - updated for monochrome style with circular appearance
 const createCustomIcon = () => {
@@ -475,10 +475,10 @@ const App: React.FC = () => {
 
         {/* Legend */}
         <div className="legend-container">
-          <LegendItem color="#aaa" label="Seed to Notarized" />
-          <LegendItem color="#d9ead3ff" label="Notarized to Finalized" />
-          <LegendItem color="#274e13ff" label="Finalization Point" />
-          <LegendItem color="#f4ccccff" label="Nullified" />
+          <LegendItem color="#aaa" label="Notarization" />
+          <LegendItem color="#d9ead3ff" label="Finalization" />
+          <LegendItem color="#274e13ff" label="Finalized" />
+          <LegendItem color="#f4ccccff" label="Skipped" />
         </div>
 
         {/* Bars */}
@@ -616,7 +616,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     }
   } else {
     // Timed out
-    inBarText = "NULLIFIED";
+    inBarText = "SKIPPED";
   }
 
   return (
