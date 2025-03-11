@@ -37,7 +37,10 @@
     },
     "env": {
       "es2020": true
-    }
+    },
+    "ignorePatterns": [
+      "src/alto_types/**/*.js"
+    ]
   },
   "browserslist": {
     "production": [

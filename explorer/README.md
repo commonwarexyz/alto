@@ -40,3 +40,9 @@ cd ../explorer
 ```bash
 npm start
 ```
+
+## Build the app
+
+```bash
+npm run build
+```

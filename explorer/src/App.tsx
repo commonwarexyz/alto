@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { LatLng, DivIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -75,13 +75,6 @@ const initializeLogoAnimations = () => {
 const App: React.FC = () => {
   const [views, setViews] = useState<ViewData[]>([]);
   const [lastObservedView, setLastObservedView] = useState<number | null>(null);
-  const [statsData, setStatsData] = useState({
-    totalViews: 0,
-    finalized: 0,
-    notarized: 0,
-    growing: 0,
-    timedOut: 0
-  });
   const [isMobile, setIsMobile] = useState<boolean>(false);
   const currentTimeRef = useRef(Date.now());
   const wsRef = useRef<WebSocket | null>(null);
@@ -108,85 +101,7 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Update current time every 100ms to force re-render for growing bars
-  useEffect(() => {
-    const interval = setInterval(() => {
-      currentTimeRef.current = Date.now();
-      // Force re-render without relying on state updates
-      setViews(views => [...views]);
-    }, 100);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Update stats whenever views change
-  useEffect(() => {
-    const stats = {
-      totalViews: views.length,
-      finalized: views.filter((v: ViewData) => v.status === "finalized").length,
-      notarized: views.filter((v: ViewData) => v.status === "notarized").length,
-      growing: views.filter((v: ViewData) => v.status === "growing").length,
-      timedOut: views.filter((v: ViewData) => v.status === "timed_out").length
-    };
-    setStatsData(stats);
-  }, [views]);
-
-  // Initialize WebSocket
-  useEffect(() => {
-    const setup = async () => {
-      await init();
-      connectWebSocket();
-    };
-
-    const connectWebSocket = () => {
-      const ws = new WebSocket(WS_URL);
-      wsRef.current = ws;
-      ws.binaryType = "arraybuffer";
-
-      ws.onopen = () => {
-        console.log("WebSocket connected");
-      };
-
-      ws.onmessage = (event) => {
-        const data = new Uint8Array(event.data);
-        const kind = data[0];
-        const payload = data.slice(1);
-
-        switch (kind) {
-          case 0: // Seed
-            const seed = parse_seed(PUBLIC_KEY, payload);
-            if (seed) handleSeed(seed);
-            break;
-          case 1: // Notarization
-            const notarized = parse_notarized(PUBLIC_KEY, payload);
-            if (notarized) handleNotarization(notarized);
-            break;
-          case 3: // Finalization
-            const finalized = parse_finalized(PUBLIC_KEY, payload);
-            if (finalized) handleFinalization(finalized);
-            break;
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error("WebSocket error:", error);
-      };
-
-      ws.onclose = () => {
-        console.log("WebSocket closed, trying to reconnect in 5 seconds");
-        setTimeout(connectWebSocket, 5000);
-      };
-    };
-
-    setup();
-
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, []);
-
-  const handleSeed = (seed: SeedJs) => {
+  const handleSeed = useCallback((seed: SeedJs) => {
     const view = seed.view + 1; // Next view is determined by seed - 1
 
     setViews((prevViews) => {
@@ -280,9 +195,9 @@ const App: React.FC = () => {
 
       return newViews;
     });
-  };
+  }, [lastObservedView]);
 
-  const handleNotarization = (notarized: NotarizedJs) => {
+  const handleNotarization = useCallback((notarized: NotarizedJs) => {
     const view = notarized.proof.view;
     setViews((prevViews) => {
       const index = prevViews.findIndex((v) => v.view === view);
@@ -324,9 +239,9 @@ const App: React.FC = () => {
         block: notarized.block,
       }, ...prevViews];
     });
-  };
+  }, []);
 
-  const handleFinalization = (finalized: FinalizedJs) => {
+  const handleFinalization = useCallback((finalized: FinalizedJs) => {
     const view = finalized.proof.view;
     setViews((prevViews) => {
       const index = prevViews.findIndex((v) => v.view === view);
@@ -368,7 +283,74 @@ const App: React.FC = () => {
         block: finalized.block,
       }, ...prevViews];
     });
-  };
+  }, []);
+
+
+  // Update current time every 100ms to force re-render for growing bars
+  useEffect(() => {
+    const interval = setInterval(() => {
+      currentTimeRef.current = Date.now();
+      // Force re-render without relying on state updates
+      setViews(views => [...views]);
+    }, 100);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Initialize WebSocket
+  useEffect(() => {
+    const setup = async () => {
+      await init();
+      connectWebSocket();
+    };
+
+    const connectWebSocket = () => {
+      const ws = new WebSocket(WS_URL);
+      wsRef.current = ws;
+      ws.binaryType = "arraybuffer";
+
+      ws.onopen = () => {
+        console.log("WebSocket connected");
+      };
+
+      ws.onmessage = (event) => {
+        const data = new Uint8Array(event.data);
+        const kind = data[0];
+        const payload = data.slice(1);
+
+        switch (kind) {
+          case 0: // Seed
+            const seed = parse_seed(PUBLIC_KEY, payload);
+            if (seed) handleSeed(seed);
+            break;
+          case 1: // Notarization
+            const notarized = parse_notarized(PUBLIC_KEY, payload);
+            if (notarized) handleNotarization(notarized);
+            break;
+          case 3: // Finalization
+            const finalized = parse_finalized(PUBLIC_KEY, payload);
+            if (finalized) handleFinalization(finalized);
+            break;
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+      };
+
+      ws.onclose = () => {
+        console.log("WebSocket closed, trying to reconnect in 5 seconds");
+        setTimeout(connectWebSocket, 5000);
+      };
+    };
+
+    setup();
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [handleSeed, handleNotarization, handleFinalization]);
 
   // Define center using LatLng
   const center = new LatLng(20, 0);
