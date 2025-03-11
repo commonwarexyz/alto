@@ -25,6 +25,8 @@ cargo install alto-inspector
 
 ## Usage
 
+_Use `-v` or `--verbose` to enable verbose logging. Use `--times` to perform some operation multiple times using a pre-established connection._
+
 ### Get the latest seed
 
 ```bash
@@ -59,4 +61,10 @@ inspector get block 10 --indexer <indexer URL> --identity <identity>
 
 ```bash
 inspector -- get block 0x65016ff40e824e21fffe903953c07b6d604dbcf39f681c62e7b3ed57ab1d1994 --indexer <indexer URL> --identity <identity>
+```
+
+### Listen for consensus events
+
+```bash
+inspector listen --indexer <indexer URL> --identity <identity>
 ```

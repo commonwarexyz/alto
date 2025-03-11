@@ -99,3 +99,10 @@ pub fn log_block(block: alto_types::Block) {
         "block"
     );
 }
+
+pub fn log_latency(start: time::Instant) {
+    let elapsed = start.elapsed();
+    let elapsed_ms = elapsed.as_millis();
+    let elapsed_str = format_age(elapsed_ms as u64);
+    info!(elapsed = %elapsed_str, "latency");
+}

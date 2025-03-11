@@ -6,21 +6,27 @@ use clap::{value_parser, Arg, Command};
 use commonware_cryptography::bls12381::PublicKey;
 use commonware_utils::from_hex_formatted;
 use futures::StreamExt;
-use tracing::info;
+use tracing::{info, Level};
 use utils::{
-    log_block, log_finalization, log_notarization, log_seed, parse_index_query, parse_query,
+    log_block, log_finalization, log_latency, log_notarization, log_seed, parse_index_query,
+    parse_query,
 };
 
 mod utils;
 
 #[tokio::main]
 async fn main() {
-    // Initialize logger
-    tracing_subscriber::fmt().init();
-
     // Define CLI structure with subcommands
     let matches = Command::new("inspector")
         .about("Monitor alto activity.")
+        .arg(
+            Arg::new("verbose")
+                .short('v')
+                .long("verbose")
+                .help("Enable debug logging")
+                .global(true)
+                .action(clap::ArgAction::SetTrue),
+        )
         .subcommand(
             Command::new("listen")
                 .about("Listen for consensus messages")
@@ -67,9 +73,24 @@ async fn main() {
                         .required(true)
                         .value_parser(value_parser!(String))
                         .help("Hex-encoded public key of the identity"),
+                )
+                .arg(
+                    Arg::new("times")
+                        .long("times")
+                        .help("Number of times to make the request")
+                        .required(false)
+                        .value_parser(value_parser!(usize)),
                 ),
         )
         .get_matches();
+
+    // Set logging level based on verbosity flag
+    let log_level = if matches.get_flag("verbose") {
+        Level::DEBUG
+    } else {
+        Level::INFO
+    };
+    tracing_subscriber::fmt().with_max_level(log_level).init();
 
     // Handle 'listen' subcommand
     if let Some(matches) = matches.subcommand_matches("listen") {
@@ -99,6 +120,7 @@ async fn main() {
     }
     // Handle 'get' subcommand
     else if let Some(matches) = matches.subcommand_matches("get") {
+        let times = *matches.get_one::<usize>("times").unwrap_or(&1usize);
         let type_ = matches.get_one::<String>("type").unwrap();
         let query_str = matches.get_one::<String>("query").unwrap();
         let indexer = matches.get_one::<String>("indexer").unwrap();
@@ -107,37 +129,47 @@ async fn main() {
         let identity = PublicKey::try_from(identity).expect("Invalid identity");
         let client = Client::new(indexer, identity);
 
-        match type_.as_str() {
-            "seed" => {
-                let query = parse_index_query(query_str).expect("Invalid query");
-                let seed = client.seed_get(query).await.expect("Failed to get seed");
-                log_seed(seed);
+        for time in 0..times {
+            if times > 1 {
+                info!(current = time + 1, max = times, "request");
             }
-            "notarization" => {
-                let query = parse_index_query(query_str).expect("Invalid query");
-                let notarized = client
-                    .notarization_get(query)
-                    .await
-                    .expect("Failed to get notarization");
-                log_notarization(notarized);
-            }
-            "finalization" => {
-                let query = parse_index_query(query_str).expect("Invalid query");
-                let finalized = client
-                    .finalization_get(query)
-                    .await
-                    .expect("Failed to get finalization");
-                log_finalization(finalized);
-            }
-            "block" => {
-                let query = parse_query(query_str).expect("Invalid query");
-                let payload = client.block_get(query).await.expect("Failed to get block");
-                match payload {
-                    Payload::Finalized(finalized) => log_finalization(*finalized),
-                    Payload::Block(block) => log_block(block),
+            let start = std::time::Instant::now();
+            match type_.as_str() {
+                "seed" => {
+                    let query = parse_index_query(query_str).expect("Invalid query");
+                    let seed = client.seed_get(query).await.expect("Failed to get seed");
+                    log_latency(start);
+                    log_seed(seed);
                 }
+                "notarization" => {
+                    let query = parse_index_query(query_str).expect("Invalid query");
+                    let notarized = client
+                        .notarization_get(query)
+                        .await
+                        .expect("Failed to get notarization");
+                    log_latency(start);
+                    log_notarization(notarized);
+                }
+                "finalization" => {
+                    let query = parse_index_query(query_str).expect("Invalid query");
+                    let finalized = client
+                        .finalization_get(query)
+                        .await
+                        .expect("Failed to get finalization");
+                    log_latency(start);
+                    log_finalization(finalized);
+                }
+                "block" => {
+                    let query = parse_query(query_str).expect("Invalid query");
+                    let payload = client.block_get(query).await.expect("Failed to get block");
+                    log_latency(start);
+                    match payload {
+                        Payload::Finalized(finalized) => log_finalization(*finalized),
+                        Payload::Block(block) => log_block(block),
+                    }
+                }
+                _ => unreachable!(),
             }
-            _ => unreachable!(),
         }
     }
 }
