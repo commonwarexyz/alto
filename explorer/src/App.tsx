@@ -41,7 +41,7 @@ interface ViewData {
   timeoutId?: NodeJS.Timeout;
 }
 
-const TIMEOUT_DURATION = 1000; // 1 second
+const TIMEOUT_DURATION = 3000; // 3 seconds
 // We'll only display the latest view on the map
 
 // Custom marker icons
@@ -555,39 +555,37 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
 
   // Format timing texts
   let inBarText = ""; // Text to display inside the bar (block info only)
-  let latencyText = ""; // Text to display below the bar (timing info)
+  let notarizedLatencyText = ""; // Text to display below the notarized point
+  let finalizedLatencyText = ""; // Text to display below the finalized point
+  let growingLatencyText = ""; // Text to display below the growing bar tip
 
   if (status === "growing") {
     const elapsed = currentTime - startTime;
-    latencyText = `${(elapsed / 1000).toFixed(2)}s`;
+    growingLatencyText = `${Math.round(elapsed)}ms`;
   } else if (status === "notarized") {
-    const latency = notarizationTime ? (notarizationTime - startTime) / 1000 : 0;
-    latencyText = `${latency.toFixed(2)}s`;
+    const latency = notarizationTime ? (notarizationTime - startTime) : 0;
+    notarizedLatencyText = `${Math.round(latency)}ms`;
     if (block) {
       inBarText = `#${block.height} | 0x${shortenUint8Array(block.digest, 6)}`;
     }
   } else if (status === "finalized") {
     // Get seed to notarization time
-    const notarizeLatency = notarizationTime ? (notarizationTime - startTime) / 1000 : 0;
-    // Get notarization to finalization time
-    const finalizeLatency = (finalizationTime && notarizationTime) ?
-      (finalizationTime - notarizationTime) / 1000 : 0;
+    const notarizeLatency = notarizationTime ? (notarizationTime - startTime) : 0;
+    // Get total time (seed to finalization)
+    const totalLatency = finalizationTime ? (finalizationTime - startTime) : 0;
 
-    // Position timing text at appropriate positions
+    // Set latency text
+    notarizedLatencyText = `${Math.round(notarizeLatency)}ms`;
+    finalizedLatencyText = `${Math.round(totalLatency)}ms`; // Show total time at finalization point
+
+    // Set block info
     if (block) {
       inBarText = `#${block.height} | 0x${shortenUint8Array(block.digest, 6)}`;
     }
-
-    latencyText = `${notarizeLatency.toFixed(2)}s`;
   } else {
     // Timed out
     inBarText = "TIMED OUT";
   }
-
-  // Get display status text
-  const statusText = status === "growing" ? "" :
-    status === "notarized" ? "Notarized" :
-      status === "finalized" ? "Finalized" : "";
 
   return (
     <div style={{
@@ -666,7 +664,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
             }} />
           )}
 
-          {/* Marker for notarization point */}
+          {/* Marker for notarization point - now same color as base bar */}
           {(status === "notarized" || status === "finalized") && (
             <div style={{
               position: "absolute",
@@ -674,7 +672,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
               top: 0,
               bottom: 0,
               width: "2px",
-              backgroundColor: "#4CAF50", // Green
+              backgroundColor: "#555", // Same as base bar color
               zIndex: 2
             }} />
           )}
@@ -691,25 +689,6 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
               zIndex: 3
             }} />
           )}
-
-          {/* Status text overlay only for notarized/finalized */}
-          {statusText && (
-            <div style={{
-              position: "absolute",
-              top: 0,
-              left: status === "finalized" ? `${notarizedWidth + 5}px` : "10px",
-              height: "100%",
-              display: "flex",
-              alignItems: "center",
-              color: "white",
-              fontSize: "13px",
-              fontWeight: "bold",
-              textShadow: "0 1px 2px rgba(0,0,0,0.5)",
-              zIndex: 4
-            }}>
-              {statusText}
-            </div>
-          )}
         </div>
 
         {/* Timing information underneath */}
@@ -723,7 +702,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
               fontSize: "12px",
               whiteSpace: "nowrap"
             }}>
-              {latencyText}
+              {notarizedLatencyText}
             </div>
           )}
 
@@ -737,12 +716,12 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
               whiteSpace: "nowrap",
               transition: "left 0.1s linear"
             }}>
-              {latencyText}
+              {growingLatencyText}
             </div>
           )}
 
-          {/* Finalization latency marker */}
-          {status === "finalized" && finalizedWidth > 0 && (
+          {/* Total latency marker for finalized views */}
+          {status === "finalized" && (
             <div style={{
               position: "absolute",
               left: `${totalWidth - 30}px`, // Position under the finalization marker
@@ -750,8 +729,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
               fontSize: "12px",
               whiteSpace: "nowrap"
             }}>
-              {(finalizationTime && notarizationTime) ?
-                `${((finalizationTime - notarizationTime) / 1000).toFixed(2)}s` : ""}
+              {finalizedLatencyText}
             </div>
           )}
         </div>
