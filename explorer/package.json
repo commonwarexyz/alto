@@ -12,8 +12,6 @@
     "@types/node": "^16.18.126",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
-    "chart.js": "^4.4.8",
-    "chartjs-adapter-date-fns": "^3.0.0",
     "leaflet": "^1.9.4",
     "react": "^19.0.0",
     "react-chartjs-2": "^5.3.0",
