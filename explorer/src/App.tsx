@@ -560,7 +560,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
       <div className="view-info" style={{ width: `${viewInfoWidth}px` }}>
         <div className="view-number">{view}</div>
         <div className="view-signature">
-          {signature ? shortenUint8Array(signature, isMobile ? 4 : 6) : "Skipped"}
+          {signature ? shortenUint8Array(signature) : "Skipped"}
         </div>
       </div>
 
@@ -662,17 +662,17 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   );
 };
 
-function shortenUint8Array(arr: Uint8Array | undefined, length: number = 3): string {
+function shortenUint8Array(arr: Uint8Array | undefined): string {
   if (!arr || arr.length === 0) return "";
 
   // Convert the entire array to hex
   const fullHex = Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
 
   // Get first 'length' bytes (2 hex chars per byte)
-  const firstPart = fullHex.slice(0, length);
+  const firstPart = fullHex.slice(0, 3);
 
   // Get last 'length' bytes
-  const lastPart = fullHex.slice(-length);
+  const lastPart = fullHex.slice(-3);
 
   // Return formatted string with first and last parts
   return `${firstPart}..${lastPart}`;
