@@ -56,8 +56,8 @@ const createCustomIcon = (status: ViewStatus) => {
     className: "custom-div-icon",
     html: `<div style="
       background-color: ${color};
-      width: 12px;
-      height: 12px;
+      width: 20px;
+      height: 20px;
       border-radius: 50%;
       border: 1px solid black;
     "></div>`,
