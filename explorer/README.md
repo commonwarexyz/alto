@@ -46,3 +46,10 @@ npm start
 ```bash
 npm run build
 ```
+
+## Run the production app
+
+```bash
+npm install -g serve
+serve -s build
+```

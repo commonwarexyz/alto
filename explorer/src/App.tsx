@@ -292,7 +292,7 @@ const App: React.FC = () => {
       currentTimeRef.current = Date.now();
       // Force re-render without relying on state updates
       setViews(views => [...views]);
-    }, 100);
+    }, 10);
     return () => clearInterval(interval);
   }, []);
 

@@ -175,7 +175,7 @@ body {
   position: relative;
   border-radius: 0;
   overflow: hidden;
-  transition: width 0.1s linear;
+  transition: width 0.01s linear;
   background-color: #eee;
   border: 1px solid #ccc;
   max-width: 100%;
@@ -245,7 +245,7 @@ body {
   color: #444;
   font-size: 11px;
   white-space: nowrap;
-  transition: left 0.1s linear;
+  transition: left 0.01s linear;
 }
 
 /* Custom marker icons - pure circles without box container */
