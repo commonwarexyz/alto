@@ -6,7 +6,7 @@ use clap::{value_parser, Arg, Command};
 use commonware_cryptography::bls12381::PublicKey;
 use commonware_utils::from_hex_formatted;
 use futures::StreamExt;
-use tracing::{info, Level};
+use tracing::{info, warn, Level};
 use utils::{
     log_block, log_finalization, log_latency, log_notarization, log_seed, parse_index_query,
     parse_query, IndexQueryKind, QueryKind,
@@ -136,9 +136,15 @@ async fn main() {
                         for view in start_view..end_view {
                             let start = std::time::Instant::now();
                             let query = IndexQuery::Index(view);
-                            let seed = client.seed_get(query).await.expect("Failed to get seed");
-                            log_latency(start);
-                            log_seed(seed);
+                            match client.seed_get(query).await {
+                                Ok(seed) => {
+                                    log_latency(start);
+                                    log_seed(seed);
+                                }
+                                Err(e) => {
+                                    warn!(view, error=?e, "failed to get seed");
+                                }
+                            }
                         }
                     }
                 }
@@ -159,12 +165,15 @@ async fn main() {
                         for view in start_view..end_view {
                             let start = std::time::Instant::now();
                             let query = IndexQuery::Index(view);
-                            let notarized = client
-                                .notarization_get(query)
-                                .await
-                                .expect("Failed to get notarization");
-                            log_latency(start);
-                            log_notarization(notarized);
+                            match client.notarization_get(query).await {
+                                Ok(notarized) => {
+                                    log_latency(start);
+                                    log_notarization(notarized);
+                                }
+                                Err(e) => {
+                                    warn!(view, error=?e, "failed to get notarization");
+                                }
+                            }
                         }
                     }
                 }
@@ -185,12 +194,15 @@ async fn main() {
                         for view in start_view..end_view {
                             let start = std::time::Instant::now();
                             let query = IndexQuery::Index(view);
-                            let finalized = client
-                                .finalization_get(query)
-                                .await
-                                .expect("Failed to get finalization");
-                            log_latency(start);
-                            log_finalization(finalized);
+                            match client.finalization_get(query).await {
+                                Ok(finalized) => {
+                                    log_latency(start);
+                                    log_finalization(finalized);
+                                }
+                                Err(e) => {
+                                    warn!(view, error=?e, "failed to get finalization");
+                                }
+                            }
                         }
                     }
                 }
@@ -211,12 +223,19 @@ async fn main() {
                         for height in start_height..end_height {
                             let start = std::time::Instant::now();
                             let query = Query::Index(height);
-                            let payload =
-                                client.block_get(query).await.expect("Failed to get block");
-                            log_latency(start);
-                            match payload {
-                                Payload::Finalized(finalized) => log_finalization(*finalized),
-                                Payload::Block(block) => log_block(block),
+                            match client.block_get(query).await {
+                                Ok(payload) => {
+                                    log_latency(start);
+                                    match payload {
+                                        Payload::Finalized(finalized) => {
+                                            log_finalization(*finalized)
+                                        }
+                                        Payload::Block(block) => log_block(block),
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!(height, error=?e, "failed to get block");
+                                }
                             }
                         }
                     }
