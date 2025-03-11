@@ -41,8 +41,7 @@ interface ViewData {
   timeoutId?: NodeJS.Timeout;
 }
 
-const TIMEOUT_DURATION = 1500; // 1.5 seconds
-// We'll only display the latest view on the map
+const TIMEOUT_DURATION = 2000; // 2 seconds
 
 // Custom marker icons
 const createCustomIcon = (status: ViewStatus) => {
@@ -164,25 +163,39 @@ const App: React.FC = () => {
 
   const handleSeed = (seed: SeedJs) => {
     const view = seed.view + 1; // Next view is determined by seed - 1
+
     setViews((prevViews) => {
+      // Create a copy of the current views that we'll modify
       let newViews = [...prevViews];
 
-      // Handle skipped views
-      if (lastObservedView !== null && view > lastObservedView + 1) {
-        for (let missedView = lastObservedView + 1; missedView < view; missedView++) {
+      // If we haven't observed any views yet, or if the new view is greater than the last observed view + 1,
+      // handle potentially missed views
+      if (lastObservedView === null || view > lastObservedView + 1) {
+        const startViewIndex = lastObservedView !== null ? lastObservedView + 1 : view;
+
+        // Add any missed views as skipped/timed out
+        for (let missedView = startViewIndex; missedView < view; missedView++) {
           const locationIndex = missedView % locations.length;
-          newViews.unshift({
-            view: missedView,
-            location: locations[locationIndex],
-            locationName: locationNames[locationIndex],
-            status: "timed_out",
-            startTime: Date.now(),
-          });
+
+          // Check if this view already exists
+          const existingIndex = newViews.findIndex(v => v.view === missedView);
+
+          if (existingIndex === -1) {
+            // Only add if it doesn't already exist
+            newViews.unshift({
+              view: missedView,
+              location: locations[locationIndex],
+              locationName: locationNames[locationIndex],
+              status: "timed_out",
+              startTime: Date.now(),
+            });
+          }
         }
       }
 
       // Check if this view already exists
       const existingIndex = newViews.findIndex(v => v.view === view);
+
       if (existingIndex !== -1) {
         // If it exists and is already finalized or notarized, don't update it
         const existingStatus = newViews[existingIndex].status;
@@ -190,13 +203,13 @@ const App: React.FC = () => {
           return newViews;
         }
 
-        // If it exists but is in another state, update it
+        // If it exists but is in another state, clear its timeout but preserve everything else
         if (newViews[existingIndex].timeoutId) {
           clearTimeout(newViews[existingIndex].timeoutId);
         }
       }
 
-      // Add new view
+      // Create the new view data
       const locationIndex = view % locations.length;
       const newView: ViewData = {
         view,
@@ -207,11 +220,11 @@ const App: React.FC = () => {
         signature: seed.signature,
       };
 
-      // Only set timeout for growing views
+      // Set a timeout for this specific view
       const timeoutId = setTimeout(() => {
-        setViews((prev) => {
-          return prev.map((v) => {
-            // Only time out views that are still in growing state
+        setViews((currentViews) => {
+          return currentViews.map((v) => {
+            // Only time out this specific view if it's still in growing state
             if (v.view === view && v.status === "growing") {
               return { ...v, status: "timed_out", timeoutId: undefined };
             }
@@ -220,15 +233,28 @@ const App: React.FC = () => {
         });
       }, TIMEOUT_DURATION);
 
+      // Add timeoutId to the new view
+      const viewWithTimeout = { ...newView, timeoutId };
+
+      // Update or add the view
       if (existingIndex !== -1) {
-        // Replace existing view
-        newViews[existingIndex] = { ...newView, timeoutId };
+        // Only update if necessary - preserve existing data that shouldn't change
+        newViews[existingIndex] = {
+          ...newViews[existingIndex],
+          status: "growing",
+          signature: seed.signature,
+          timeoutId: timeoutId
+        };
       } else {
-        // Add new view
-        newViews.unshift({ ...newView, timeoutId });
+        // Add as new
+        newViews.unshift(viewWithTimeout);
       }
 
-      setLastObservedView(view);
+      // Update the last observed view if this is a new maximum
+      if (lastObservedView === null || view > lastObservedView) {
+        setLastObservedView(view);
+      }
+
       return newViews;
     });
   };
@@ -414,9 +440,9 @@ const App: React.FC = () => {
           background: "#1c1c1c",
           borderRadius: "6px"
         }}>
-          <LegendItem color="#808080" label="Growing" />
-          <LegendItem color="#4CAF50" label="Notarized" />
-          <LegendItem color="#1B5E20" label="Finalized" />
+          <LegendItem color="#555" label="Seed to Notarized" />
+          <LegendItem color="#2E7D32" label="Notarized to Finalized" />
+          <LegendItem color="#1B5E20" label="Finalization Point" />
           <LegendItem color="#F44336" label="Timed Out" />
         </div>
 
@@ -532,11 +558,11 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
 
     // Set block info
     if (block) {
-      inBarText = `${block.height} | ${shortenUint8Array(block.digest)}`;
+      inBarText = `#${block.height} | ${shortenUint8Array(block.digest)}`;
     }
   } else {
     // Timed out
-    inBarText = "";
+    inBarText = "TIMED OUT";
   }
 
   return (
@@ -563,7 +589,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
           textOverflow: "ellipsis",
           overflow: "hidden"
         }}>
-          {signature ? shortenUint8Array(signature) : ""}
+          {signature ? shortenUint8Array(signature) : "Skipped"}
         </div>
       </div>
 
@@ -699,7 +725,7 @@ function shortenUint8Array(arr: Uint8Array | undefined): string {
   if (!arr || arr.length === 0) return "";
 
   // Convert the entire array to hex
-  const fullHex = Array.from(arr, (b) => b.toString(16)).join("");
+  const fullHex = Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
 
   // Get first 'length' bytes (2 hex chars per byte)
   const firstPart = fullHex.slice(0, 3);
