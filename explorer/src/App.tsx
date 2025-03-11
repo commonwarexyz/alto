@@ -41,7 +41,7 @@ interface ViewData {
   timeoutId?: NodeJS.Timeout;
 }
 
-const TIMEOUT_DURATION = 2000; // 2 seconds
+const TIMEOUT_DURATION = 1000; // 1 second
 // We'll only display the latest view on the map
 
 // Custom marker icons
