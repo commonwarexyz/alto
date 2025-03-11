@@ -73,16 +73,6 @@ jobs:
         cache-dependency-path: explorer/package-lock.json
     - name: Install dependencies
       run: cd explorer && npm ci
-    - name: Mock alto_types WASM file
-      run: |
-        mkdir -p explorer/src/alto_types
-        touch explorer/src/alto_types/alto_types.js
-        touch explorer/src/alto_types/alto_types_bg.wasm
-        echo "export function parse_seed() { return null; }" >> explorer/src/alto_types/alto_types.js
-        echo "export function parse_notarized() { return null; }" >> explorer/src/alto_types/alto_types.js
-        echo "export function parse_finalized() { return null; }" >> explorer/src/alto_types/alto_types.js
-        echo "export function leader_index() { return 0; }" >> explorer/src/alto_types/alto_types.js
-        echo "export default function init() { return Promise.resolve(); }" >> explorer/src/alto_types/alto_types.js
     - name: Test compilation
       run: cd explorer && CI=true npm run build
 
