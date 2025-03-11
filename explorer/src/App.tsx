@@ -565,8 +565,9 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
   } else if (status === "notarized") {
     const latency = notarizationTime ? (notarizationTime - startTime) : 0;
     notarizedLatencyText = `${Math.round(latency)}ms`;
+    // Format inBarText for block information
     if (block) {
-      inBarText = `#${block.height} | 0x${shortenUint8Array(block.digest, 6)}`;
+      inBarText = `#${block.height} | ${shortenUint8Array(block.digest)}`;
     }
   } else if (status === "finalized") {
     // Get seed to notarization time
@@ -580,7 +581,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
 
     // Set block info
     if (block) {
-      inBarText = `#${block.height} | 0x${shortenUint8Array(block.digest, 6)}`;
+      inBarText = `${block.height} | ${shortenUint8Array(block.digest)}`;
     }
   } else {
     // Timed out
@@ -738,10 +739,20 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime }) => {
   );
 };
 
-function shortenUint8Array(arr: Uint8Array | undefined, length: number = 4): string {
-  if (!arr) return "";
-  const hex = Array.from(arr.slice(0, length), (b) => b.toString(16).padStart(2, "0")).join("");
-  return `0x${hex}...`;
+function shortenUint8Array(arr: Uint8Array | undefined): string {
+  if (!arr || arr.length === 0) return "";
+
+  // Convert the entire array to hex
+  const fullHex = Array.from(arr, (b) => b.toString(16)).join("");
+
+  // Get first 'length' bytes (2 hex chars per byte)
+  const firstPart = fullHex.slice(0, 3);
+
+  // Get last 'length' bytes
+  const lastPart = fullHex.slice(-3);
+
+  // Return formatted string with first and last parts
+  return `${firstPart}...${lastPart}`;
 }
 
 export default App;
