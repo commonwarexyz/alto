@@ -4,14 +4,23 @@ import './index.css';
 import App from './App';
 import ErrorBoundary from './ErrorBoundary';
 
-
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );
-root.render(
-  <React.StrictMode>
+
+// Only use StrictMode in development, not in production
+if (process.env.NODE_ENV === 'development') {
+  root.render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </React.StrictMode>
+  );
+} else {
+  root.render(
     <ErrorBoundary>
       <App />
     </ErrorBoundary>
-  </React.StrictMode>
-);
+  );
+}
