@@ -357,7 +357,7 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // Update current time every 100ms to force re-render for growing bars
+  // Update current time every 50ms to force re-render for growing bars
   useEffect(() => {
     const interval = setInterval(() => {
       currentTimeRef.current = Date.now();
@@ -393,7 +393,7 @@ const App: React.FC = () => {
         reconnectTimeoutRef.current = null;
       }
 
-      // Close existing connection if any
+      // Close existing connection (if any)
       if (wsRef.current) {
         try {
           const ws = wsRef.current;
@@ -444,7 +444,6 @@ const App: React.FC = () => {
         setIsConnected(false);
 
         // Only attempt to reconnect if we still have a reference to this websocket
-        // This prevents reconnection attempts for manually closed connections
         if (wsRef.current === ws) {
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectTimeoutRef.current = null;
@@ -483,7 +482,7 @@ const App: React.FC = () => {
   }, []);
 
   // Define center using LatLng
-  const center = new LatLng(20, 0);
+  const center = new LatLng(0, 0);
 
   return (
     <div className="app-container">
