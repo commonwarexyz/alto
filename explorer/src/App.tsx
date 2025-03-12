@@ -807,6 +807,39 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   // Determine what content to render in bar - for finalized without notarization
   const renderFinalizedWithoutNotarization = status === "finalized" && !notarizationTime;
 
+  // Calculate positions for timing labels to prevent overlap
+  const labelWidth = isMobile ? 45 : 60; // Estimated width of a timing label
+  const minLabelSpacing = labelWidth + 5; // Increased minimum space needed between labels
+
+  // Calculate ideal positions for notarization and finalization labels (centered on their respective points)
+  let notarizedLabelPosition = notarizedWidth > 0 ? Math.max(0, notarizedWidth - (labelWidth / 2)) : 0;
+  let finalizedLabelPosition = totalWidth > 0 ? Math.max(0, totalWidth - (labelWidth / 2)) : 0;
+
+  // Check if labels would overlap
+  const wouldOverlap = status === "finalized" &&
+    notarizationTime &&
+    (finalizedLabelPosition - notarizedLabelPosition < minLabelSpacing);
+
+  // Adjust positions if overlap detected - option 3: ensure minimum spacing
+  if (wouldOverlap) {
+    // Prioritize the finalization label position since it's usually more important
+    // Then push the notarization label to the left to ensure minimum spacing
+    notarizedLabelPosition = finalizedLabelPosition - minLabelSpacing;
+
+    // If this would push the notarization label off the left edge, adjust both
+    if (notarizedLabelPosition < 0) {
+      notarizedLabelPosition = 0;
+
+      // Only move the finalization label if there's enough room for both
+      if (minLabelSpacing < totalWidth) {
+        finalizedLabelPosition = minLabelSpacing;
+      } else {
+        // Not enough room for both, keep finalization at the far right
+        finalizedLabelPosition = totalWidth - (labelWidth / 2);
+      }
+    }
+  }
+
   return (
     <div className="bar-row">
       <div className="view-info" style={{ width: `${viewInfoWidth}px` }}>
@@ -893,14 +926,29 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
           {signature && (
             <>
               {/* Latency at notarization point - only show if text exists and we have notarization */}
-              {!renderFinalizedWithoutNotarization && (status === "notarized" || status === "finalized") && notarizedWidth > 0 && notarizedLatencyText && (
+              {!renderFinalizedWithoutNotarization &&
+                (status === "notarized" || status === "finalized") &&
+                notarizedWidth > 0 &&
+                notarizedLatencyText && (
+                  <div
+                    className="latency-text notarized-latency"
+                    style={{
+                      left: `${notarizedLabelPosition}px`,
+                    }}
+                  >
+                    {notarizedLatencyText}
+                  </div>
+                )}
+
+              {/* Total latency marker for finalized views - only show if text exists */}
+              {status === "finalized" && finalizedLatencyText && (
                 <div
-                  className="latency-text notarized-latency"
+                  className="latency-text finalized-latency"
                   style={{
-                    left: `${Math.max(0, notarizedWidth - (isMobile ? 20 : 30))}px`,
+                    left: `${finalizedLabelPosition}px`,
                   }}
                 >
-                  {notarizedLatencyText}
+                  {finalizedLatencyText}
                 </div>
               )}
 
@@ -909,22 +957,10 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
                 <div
                   className="latency-text growing-latency"
                   style={{
-                    left: `${Math.max(0, totalWidth - (isMobile ? 20 : 30))}px`,
+                    left: `${Math.max(0, totalWidth - (labelWidth / 2))}px`,
                   }}
                 >
                   {growingLatencyText}
-                </div>
-              )}
-
-              {/* Total latency marker for finalized views - only show if text exists */}
-              {status === "finalized" && finalizedLatencyText && (
-                <div
-                  className="latency-text finalized-latency"
-                  style={{
-                    left: `${Math.max(0, totalWidth - (isMobile ? 20 : 30))}px`,
-                  }}
-                >
-                  {finalizedLatencyText}
                 </div>
               )}
             </>
