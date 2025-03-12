@@ -48,7 +48,8 @@ npm run build
 
 ## Run the production app
 
+_Install `serve` if necessary: `npm install -g serve`._
+
 ```bash
-npm install -g serve
 serve -s build
 ```
