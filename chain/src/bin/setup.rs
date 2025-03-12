@@ -10,7 +10,7 @@ use commonware_cryptography::{
 use commonware_deployer::ec2;
 use commonware_utils::{hex, quorum};
 use rand::{rngs::OsRng, seq::IteratorRandom};
-use std::fs;
+use std::{collections::BTreeMap, fs};
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -245,6 +245,8 @@ fn generate(sub_matches: &ArgMatches) {
         instance_configs.push(instance);
     }
 
+    // Generate `config.ts` file for the explorer
+
     // Generate root config file
     let config = ec2::Config {
         tag,
@@ -273,6 +275,7 @@ fn generate(sub_matches: &ArgMatches) {
         let path = format!("{}/{}", output, peer_config_file);
         let file = fs::File::create(&path).unwrap();
         serde_yaml::to_writer(file, &peer_config).unwrap();
+        info!(path, "wrote peer configuration file");
     }
     let path = format!("{}/config.yaml", output);
     let file = fs::File::create(&path).unwrap();

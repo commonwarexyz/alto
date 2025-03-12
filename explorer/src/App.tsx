@@ -3,9 +3,34 @@ import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { LatLng, DivIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
-import { INDEXER_URL, PUBLIC_KEY, LOCATIONS, PUBLIC_KEY_HEX } from "./config";
+import { INDEXER_URL, LOCATIONS, PUBLIC_KEY_HEX } from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, BlockJs } from "./types";
 import "./App.css";
+
+/**
+ * Converts a hexadecimal string to a Uint8Array.
+ * @param hex - The hexadecimal string to convert.
+ * @returns A Uint8Array representation of the hex string.
+ * @throws Error if the hex string has an odd length or contains invalid characters.
+ */
+function hexToUint8Array(hex: string): Uint8Array {
+  if (hex.length % 2 !== 0) {
+    throw new Error("Hex string must have an even length");
+  }
+  const bytes: number[] = [];
+  for (let i = 0; i < hex.length; i += 2) {
+    const byteStr = hex.substr(i, 2);
+    const byte = parseInt(byteStr, 16);
+    if (isNaN(byte)) {
+      throw new Error(`Invalid hex character in string: ${byteStr}`);
+    }
+    bytes.push(byte);
+  }
+  return new Uint8Array(bytes);
+}
+
+// Export PUBLIC_KEY as a Uint8Array for use in the application
+const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
 
 type ViewStatus = "growing" | "notarized" | "finalized" | "timed_out";
 
