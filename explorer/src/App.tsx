@@ -386,8 +386,6 @@ const App: React.FC = () => {
     if (isInitializedRef.current) return;
     isInitializedRef.current = true;
 
-    console.log("Initializing WebSocket connection manager");
-
     const connectWebSocket = () => {
       // Clear any existing reconnection timers
       if (reconnectTimeoutRef.current) {
@@ -397,17 +395,16 @@ const App: React.FC = () => {
 
       // Close existing connection if any
       if (wsRef.current) {
-        console.log("Closing existing WebSocket connection before creating a new one");
         try {
           const ws = wsRef.current;
-          wsRef.current = null; // Clear reference first to prevent cleanup issues
+          wsRef.current = null;
           ws.close();
         } catch (err) {
           console.error("Error closing existing WebSocket:", err);
         }
       }
 
-      console.log("Creating new WebSocket connection");
+      // Create new WebSocket connection
       const ws = new WebSocket(BACKEND_URL);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
@@ -443,13 +440,12 @@ const App: React.FC = () => {
       };
 
       ws.onclose = (event) => {
-        console.error(`WebSocket closed with code: ${event.code}, reason: ${event.reason || 'No reason provided'}, wasClean: ${event.wasClean}`);
+        console.error(`WebSocket closed with code: ${event.code}`);
         setIsConnected(false);
 
         // Only attempt to reconnect if we still have a reference to this websocket
         // This prevents reconnection attempts for manually closed connections
         if (wsRef.current === ws) {
-          console.log("Scheduling reconnect in 5 seconds");
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectTimeoutRef.current = null;
             connectWebSocket();
@@ -467,8 +463,6 @@ const App: React.FC = () => {
 
     // Cleanup function when component unmounts
     return () => {
-      console.log("Cleaning up WebSocket connection");
-
       // Clear any reconnection timers
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
@@ -486,7 +480,7 @@ const App: React.FC = () => {
         }
       }
     };
-  }, []); // Empty dependency array ensures this only runs once
+  }, []);
 
   // Define center using LatLng
   const center = new LatLng(20, 0);
