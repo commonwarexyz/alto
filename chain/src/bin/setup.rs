@@ -99,6 +99,12 @@ fn main() {
             Command::new("indexer")
                 .about("Add indexer support for an alto chain.")
                 .arg(
+                    Arg::new("count")
+                        .long("count")
+                        .required(true)
+                        .value_parser(value_parser!(usize)),
+                )
+                .arg(
                     Arg::new("dir")
                         .long("dir")
                         .required(true)
@@ -276,6 +282,7 @@ fn generate(sub_matches: &ArgMatches) {
 
 fn indexer(sub_matches: &ArgMatches) {
     // Extract arguments
+    let count = *sub_matches.get_one::<usize>("count").unwrap();
     let dir = sub_matches.get_one::<String>("dir").unwrap().clone();
     let url = sub_matches.get_one::<String>("url").unwrap().clone();
 
@@ -291,6 +298,8 @@ fn indexer(sub_matches: &ArgMatches) {
     }
 
     // Iterate over all peer configuration files and add indexer URL
+    assert!(count > 0, "count must be greater than zero");
+    let mut applied = 0;
     for entry in fs::read_dir(&dir).unwrap() {
         let entry = entry.unwrap();
         let path = entry.path();
@@ -312,6 +321,10 @@ fn indexer(sub_matches: &ArgMatches) {
                                             );
                                         } else {
                                             info!(path = ?relative_path, "updated");
+                                            applied += 1;
+                                            if applied == count {
+                                                return;
+                                            }
                                         }
                                     }
                                     Err(e) => {
