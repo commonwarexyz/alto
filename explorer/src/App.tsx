@@ -47,7 +47,7 @@ interface ViewData {
   timeoutId?: NodeJS.Timeout;
 }
 
-const TIMEOUT_DURATION = 1500; // 1.5 seconds
+const TIMEOUT_DURATION = 750; // 750 milliseconds
 
 const markerIcon = new DivIcon({
   className: "custom-div-icon",
