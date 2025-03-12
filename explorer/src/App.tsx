@@ -165,9 +165,20 @@ const App: React.FC = () => {
       const existingIndex = newViews.findIndex(v => v.view === view);
 
       if (existingIndex !== -1) {
-        // If it exists and is already finalized or notarized, don't update it
+        // If it exists and is already finalized or notarized, just update
+        // the location and signature information without changing timing
         const existingStatus = newViews[existingIndex].status;
         if (existingStatus === "finalized" || existingStatus === "notarized") {
+          const locationIndex = leader_index(seed.signature, LOCATIONS.length);
+
+          // Only update location and signature info, preserve all timing and status
+          newViews[existingIndex] = {
+            ...newViews[existingIndex],
+            location: LOCATIONS[locationIndex][0],
+            locationName: LOCATIONS[locationIndex][1],
+            signature: seed.signature,
+          };
+
           return newViews;
         }
 
@@ -211,7 +222,9 @@ const App: React.FC = () => {
           ...newViews[existingIndex],
           status: "growing",
           signature: seed.signature,
-          timeoutId: timeoutId
+          timeoutId: timeoutId,
+          location: LOCATIONS[locationIndex][0],
+          locationName: LOCATIONS[locationIndex][1],
         };
       } else {
         // Add as new
@@ -238,12 +251,20 @@ const App: React.FC = () => {
     });
   }, [lastObservedView]);
 
-
   const handleNotarization = useCallback((notarized: NotarizedJs) => {
     const view = notarized.proof.view;
     setViews((prevViews) => {
       const index = prevViews.findIndex((v) => v.view === view);
       let newViews = [...prevViews];
+      const currentTime = Date.now();
+
+      // Calculate a reasonable start time using the block timestamp if available
+      let calculatedStartTime = currentTime;
+      if (notarized.block && notarized.block.timestamp) {
+        // The block timestamp is in milliseconds since epoch
+        const blockTime = Number(notarized.block.timestamp);
+        calculatedStartTime = blockTime;
+      }
 
       if (index !== -1) {
         const viewData = prevViews[index];
@@ -260,7 +281,9 @@ const App: React.FC = () => {
         const updatedView: ViewData = {
           ...viewData,
           status: "notarized",
-          notarizationTime: Date.now(),
+          notarizationTime: currentTime,
+          // If no start time exists, use the block timestamp
+          startTime: viewData.startTime || calculatedStartTime,
           block: notarized.block,
           timeoutId: undefined,
         };
@@ -271,14 +294,14 @@ const App: React.FC = () => {
           ...prevViews.slice(index + 1),
         ];
       } else {
-        // If view doesn't exist, create it
+        // If view doesn't exist, create it with block timestamp as start time
         newViews = [{
           view,
           location: undefined,
           locationName: undefined,
           status: "notarized",
-          startTime: Date.now(),
-          notarizationTime: Date.now(),
+          startTime: calculatedStartTime,
+          notarizationTime: currentTime,
           block: notarized.block,
         }, ...prevViews];
       }
@@ -303,6 +326,15 @@ const App: React.FC = () => {
     setViews((prevViews) => {
       const index = prevViews.findIndex((v) => v.view === view);
       let newViews = [...prevViews];
+      const currentTime = Date.now();
+
+      // Calculate a reasonable start time using the block timestamp if available
+      let calculatedStartTime = currentTime;
+      if (finalized.block && finalized.block.timestamp) {
+        // The block timestamp is in milliseconds since epoch
+        const blockTime = Number(finalized.block.timestamp);
+        calculatedStartTime = blockTime;
+      }
 
       if (index !== -1) {
         const viewData = prevViews[index];
@@ -316,10 +348,14 @@ const App: React.FC = () => {
           return prevViews;
         }
 
+        // Use existing data if available, without fabricating missing data
         const updatedView: ViewData = {
           ...viewData,
           status: "finalized",
-          finalizationTime: Date.now(),
+          finalizationTime: currentTime,
+          // Keep existing notarization time if available, but don't create one if missing
+          // Keep existing start time or use block timestamp if none
+          startTime: viewData.startTime || calculatedStartTime,
           block: finalized.block,
           timeoutId: undefined,
         };
@@ -330,14 +366,15 @@ const App: React.FC = () => {
           ...prevViews.slice(index + 1),
         ];
       } else {
-        // If view doesn't exist, create it
+        // If view doesn't exist, create it with just the data we have
         newViews = [{
           view,
           location: undefined,
           locationName: undefined,
           status: "finalized",
-          startTime: Date.now(),
-          finalizationTime: Date.now(),
+          startTime: calculatedStartTime,
+          // No notarization time - we don't want to fabricate this
+          finalizationTime: currentTime,
           block: finalized.block,
         }, ...prevViews];
       }
@@ -649,7 +686,8 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
 
   const viewInfoWidth = isMobile ? 50 : 80;
   const growthRate = measuredWidth / TIMEOUT_DURATION; // pixels per ms
-  const minBarWidth = isMobile ? 20 : 30; // minimum width for completed bars
+  const minBarWidth = isMobile ? 30 : 60; // Minimum width for completed bars
+  const minSegmentWidth = isMobile ? 15 : 30; // Minimum segment width
 
   // Calculate widths for different stages
   let totalWidth = 0;
@@ -661,27 +699,62 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     const elapsed = currentTime - startTime;
     totalWidth = elapsed <= 50 ? 0 : Math.min(elapsed * growthRate, measuredWidth);
   } else if (status === "notarized" || status === "finalized") {
-    // Calculate notarization segment
+    // Calculate notarization segment if notarization time exists
     if (notarizationTime) {
       const notarizeElapsed = notarizationTime - startTime;
-      notarizedWidth = Math.min(notarizeElapsed * growthRate, measuredWidth);
-      notarizedWidth = Math.max(notarizedWidth, minBarWidth); // Ensure minimum width
+      // If time is too small, use a minimum width
+      if (notarizeElapsed < 50) {
+        notarizedWidth = minSegmentWidth * 1.5;
+      } else {
+        notarizedWidth = Math.min(notarizeElapsed * growthRate, measuredWidth);
+      }
+      // Ensure minimum width
+      notarizedWidth = Math.max(notarizedWidth, minSegmentWidth);
     }
 
-    // Calculate finalization segment (if applicable)
-    if (status === "finalized" && finalizationTime && notarizationTime) {
-      const finalizeElapsed = finalizationTime - notarizationTime;
-      finalizedWidth = Math.min(finalizeElapsed * growthRate, measuredWidth - notarizedWidth);
-      finalizedWidth = Math.max(finalizedWidth, minBarWidth / 2); // Ensure minimum width
+    // For finalized status with notarization time, calculate finalization segment
+    if (status === "finalized" && finalizationTime) {
+      if (notarizationTime) {
+        // With notarization time, calculate based on time difference
+        const finalizeElapsed = finalizationTime - notarizationTime;
+        // If time is too small, use a minimum width
+        if (finalizeElapsed < 50) {
+          finalizedWidth = minSegmentWidth;
+        } else {
+          finalizedWidth = Math.min(finalizeElapsed * growthRate, measuredWidth - notarizedWidth);
+        }
+        // Ensure minimum width
+        finalizedWidth = Math.max(finalizedWidth, minSegmentWidth / 2);
+      } else {
+        // Without notarization time, use the entire bar for finalization
+        // (from start to finalization)
+        const totalElapsed = finalizationTime - startTime;
+        totalWidth = Math.min(totalElapsed * growthRate, measuredWidth);
+        totalWidth = Math.max(totalWidth, minBarWidth);
+        notarizedWidth = 0; // No notarization segment
+        finalizedWidth = 0; // No separate finalization segment, using the full bar instead
+      }
     }
 
-    totalWidth = notarizedWidth + finalizedWidth;
+    // Set total width based on segments if notarization exists
+    if (notarizationTime) {
+      totalWidth = notarizedWidth + finalizedWidth;
+    }
+
+    // Ensure the total is at least the minimum bar width when using segments
+    if (notarizationTime && totalWidth < minBarWidth) {
+      // Adjust segments proportionally
+      const ratio = notarizedWidth / (notarizedWidth + finalizedWidth || 1);
+      notarizedWidth = minBarWidth * ratio;
+      finalizedWidth = minBarWidth * (1 - ratio);
+      totalWidth = minBarWidth;
+    }
   } else {
     // Timed out
     totalWidth = measuredWidth;
   }
 
-  // Format timing texts
+  // Format timing texts with improved clarity
   let inBarText = ""; // Text to display inside the bar (block info only)
   let notarizedLatencyText = ""; // Text to display below the notarized point
   let finalizedLatencyText = ""; // Text to display below the finalized point
@@ -694,28 +767,32 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
       growingLatencyText = `${Math.round(elapsed)}ms`;
     }
   } else if (status === "notarized") {
-    const latency = notarizationTime ? (notarizationTime - startTime) : 0;
+    let latency = notarizationTime ? (notarizationTime - startTime) : 0;
+
     // Only show latency if it's positive
-    if (latency > 1) {
+    if (latency > 0) {
       notarizedLatencyText = `${Math.round(latency)}ms`;
     }
+
     // Format inBarText for block information
     if (block) {
       inBarText = isMobile ? `#${block.height}` : `#${block.height} | ${shortenUint8Array(block.digest)}`;
     }
   } else if (status === "finalized") {
-    // Get seed to notarization time
-    const notarizeLatency = notarizationTime ? (notarizationTime - startTime) : 0;
-    // Get total time (seed to finalization)
-    const totalLatency = finalizationTime ? (finalizationTime - startTime) : 0;
-
-    // Set latency text only if values are positive
-    if (notarizeLatency > 1) {
-      notarizedLatencyText = `${Math.round(notarizeLatency)}ms`;
+    // Only show notarization latency if notarization time exists
+    if (notarizationTime) {
+      const notarizeLatency = notarizationTime - startTime;
+      if (notarizeLatency > 0) {
+        notarizedLatencyText = `${Math.round(notarizeLatency)}ms`;
+      }
     }
 
-    if (totalLatency > 1) {
-      finalizedLatencyText = `${Math.round(totalLatency)}ms`; // Show total time at finalization point
+    // Always show total latency (seed to finalization, or just finalization if no seed)
+    if (finalizationTime) {
+      const totalLatency = finalizationTime - startTime;
+      if (totalLatency > 0) {
+        finalizedLatencyText = `${Math.round(totalLatency)}ms`;
+      }
     }
 
     // Set block info
@@ -726,6 +803,9 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     // Timed out
     inBarText = "SKIPPED";
   }
+
+  // Determine what content to render in bar - for finalized without notarization
+  const renderFinalizedWithoutNotarization = status === "finalized" && !notarizationTime;
 
   return (
     <div className="bar-row">
@@ -744,25 +824,56 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
             width: `${totalWidth}px`,
           }}
         >
-          {/* Base bar - grey represents time from seed receipt to notarization (or current time if growing) */}
-          <div
-            className={`bar-segment ${status === "timed_out" ? "timed-out" : "growing"}`}
-            style={{
-              width: status === "timed_out" ? "100%" : (status === "growing" ? "100%" : `${notarizedWidth}px`),
-            }}
-          >
-            {inBarText}
-          </div>
+          {/* Timed out or Growing state */}
+          {(status === "timed_out" || status === "growing") && (
+            <div
+              className={`bar-segment ${status === "timed_out" ? "timed-out" : "growing"}`}
+              style={{ width: "100%" }}
+            >
+              {inBarText}
+            </div>
+          )}
 
-          {/* Notarized to finalized segment */}
-          {status === "finalized" && finalizedWidth > 0 && (
+          {/* Notarized state */}
+          {status === "notarized" && (
+            <div
+              className="bar-segment growing"
+              style={{ width: "100%" }}
+            >
+              {inBarText}
+            </div>
+          )}
+
+          {/* Finalized state with notarization */}
+          {status === "finalized" && !renderFinalizedWithoutNotarization && (
+            <>
+              {/* Base segment (seed to notarization) */}
+              <div
+                className="bar-segment growing"
+                style={{ width: `${notarizedWidth}px` }}
+              >
+                {inBarText}
+              </div>
+
+              {/* Notarized to finalized segment */}
+              <div
+                className="bar-segment finalized"
+                style={{
+                  left: `${notarizedWidth}px`,
+                  width: `${finalizedWidth}px`,
+                }}
+              />
+            </>
+          )}
+
+          {/* Finalized state without notarization - just a single finalized bar */}
+          {renderFinalizedWithoutNotarization && (
             <div
               className="bar-segment finalized"
-              style={{
-                left: `${notarizedWidth}px`,
-                width: `${finalizedWidth}px`,
-              }}
-            />
+              style={{ width: "100%" }}
+            >
+              {inBarText}
+            </div>
           )}
 
           {/* Marker for finalization point */}
@@ -781,8 +892,8 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
           {/* Only show timing if not skipped */}
           {signature && (
             <>
-              {/* Latency at notarization point - only show if text exists */}
-              {(status === "notarized" || status === "finalized") && notarizedWidth > 0 && notarizedLatencyText && (
+              {/* Latency at notarization point - only show if text exists and we have notarization */}
+              {!renderFinalizedWithoutNotarization && (status === "notarized" || status === "finalized") && notarizedWidth > 0 && notarizedLatencyText && (
                 <div
                   className="latency-text notarized-latency"
                   style={{
