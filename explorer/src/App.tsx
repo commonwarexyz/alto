@@ -49,21 +49,18 @@ interface ViewData {
 
 const TIMEOUT_DURATION = 1500; // 1.5 seconds
 
-// Custom marker icons - updated for monochrome style with circular appearance
-const createCustomIcon = () => {
-  return new DivIcon({
-    className: "custom-div-icon",
-    html: `<div style="
+const markerIcon = new DivIcon({
+  className: "custom-div-icon",
+  html: `<div style="
       background-color: #aaa;
       width: 16px;
       height: 16px;
       border-radius: 50%;
       border: 1px solid black;
     "></div>`,
-    iconSize: [12, 12],
-    iconAnchor: [6, 6],
-  });
-};
+  iconSize: [12, 12],
+  iconAnchor: [6, 6],
+});
 
 // ASCII Logo animation logic
 const initializeLogoAnimations = () => {
@@ -626,7 +623,7 @@ const App: React.FC = () => {
               <Marker
                 key={views[0].view}
                 position={views[0].location}
-                icon={createCustomIcon()}
+                icon={markerIcon}
               >
                 <Popup>
                   <div>
