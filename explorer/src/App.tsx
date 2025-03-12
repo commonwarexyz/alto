@@ -105,6 +105,13 @@ const App: React.FC = () => {
   const currentTimeRef = useRef(Date.now());
   const wsRef = useRef<WebSocket | null>(null);
 
+  // Manage WebSocket lifecycle
+  const handleSeedRef = useRef<typeof handleSeed>(null!);
+  const handleNotarizedRef = useRef<typeof handleNotarization>(null!);
+  const handleFinalizedRef = useRef<typeof handleFinalization>(null!);
+  const isInitializedRef = useRef(false);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // Initialize logo animations
   useEffect(() => {
     initializeLogoAnimations();
@@ -353,7 +360,6 @@ const App: React.FC = () => {
     });
   }, []);
 
-
   // Update current time every 100ms to force re-render for growing bars
   useEffect(() => {
     const interval = setInterval(() => {
@@ -364,19 +370,51 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Initialize WebSocket
+  // Update handler refs when the handlers change
   useEffect(() => {
-    const setup = async () => {
-      await init();
-      connectWebSocket();
-    };
+    handleSeedRef.current = handleSeed;
+  }, [handleSeed]);
+
+  useEffect(() => {
+    handleNotarizedRef.current = handleNotarization;
+  }, [handleNotarization]);
+
+  useEffect(() => {
+    handleFinalizedRef.current = handleFinalization;
+  }, [handleFinalization]);
+
+  // WebSocket connection management with fixed single-connection approach
+  useEffect(() => {
+    // Skip if already initialized to prevent duplicate connections during development mode's double-invocation
+    if (isInitializedRef.current) return;
+    isInitializedRef.current = true;
+
+    console.log("Initializing WebSocket connection manager");
 
     const connectWebSocket = () => {
+      // Clear any existing reconnection timers
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+
+      // Close existing connection if any
+      if (wsRef.current) {
+        console.log("Closing existing WebSocket connection before creating a new one");
+        try {
+          const ws = wsRef.current;
+          wsRef.current = null; // Clear reference first to prevent cleanup issues
+          ws.close();
+        } catch (err) {
+          console.error("Error closing existing WebSocket:", err);
+        }
+      }
+
+      console.log("Creating new WebSocket connection");
       const ws = new WebSocket(BACKEND_URL);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
-      // TODO: seems multiple connections are being created
       ws.onopen = () => {
         console.log("WebSocket connected");
         setIsConnected(true);
@@ -390,24 +428,22 @@ const App: React.FC = () => {
         switch (kind) {
           case 0: // Seed
             const seed = parse_seed(PUBLIC_KEY, payload);
-            if (seed) handleSeed(seed);
+            if (seed) handleSeedRef.current(seed);
             break;
           case 1: // Notarization
             const notarized = parse_notarized(PUBLIC_KEY, payload);
-            if (notarized) handleNotarization(notarized);
+            if (notarized) handleNotarizedRef.current(notarized);
             break;
           case 3: // Finalization
             const finalized = parse_finalized(PUBLIC_KEY, payload);
-            if (finalized) handleFinalization(finalized);
+            if (finalized) handleFinalizedRef.current(finalized);
             break;
         }
       };
 
       ws.onerror = (error) => {
-        // Log the full error object for better insights
         console.error("WebSocket error:", error);
 
-        // Track the error type and create more descriptive logs
         const errorEvent = error as Event;
         console.error("WebSocket error details:", {
           isTrusted: errorEvent.isTrusted,
@@ -418,7 +454,6 @@ const App: React.FC = () => {
       };
 
       ws.onclose = (event) => {
-        // Log detailed close information
         console.error(`WebSocket closed with code: ${event.code}, reason: ${event.reason || 'No reason provided'}, wasClean: ${event.wasClean}`);
 
         // Interpret the close code
@@ -473,18 +508,54 @@ const App: React.FC = () => {
         console.error(`WebSocket close interpreted: ${closeReason}`);
 
         setIsConnected(false);
-        setTimeout(connectWebSocket, 5000);
+
+        // Only attempt to reconnect if we still have a reference to this websocket
+        // This prevents reconnection attempts for manually closed connections
+        if (wsRef.current === ws) {
+          console.log("Scheduling reconnect in 5 seconds");
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectTimeoutRef.current = null;
+            connectWebSocket();
+          }, 5000);
+        }
       };
+    };
+
+    const setup = async () => {
+      try {
+        await init();
+        connectWebSocket();
+      } catch (err) {
+        console.error("Error initializing WASM:", err);
+        // Still try to connect even if init fails
+        connectWebSocket();
+      }
     };
 
     setup();
 
+    // Cleanup function when component unmounts
     return () => {
+      console.log("Cleaning up WebSocket connection");
+
+      // Clear any reconnection timers
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+
+      // Close and clean up the websocket
       if (wsRef.current) {
-        wsRef.current.close();
+        const ws = wsRef.current;
+        wsRef.current = null; // Clear reference first to prevent reconnection attempts
+        try {
+          ws.close(1000, "Component unmounting");
+        } catch (err) {
+          console.error("Error closing WebSocket during cleanup:", err);
+        }
       }
     };
-  }, [handleSeed, handleNotarization, handleFinalization]);
+  }, []); // Empty dependency array ensures this only runs once
 
   // Define center using LatLng
   const center = new LatLng(20, 0);
