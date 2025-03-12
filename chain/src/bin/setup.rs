@@ -447,7 +447,7 @@ fn explorer(sub_matches: &ArgMatches) {
     let identity = poly::Public::deserialize(&identity, threshold).expect("identity is invalid");
     let identity_public = poly::public(&identity);
     let config_ts = format!(
-        "export const BACKEND_URL = \"{}\";\n\
+        "export const BACKEND_URL = \"{}/consensus/ws\";\n\
         export const PUBLIC_KEY_HEX = \"{}\";\n\
         export const LOCATIONS: [[number, number], string][] = [\n{}\n];",
         backend_url,
