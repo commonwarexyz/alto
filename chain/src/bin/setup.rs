@@ -283,6 +283,7 @@ fn generate(sub_matches: &ArgMatches) {
 fn indexer(sub_matches: &ArgMatches) {
     // Extract arguments
     let count = *sub_matches.get_one::<usize>("count").unwrap();
+    assert!(count > 0, "count must be greater than zero");
     let dir = sub_matches.get_one::<String>("dir").unwrap().clone();
     let url = sub_matches.get_one::<String>("url").unwrap().clone();
 
@@ -297,62 +298,68 @@ fn indexer(sub_matches: &ArgMatches) {
         std::process::exit(1);
     }
 
-    // Iterate over all peer configuration files and add indexer URL
-    assert!(count > 0, "count must be greater than zero");
-    let mut applied = 0;
+    // Collect and sort file paths
+    let mut file_paths = Vec::new();
     for entry in fs::read_dir(&dir).unwrap() {
         let entry = entry.unwrap();
         let path = entry.path();
         if path.is_file() {
             if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
                 if file_name.ends_with(".yaml") && file_name != "config.yaml" {
-                    let relative_path = path.strip_prefix(&dir).unwrap();
-                    match fs::read_to_string(&path) {
-                        Ok(content) => match serde_yaml::from_str::<Config>(&content) {
-                            Ok(mut config) => {
-                                config.indexer = Some(url.clone());
-                                match serde_yaml::to_string(&config) {
-                                    Ok(updated_content) => {
-                                        if let Err(e) = fs::write(&path, updated_content) {
-                                            error!(
-                                                path = ?relative_path,
-                                                error = ?e,
-                                                "failed to write",
-                                            );
-                                        } else {
-                                            info!(path = ?relative_path, "updated");
-                                            applied += 1;
-                                            if applied == count {
-                                                return;
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!(
-                                            path = ?relative_path,
-                                            error = ?e,
-                                            "failed to serialize config",
-                                        );
-                                    }
-                                }
-                            }
-                            Err(e) => {
+                    file_paths.push(path);
+                }
+            }
+        }
+    }
+    file_paths.sort();
+
+    // Iterate over sorted file paths and add indexer URL
+    let mut applied = 0;
+    for path in file_paths {
+        if applied >= count {
+            break;
+        }
+        let relative_path = path.strip_prefix(&dir).unwrap();
+        match fs::read_to_string(&path) {
+            Ok(content) => match serde_yaml::from_str::<Config>(&content) {
+                Ok(mut config) => {
+                    config.indexer = Some(url.clone());
+                    match serde_yaml::to_string(&config) {
+                        Ok(updated_content) => {
+                            if let Err(e) = fs::write(&path, updated_content) {
                                 error!(
                                     path = ?relative_path,
                                     error = ?e,
-                                    "failed to parse"
+                                    "failed to write",
                                 );
+                            } else {
+                                info!(path = ?relative_path, "updated");
+                                applied += 1;
                             }
-                        },
+                        }
                         Err(e) => {
                             error!(
                                 path = ?relative_path,
                                 error = ?e,
-                                "failed to read",
+                                "failed to serialize config",
                             );
                         }
                     }
                 }
+                Err(e) => {
+                    error!(
+                        path = ?relative_path,
+                        error = ?e,
+                        "failed to parse"
+                    );
+                }
+            },
+            Err(e) => {
+                error!(
+                    path = ?relative_path,
+                    error = ?e,
+                    "failed to read",
+                );
             }
         }
     }
