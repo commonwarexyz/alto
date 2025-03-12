@@ -5,10 +5,11 @@ use commonware_cryptography::{
         dkg::ops,
         primitives::{group::Element, poly},
     },
+    ed25519::PublicKey,
     Ed25519, Scheme,
 };
 use commonware_deployer::ec2;
-use commonware_utils::{hex, quorum};
+use commonware_utils::{from_hex_formatted, hex, quorum};
 use rand::{rngs::OsRng, seq::IteratorRandom};
 use std::{collections::BTreeMap, fs};
 use tracing::{error, info};
@@ -116,6 +117,22 @@ fn main() {
                         .required(true)
                         .value_parser(value_parser!(String)),
                 ),
+        )
+        .subcommand(
+            Command::new("explorer")
+                .about("Generate a config.ts for the explorer.")
+                .arg(
+                    Arg::new("dir")
+                        .long("dir")
+                        .required(true)
+                        .value_parser(value_parser!(String)),
+                )
+                .arg(
+                    Arg::new("backend-url")
+                        .long("backend-url")
+                        .required(true)
+                        .value_parser(value_parser!(String)),
+                ),
         );
 
     // Parse arguments
@@ -125,6 +142,7 @@ fn main() {
     match matches.subcommand() {
         Some(("generate", sub_matches)) => generate(sub_matches),
         Some(("indexer", sub_matches)) => indexer(sub_matches),
+        Some(("explorer", sub_matches)) => explorer(sub_matches),
         _ => {
             eprintln!("Invalid subcommand. Use 'generate' or 'indexer'.");
             std::process::exit(1);
@@ -245,8 +263,6 @@ fn generate(sub_matches: &ArgMatches) {
         instance_configs.push(instance);
     }
 
-    // Generate `config.ts` file for the explorer
-
     // Generate root config file
     let config = ec2::Config {
         tag,
@@ -366,4 +382,81 @@ fn indexer(sub_matches: &ArgMatches) {
             }
         }
     }
+}
+
+// Region-to-location mapping
+fn get_aws_location(region: &str) -> Option<([f64; 2], String)> {
+    match region {
+        "us-west-1" => Some(([37.7749, -122.4194], "San Francisco".to_string())),
+        "us-east-1" => Some(([38.8339, -77.3074], "Ashburn".to_string())),
+        "eu-west-1" => Some(([53.3498, -6.2603], "Dublin".to_string())),
+        "ap-northeast-1" => Some(([35.6895, 139.6917], "Tokyo".to_string())),
+        "eu-north-1" => Some(([59.3293, 18.0686], "Stockholm".to_string())),
+        "ap-south-1" => Some(([19.0760, 72.8777], "Mumbai".to_string())),
+        "sa-east-1" => Some(([-23.5505, -46.6333], "Sao Paulo".to_string())),
+        "eu-central-1" => Some(([50.1109, 8.6821], "Frankfurt".to_string())),
+        "ap-northeast-2" => Some(([37.5665, 126.9780], "Seoul".to_string())),
+        "ap-southeast-2" => Some(([-33.8688, 151.2093], "Sydney".to_string())),
+        _ => None,
+    }
+}
+
+// Explorer subcommand implementation
+fn explorer(sub_matches: &ArgMatches) {
+    // Parse arguments
+    let dir = sub_matches.get_one::<String>("dir").unwrap().clone();
+    let backend_url = sub_matches
+        .get_one::<String>("backend-url")
+        .unwrap()
+        .clone();
+
+    // Collect all locations
+    let config_path = format!("{}/config.yaml", dir);
+    let config_content = std::fs::read_to_string(&config_path).expect("failed to read config.yaml");
+    let config: ec2::Config =
+        serde_yaml::from_str(&config_content).expect("failed to parse config.yaml");
+    let mut participants = BTreeMap::new();
+    for instance in &config.instances {
+        let region = &instance.region;
+        let public_key = from_hex_formatted(&instance.name).expect("invalid public key");
+        let public_key = PublicKey::try_from(public_key).expect("invalid public key");
+        let (coords, city) = get_aws_location(region).expect("unknown region");
+        participants.insert(
+            public_key,
+            format!("    [[{}, {}], \"{}\"]", coords[0], coords[1], city),
+        );
+    }
+
+    // Order by public key
+    let threshold = quorum(participants.len() as u32).expect("invalid quorum");
+    let mut locations = Vec::new();
+    for (_, location) in participants {
+        locations.push(location);
+    }
+
+    // Generate config.ts
+    let locations_str = locations.join(",\n");
+    let first_instance = &config.instances[0];
+    let peer_config_path = format!("{}/{}", dir, first_instance.config);
+    let peer_config_content =
+        std::fs::read_to_string(&peer_config_path).expect("failed to read peer config");
+    let peer_config: Config =
+        serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
+    let identity_hex = peer_config.identity;
+    let identity = from_hex_formatted(&identity_hex).expect("invalid identity");
+    let identity = poly::Public::deserialize(&identity, threshold).expect("identity is invalid");
+    let identity_public = poly::public(&identity);
+    let config_ts = format!(
+        "export const BACKEND_URL = \"{}\";\n\
+        export const PUBLIC_KEY_HEX = \"{}\";\n\
+        export const LOCATIONS: [[number, number], string][] = [\n{}\n];",
+        backend_url,
+        hex(&identity_public.serialize()),
+        locations_str
+    );
+
+    // Write config.ts
+    let config_ts_path = format!("{}/config.ts", dir);
+    std::fs::write(&config_ts_path, config_ts).expect("failed to write config.ts");
+    info!(path = config_ts_path, "wrote explorer configuration file");
 }

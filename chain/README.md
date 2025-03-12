@@ -33,6 +33,12 @@ cargo run --bin setup -- indexer --count <uploaders> --dir assets --url <indexer
 
 _The indexer URL is configured separately because it is typically only known after the threshold key is generated (derived in `setup generate`). The iteration order of this command is deterministic (re-running will update the same configuration files)._
 
+### [Optional] Configure Explorer
+
+```bash
+cargo run --bin setup -- explorer --dir assets --backend-url <backend URL>
+```
+
 ### Build Validator Binary
 
 #### Build Cross-Platform Compiler
