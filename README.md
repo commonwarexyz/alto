@@ -6,7 +6,7 @@
 
 ## Components
 
-_Components are designed for deployment in adversarial environments. If you find an exploit, please refer to the [Commonware Library security policy](https://github.com/commonwarexyz/monorepo/blob/main/SECURITY.md) before disclosing it publicly (an exploit may equip a malicious party to attack users of a primitive)._
+_Components are designed for deployment in adversarial environments. If you find an exploit, please refer to our [security policy](./SECURITY.md) before disclosing it publicly (an exploit may equip a malicious party to attack users of a primitive)._
 
 * [chain](./chain/README.md): A minimal blockchain built with the [Commonware Library](https://github.com/commonwarexyz/monorepo).
 * [client](./client/README.md): Client for interacting with `alto`.
