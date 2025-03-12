@@ -376,6 +376,7 @@ const App: React.FC = () => {
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
+      // TODO: seems multiple connections are being created
       ws.onopen = () => {
         console.log("WebSocket connected");
         setIsConnected(true);
@@ -414,7 +415,6 @@ const App: React.FC = () => {
           timestamp: new Date().toISOString(),
           readyState: ws.readyState
         });
-        setIsConnected(false);
       };
 
       ws.onclose = (event) => {
