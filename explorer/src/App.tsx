@@ -440,70 +440,10 @@ const App: React.FC = () => {
 
       ws.onerror = (error) => {
         console.error("WebSocket error:", error);
-
-        const errorEvent = error as Event;
-        console.error("WebSocket error details:", {
-          isTrusted: errorEvent.isTrusted,
-          type: errorEvent.type,
-          timestamp: new Date().toISOString(),
-          readyState: ws.readyState
-        });
       };
 
       ws.onclose = (event) => {
         console.error(`WebSocket closed with code: ${event.code}, reason: ${event.reason || 'No reason provided'}, wasClean: ${event.wasClean}`);
-
-        // Interpret the close code
-        let closeReason = "Unknown reason";
-        switch (event.code) {
-          case 1000:
-            closeReason = "Normal closure";
-            break;
-          case 1001:
-            closeReason = "Endpoint going away (server shutdown or browser navigating away)";
-            break;
-          case 1002:
-            closeReason = "Protocol error";
-            break;
-          case 1003:
-            closeReason = "Unsupported data";
-            break;
-          case 1005:
-            closeReason = "No status received (abnormal closure)";
-            break;
-          case 1006:
-            closeReason = "Abnormal closure (connection lost without proper closing handshake)";
-            break;
-          case 1007:
-            closeReason = "Invalid frame payload data";
-            break;
-          case 1008:
-            closeReason = "Policy violation";
-            break;
-          case 1009:
-            closeReason = "Message too big";
-            break;
-          case 1010:
-            closeReason = "Missing extension required by client";
-            break;
-          case 1011:
-            closeReason = "Internal server error";
-            break;
-          case 1012:
-            closeReason = "Service restart";
-            break;
-          case 1013:
-            closeReason = "Try again later";
-            break;
-          case 1014:
-            closeReason = "Bad gateway";
-            break;
-          case 1015:
-            closeReason = "TLS handshake failure";
-            break;
-        }
-        console.error(`WebSocket close interpreted: ${closeReason}`);
-
         setIsConnected(false);
 
         // Only attempt to reconnect if we still have a reference to this websocket
@@ -519,14 +459,8 @@ const App: React.FC = () => {
     };
 
     const setup = async () => {
-      try {
-        await init();
-        connectWebSocket();
-      } catch (err) {
-        console.error("Error initializing WASM:", err);
-        // Still try to connect even if init fails
-        connectWebSocket();
-      }
+      await init();
+      connectWebSocket();
     };
 
     setup();
