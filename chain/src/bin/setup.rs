@@ -291,12 +291,12 @@ fn generate(sub_matches: &ArgMatches) {
         let path = format!("{}/{}", output, peer_config_file);
         let file = fs::File::create(&path).unwrap();
         serde_yaml::to_writer(file, &peer_config).unwrap();
-        info!(path, "wrote peer configuration file");
+        info!(path = peer_config_file, "wrote peer configuration file");
     }
     let path = format!("{}/config.yaml", output);
     let file = fs::File::create(&path).unwrap();
     serde_yaml::to_writer(file, &config).unwrap();
-    info!(path, "wrote configuration files");
+    info!(path = "config.yaml", "wrote configuration file");
 }
 
 fn indexer(sub_matches: &ArgMatches) {
@@ -458,5 +458,5 @@ fn explorer(sub_matches: &ArgMatches) {
     // Write config.ts
     let config_ts_path = format!("{}/config.ts", dir);
     std::fs::write(&config_ts_path, config_ts).expect("failed to write config.ts");
-    info!(path = config_ts_path, "wrote explorer configuration file");
+    info!(path = "config.ts", "wrote explorer configuration file");
 }
