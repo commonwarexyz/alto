@@ -373,7 +373,7 @@ const App: React.FC = () => {
           locationName: undefined,
           status: "finalized",
           startTime: calculatedStartTime,
-          // No notarization time - we don't want to fabricate this
+          // No notarization time observed yet
           finalizationTime: currentTime,
           block: finalized.block,
         }, ...prevViews];
