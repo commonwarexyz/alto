@@ -219,14 +219,28 @@ const App: React.FC = () => {
         setLastObservedView(view);
       }
 
+      // Limit the number of views to 50
+      if (newViews.length > 50) {
+        // Clean up any timeouts for views we're about to remove
+        for (let i = 50; i < newViews.length; i++) {
+          if (newViews[i].timeoutId) {
+            clearTimeout(newViews[i].timeoutId);
+          }
+        }
+        newViews = newViews.slice(0, 50);
+      }
+
       return newViews;
     });
   }, [lastObservedView]);
+
 
   const handleNotarization = useCallback((notarized: NotarizedJs) => {
     const view = notarized.proof.view;
     setViews((prevViews) => {
       const index = prevViews.findIndex((v) => v.view === view);
+      let newViews = [...prevViews];
+
       if (index !== -1) {
         const viewData = prevViews[index];
         // Clear timeout if it exists
@@ -247,23 +261,36 @@ const App: React.FC = () => {
           timeoutId: undefined,
         };
 
-        return [
+        newViews = [
           ...prevViews.slice(0, index),
           updatedView,
           ...prevViews.slice(index + 1),
         ];
+      } else {
+        // If view doesn't exist, create it
+        newViews = [{
+          view,
+          location: undefined,
+          locationName: undefined,
+          status: "notarized",
+          startTime: Date.now(),
+          notarizationTime: Date.now(),
+          block: notarized.block,
+        }, ...prevViews];
       }
 
-      // If view doesn't exist, create it
-      return [{
-        view,
-        location: undefined,
-        locationName: undefined,
-        status: "notarized",
-        startTime: Date.now(),
-        notarizationTime: Date.now(),
-        block: notarized.block,
-      }, ...prevViews];
+      // Limit the number of views to 50
+      if (newViews.length > 50) {
+        // Clean up any timeouts for views we're about to remove
+        for (let i = 50; i < newViews.length; i++) {
+          if (newViews[i].timeoutId) {
+            clearTimeout(newViews[i].timeoutId);
+          }
+        }
+        newViews = newViews.slice(0, 50);
+      }
+
+      return newViews;
     });
   }, []);
 
@@ -271,6 +298,8 @@ const App: React.FC = () => {
     const view = finalized.proof.view;
     setViews((prevViews) => {
       const index = prevViews.findIndex((v) => v.view === view);
+      let newViews = [...prevViews];
+
       if (index !== -1) {
         const viewData = prevViews[index];
         // Clear timeout if it exists
@@ -291,23 +320,36 @@ const App: React.FC = () => {
           timeoutId: undefined,
         };
 
-        return [
+        newViews = [
           ...prevViews.slice(0, index),
           updatedView,
           ...prevViews.slice(index + 1),
         ];
+      } else {
+        // If view doesn't exist, create it
+        newViews = [{
+          view,
+          location: undefined,
+          locationName: undefined,
+          status: "finalized",
+          startTime: Date.now(),
+          finalizationTime: Date.now(),
+          block: finalized.block,
+        }, ...prevViews];
       }
 
-      // If view doesn't exist, create it
-      return [{
-        view,
-        location: undefined,
-        locationName: undefined,
-        status: "finalized",
-        startTime: Date.now(),
-        finalizationTime: Date.now(),
-        block: finalized.block,
-      }, ...prevViews];
+      // Limit the number of views to 50
+      if (newViews.length > 50) {
+        // Clean up any timeouts for views we're about to remove
+        for (let i = 50; i < newViews.length; i++) {
+          if (newViews[i].timeoutId) {
+            clearTimeout(newViews[i].timeoutId);
+          }
+        }
+        newViews = newViews.slice(0, 50);
+      }
+
+      return newViews;
     });
   }, []);
 
@@ -482,7 +524,7 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="bars-list">
-            {views.slice(0, 100).map((viewData) => (
+            {views.slice(0, 50).map((viewData) => (
               <Bar
                 key={viewData.view}
                 viewData={viewData}
