@@ -39,6 +39,8 @@ _The indexer URL is configured separately because it is typically only known aft
 cargo run --bin setup -- explorer --dir assets --backend-url <backend URL>
 ```
 
+_The backend URL should be a WebSocket endpoint (with a `ws://` or `wss://` prefix)._
+
 ### Build Validator Binary
 
 #### Build Cross-Platform Compiler
