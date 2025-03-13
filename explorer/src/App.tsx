@@ -613,8 +613,8 @@ const App: React.FC = () => {
               <LegendItem color="#ddd" label="Notarization" />
               <LegendItem color="#d9ead3ff" label="Finalization" />
               <LegendItem color="#274e13ff" label="Finalized" />
-              <LegendItem color="#fce5cdff" label="Missing" />
-              <LegendItem color="#f4ccccff" label="Timed Out" />
+              <LegendItem color="#fce5cdff" label="Unknown" />
+              <LegendItem color="#f4ccccff" label="Timeout" />
             </div>
           </div>
           <div className="bars-list">
@@ -752,7 +752,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
       finalizedWidth = minBarWidth * (1 - ratio);
       totalWidth = minBarWidth;
     }
-  } else if (status == "timed_out") {
+  } else if (status === "timed_out") {
     // Timed out
     totalWidth = measuredWidth;
   }
@@ -808,9 +808,9 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     if (block) {
       inBarText = isMobile ? `#${block.height}` : `#${block.height} | ${hexUint8Array(block.digest)}`;
     }
-  } else if (status == "timed_out") {
+  } else if (status === "timed_out") {
     // Timed out
-    inBarText = "TIMED OUT";
+    inBarText = "TIMEOUT";
   } else if (status === "unknown") {
     // Unknown status
     inBarText = "UNKNOWN";
