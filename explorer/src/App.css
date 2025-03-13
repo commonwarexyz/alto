@@ -158,7 +158,7 @@ body {
 
 .view-signature {
   font-size: 11px;
-  color: #ffb200;
+  color: #0000eeff;
   text-overflow: ellipsis;
   overflow: hidden;
 }
@@ -204,7 +204,7 @@ body {
 }
 
 .bar-segment.finalized {
-  background-color: #0000ee3f;
+  background-color: #d9ead3ff;
   z-index: 1;
   border-right: 1px solid #888;
 }
@@ -231,7 +231,7 @@ body {
 
 .finalization-marker {
   width: 2px;
-  background-color: #0000eeff;
+  background-color: #274e13ff;
   z-index: 3;
 }
 

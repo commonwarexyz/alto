@@ -30,7 +30,7 @@ const TIMEOUT_DURATION = 1000; // 1 second
 const markerIcon = new DivIcon({
   className: "custom-div-icon",
   html: `<div style="
-      background-color: #ffb200;
+      background-color: #0000eeff;
       width: 16px;
       height: 16px;
       border-radius: 50%;
@@ -590,8 +590,8 @@ const App: React.FC = () => {
             <h2 className="bars-title">Views</h2>
             <div className="legend-container">
               <LegendItem color="#ddd" label="Notarization" />
-              <LegendItem color="#0000ee3f" label="Finalization" />
-              <LegendItem color="#0000eeff" label="Finalized" />
+              <LegendItem color="#d9ead3ff" label="Finalization" />
+              <LegendItem color="#274e13ff" label="Finalized" />
               <LegendItem color="#f4ccccff" label="Unknown" />
             </div>
           </div>
