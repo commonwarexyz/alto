@@ -816,13 +816,12 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
       growingLatencyText = `${Math.round(elapsed)}ms`;
     }
   } else if (status === "notarized") {
-    let latency = notarizationTime ? (notarizationTime - startTime) : 0;
-
-    // Only show latency if it's positive
-    if (latency > 0) {
-      if (actualNotarizationLatency) {
-        notarizedLatencyText = `${Math.round(latency)}ms (${Math.round(actualNotarizationLatency)}ms)`;
-      } else {
+    // Prefer the actual latency if available, otherwise use client-calculated latency
+    if (actualNotarizationLatency) {
+      notarizedLatencyText = `${Math.round(actualNotarizationLatency)}ms`;
+    } else if (notarizationTime) {
+      const latency = notarizationTime - startTime;
+      if (latency > 0) {
         notarizedLatencyText = `${Math.round(latency)}ms`;
       }
     }
@@ -832,27 +831,25 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
       inBarText = isMobile ? `#${block.height}` : `#${block.height} | ${hexUint8Array(block.digest)}`;
     }
   } else if (status === "finalized") {
-    // Only show notarization latency if notarization time exists
+    // Only show notarization latency if notarization time exists and actual data is available
     if (notarizationTime) {
-      const notarizeLatency = notarizationTime - startTime;
-      if (notarizeLatency > 0) {
-        if (actualNotarizationLatency) {
-          notarizedLatencyText = `${Math.round(notarizeLatency)}ms (${Math.round(actualNotarizationLatency)}ms)`;
-        } else {
+      if (actualNotarizationLatency) {
+        notarizedLatencyText = `${Math.round(actualNotarizationLatency)}ms`;
+      } else {
+        const notarizeLatency = notarizationTime - startTime;
+        if (notarizeLatency > 0) {
           notarizedLatencyText = `${Math.round(notarizeLatency)}ms`;
         }
       }
     }
 
-    // Always show total latency (seed to finalization, or just finalization if no seed)
-    if (finalizationTime) {
+    // Show actual finalization latency if available, otherwise use calculated
+    if (actualFinalizationLatency) {
+      finalizedLatencyText = `${Math.round(actualFinalizationLatency)}ms`;
+    } else if (finalizationTime) {
       const totalLatency = finalizationTime - startTime;
       if (totalLatency > 0) {
-        if (actualFinalizationLatency) {
-          finalizedLatencyText = `${Math.round(totalLatency)}ms (${Math.round(actualFinalizationLatency)}ms)`;
-        } else {
-          finalizedLatencyText = `${Math.round(totalLatency)}ms`;
-        }
+        finalizedLatencyText = `${Math.round(totalLatency)}ms`;
       }
     }
 
