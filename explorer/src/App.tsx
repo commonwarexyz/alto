@@ -7,28 +7,6 @@ import { BACKEND_URL, LOCATIONS, PUBLIC_KEY_HEX } from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, BlockJs } from "./types";
 import "./App.css";
 
-/**
- * Converts a hexadecimal string to a Uint8Array.
- * @param hex - The hexadecimal string to convert.
- * @returns A Uint8Array representation of the hex string.
- * @throws Error if the hex string has an odd length or contains invalid characters.
- */
-function hexToUint8Array(hex: string): Uint8Array {
-  if (hex.length % 2 !== 0) {
-    throw new Error("Hex string must have an even length");
-  }
-  const bytes: number[] = [];
-  for (let i = 0; i < hex.length; i += 2) {
-    const byteStr = hex.substr(i, 2);
-    const byte = parseInt(byteStr, 16);
-    if (isNaN(byte)) {
-      throw new Error(`Invalid hex character in string: ${byteStr}`);
-    }
-    bytes.push(byte);
-  }
-  return new Uint8Array(bytes);
-}
-
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
 
@@ -776,7 +754,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
 
     // Format inBarText for block information
     if (block) {
-      inBarText = isMobile ? `#${block.height}` : `#${block.height} | ${shortenUint8Array(block.digest)}`;
+      inBarText = isMobile ? `#${block.height}` : `#${block.height} | ${hexUint8Array(block.digest)}`;
     }
   } else if (status === "finalized") {
     // Only show notarization latency if notarization time exists
@@ -797,7 +775,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
 
     // Set block info
     if (block) {
-      inBarText = isMobile ? `#${block.height}` : `#${block.height} | ${shortenUint8Array(block.digest)}`;
+      inBarText = isMobile ? `#${block.height}` : `#${block.height} | ${hexUint8Array(block.digest)}`;
     }
   } else {
     // Timed out
@@ -845,7 +823,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
       <div className="view-info" style={{ width: `${viewInfoWidth}px` }}>
         <div className="view-number">{view}</div>
         <div className="view-signature">
-          {signature ? shortenUint8Array(signature) : ""}
+          {signature ? hexUint8Array(signature) : ""}
         </div>
       </div>
 
@@ -971,14 +949,42 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   );
 };
 
-function shortenUint8Array(arr: Uint8Array | undefined): string {
+/**
+ * Converts a hexadecimal string to a Uint8Array.
+ * @param hex - The hexadecimal string to convert.
+ * @returns A Uint8Array representation of the hex string.
+ * @throws Error if the hex string has an odd length or contains invalid characters.
+ */
+function hexToUint8Array(hex: string): Uint8Array {
+  if (hex.length % 2 !== 0) {
+    throw new Error("Hex string must have an even length");
+  }
+  const bytes: number[] = [];
+  for (let i = 0; i < hex.length; i += 2) {
+    const byteStr = hex.substr(i, 2);
+    const byte = parseInt(byteStr, 16);
+    if (isNaN(byte)) {
+      throw new Error(`Invalid hex character in string: ${byteStr}`);
+    }
+    bytes.push(byte);
+  }
+  return new Uint8Array(bytes);
+}
+
+/**
+ * Converts a Uint8Array to a hex string (keeping up to len).
+ * @param arr - The Uint8Array to convert
+ * @param len - Max number of characters to keep (default: 5)
+ * @returns A representation of the Uint8Array as a hex string.
+ */
+function hexUint8Array(arr: Uint8Array | undefined, len: number = 5): string {
   if (!arr || arr.length === 0) return "";
 
   // Convert the entire array to hex
   const fullHex = Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
 
   // Get last 5 characters of the hex string
-  return fullHex.slice(-5);
+  return fullHex.slice(-len);
 }
 
 export default App;
