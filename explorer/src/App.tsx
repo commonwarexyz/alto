@@ -613,7 +613,7 @@ const App: React.FC = () => {
               <LegendItem color="#ddd" label="Notarization" />
               <LegendItem color="#d9ead3ff" label="Finalization" />
               <LegendItem color="#274e13ff" label="Finalized" />
-              <LegendItem color="#fce5cdff" label="Unknown" />
+              <LegendItem color="#fce5cdff" label="Missing" />
               <LegendItem color="#f4ccccff" label="Timed Out" />
             </div>
           </div>
