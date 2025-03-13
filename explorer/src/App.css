@@ -209,6 +209,11 @@ body {
   border-right: 1px solid #888;
 }
 
+.bar-segment.unknown {
+  background-color: #fce5cdff;
+  border-right: 1px solid #aaa;
+}
+
 .bar-segment.timed-out {
   background-color: #f4ccccff;
   width: 100% !important;
@@ -395,23 +400,6 @@ body {
 
 .status-indicator.disconnected {
   background: transparent;
-}
-
-/* Style for the unknown bar */
-.bar-main.unknown-bar {
-  background-color: #eeeeee;
-  border: 1px dashed #ccc;
-}
-
-/* Style for the unknown label */
-.unknown-label {
-  position: absolute;
-  font-size: 12px;
-  color: #666;
-  top: 50%;
-  left: 10px;
-  transform: translateY(-50%);
-  white-space: nowrap;
 }
 
 @media (max-width: 480px) {
