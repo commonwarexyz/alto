@@ -977,7 +977,7 @@ function shortenUint8Array(arr: Uint8Array | undefined): string {
   // Convert the entire array to hex
   const fullHex = Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
 
-  // Get first 5 characters of the hex string
+  // Get last 5 characters of the hex string
   return fullHex.slice(-5);
 }
 
