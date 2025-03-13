@@ -281,18 +281,17 @@ const App: React.FC = () => {
           }
         }
 
-        // Only update if not already finalized (finalized is the final state)
-        if (viewData.status === "finalized") {
-          return prevViews;
-        }
-
+        // Always update the notarization information regardless of current status
+        // This ensures that if finalization was received before notarization,
+        // we'll still have the notarization data available for visualization
         const updatedView: ViewData = {
           ...viewData,
-          status: "notarized",
+          // Only change status if not already finalized
+          status: viewData.status === "finalized" ? "finalized" : "notarized",
           notarizationTime: currentTime,
           // If no start time exists, use the block timestamp
           startTime: viewData.startTime || calculatedStartTime,
-          block: notarized.block,
+          block: viewData.block || notarized.block, // Don't overwrite existing block data
           timeoutId: undefined,
           actualNotarizationLatency,
         };
