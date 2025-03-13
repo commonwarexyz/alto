@@ -23,6 +23,8 @@ interface ViewData {
   signature?: Uint8Array;
   block?: BlockJs;
   timeoutId?: NodeJS.Timeout;
+  actualNotarizationLatency?: number;
+  actualFinalizationLatency?: number;
 }
 
 const TIMEOUT_DURATION = 800; // 800ms
@@ -270,6 +272,15 @@ const App: React.FC = () => {
           clearTimeout(viewData.timeoutId);
         }
 
+        // Calculate actual notarization latency when we receive the notarization message
+        let actualNotarizationLatency: number | undefined = undefined;
+        if (notarized.block && notarized.block.timestamp) {
+          const blockTime = Number(notarized.block.timestamp);
+          if (blockTime > 0 && blockTime < currentTime) {
+            actualNotarizationLatency = currentTime - blockTime;
+          }
+        }
+
         // Only update if not already finalized (finalized is the final state)
         if (viewData.status === "finalized") {
           return prevViews;
@@ -283,6 +294,7 @@ const App: React.FC = () => {
           startTime: viewData.startTime || calculatedStartTime,
           block: notarized.block,
           timeoutId: undefined,
+          actualNotarizationLatency,
         };
 
         newViews = [
@@ -292,6 +304,13 @@ const App: React.FC = () => {
         ];
       } else {
         // If view doesn't exist, create it with block timestamp as start time
+        let actualNotarizationLatency: number | undefined = undefined;
+        if (notarized.block && notarized.block.timestamp) {
+          const blockTime = Number(notarized.block.timestamp);
+          if (blockTime > 0 && blockTime < currentTime) {
+            actualNotarizationLatency = currentTime - blockTime;
+          }
+        }
         newViews = [{
           view,
           location: undefined,
@@ -300,6 +319,7 @@ const App: React.FC = () => {
           startTime: calculatedStartTime,
           notarizationTime: currentTime,
           block: notarized.block,
+          actualNotarizationLatency,
         }, ...prevViews];
       }
 
@@ -340,6 +360,15 @@ const App: React.FC = () => {
           clearTimeout(viewData.timeoutId);
         }
 
+        // Calculate actual finalization latency when we receive the finalization message
+        let actualFinalizationLatency: number | undefined = undefined;
+        if (finalized.block && finalized.block.timestamp) {
+          const blockTime = Number(finalized.block.timestamp);
+          if (blockTime > 0 && blockTime < currentTime) {
+            actualFinalizationLatency = currentTime - blockTime;
+          }
+        }
+
         // If already finalized, don't update
         if (viewData.status === "finalized") {
           return prevViews;
@@ -355,6 +384,8 @@ const App: React.FC = () => {
           startTime: viewData.startTime || calculatedStartTime,
           block: finalized.block,
           timeoutId: undefined,
+          actualNotarizationLatency: viewData.actualNotarizationLatency,
+          actualFinalizationLatency,
         };
 
         newViews = [
@@ -364,6 +395,13 @@ const App: React.FC = () => {
         ];
       } else {
         // If view doesn't exist, create it with just the data we have
+        let actualFinalizationLatency: number | undefined = undefined;
+        if (finalized.block && finalized.block.timestamp) {
+          const blockTime = Number(finalized.block.timestamp);
+          if (blockTime > 0 && blockTime < currentTime) {
+            actualFinalizationLatency = currentTime - blockTime;
+          }
+        }
         newViews = [{
           view,
           location: undefined,
@@ -373,6 +411,7 @@ const App: React.FC = () => {
           // No notarization time observed yet
           finalizationTime: currentTime,
           block: finalized.block,
+          actualFinalizationLatency,
         }, ...prevViews];
       }
 
@@ -660,7 +699,7 @@ interface BarProps {
 }
 
 const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
-  const { view, status, startTime, notarizationTime, finalizationTime, signature, block } = viewData;
+  const { view, status, startTime, notarizationTime, finalizationTime, signature, block, actualNotarizationLatency, actualFinalizationLatency } = viewData;
   const [measuredWidth, setMeasuredWidth] = useState(isMobile ? 200 : 500); // Reasonable default
   const barContainerRef = useRef<HTMLDivElement>(null);
 
@@ -781,7 +820,11 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
 
     // Only show latency if it's positive
     if (latency > 0) {
-      notarizedLatencyText = `${Math.round(latency)}ms`;
+      if (actualNotarizationLatency) {
+        notarizedLatencyText = `${Math.round(latency)}ms (${Math.round(actualNotarizationLatency)}ms)`;
+      } else {
+        notarizedLatencyText = `${Math.round(latency)}ms`;
+      }
     }
 
     // Format inBarText for block information
@@ -793,7 +836,11 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     if (notarizationTime) {
       const notarizeLatency = notarizationTime - startTime;
       if (notarizeLatency > 0) {
-        notarizedLatencyText = `${Math.round(notarizeLatency)}ms`;
+        if (actualNotarizationLatency) {
+          notarizedLatencyText = `${Math.round(notarizeLatency)}ms (${Math.round(actualNotarizationLatency)}ms)`;
+        } else {
+          notarizedLatencyText = `${Math.round(notarizeLatency)}ms`;
+        }
       }
     }
 
@@ -801,7 +848,11 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     if (finalizationTime) {
       const totalLatency = finalizationTime - startTime;
       if (totalLatency > 0) {
-        finalizedLatencyText = `${Math.round(totalLatency)}ms`;
+        if (actualFinalizationLatency) {
+          finalizedLatencyText = `${Math.round(totalLatency)}ms (${Math.round(actualFinalizationLatency)}ms)`;
+        } else {
+          finalizedLatencyText = `${Math.round(totalLatency)}ms`;
+        }
       }
     }
 
