@@ -610,11 +610,12 @@ const App: React.FC = () => {
             <h2 className="bars-title">Views</h2>
             <div className="legend-container">
               <LegendItem color="#0000eeff" label="VRF" />
-              <LegendItem color="#ddd" label="Notarization" />
+              <LegendItem color="#ddd" label="Seeded" />
+              <LegendItem color="#000" label="Notarized" />
               <LegendItem color="#d9ead3ff" label="Finalization" />
               <LegendItem color="#274e13ff" label="Finalized" />
-              <LegendItem color="#fce5cdff" label="Unknown" />
               <LegendItem color="#f4ccccff" label="Timeout" />
+              <LegendItem color="#fce5cdff" label="Unknown" />
             </div>
           </div>
           <div className="bars-list">
@@ -883,12 +884,20 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
 
           {/* Notarized state */}
           {status === "notarized" && (
-            <div
-              className="bar-segment growing"
-              style={{ width: "100%" }}
-            >
-              {inBarText}
-            </div>
+            <>
+              <div
+                className="bar-segment growing"
+                style={{ width: "100%" }}
+              >
+                {inBarText}
+              </div>
+              <div
+                className="marker notarization-marker"
+                style={{
+                  right: 0,
+                }}
+              />
+            </>
           )}
 
           {/* Finalized state with notarization */}
@@ -901,6 +910,16 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
               >
                 {inBarText}
               </div>
+
+              {/* Add notarization marker at the junction point between segments */}
+              <div
+                className="marker notarization-marker"
+                style={{
+                  left: `${notarizedWidth}px`,
+                  right: 'auto',
+                }}
+                title="Notarization point"
+              />
 
               {/* Notarized to finalized segment */}
               <div
@@ -981,7 +1000,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
           )}
         </div>
       </div>
-    </div>
+    </div >
   );
 };
 

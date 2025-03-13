@@ -235,7 +235,6 @@ body {
 }
 
 .finalization-marker {
-  width: 2px;
   background-color: #274e13ff;
   z-index: 3;
 }
