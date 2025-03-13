@@ -126,6 +126,20 @@ const App: React.FC = () => {
           const existingIndex = newViews.findIndex(v => v.view === missedView);
 
           if (existingIndex === -1) {
+            // Set a timeout for unknown views
+            const timeoutId = setTimeout(() => {
+              setViews((currentViews) => {
+                return currentViews.map((v) => {
+                  // Only time out this specific view if it's still in unknown state
+                  if (v.view === missedView && v.status === "unknown") {
+                    return { ...v, status: "timed_out", timeoutId: undefined };
+                  }
+                  return v;
+                });
+              });
+            }, TIMEOUT_DURATION);
+
+
             // Only add if it doesn't already exist
             newViews.unshift({
               view: missedView,
@@ -133,6 +147,7 @@ const App: React.FC = () => {
               locationName: undefined,
               status: "unknown",
               startTime: Date.now(),
+              timeoutId: timeoutId
             });
           }
         }
@@ -682,6 +697,10 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   if (status === "growing") {
     const elapsed = currentTime - startTime;
     totalWidth = elapsed <= 50 ? 0 : Math.min(elapsed * growthRate, measuredWidth);
+  } else if (status === "unknown") {
+    // Unknown status should also grow, similar to "growing" status
+    const elapsed = currentTime - startTime;
+    totalWidth = elapsed <= 50 ? 0 : Math.min(elapsed * growthRate, measuredWidth);
   } else if (status === "notarized" || status === "finalized") {
     // Calculate notarization segment if notarization time exists
     if (notarizationTime) {
@@ -736,9 +755,6 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   } else if (status == "timed_out") {
     // Timed out
     totalWidth = measuredWidth;
-  } else if (status === "unknown") {
-    // Unknown status
-    totalWidth = 0;
   }
 
   // Format timing texts with improved clarity
@@ -748,6 +764,12 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   let growingLatencyText = ""; // Text to display below the growing bar tip
 
   if (status === "growing") {
+    const elapsed = currentTime - startTime;
+    // Only show latency if it's positive
+    if (elapsed > 1) {
+      growingLatencyText = `${Math.round(elapsed)}ms`;
+    }
+  } else if (status === "unknown") {
     const elapsed = currentTime - startTime;
     // Only show latency if it's positive
     if (elapsed > 1) {
@@ -848,9 +870,11 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
           }}
         >
           {/* Timed out or Growing state */}
-          {(status === "timed_out" || status === "growing") && (
+          {(status === "timed_out" || status === "growing" || status === "unknown") && (
             <div
-              className={`bar-segment ${status === "timed_out" ? "timed-out" : "growing"}`}
+              className={`bar-segment ${status === "timed_out" ? "timed-out" :
+                status === "unknown" ? "unknown" : "growing"
+                }`}
               style={{ width: "100%" }}
             >
               {inBarText}
@@ -908,19 +932,12 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
               }}
             />
           )}
-
-          {/* Display the UNKNOWN text when the status is unknown */}
-          {status === "unknown" && (
-            <div className="unknown-label">
-              {inBarText}
-            </div>
-          )}
         </div>
 
         {/* Timing information underneath */}
         <div className="timing-info">
-          {/* Only show timing if not skipped */}
-          {signature && (
+          {/* Show timing for all states that need it */}
+          {(signature || status === "unknown") && (
             <>
               {/* Latency at notarization point - only show if text exists and we have notarization */}
               {!renderFinalizedWithoutNotarization &&
@@ -950,7 +967,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
               )}
 
               {/* Latency for growing bars - follows the tip - only show if text exists */}
-              {status === "growing" && growingLatencyText && (
+              {(status === "growing" || status === "unknown") && growingLatencyText && (
                 <div
                   className="latency-text growing-latency"
                   style={{
