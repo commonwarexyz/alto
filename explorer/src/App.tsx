@@ -10,7 +10,7 @@ import "./App.css";
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
 
-type ViewStatus = "growing" | "notarized" | "finalized" | "timed_out";
+type ViewStatus = "growing" | "notarized" | "finalized" | "timed_out" | "unknown";
 
 interface ViewData {
   view: number;
@@ -131,7 +131,7 @@ const App: React.FC = () => {
               view: missedView,
               location: undefined,
               locationName: undefined,
-              status: "timed_out",
+              status: "unknown",
               startTime: Date.now(),
             });
           }
@@ -156,6 +156,11 @@ const App: React.FC = () => {
             signature: seed.signature,
           };
 
+          return newViews;
+        }
+
+        // Skip processing for views with "unknown" status
+        if (existingStatus === "unknown") {
           return newViews;
         }
 
@@ -590,10 +595,11 @@ const App: React.FC = () => {
             <h2 className="bars-title">Views</h2>
             <div className="legend-container">
               <LegendItem color="#0000eeff" label="VRF" />
+              <LegendItem color="#eeeeee" label="Unknown" />
               <LegendItem color="#ddd" label="Notarization" />
               <LegendItem color="#d9ead3ff" label="Finalization" />
               <LegendItem color="#274e13ff" label="Finalized" />
-              <LegendItem color="#f4ccccff" label="Unknown" />
+              <LegendItem color="#f4ccccff" label="Timed Out" />
             </div>
           </div>
           <div className="bars-list">
@@ -727,9 +733,12 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
       finalizedWidth = minBarWidth * (1 - ratio);
       totalWidth = minBarWidth;
     }
-  } else {
+  } else if (status == "timed_out") {
     // Timed out
     totalWidth = measuredWidth;
+  } else if (status === "unknown") {
+    // Unknown status
+    totalWidth = 0;
   }
 
   // Format timing texts with improved clarity
@@ -777,8 +786,11 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     if (block) {
       inBarText = isMobile ? `#${block.height}` : `#${block.height} | ${hexUint8Array(block.digest)}`;
     }
-  } else {
+  } else if (status == "timed_out") {
     // Timed out
+    inBarText = "TIMED OUT";
+  } else if (status === "unknown") {
+    // Unknown status
     inBarText = "UNKNOWN";
   }
 
@@ -895,6 +907,13 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
                 right: 0,
               }}
             />
+          )}
+
+          {/* Display the UNKNOWN text when the status is unknown */}
+          {status === "unknown" && (
+            <div className="unknown-label">
+              {inBarText}
+            </div>
           )}
         </div>
 

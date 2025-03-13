@@ -397,6 +397,23 @@ body {
   background: transparent;
 }
 
+/* Style for the unknown bar */
+.bar-main.unknown-bar {
+  background-color: #eeeeee;
+  border: 1px dashed #ccc;
+}
+
+/* Style for the unknown label */
+.unknown-label {
+  position: absolute;
+  font-size: 12px;
+  color: #666;
+  top: 50%;
+  left: 10px;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+
 @media (max-width: 480px) {
   .app-header {
     padding: 12px;
@@ -500,5 +517,9 @@ body {
   .status-indicator {
     width: 10px;
     height: 10px;
+  }
+
+  .unknown-label {
+    font-size: 10px;
   }
 }
