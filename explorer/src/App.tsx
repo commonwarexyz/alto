@@ -30,11 +30,10 @@ const TIMEOUT_DURATION = 1000; // 1 second
 const markerIcon = new DivIcon({
   className: "custom-div-icon",
   html: `<div style="
-      background-color: #aaa;
+      background-color: #ffb200;
       width: 16px;
       height: 16px;
       border-radius: 50%;
-      border: 1px solid black;
     "></div>`,
   iconSize: [12, 12],
   iconAnchor: [6, 6],
@@ -590,10 +589,10 @@ const App: React.FC = () => {
           <div className="bars-header">
             <h2 className="bars-title">Views</h2>
             <div className="legend-container">
-              <LegendItem color="#aaa" label="Notarization" />
-              <LegendItem color="#d9ead3ff" label="Finalization" />
-              <LegendItem color="#274e13ff" label="Finalized" />
-              <LegendItem color="#f4ccccff" label="Skipped" />
+              <LegendItem color="#ddd" label="Notarization" />
+              <LegendItem color="#0000ee3f" label="Finalization" />
+              <LegendItem color="#0000eeff" label="Finalized" />
+              <LegendItem color="#f4ccccff" label="Unknown" />
             </div>
           </div>
           <div className="bars-list">
@@ -779,7 +778,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     }
   } else {
     // Timed out
-    inBarText = "SKIPPED";
+    inBarText = "UNKNOWN";
   }
 
   // Determine what content to render in bar - for finalized without notarization
