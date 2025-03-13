@@ -48,6 +48,18 @@ const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 const MAX_FETCH_COUNT: usize = 16;
 const MAX_FETCH_SIZE: usize = 512 * 1024;
 
+/// Parse the log level.
+fn parse_log_level(level: &str) -> Option<Level> {
+    match level {
+        "trace" => Some(Level::TRACE),
+        "debug" => Some(Level::DEBUG),
+        "info" => Some(Level::INFO),
+        "warn" => Some(Level::WARN),
+        "error" => Some(Level::ERROR),
+        _ => None,
+    }
+}
+
 fn main() {
     // Parse arguments
     let matches = Command::new("validator")
@@ -55,14 +67,6 @@ fn main() {
         .arg(Arg::new("peers").long("peers").required(true))
         .arg(Arg::new("config").long("config").required(true))
         .get_matches();
-
-    // Create logger
-    tracing_subscriber::fmt()
-        .json()
-        .with_max_level(Level::DEBUG)
-        .with_line_number(true)
-        .with_file(true)
-        .init();
 
     // Load peers
     let peer_file = matches.get_one::<String>("peers").unwrap();
@@ -102,6 +106,15 @@ fn main() {
         port = config.port,
         "loaded config"
     );
+
+    // Create logger
+    let log_level = parse_log_level(&config.log_level).expect("Invalid log level");
+    tracing_subscriber::fmt()
+        .json()
+        .with_max_level(log_level)
+        .with_line_number(true)
+        .with_file(true)
+        .init();
 
     // Configure peers and bootstrappers
     let peer_keys = peers.keys().cloned().collect::<Vec<_>>();

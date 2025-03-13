@@ -72,6 +72,12 @@ fn main() {
                         .value_parser(value_parser!(usize)),
                 )
                 .arg(
+                    Arg::new("log_level")
+                        .long("log-level")
+                        .required(true)
+                        .value_parser(value_parser!(String)),
+                )
+                .arg(
                     Arg::new("message_backlog")
                         .long("message-backlog")
                         .required(true)
@@ -169,6 +175,7 @@ fn generate(sub_matches: &ArgMatches) {
         .unwrap()
         .clone();
     let worker_threads = *sub_matches.get_one::<usize>("worker_threads").unwrap();
+    let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
     let message_backlog = *sub_matches.get_one::<usize>("message_backlog").unwrap();
     let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
     let dashboard = sub_matches.get_one::<String>("dashboard").unwrap().clone();
@@ -237,6 +244,7 @@ fn generate(sub_matches: &ArgMatches) {
             port: PORT,
             directory: "/home/ubuntu/data".to_string(),
             worker_threads,
+            log_level: log_level.clone(),
 
             allowed_peers: allowed_peers.clone(),
             bootstrappers: bootstrappers.clone(),

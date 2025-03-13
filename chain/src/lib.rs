@@ -67,6 +67,7 @@ pub struct Config {
     pub port: u16,
     pub directory: String,
     pub worker_threads: usize,
+    pub log_level: String,
 
     pub allowed_peers: Vec<String>,
     pub bootstrappers: Vec<String>,
