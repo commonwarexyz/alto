@@ -108,7 +108,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section>
                         <h3>Where is the data coming from?</h3>
                         <p>
-                            To power this explorer, we deployed alto to a cluster of <strong>10 c7g.xlarge</strong> nodes (4 vCPU, 8GB RAM) on AWS in <strong>10 regions</strong> (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2)
+                            To power this explorer, we deployed alto to a cluster of <strong>25 c7g.xlarge</strong> nodes (4 vCPU, 8GB RAM) on AWS in <strong>10 regions</strong> (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2)
                             and built some infrastructure to stream each consensus message to your browser in real time (<a href="https://exoware.xyz">exoware::relay</a>).
                         </p>
                         <p>
