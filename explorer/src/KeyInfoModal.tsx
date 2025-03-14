@@ -69,14 +69,9 @@ const KeyInfoModal: React.FC<KeyInfoModalProps> = ({ isOpen, onClose, publicKeyH
 
                     <section>
                         <h3>The Network Key</h3>
-                        <div className="code-block">
+                        <pre className="code-block">
                             <code>{publicKeyHex}</code>
-                            <div style={{ textAlign: 'right', marginTop: '8px' }}>
-                                <button className="about-button" onClick={handleCopy}>
-                                    Copy
-                                </button>
-                            </div>
-                        </div>
+                        </pre>
                     </section>
 
                     <section>
