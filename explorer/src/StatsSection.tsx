@@ -142,9 +142,9 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
             : 0;
 
     const tooltips = {
-        blockTime: "The median time between consecutive blocks. This represents how quickly the blockchain is producing new blocks.",
-        timeToLock: "The median time (in milliseconds) from block proposal to notarization (2f+1 votes). Once a block is notarized, no conflicting block can be notarized in the same view.",
-        timeToFinalize: "The median time (in milliseconds) from block proposal to finalization (2f+1 finalizes). Once finalized, the block is immutable."
+        blockTime: "The median delta between consecutive block timestamps.",
+        timeToLock: "The median latency from block proposal to preparation.",
+        timeToFinalize: "The median latency from block proposal to finalization."
     };
 
     return (
@@ -179,7 +179,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
                 </div>
             </div>
             <div className="stats-disclaimer">
-                Latency (the delta between a block timestamp and your local clock) is recorded by your browser after verifying each incoming consensus artifact.
+                Latency observations are made by your browser after verifying each incoming consensus artifact.
             </div>
         </div>
     );
