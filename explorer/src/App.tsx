@@ -29,7 +29,7 @@ interface ViewData {
   actualFinalizationLatency?: number;
 }
 
-const SCALE_DURATION = 1000; // 1s
+const SCALE_DURATION = 750; // 750ms
 const TIMEOUT_DURATION = 5000; // 5s
 
 const markerIcon = new DivIcon({
@@ -1067,7 +1067,7 @@ function hexToUint8Array(hex: string): Uint8Array {
  * @param len - Max number of characters to keep (default: 5)
  * @returns A representation of the Uint8Array as a hex string.
  */
-function hexUint8Array(arr: Uint8Array | undefined, len: number = 5): string {
+function hexUint8Array(arr: Uint8Array | undefined, len: number = 8): string {
   if (!arr || arr.length === 0) return "";
 
   // Convert the entire array to hex
