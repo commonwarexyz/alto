@@ -54,7 +54,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             </ul>
                         </p>
                         <p>
-                            No transactions, no smart contracts, no gas, no fees, no state.
+                            That's it!
                         </p>
                     </section>
 
