@@ -653,7 +653,11 @@ const App: React.FC = () => {
         </div>
 
         {/* Stats Section */}
-        <StatsSection views={views} numValidators={LOCATIONS.length} />
+        <StatsSection
+          views={views}
+          numValidators={LOCATIONS.length}
+          onOpenAboutModal={() => setIsAboutModalOpen(true)}
+        />
 
         {/* Bars with integrated legend */}
         <div className="bars-container">

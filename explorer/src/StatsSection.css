@@ -14,6 +14,26 @@
     font-family: 'Consolas', monospace;
 }
 
+.stats-disclaimer {
+    font-style: italic;
+    color: #888;
+    font-size: 12px;
+    text-align: center;
+    margin-top: 12px;
+    padding: 0 8px;
+}
+
+.learn-more-link {
+    color: #0000ee;
+    cursor: pointer;
+    text-decoration: underline;
+    font-style: italic;
+}
+
+.learn-more-link:hover {
+    text-decoration: none;
+}
+
 .stats-container {
     display: flex;
     justify-content: space-between;
@@ -92,17 +112,14 @@
     border-color: #333 transparent transparent transparent;
 }
 
-/* Media Queries */
 @media (max-width: 768px) {
     .stats-container {
-        /* Keep horizontal layout */
         flex-direction: row;
         flex-wrap: nowrap;
         gap: 6px;
     }
 
     .stat-item {
-        /* Allow items to shrink to fit */
         min-width: unset;
         padding: 6px 4px;
     }
@@ -137,6 +154,11 @@
 
     .stat-sample {
         font-size: 9px;
+    }
+
+    .stats-disclaimer {
+        font-size: 10px;
+        margin-top: 8px;
     }
 
     .tooltip-content {
