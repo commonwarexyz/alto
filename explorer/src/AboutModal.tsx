@@ -12,11 +12,14 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
         <div className="about-modal-overlay">
             <div className="about-modal">
                 <div className="about-modal-header">
-                    <h2>alto: <i>The first blockchain built with the Commonware Library.</i></h2>
+                    <h2>alto: <i>A minimal blockchain built with the Commonware Library.</i></h2>
                 </div>
                 <div className="about-modal-content">
                     <section>
                         <h3>About</h3>
+                        <p>
+                            This explorer visualizes <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html">alto's consensus progress</a> in real-time.
+                        </p>
                         <p>
                             This dashboard visualizes the alto consensus protocol in real-time. alto is a Byzantine Fault Tolerant (BFT)
                             consensus mechanism that ensures distributed systems can reach agreement even when some participants may be faulty
@@ -106,7 +109,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <button className="about-button" onClick={onClose}>Close</button>
                 </div>
             </div>
-        </div>
+        </div >
     );
 };
 
