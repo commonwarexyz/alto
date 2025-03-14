@@ -73,7 +73,8 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                                     <div className="about-status-indicator" style={{ backgroundColor: "#0000eeff" }}></div>
                                     <strong>Seed</strong>
                                 </div>
-                                The view <i>v</i> is in progress. The leader (selected via VRF) is proposing a block to be voted upon.
+                                Some leader (selected via a BLS12-381 VRF) is proposing a block to be voted upon. The dot on the map (of the same color)
+                                is the region where the leader is located.
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">
@@ -118,56 +119,6 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             That's right, your browser is verifying every message you receive came from a hardcoded consensus set in real time. Don't trust infrastructure, trust the open source verifier code running on your computer.
                         </p>
                     </section>
-
-                    <section>
-                        <h3>Who Hosts this Example?</h3>
-                        <p>
-                            Using the <i>network key</i> displayed at the top of the page, your browser verifies that any data
-                            displayed was signed by at least <i>2f+1</i> of the <i>3f+1</i> validators in the network using WASM-compiled
-                            cryptography from the Commonware Library.
-                        </p>
-                        <p>
-                            All data you see is relayed from consensus to your browser with <a href="https://exoware.xyz">exoware::relay</a>.
-                        </p>
-                        <p>
-                            If you want to replay any of the stream, checkout <a href="https://docs.rs/crate/alto-inspector/latest">inspector</a>.
-
-
-                            <pre className="code-block">
-                                <code>
-                                    cargo install alto-inspector
-                                </code>
-                            </pre>
-
-                            <pre className="code-block">
-                                <code>
-                                    inspector get block 10
-                                </code>
-                            </pre>
-                        </p>
-                    </section>
-
-                    <section>
-                        <h3>The Map</h3>
-                        <p>
-                            The map displays the location of the current leader node that is proposing the block for the most recent view.
-                            Leader selection is determined by a Verifiable Random Function (VRF) using the node's signature.
-                        </p>
-                        <p>
-                            This geographic distribution helps visualize how the consensus process works across a globally distributed network.
-                        </p>
-                    </section>
-
-                    <section>
-                        <h3>Configuration</h3>
-                        <p>
-                            This geographic distribution helps visualize how the consensus process works across a globally distributed network.
-
-                            instance size
-                        </p>
-                    </section>
-
-
                 </div>
                 <div className="about-modal-footer">
                     <button className="about-button" onClick={onClose}>Close</button>
