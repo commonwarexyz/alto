@@ -25,7 +25,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
         <div className="about-modal-overlay">
             <div className="about-modal">
                 <div className="about-modal-header">
-                    <h2>alto: <i>A minimal blockchain built with the Commonware Library</i></h2>
+                    <h2>alto: <i>A minimal (and wicked fast) blockchain built with the Commonware Library</i></h2>
                 </div>
                 <div className="about-modal-content">
                     <section>

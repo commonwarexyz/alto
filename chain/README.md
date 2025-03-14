@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/alto-chain.svg)](https://crates.io/crates/alto-chain)
 [![Docs.rs](https://docs.rs/alto-chain/badge.svg)](https://docs.rs/alto-chain)
 
-A minimal blockchain built with the [Commonware Library](https://github.com/commonwarexyz/monorepo).
+A minimal (and wicked fast) blockchain built with the [Commonware Library](https://github.com/commonwarexyz/monorepo).
 
 ## Status
 
