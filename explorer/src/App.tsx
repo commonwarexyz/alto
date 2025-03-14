@@ -838,12 +838,19 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   }
 
   // Calculate positions for timing labels to prevent overlap
-  const labelWidth = isMobile ? 45 : 60; // Estimated width of a timing label
+  const labelWidth = isMobile ? 30 : 45; // Estimated width of a timing label
   const minLabelSpacing = labelWidth + 5; // Increased minimum space needed between labels
 
   // Calculate ideal positions for notarization and finalization labels (centered on their respective points)
+  let growingLabelPosition = Math.max(0, totalWidth - (labelWidth / 2));
   let notarizedLabelPosition = notarizedWidth > 0 ? Math.max(0, notarizedWidth - (labelWidth / 2)) : 0;
   let finalizedLabelPosition = totalWidth > 0 ? Math.max(0, totalWidth - (labelWidth / 2)) : 0;
+
+  // Constraint to ensure labels don't overflow right edge
+  const maxLabelPosition = measuredWidth - labelWidth;
+  growingLabelPosition = Math.min(growingLabelPosition, maxLabelPosition);
+  notarizedLabelPosition = Math.min(notarizedLabelPosition, maxLabelPosition);
+  finalizedLabelPosition = Math.min(finalizedLabelPosition, maxLabelPosition);
 
   // Check if labels would overlap
   const wouldOverlap = status === "finalized" &&
@@ -1012,7 +1019,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
                 <div
                   className="latency-text growing-latency"
                   style={{
-                    left: `${Math.max(0, totalWidth - (labelWidth / 2))}px`,
+                    left: `${growingLabelPosition}px`,
                   }}
                 >
                   {growingLatencyText}
