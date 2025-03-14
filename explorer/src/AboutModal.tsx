@@ -32,17 +32,32 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         <h3>About</h3>
                         <p>
                             This explorer visualizes the performance of <a href="https://github.com/commonwarexyz/alto">alto</a>'s consensus, <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html">threshold-simplex</a>,
-                            deployed on a cluster of globally distributed nodes.</p>
+                            deployed on a cluster of globally distributed nodes.
+                        </p>
                         <p>
-                            <i>You can replicate this setup in your own AWS account with <a href="https://docs.rs/commonware-deployer/0.0.41/commonware_deployer/">commonware-deployer</a> by following the
+                            <i>You can replicate this devnet in your own AWS account with <a href="https://docs.rs/commonware-deployer/0.0.41/commonware_deployer/">commonware-deployer</a> by following the
                                 instructions <a href="https://github.com/commonwarexyz/alto/blob/main/chain/README.md">here</a>.</i>
+                        </p>
+                    </section>
+
+                    <section>
+                        <h3>What is alto?</h3>
+                        <p>
+                            <a href="https://github.com/commonwarexyz/alto">alto</a> is a minimal (and wicked fast) blockchain built with the Commonware Library. By minimal, we mean minimal. Its state transition function only ensures each block
+                            has a height greater than its parent, that it references the digest of its parent, and that the timestamp is greater than the parent's timestamp (but not too far into the future).
+                        </p>
+                        <p>
+
                         </p>
                     </section>
 
                     <section>
                         <h3>What are you looking at?</h3>
                         <p>
-                            The explorer visualizes the progression of <i>threshold-simplex</i> in each view.
+                            This site visualizes the progression of <i>threshold-simplex</i> over time, represented by <strong>views</strong>.
+
+
+                            across <strong>views</strong> -.
 
 
                             of block proposal, notarization, and finalization on the alto devnet
