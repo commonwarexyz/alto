@@ -728,9 +728,6 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   const minBarWidth = isMobile ? 30 : 60; // Minimum width for completed bars
   const minSegmentWidth = isMobile ? 15 : 30; // Minimum segment width
 
-  // Maximum latency to consider for scaling (to prevent extremely long bars)
-  const MAX_LATENCY = 2000; // 2 seconds
-
   // Calculate widths for different stages
   let totalWidth = 0;
   let notarizedWidth = 0;
@@ -833,7 +830,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
 
   // Set block info text
   if (status === "timed_out") {
-    inBarText = "TIMEOUT";
+    inBarText = "MISSING";
   } else if (status === "unknown") {
     inBarText = "UNKNOWN";
   } else if (block) {
