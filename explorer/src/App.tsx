@@ -6,6 +6,8 @@ import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from
 import { BACKEND_URL, LOCATIONS, PUBLIC_KEY_HEX } from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, BlockJs } from "./types";
 import "./App.css";
+import AboutModal from './AboutModal';
+import './AboutModal.css';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
@@ -77,8 +79,8 @@ const initializeLogoAnimations = () => {
 const App: React.FC = () => {
   const [views, setViews] = useState<ViewData[]>([]);
   const [lastObservedView, setLastObservedView] = useState<number | null>(null);
+  const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
-  const [isConnected, setIsConnected] = useState<boolean>(false);
   const currentTimeRef = useRef(Date.now());
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -487,7 +489,6 @@ const App: React.FC = () => {
 
       ws.onopen = () => {
         console.log("WebSocket connected");
-        setIsConnected(true);
       };
 
       ws.onmessage = (event) => {
@@ -517,7 +518,6 @@ const App: React.FC = () => {
 
       ws.onclose = (event) => {
         console.error(`WebSocket closed with code: ${event.code}`);
-        setIsConnected(false);
 
         // Only attempt to reconnect if we still have a reference to this websocket
         if (wsRef.current === ws) {
@@ -602,9 +602,13 @@ const App: React.FC = () => {
             <span className="edge-logo-symbol">+</span>
           </div>
         </div>
-        <div className="connection-status">
-          <div className={`status-indicator ${isConnected ? "connected" : "disconnected"}`}></div>
-          <span>{isConnected ? "Connected" : "Disconnected"}</span>
+        <div className="about-button-container">
+          <button
+            className="about-header-button"
+            onClick={() => setIsAboutModalOpen(true)}
+          >
+            ?
+          </button>
         </div>
       </header>
 
@@ -672,6 +676,8 @@ const App: React.FC = () => {
       <footer className="footer">
         &copy; {new Date().getFullYear()} Commonware, Inc. All rights reserved.
       </footer>
+
+      <AboutModal isOpen={isAboutModalOpen} onClose={() => setIsAboutModalOpen(false)} />
     </div >
   );
 };
