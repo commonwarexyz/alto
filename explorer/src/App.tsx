@@ -254,6 +254,12 @@ const App: React.FC = () => {
     const view = notarized.proof.view;
     setViews((prevViews) => {
       const index = prevViews.findIndex((v) => v.view === view);
+
+      // If the view exists and is already finalized, ignore this notarization completely
+      if (index !== -1 && prevViews[index].status === "finalized") {
+        return prevViews; // No changes needed, preserve finalized state
+      }
+
       let newViews = [...prevViews];
       const currentTime = Date.now();
 
@@ -281,13 +287,10 @@ const App: React.FC = () => {
           }
         }
 
-        // Always update the notarization information regardless of current status
-        // This ensures that if finalization was received before notarization,
-        // we'll still have the notarization data available for visualization
+        // Update the view with notarization data
         const updatedView: ViewData = {
           ...viewData,
-          // Only change status if not already finalized
-          status: viewData.status === "finalized" ? "finalized" : "notarized",
+          status: "notarized", // We already checked it's not finalized
           notarizationTime: currentTime,
           // If no start time exists, use the block timestamp
           startTime: viewData.startTime || calculatedStartTime,
@@ -648,9 +651,7 @@ const App: React.FC = () => {
             <h2 className="bars-title">Views</h2>
             <div className="legend-container">
               <LegendItem color="#0000eeff" label="VRF" />
-              <LegendItem color="#ddd" label="Seeded" />
               <LegendItem color="#000" label="Notarized" />
-              <LegendItem color="#d9ead3ff" label="Finalization" />
               <LegendItem color="#274e13ff" label="Finalized" />
               <LegendItem color="#f4ccccff" label="Timeout" />
               <LegendItem color="#fce5cdff" label="Unknown" />
