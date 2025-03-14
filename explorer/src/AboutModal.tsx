@@ -54,7 +54,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             </ul>
                         </p>
                         <p>
-                            Enough to serve as an example and nowhere near enough to slow you down when you introduce your own rules.
+                            No transactions, no smart contracts, no gas, no fees, no state.
                         </p>
                     </section>
 
