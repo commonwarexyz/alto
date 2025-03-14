@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import './AboutModal.css'; // Sharing the same CSS file
 
 interface KeyInfoModalProps {
     isOpen: boolean;
@@ -11,7 +12,7 @@ const KeyInfoModal: React.FC<KeyInfoModalProps> = ({ isOpen, onClose, publicKeyH
     useEffect(() => {
         if (isOpen) {
             // Find all links in the modal and set them to open in new tabs
-            const modalLinks = document.querySelectorAll('.key-info-modal a');
+            const modalLinks = document.querySelectorAll('.about-modal a');
             modalLinks.forEach(link => {
                 if (link instanceof HTMLAnchorElement) {
                     link.setAttribute('target', '_blank');
@@ -21,11 +22,22 @@ const KeyInfoModal: React.FC<KeyInfoModalProps> = ({ isOpen, onClose, publicKeyH
         }
     }, [isOpen]);
 
+    const handleCopy = () => {
+        navigator.clipboard.writeText(publicKeyHex);
+        const button = document.querySelector('.copy-key-button');
+        if (button) {
+            button.textContent = "Copied!";
+            setTimeout(() => {
+                button.textContent = "Copy";
+            }, 2000);
+        }
+    };
+
     if (!isOpen) return null;
 
     return (
         <div className="about-modal-overlay">
-            <div className="about-modal key-info-modal">
+            <div className="about-modal">
                 <div className="about-modal-header">
                     <h2>Network Key Information</h2>
                 </div>
@@ -57,23 +69,13 @@ const KeyInfoModal: React.FC<KeyInfoModalProps> = ({ isOpen, onClose, publicKeyH
 
                     <section>
                         <h3>The Network Key</h3>
-                        <div className="key-display-box">
+                        <div className="code-block">
                             <code>{publicKeyHex}</code>
-                            <button
-                                className="copy-key-button"
-                                onClick={() => {
-                                    navigator.clipboard.writeText(publicKeyHex);
-                                    const button = document.querySelector('.copy-key-button');
-                                    if (button) {
-                                        button.textContent = "Copied!";
-                                        setTimeout(() => {
-                                            button.textContent = "Copy";
-                                        }, 2000);
-                                    }
-                                }}
-                            >
-                                Copy
-                            </button>
+                            <div style={{ textAlign: 'right', marginTop: '8px' }}>
+                                <button className="about-button" onClick={handleCopy}>
+                                    Copy
+                                </button>
+                            </div>
                         </div>
                     </section>
 

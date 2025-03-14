@@ -10,9 +10,6 @@ import AboutModal from './AboutModal';
 import './AboutModal.css';
 import StatsSection from "./StatsSection";
 import './StatsSection.css';
-import Tooltip from "./Tooltip";
-import './Tooltip.css';
-import KeyInfoButton from './KeyInfoButton';
 import KeyInfoModal from './KeyInfoModal';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
@@ -610,7 +607,12 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="about-button-container">
-          <KeyInfoButton onClick={() => setIsKeyInfoModalOpen(true)} />
+          <button
+            className="key-header-button"
+            onClick={() => setIsKeyInfoModalOpen(true)}
+          >
+            ⚷
+          </button>
           <button
             className="about-header-button"
             onClick={() => setIsAboutModalOpen(true)}
