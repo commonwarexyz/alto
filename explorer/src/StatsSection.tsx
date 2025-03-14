@@ -19,7 +19,6 @@ export interface ViewData {
 interface StatsSectionProps {
     views: ViewData[];
     numValidators: number;
-    onOpenAboutModal?: () => void;
 }
 
 interface TooltipProps {
@@ -51,7 +50,7 @@ export const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
     );
 };
 
-const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators, onOpenAboutModal }) => {
+const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => {
     // Calculate average time-to-lock (notarization latency)
     const notarizationTimes = views
         .filter(view => (view.status === "notarized" || view.status === "finalized"))
@@ -128,9 +127,6 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators, onOpe
             </div>
             <div className="stats-disclaimer">
                 Metrics calculated from recent network activity. Measured from your browser's perspective.
-                {onOpenAboutModal && (
-                    <> <span className="learn-more-link" onClick={onOpenAboutModal}>Learn more</span></>
-                )}
             </div>
         </div>
     );

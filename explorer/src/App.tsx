@@ -658,7 +658,6 @@ const App: React.FC = () => {
         <StatsSection
           views={views}
           numValidators={LOCATIONS.length}
-          onOpenAboutModal={() => setIsAboutModalOpen(true)}
         />
 
         {/* Bars with integrated legend */}

@@ -23,17 +23,6 @@
     padding: 0 8px;
 }
 
-.learn-more-link {
-    color: #0000ee;
-    cursor: pointer;
-    text-decoration: underline;
-    font-style: italic;
-}
-
-.learn-more-link:hover {
-    text-decoration: none;
-}
-
 .stats-container {
     display: flex;
     justify-content: space-between;
