@@ -43,8 +43,15 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section>
                         <h3>What is alto?</h3>
                         <p>
-                            <a href="https://github.com/commonwarexyz/alto">alto</a> is a minimal (and wicked fast) blockchain built with the Commonware Library. By minimal, we mean minimal. Its state transition function only ensures each block
-                            has a height greater than its parent, that it references the digest of its parent, and that the timestamp is greater than the parent's timestamp (but not too far into the future).
+                            <a href="https://github.com/commonwarexyz/alto">alto</a> is a minimal (and wicked fast) blockchain built with the Commonware Library.
+                        </p>
+                        <p>
+                            By minimal, we mean minimal. alto's state transition function consists of just <strong>3</strong> rules. Each block must:
+                            <ul>
+                                <li>Increase the height by 1</li>
+                                <li>Reference the digest of its parent</li>
+                                <li>Propose a new timestamp greater than its parent (<i>but not more than 500ms in the future</i>)</li>
+                            </ul>
                         </p>
                         <p>
 
