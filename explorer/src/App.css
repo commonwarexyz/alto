@@ -317,17 +317,17 @@ body {
 }
 
 .key-header-button {
-  background: #ffb200;
-  border: 1px solid #ffb200;
+  background: #0000eeff;
+  border: 1px solid #0000eeff;
   cursor: pointer;
   font-family: 'Consolas', monospace;
   font-size: 0.9rem;
   margin-right: 6px;
-  color: black;
+  color: white;
   -webkit-appearance: none;
   appearance: none;
   -webkit-tap-highlight-color: transparent;
-  -webkit-text-fill-color: black;
+  -webkit-text-fill-color: white;
   width: 36px;
   height: 36px;
   padding: 0;
@@ -343,6 +343,8 @@ body {
 .key-header-button:visited {
   background-color: #f0f0f0;
   text-decoration: none;
+  color: #0000eeff;
+  -webkit-text-fill-color: #0000eeff;
 }
 
 .about-header-button {
@@ -370,8 +372,8 @@ body {
 .about-header-button:active,
 .about-header-button:visited {
   background-color: #f0f0f0;
-  color: black;
   text-decoration: none;
+  color: black;
   -webkit-text-fill-color: black;
 }
 

@@ -10,7 +10,9 @@ import AboutModal from './AboutModal';
 import './AboutModal.css';
 import StatsSection from "./StatsSection";
 import './StatsSection.css';
-import KeyInfoModal from './KeyInfoModal';
+import KeyInfoModal from './KeyModal';
+import MapOverlay from './MapOverlay';
+import './MapOverlay.css';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
@@ -629,8 +631,8 @@ const App: React.FC = () => {
         <div className="map-container">
           <MapContainer center={center} zoom={1} style={{ height: "100%", width: "100%" }} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false} dragging={false}>
             <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> | &copy; <a href="https://carto.com/attributions">CARTO</a>'
+              url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
+              attribution='&copy; OSM | &copy; CARTO</a>'
             />
             {views.length > 0 && views[0].location !== undefined && (
               <Marker
@@ -653,6 +655,7 @@ const App: React.FC = () => {
                 </Popup>
               </Marker>
             )}
+            <MapOverlay numValidators={LOCATIONS.length} />
           </MapContainer>
         </div>
 
@@ -665,7 +668,7 @@ const App: React.FC = () => {
         {/* Bars with integrated legend */}
         <div className="bars-container">
           <div className="bars-header">
-            <h2 className="bars-title">Views</h2>
+            <h2 className="bars-title">Timeline</h2>
             <div className="legend-container">
               <LegendItem color="#0000eeff" label="Seed" />
               <LegendItem color="#000" label="Prepared" />
