@@ -21,18 +21,6 @@ const KeyInfoModal: React.FC<KeyInfoModalProps> = ({ isOpen, onClose, publicKeyH
             });
         }
     }, [isOpen]);
-
-    const handleCopy = () => {
-        navigator.clipboard.writeText(publicKeyHex);
-        const button = document.querySelector('.copy-key-button');
-        if (button) {
-            button.textContent = "Copied!";
-            setTimeout(() => {
-                button.textContent = "Copy";
-            }, 2000);
-        }
-    };
-
     if (!isOpen) return null;
 
     return (

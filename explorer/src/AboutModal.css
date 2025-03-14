@@ -34,21 +34,13 @@
     align-items: center;
     padding: 16px 20px;
     border-bottom: 1px solid #eee;
+    background-color: #f0f0f0;
 }
 
 .about-modal-header h2 {
     margin: 0;
     font-size: 1.2rem;
     font-weight: normal;
-}
-
-.about-close-button {
-    background: none;
-    border: none;
-    font-size: 1.5rem;
-    cursor: pointer;
-    color: #333;
-    padding: 0 8px;
 }
 
 /* Modal Content */
@@ -123,51 +115,6 @@
     justify-content: flex-end;
 }
 
-.about-button {
-    padding: 8px 16px;
-    background-color: #f4f4f4;
-    border: 1px solid #ddd;
-    cursor: pointer;
-    font-family: 'Consolas', monospace;
-    font-size: 0.9rem;
-    color: black;
-    -webkit-appearance: none;
-    appearance: none;
-    -webkit-tap-highlight-color: transparent;
-}
-
-.about-button:hover,
-.about-button:focus,
-.about-button:active,
-.about-button:visited {
-    background-color: #e8e8e8;
-    color: black;
-    text-decoration: none;
-}
-
-.about-header-button {
-    background: black;
-    border: 1px solid black;
-    padding: 6px 12px;
-    cursor: pointer;
-    font-family: 'Consolas', monospace;
-    font-size: 0.9rem;
-    margin-left: 16px;
-    color: white;
-    -webkit-appearance: none;
-    appearance: none;
-    -webkit-tap-highlight-color: transparent;
-}
-
-.about-header-button:hover,
-.about-header-button:focus,
-.about-header-button:active,
-.about-header-button:visited {
-    background-color: #f0f0f0;
-    color: black;
-    text-decoration: none;
-}
-
 .code-block {
     background-color: #f4f4f4;
     border: 1px solid #ddd;
@@ -180,6 +127,30 @@
     word-break: break-all;
     overflow-x: auto;
 }
+
+.about-button {
+    padding: 8px 16px;
+    background-color: #f4f4f4;
+    border: 1px solid #ddd;
+    cursor: pointer;
+    font-family: 'Consolas', monospace;
+    font-size: 0.9rem;
+    color: black !important;
+    -webkit-appearance: none;
+    appearance: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-fill-color: black;
+}
+
+.about-button:hover,
+.about-button:focus,
+.about-button:active,
+.about-button:visited {
+    background-color: #e8e8e8;
+    color: black;
+    text-decoration: none;
+}
+
 
 /* Mobile optimizations */
 @media (max-width: 768px) {
@@ -198,16 +169,5 @@
     .about-modal-content p,
     .about-modal-content li {
         font-size: 0.8rem;
-    }
-
-    /* Ensure buttons stay black on mobile */
-    .about-button {
-        color: black !important;
-        -webkit-text-fill-color: black;
-    }
-
-    .about-header-button {
-        color: white !important;
-        -webkit-text-fill-color: white;
     }
 }
