@@ -34,6 +34,7 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
             className="tooltip-container"
             onMouseEnter={() => setIsVisible(true)}
             onMouseLeave={() => setIsVisible(false)}
+            onClick={() => setIsVisible(!isVisible)}
         >
             {children}
             {isVisible && (

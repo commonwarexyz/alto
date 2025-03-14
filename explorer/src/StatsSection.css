@@ -58,7 +58,7 @@
     position: relative;
     display: inline-block;
     width: 100%;
-    cursor: help;
+    touch-action: manipulation;
 }
 
 .tooltip-content {
@@ -73,6 +73,7 @@
     border-radius: 0;
     z-index: 1000;
     width: 250px;
+    max-width: 90vw;
     font-size: 12px;
     line-height: 1.4;
     margin-bottom: 6px;
@@ -94,12 +95,16 @@
 /* Media Queries */
 @media (max-width: 768px) {
     .stats-container {
-        flex-direction: column;
-        gap: 8px;
+        /* Keep horizontal layout */
+        flex-direction: row;
+        flex-wrap: nowrap;
+        gap: 6px;
     }
 
     .stat-item {
-        width: 100%;
+        /* Allow items to shrink to fit */
+        min-width: unset;
+        padding: 6px 4px;
     }
 
     .stat-value {
@@ -114,7 +119,7 @@
 
 @media (max-width: 480px) {
     .stats-section {
-        padding: 10px;
+        padding: 10px 8px;
     }
 
     .stats-title {
@@ -123,21 +128,26 @@
     }
 
     .stat-label {
-        font-size: 12px;
+        font-size: 11px;
     }
 
     .stat-value {
         font-size: 14px;
     }
 
+    .stat-sample {
+        font-size: 9px;
+    }
+
     .tooltip-content {
-        width: 180px;
+        width: 160px;
+        max-width: 80vw;
         font-size: 10px;
-        left: 0;
-        transform: none;
+        left: 50%;
+        transform: translateX(-50%);
     }
 
     .tooltip-content::after {
-        left: 20px;
+        left: 50%;
     }
 }
