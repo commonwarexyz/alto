@@ -87,9 +87,32 @@
 }
 
 .about-modal-content li {
-    margin-bottom: 8px;
+    margin-bottom: 12px;
     font-size: 0.9rem;
     line-height: 1.5;
+}
+
+/* Status indicator styles */
+.status-indicator-wrapper {
+    display: flex;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.about-status-indicator {
+    width: 16px;
+    height: 16px;
+    margin-right: 8px;
+    border: 1px solid #ccc;
+}
+
+.status-list li {
+    list-style-type: none;
+    padding-left: 0;
+}
+
+.status-list {
+    padding-left: 0;
 }
 
 /* Modal Footer */

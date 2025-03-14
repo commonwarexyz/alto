@@ -31,21 +31,37 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             The dashboard shows a series of <strong>views</strong> - discrete consensus rounds where the network attempts
                             to agree on a block. Each view progresses through several stages:
                         </p>
-                        <ul>
+                        <ul className="status-list">
                             <li>
-                                <strong>Growing (Blue):</strong> The view is in progress. The leader (selected via VRF)
+                                <div className="status-indicator-wrapper">
+                                    <div className="about-status-indicator" style={{ backgroundColor: "#0000eeff" }}></div>
+                                    <strong>VRF</strong>
+                                </div>
+                                The view is in progress. The leader (selected via VRF)
                                 is proposing a block to be agreed upon.
                             </li>
                             <li>
-                                <strong>Locked/Notarized (Black):</strong> The view has received enough validator signatures
+                                <div className="status-indicator-wrapper">
+                                    <div className="about-status-indicator" style={{ backgroundColor: "#000" }}></div>
+                                    <strong>Locked</strong>
+                                </div>
+                                The view has received enough validator signatures
                                 to be considered notarized. This means a quorum of validators has endorsed this block.
                             </li>
                             <li>
-                                <strong>Finalized (Green):</strong> The view has been fully confirmed by the network and
+                                <div className="status-indicator-wrapper">
+                                    <div className="about-status-indicator" style={{ backgroundColor: "#274e13ff" }}></div>
+                                    <strong>Finalized</strong>
+                                </div>
+                                The view has been fully confirmed by the network and
                                 the block is now immutable.
                             </li>
                             <li>
-                                <strong>Timed Out:</strong> The view failed to progress within the expected timeframe.
+                                <div className="status-indicator-wrapper">
+                                    <div className="about-status-indicator" style={{ backgroundColor: "#f4ccccff" }}></div>
+                                    <strong>Timed Out</strong>
+                                </div>
+                                The view failed to progress within the expected timeframe.
                             </li>
                         </ul>
                         <p>
