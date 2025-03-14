@@ -27,7 +27,8 @@ interface ViewData {
   actualFinalizationLatency?: number;
 }
 
-const TIMEOUT_DURATION = 1000; // 1000ms
+const SCALE_DURATION = 1000; // 1 second
+const TIMEOUT_DURATION = 5000; // 5000ms
 
 const markerIcon = new DivIcon({
   className: "custom-div-icon",
@@ -653,8 +654,6 @@ const App: React.FC = () => {
               <LegendItem color="#0000eeff" label="VRF" />
               <LegendItem color="#000" label="Notarized" />
               <LegendItem color="#274e13ff" label="Finalized" />
-              <LegendItem color="#f4ccccff" label="Timeout" />
-              <LegendItem color="#fce5cdff" label="Unknown" />
             </div>
           </div>
           <div className="bars-list">
@@ -793,7 +792,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   // Now calculate bar widths based on the actual latency values
   const calculateScaledWidth = (latency: number) => {
     // Apply scaling factor to keep bars within reasonable size
-    return Math.min(latency / TIMEOUT_DURATION, 1) * measuredWidth;
+    return Math.min(latency / SCALE_DURATION, 1) * measuredWidth;
   };
 
   // Calculate the widths for different bar segments
