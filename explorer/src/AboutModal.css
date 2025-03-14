@@ -63,11 +63,11 @@
 }
 
 .about-modal-content h3 {
-    font-size: 1rem;
+    font-size: 1.1rem;
     margin-top: 0;
     margin-bottom: 10px;
-    font-weight: normal;
-    border-bottom: 1px solid #eee;
+    font-weight: bold;
+    border-bottom: 1px solid #ccc;
     padding-bottom: 6px;
 }
 
