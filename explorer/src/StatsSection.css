@@ -1,0 +1,137 @@
+.stats-section {
+    background-color: white;
+    border: 1px solid #ccc;
+    padding: 12px;
+    margin-bottom: 16px;
+    width: 100%;
+    font-family: 'Consolas', monospace;
+}
+
+.stats-title {
+    margin: 0 0 12px 0;
+    font-size: 18px;
+    font-weight: normal;
+    font-family: 'Consolas', monospace;
+}
+
+.stats-container {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.stat-item {
+    flex: 1;
+    min-width: 120px;
+    padding: 8px 12px;
+    background-color: #f4f4f4;
+    border: 1px solid #ddd;
+}
+
+.stat-label {
+    font-size: 14px;
+    color: #555;
+    margin-bottom: 4px;
+}
+
+.stat-value {
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.stat-sample {
+    display: block;
+    font-size: 12px;
+    font-weight: normal;
+    color: #777;
+    margin-top: 2px;
+}
+
+/* Tooltip styles */
+.tooltip-container {
+    position: relative;
+    display: inline-block;
+    width: 100%;
+    cursor: help;
+}
+
+.tooltip-content {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #333;
+    color: white;
+    text-align: center;
+    padding: 8px 12px;
+    border-radius: 0;
+    z-index: 100;
+    width: 250px;
+    font-size: 12px;
+    line-height: 1.4;
+    margin-bottom: 6px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.tooltip-content::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    margin-left: -5px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: #333 transparent transparent transparent;
+}
+
+/* Media Queries */
+@media (max-width: 768px) {
+    .stats-container {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .stat-item {
+        width: 100%;
+    }
+
+    .stat-value {
+        font-size: 16px;
+    }
+
+    .tooltip-content {
+        width: 200px;
+        font-size: 11px;
+    }
+}
+
+@media (max-width: 480px) {
+    .stats-section {
+        padding: 10px;
+    }
+
+    .stats-title {
+        font-size: 16px;
+        margin-bottom: 8px;
+    }
+
+    .stat-label {
+        font-size: 12px;
+    }
+
+    .stat-value {
+        font-size: 14px;
+    }
+
+    .tooltip-content {
+        width: 180px;
+        font-size: 10px;
+        left: 0;
+        transform: none;
+    }
+
+    .tooltip-content::after {
+        left: 20px;
+    }
+}

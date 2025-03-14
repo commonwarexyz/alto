@@ -8,6 +8,8 @@ import { SeedJs, NotarizedJs, FinalizedJs, BlockJs } from "./types";
 import "./App.css";
 import AboutModal from './AboutModal';
 import './AboutModal.css';
+import StatsSection from "./StatsSection";
+import './StatsSection.css';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
@@ -649,6 +651,9 @@ const App: React.FC = () => {
             )}
           </MapContainer>
         </div>
+
+        {/* Stats Section */}
+        <StatsSection views={views} numValidators={LOCATIONS.length} />
 
         {/* Bars with integrated legend */}
         <div className="bars-container">
