@@ -668,7 +668,7 @@ const App: React.FC = () => {
         {/* Bars with integrated legend */}
         <div className="bars-container">
           <div className="bars-header">
-            <h2 className="bars-title">Views</h2>
+            <h2 className="bars-title">Timeline</h2>
             <div className="legend-container">
               <LegendItem color="#0000eeff" label="Seed" />
               <LegendItem color="#000" label="Prepared" />
