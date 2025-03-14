@@ -668,8 +668,6 @@ const App: React.FC = () => {
                   currentTime={currentTimeRef.current}
                   isMobile={isMobile}
                 />
-
-                {/* Add view change latency indicator between bars (except after the last one) */}
                 {index < views.length - 1 && views[index + 1] && (
                   <ViewChangeLatency
                     currentView={viewData}
@@ -706,6 +704,7 @@ const LegendItem: React.FC<LegendItemProps> = ({ color, label }) => {
   );
 };
 
+// Completely redesigned ViewChangeLatency component with vertical orientation
 interface ViewChangeLatencyProps {
   currentView: ViewData;
   nextView: ViewData;
@@ -715,11 +714,7 @@ interface ViewChangeLatencyProps {
 const ViewChangeLatency: React.FC<ViewChangeLatencyProps> = ({ currentView, nextView, isMobile }) => {
   // Only show latency if both views have valid start times
   if (!currentView.startTime || !nextView.startTime) {
-    return (
-      <div className="view-change-latency">
-        <div className="latency-line"></div>
-      </div>
-    );
+    return null;
   }
 
   // Calculate latency between views (absolute value in case of any ordering issues)
@@ -727,11 +722,7 @@ const ViewChangeLatency: React.FC<ViewChangeLatencyProps> = ({ currentView, next
 
   // Skip rendering if latency is unreasonably large (might indicate gap in data)
   if (latencyMs > 30000) { // Skip if more than 30 seconds
-    return (
-      <div className="view-change-latency">
-        <div className="latency-line"></div>
-      </div>
-    );
+    return null;
   }
 
   // Format latency for display
@@ -744,9 +735,10 @@ const ViewChangeLatency: React.FC<ViewChangeLatencyProps> = ({ currentView, next
   }
 
   return (
-    <div className="view-change-latency">
-      <div className="latency-line"></div>
-      <div className="latency-value">{displayText}</div>
+    <div className="vertical-latency-container" title={`Time between view ${currentView.view} and ${nextView.view}`}>
+      <div className="vertical-latency-line">
+        <div className="vertical-latency-value">{displayText}</div>
+      </div>
     </div>
   );
 };

@@ -128,21 +128,52 @@ body {
   font-family: 'Consolas', monospace;
 }
 
+/* Keep bars close together */
 .bars-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 2px;
+  /* Slight gap between elements */
   width: 100%;
+  position: relative;
 }
 
-/* Individual bar rows */
+/* Add a continuous vertical timeline line */
+.bars-list::before {
+  display: none;
+}
+
+/* View block container - wraps each bar and its latency indicator */
+.view-block {
+  position: relative;
+  margin-bottom: 1px;
+}
+
+/* Latency indicator - positioned to the left of the view info */
+.latency-indicator {
+  position: absolute;
+  left: 0;
+  top: -10px;
+  /* Position above the bar */
+  font-size: 10px;
+  color: #666;
+  background-color: white;
+  padding: 0 2px;
+  white-space: nowrap;
+  z-index: 2;
+  font-family: 'Consolas', monospace;
+}
+
+/* Add a bit more structure to the bar row */
 .bar-row {
   display: flex;
-  margin-bottom: 16px;
-  font-size: 14px;
+  margin-bottom: 0;
+  padding: 4px 0;
   width: 100%;
   max-width: 100%;
   font-family: 'Consolas', monospace;
+  position: relative;
+  z-index: 1;
 }
 
 .view-info {
@@ -315,79 +346,73 @@ body {
   text-overflow: ellipsis;
 }
 
-/* Connection status styling */
-.connection-status {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-  margin-left: auto;
-  padding-top: 4px;
-}
-
-.status-indicator {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 1px solid #000;
-}
-
-.status-indicator.connected {
-  background: #000;
-}
-
-.status-indicator.disconnected {
-  background: transparent;
-}
-
-.view-change-latency {
-  display: flex;
-  align-items: center;
-  margin: 2px 0;
-  padding-left: 80px;
-  /* Align with bar content, adjust to match view-info width */
-  height: 14px;
+/* Vertical latency indicator container */
+.vertical-latency-container {
   position: relative;
+  height: 18px;
+  /* Give more space for the indicator */
+  width: 100%;
+  z-index: 2;
+  /* Above everything else */
 }
 
-.latency-line {
-  flex-grow: 1;
-  height: 1px;
-  background-color: #ddd;
-  position: relative;
-}
-
-.latency-line::before,
-.latency-line::after {
+/* Vertical latency node/dot */
+.vertical-latency-line::before {
   content: '';
   position: absolute;
-  width: 3px;
-  height: 3px;
+  left: 30px;
+  /* Match the vertical line position */
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 6px;
+  height: 6px;
   background-color: #ddd;
+  border: 1px solid #bbb;
   border-radius: 50%;
-  top: -1px;
 }
 
-.latency-line::before {
-  left: 0;
-}
-
-.latency-line::after {
-  right: 0;
-}
-
-.latency-value {
+/* Vertical latency value */
+.vertical-latency-value {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 10px;
+  /* Position it left of the timeline */
+  top: 50%;
+  transform: translateY(-50%);
   font-size: 10px;
-  color: #888;
+  color: #666;
   background-color: white;
-  padding: 0 4px;
-  border-radius: 2px;
+  padding: 1px 4px;
   white-space: nowrap;
+  border: 1px solid #eee;
+  border-radius: 2px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
+/* Maintain bar timing styles */
+.timing-info {
+  position: relative;
+  height: 16px;
+  margin-top: 1px;
+}
+
+.latency-text {
+  position: absolute;
+  color: #444;
+  font-size: 10px;
+  white-space: nowrap;
+  transition: left 0.05s linear;
+}
+
+/* Create a subtle highlight for the vertical markers */
+.vertical-latency-container:hover .vertical-latency-value {
+  background-color: #f8f8f8;
+  border-color: #ddd;
+  z-index: 3;
+}
+
+.vertical-latency-container:hover .vertical-latency-line::before {
+  background-color: #bbb;
+}
 
 /* Footer */
 .footer {
@@ -578,15 +603,17 @@ body {
     font-size: 8px !important;
   }
 
-  .view-change-latency {
-    padding-left: 50px;
-    /* Adjust to match mobile view-info width */
-    height: 10px;
-    margin: 1px 0;
+
+  .bars-list::before {
+    left: 25px;
   }
 
-  .latency-value {
+  .latency-indicator {
     font-size: 8px;
-    padding: 0 2px;
+    top: -8px;
+  }
+
+  .bar-row {
+    padding: 2px 0;
   }
 }
