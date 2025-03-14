@@ -1,3 +1,81 @@
+//! Inspect alto activity.
+//!
+//! # Status
+//!
+//! `alto-inspector` is **ALPHA** software and is not yet recommended for production use. Developers should expect breaking changes and occasional instability.
+//!
+//! # Installation
+//!
+//! ## Local
+//!
+//! ```bash
+//! cargo install --path . --force
+//! ```
+//!
+//! ## Crates.io
+//!
+//! ```bash
+//! cargo install alto-inspector
+//! ```
+//!
+//! # Usage
+//!
+//! _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
+//!
+//! ## Get the latest seed
+//!
+//! ```bash
+//! inspector get seed latest
+//! ```
+//!
+//! ## Get the notarization for view 100
+//!
+//! ```bash
+//! inspector get notarization 100
+//! ```
+//!
+//! ## Get the notarizations between views 100 to 110
+//!
+//! ```bash
+//! inspector get notarization 100..110
+//! ```
+//!
+//! ## Get the finalization for view 50
+//!
+//! ```bash
+//! inspector get finalization 50
+//! ```
+//!
+//! ## Get the latest finalized block
+//!
+//! ```bash
+//! inspector get block latest
+//! ```
+//!
+//! ## Get the block at height 10
+//!
+//! ```bash
+//! inspector get block 10
+//! ```
+//!
+//! ## Get the blocks between heights 10 and 20
+//!
+//! ```bash
+//! inspector get block 10..20
+//! ```
+//!
+//! ## Get the block with a specific digest
+//!
+//! ```bash
+//! inspector -- get block 0x65016ff40e824e21fffe903953c07b6d604dbcf39f681c62e7b3ed57ab1d1994
+//! ```
+//!
+//! ## Listen for consensus events
+//!
+//! ```bash
+//! inspector listen
+//! ```
+
 use alto_client::{
     consensus::{Message, Payload},
     Client, IndexQuery, Query,
@@ -13,6 +91,10 @@ use utils::{
 };
 
 mod utils;
+
+const DEFAULT_INDEXER: &str = "https://alto.exoware.xyz";
+const DEFAULT_IDENTITY: &str =
+    "80e2369ea16268299d0d2c6be6f16d3f7abc8a934a99b2a4120706177f5781f6952ab05615bf67d518c37b96866e0b37";
 
 #[tokio::main]
 async fn main() {
@@ -32,15 +114,15 @@ async fn main() {
                 .arg(
                     Arg::new("indexer")
                         .long("indexer")
-                        .required(true)
                         .value_parser(value_parser!(String))
+                        .default_value(DEFAULT_INDEXER)
                         .help("URL of the indexer to connect to"),
                 )
                 .arg(
                     Arg::new("identity")
                         .long("identity")
-                        .required(true)
                         .value_parser(value_parser!(String))
+                        .default_value(DEFAULT_IDENTITY)
                         .help("Hex-encoded public key of the identity"),
                 ),
         )
@@ -62,15 +144,15 @@ async fn main() {
                 .arg(
                     Arg::new("indexer")
                         .long("indexer")
-                        .required(true)
                         .value_parser(value_parser!(String))
+                        .default_value(DEFAULT_INDEXER)
                         .help("URL of the indexer to connect to"),
                 )
                 .arg(
                     Arg::new("identity")
                         .long("identity")
-                        .required(true)
                         .value_parser(value_parser!(String))
+                        .default_value(DEFAULT_IDENTITY)
                         .help("Hex-encoded public key of the identity"),
                 )
                 .arg(

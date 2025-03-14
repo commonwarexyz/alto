@@ -30,53 +30,53 @@ _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `
 ### Get the latest seed
 
 ```bash
-inspector get seed latest --indexer <indexer URL> --identity <identity>
+inspector get seed latest
 ```
 
 ### Get the notarization for view 100
 
 ```bash
-inspector get notarization 100 --indexer <indexer URL> --identity <identity>
+inspector get notarization 100
 ```
 
 ### Get the notarizations between views 100 to 110
 
 ```bash
-inspector get notarization 100..110 --indexer <indexer URL> --identity <identity>
+inspector get notarization 100..110
 ```
 
 ### Get the finalization for view 50
 
 ```bash
-inspector get finalization 50 --indexer <indexer URL> --identity <identity>
+inspector get finalization 50
 ```
 
 ### Get the latest finalized block
 
 ```bash
-inspector get block latest --indexer <indexer URL> --identity <identity>
+inspector get block latest
 ```
 
 ### Get the block at height 10
 
 ```bash
-inspector get block 10 --indexer <indexer URL> --identity <identity>
+inspector get block 10
 ```
 
 ### Get the blocks between heights 10 and 20
 
 ```bash
-inspector get block 10..20 --indexer <indexer URL> --identity <identity>
+inspector get block 10..20
 ```
 
 ### Get the block with a specific digest
 
 ```bash
-inspector -- get block 0x65016ff40e824e21fffe903953c07b6d604dbcf39f681c62e7b3ed57ab1d1994 --indexer <indexer URL> --identity <identity>
+inspector -- get block 0x65016ff40e824e21fffe903953c07b6d604dbcf39f681c62e7b3ed57ab1d1994
 ```
 
 ### Listen for consensus events
 
 ```bash
-inspector listen --indexer <indexer URL> --identity <identity>
+inspector listen
 ```
