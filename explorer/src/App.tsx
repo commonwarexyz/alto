@@ -620,7 +620,7 @@ const App: React.FC = () => {
           <MapContainer center={center} zoom={1} style={{ height: "100%", width: "100%" }}>
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> | &copy; <a href="https://carto.com/attributions">CARTO</a>'
             />
             {views.length > 0 && views[0].location !== undefined && (
               <Marker

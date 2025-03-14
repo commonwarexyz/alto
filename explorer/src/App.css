@@ -259,6 +259,16 @@ body {
   border: none;
 }
 
+.leaflet-control-attribution {
+  font-size: 12px !important;
+  line-height: 1.2 !important;
+  padding: 0 2px !important;
+}
+
+.leaflet-control-attribution a {
+  font-size: 12px !important;
+}
+
 /* Footer */
 .footer {
   text-align: left;
@@ -508,5 +518,14 @@ body {
 
   .unknown-label {
     font-size: 10px;
+  }
+
+  .leaflet-control-attribution {
+    font-size: 8px !important;
+    padding: 0 1px !important;
+  }
+
+  .leaflet-control-attribution a {
+    font-size: 8px !important;
   }
 }
