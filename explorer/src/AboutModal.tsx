@@ -79,7 +79,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             <li>
                                 <div className="status-indicator-wrapper">
                                     <div className="about-status-indicator" style={{ backgroundColor: "#000" }}></div>
-                                    <strong>Prepared</strong>
+                                    <strong>Notarized</strong>
                                 </div>
                                 Some block <i>b</i> has received <i>2f+1</i> votes in a given view <i>v</i>. This means there can never be another prepared block in view <i>v</i> (and
                                 block <i>b</i> must be used in the canonical chain if <i>2f+1</i> participants did not timeout).

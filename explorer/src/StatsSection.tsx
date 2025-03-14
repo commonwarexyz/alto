@@ -142,9 +142,9 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
             : 0;
 
     const tooltips = {
-        blockTime: "The median delta between consecutive block timestamps.",
-        timeToLock: "The median latency from block proposal to preparation.",
-        timeToFinalize: "The median latency from block proposal to finalization."
+        blockTime: "The median difference between consecutive block timestamps.",
+        timeToLock: "The median latency from block proposal to notarize. At most one block can be notarized per view.",
+        timeToFinalize: "The median latency from block proposal to finalization. Once finalized, a block is immutable."
     };
 
     return (
@@ -162,7 +162,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
 
                 <div className="stat-item">
                     <Tooltip content={tooltips.timeToLock}>
-                        <div className="stat-label">Time to Prepare</div>
+                        <div className="stat-label">Time-to-Notarize (TTN)</div>
                         <div className="stat-value">
                             {medianTimeToLock > 0 ? `${medianTimeToLock}ms` : "N/A"}
                         </div>
@@ -171,7 +171,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
 
                 <div className="stat-item">
                     <Tooltip content={tooltips.timeToFinalize}>
-                        <div className="stat-label">Time to Finalize</div>
+                        <div className="stat-label">Time-to-Finalize (TTF)</div>
                         <div className="stat-value">
                             {medianTimeToFinalize > 0 ? `${medianTimeToFinalize}ms` : "N/A"}
                         </div>
@@ -179,7 +179,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
                 </div>
             </div>
             <div className="stats-disclaimer">
-                Latency observations are made by your browser after verifying each incoming consensus artifact.
+                All latency measurements are made by your browser after verifying incoming consensus artifacts.
             </div>
         </div>
     );
