@@ -61,9 +61,44 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section>
                         <h3>What are you looking at?</h3>
                         <p>
-                            The dashboards on this explorer display the progression of <i>threshold-simplex</i> over time, broken into <strong>views</strong>. Validators enter a new
-                            view <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html#specification-for-view-v">whenever they observe either <i>2f+1</i> votes for a block proposal or a timeout (<i>they may see both</i>)</a>.
+                            The dashboards on this explorer display the progression of <i>threshold-simplex</i> over time, broken into <strong>views</strong>.
                         </p>
+                        <p>
+                            Validators enter a new view <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html#specification-for-view-v">whenever they observe either <i>2f+1</i> votes for a block proposal or a timeout AND some seed (VRF).
+                                Validators finalize a view whenever they observe <i>2f+1</i> finalizes for a block proposal.</a> We color these phases as follows:
+                        </p>
+                        <ul className="status-list">
+                            <li>
+                                <div className="status-indicator-wrapper">
+                                    <div className="about-status-indicator" style={{ backgroundColor: "#0000eeff" }}></div>
+                                    <strong>Seed</strong>
+                                </div>
+                                The view <i>v</i> is in progress. The leader (selected via VRF) is proposing a block to be voted upon.
+                            </li>
+                            <li>
+                                <div className="status-indicator-wrapper">
+                                    <div className="about-status-indicator" style={{ backgroundColor: "#000" }}></div>
+                                    <strong>Prepared</strong>
+                                </div>
+                                Some block <i>b</i> has received <i>2f+1</i> votes in a given view <i>v</i>. This means there can never be another prepared block in view <i>v</i> (and
+                                block <i>b</i> must be used in the canonical chain if <i>2f+1</i> participants did not timeout).
+                            </li>
+                            <li>
+                                <div className="status-indicator-wrapper">
+                                    <div className="about-status-indicator" style={{ backgroundColor: "#274e13ff" }}></div>
+                                    <strong>Finalized</strong>
+                                </div>
+                                The block <i>b</i> in view <i>v</i> has received <i>2f+1</i> finalizes. The block is now immutable.
+                            </li>
+                            <li>
+                                <div className="status-indicator-wrapper">
+                                    <div className="about-status-indicator" style={{ backgroundColor: "#f4ccccff" }}></div>
+                                    <strong>Timed Out</strong>
+                                </div>
+                                For some reason, your browser did not detect that a view was <i>prepared</i> or <i>finalized</i> in a reasonable amount of time. This could be due to network instability or from your browser
+                                disconnecting from the consensus stream.
+                            </li>
+                        </ul>
                         <p>
                             threshold-simplex, like <a href="https://eprint.iacr.org/2023/463">Simplex Consensus</a>, is optimistically responsive and tolerates up to <i>f</i> Byzantine faults in the partially synchronous setting. English? When the leader is honest and the network is healthy,
                             participants come to agreement at <strong>network speed</strong>.
@@ -72,67 +107,20 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             When every participant is directly connected to every other participant (alto employs <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>) and leaders don't "relay" aggregated/recovered signatures (alto employs all-to-all communication for minimal view latency), it turns out "network speed" is <strong>really fast</strong>.
                         </p>
                         <p>
-                            To demonstrate just how fast, we deployed a cluster of <strong>10 c7g.xlarge</strong> nodes (4 vCPU, 8GB RAM) on AWS (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2) and stream all consensus
-                            messages to your browser in real time using <a href="https://exoware.xyz">exoware::relay</a>.
+                            To demonstrate just how fast, we decided to build this site and some low-level infrastructure (<a href="https://exoware.xyz">exoware::relay</a>) to stream every consensus message to your browser in real time.
                         </p>
                         <p>
-                            Because each consensus artifact is signed with a threshold signature (the public key is the <i>network key</i> displayed at the top of the page), your browser can (and does) verify each message it processes using <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> (compiled to WASM). Streamed some block that never went through consensus? Your browser rejects it.
+
+
+                            we deployed alto to a cluster of <strong>10 c7g.xlarge</strong> nodes (4 vCPU, 8GB RAM) on AWS in <strong>10 regions</strong> (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2).
+                            We could've
+
+
+                            and forward all consensus messages to your browser in real time using <a href="https://exoware.xyz">exoware::relay</a>.
                         </p>
                         <p>
-                            Unlike other popular consensus constructions, threshold-simplex does not employ a "leader relay" to minimize view latency and instead requires each participant to broadcast each message to all other parties (i.e. all-to-all). In alto, we use <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a> to form an encrypted connection to each participant in consensus.
+                            Because each consensus artifact is <strong>signed with a threshold signature</strong> (the public key is the <i>network key</i> displayed at the top of the page), your browser can (and does) verify each message it processes using <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> (compiled to WASM). Streamed some block that never went through consensus? Your browser rejects it.
                         </p>
-                        <p>
-                            threshold-simplex, unlike Simplex Consensus, introduces <i>BLS12-381 Threshold Signatures</i> for all messages.
-
-                            threshold-simplex is optimstically responsive
-
-                            On the "happy path", participants move at <strong>network speed</strong> between views (only ever relying on a timeout for a <a href="https://github.com/commonwarexyz/monorepo/blob/04814db4ce7db6d2753ac33878a827e7176d6dfc/consensus/src/threshold_simplex/mod.rs#L79">recently inactive leader</a>).
-
-
-                            This site visualizes the progression of <i>threshold-simplex</i> over time, represented by <strong>views</strong>.
-
-
-                            across <strong>views</strong> -.
-
-
-                            of block proposal, notarization, and finalization on the alto devnet
-
-                            shows a series of <strong>views</strong> - discrete consensus rounds where the network attempts
-                            to agree on a block. Each view progresses through several stages:
-                        </p>
-                        <ul className="status-list">
-                            <li>
-                                <div className="status-indicator-wrapper">
-                                    <div className="about-status-indicator" style={{ backgroundColor: "#0000eeff" }}></div>
-                                    <strong>Seed</strong>
-                                </div>
-                                The view is in progress. The leader (selected via VRF)
-                                is proposing a block to be agreed upon.
-                            </li>
-                            <li>
-                                <div className="status-indicator-wrapper">
-                                    <div className="about-status-indicator" style={{ backgroundColor: "#000" }}></div>
-                                    <strong>Prepared</strong>
-                                </div>
-                                The view has received enough validator signatures
-                                to be considered notarized. This means a quorum of validators has endorsed this block.
-                            </li>
-                            <li>
-                                <div className="status-indicator-wrapper">
-                                    <div className="about-status-indicator" style={{ backgroundColor: "#274e13ff" }}></div>
-                                    <strong>Finalized</strong>
-                                </div>
-                                The view has been fully confirmed by the network and
-                                the block is now immutable.
-                            </li>
-                            <li>
-                                <div className="status-indicator-wrapper">
-                                    <div className="about-status-indicator" style={{ backgroundColor: "#f4ccccff" }}></div>
-                                    <strong>Timed Out</strong>
-                                </div>
-                                The view failed to progress within the expected timeframe.
-                            </li>
-                        </ul>
                         <p>
                             The latency values (in milliseconds) shown below each bar indicate how long each phase took to complete.
                         </p>
