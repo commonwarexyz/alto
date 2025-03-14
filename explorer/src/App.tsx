@@ -655,8 +655,8 @@ const App: React.FC = () => {
           <div className="bars-header">
             <h2 className="bars-title">Views</h2>
             <div className="legend-container">
-              <LegendItem color="#0000eeff" label="Seed (VRF)" />
-              <LegendItem color="#000" label="Locked" />
+              <LegendItem color="#0000eeff" label="Seed" />
+              <LegendItem color="#000" label="Prepared" />
               <LegendItem color="#274e13ff" label="Finalized" />
             </div>
           </div>
