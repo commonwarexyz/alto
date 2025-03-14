@@ -105,18 +105,27 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             participants come to agreement at <strong>network speed</strong>.
                         </p>
                         <p>
-                            When every participant is directly connected to every other participant (alto employs <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>) and leaders don't "relay" aggregated/recovered signatures (alto employs all-to-all communication for minimal view latency), it turns out "network speed" can be <strong>very fast</strong>.
+                            When every participant is directly connected to every other participant (alto employs <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>) and leaders don't "relay" aggregated/recovered signatures (alto employs all-to-all communication for minimal view latency), it turns out "network speed" (as you've seen) can be <strong>very fast</strong>.
                         </p>
+                    </section>
+                    <section>
+                        <h3>Where is the data coming from?</h3>
                         <p>
-                            To demonstrate just how fast, we deployed alto to a cluster of <strong>10 c7g.xlarge</strong> nodes (4 vCPU, 8GB RAM) on AWS in <strong>10 regions</strong> (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2),
-                            designed some low-level infrastructure (<a href="https://exoware.xyz">exoware::relay</a>) to stream each consensus message to your browser in real time, and built this site for you to measure the speed yourself (<i>the latency measurement you see is the delta between the block timestamp
-                                and your browser's local time when receiving a message</i>).
+                            To power this explorer, we deployed alto to a cluster of <strong>10 c7g.xlarge</strong> nodes (4 vCPU, 8GB RAM) on AWS in <strong>10 regions</strong> (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2)
+                            and built some infrastructure to stream each consensus message to your browser in real time (<a href="https://exoware.xyz">exoware::relay</a>).
                         </p>
                         <p>
                             Because each consensus artifact is accompanied by a <strong>threshold signature</strong> (the public key of which is the <i>network key</i> displayed at the top of the page), your browser can (and does) verify each inbound message using <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> compiled to WASM.
                         </p>
                         <p>
                             That's right, your browser is verifying every message you receive came from a hardcoded consensus set in real time. Don't trust infrastructure, trust the open source verifier code running on your computer.
+                        </p>
+                    </section>
+                    <section>
+                        <h3>How do I measure latency?</h3>
+                        <p>
+                            Your browser measures latency by comparing the timestamp of a block (referenced in a prepared or finalization artifact) to your local time. This means that the latency you see includes the time it takes for a block to be proposed, voted upon, sent to
+                            exoware::relay, and then received by your browser. While it is true that validators observe lower latency, the one that usually impacts UX is the one you're measuring here.
                         </p>
                     </section>
                 </div>
