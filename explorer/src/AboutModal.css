@@ -1,0 +1,185 @@
+/* Modal Overlay - covers the entire screen */
+.about-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    padding: 20px;
+}
+
+/* Modal Container */
+.about-modal {
+    background-color: white;
+    border: 1px solid #ccc;
+    width: 100%;
+    max-width: 750px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    font-family: 'Consolas', monospace;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Modal Header */
+.about-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid #eee;
+}
+
+.about-modal-header h2 {
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: normal;
+}
+
+.about-close-button {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #333;
+    padding: 0 8px;
+}
+
+/* Modal Content */
+.about-modal-content {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.about-modal-content section {
+    margin-bottom: 24px;
+}
+
+.about-modal-content h3 {
+    font-size: 1rem;
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-weight: normal;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 6px;
+}
+
+.about-modal-content p {
+    margin: 0 0 12px;
+    line-height: 1.5;
+    font-size: 0.9rem;
+}
+
+.about-modal-content strong {
+    font-weight: bold;
+}
+
+.about-modal-content ul {
+    padding-left: 20px;
+    margin: 10px 0;
+}
+
+.about-modal-content li {
+    margin-bottom: 12px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+/* Status indicator styles */
+.status-indicator-wrapper {
+    display: flex;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.about-status-indicator {
+    width: 16px;
+    height: 16px;
+    margin-right: 8px;
+    border: 1px solid #ccc;
+}
+
+.status-list li {
+    list-style-type: none;
+    padding-left: 0;
+}
+
+.status-list {
+    padding-left: 0;
+}
+
+/* Modal Footer */
+.about-modal-footer {
+    padding: 16px 20px;
+    border-top: 1px solid #eee;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.about-button {
+    padding: 8px 16px;
+    background-color: #f4f4f4;
+    border: 1px solid #ddd;
+    cursor: pointer;
+    font-family: 'Consolas', monospace;
+    font-size: 0.9rem;
+}
+
+.about-button:hover {
+    background-color: #e8e8e8;
+}
+
+/* About button in the header */
+.about-header-button {
+    background: none;
+    border: 1px solid #ddd;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-family: 'Consolas', monospace;
+    font-size: 0.9rem;
+    margin-left: 16px;
+}
+
+.about-header-button:hover {
+    background-color: #f0f0f0;
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+    .about-modal {
+        max-width: 95%;
+    }
+
+    .about-modal-header h2 {
+        font-size: 1rem;
+    }
+
+    .about-modal-content {
+        padding: 16px;
+    }
+
+    .about-modal-content p,
+    .about-modal-content li {
+        font-size: 0.8rem;
+    }
+}
+
+.code-block {
+    background-color: #f4f4f4;
+    border: 1px solid #ddd;
+    border-radius: 0;
+    padding: 10px;
+    font-family: 'Consolas', monospace;
+    font-size: 0.9rem;
+    margin: 10px 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow-x: auto;
+}
