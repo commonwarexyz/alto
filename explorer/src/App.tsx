@@ -11,6 +11,8 @@ import './AboutModal.css';
 import StatsSection from "./StatsSection";
 import './StatsSection.css';
 import KeyInfoModal from './KeyInfoModal';
+import MapOverlay from './MapOverlay';
+import './MapOverlay.css';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
@@ -653,6 +655,7 @@ const App: React.FC = () => {
                 </Popup>
               </Marker>
             )}
+            <MapOverlay numValidators={LOCATIONS.length} />
           </MapContainer>
         </div>
 
