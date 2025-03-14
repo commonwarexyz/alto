@@ -81,14 +81,32 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
         })
         .filter((time): time is number => time !== null);
 
-    // Calculate averages
-    const avgTimeToLock = notarizationTimes.length > 0
-        ? Math.round(notarizationTimes.reduce((sum, time) => sum + time, 0) / notarizationTimes.length)
-        : 0;
 
-    const avgTimeToFinalize = finalizationTimes.length > 0
-        ? Math.round(finalizationTimes.reduce((sum, time) => sum + time, 0) / finalizationTimes.length)
-        : 0;
+    // Calculate median for notarizationTimes
+    const sortedNotarizationTimes = [...notarizationTimes].sort((a, b) => a - b);
+    const medianTimeToLock =
+        sortedNotarizationTimes.length > 0
+            ? sortedNotarizationTimes.length % 2 === 1
+                ? sortedNotarizationTimes[Math.floor(sortedNotarizationTimes.length / 2)]
+                : Math.round(
+                    (sortedNotarizationTimes[sortedNotarizationTimes.length / 2 - 1] +
+                        sortedNotarizationTimes[sortedNotarizationTimes.length / 2]) /
+                    2
+                )
+            : 0;
+
+    // Calculate median for finalizationTimes
+    const sortedFinalizationTimes = [...finalizationTimes].sort((a, b) => a - b);
+    const medianTimeToFinalize =
+        sortedFinalizationTimes.length > 0
+            ? sortedFinalizationTimes.length % 2 === 1
+                ? sortedFinalizationTimes[Math.floor(sortedFinalizationTimes.length / 2)]
+                : Math.round(
+                    (sortedFinalizationTimes[sortedFinalizationTimes.length / 2 - 1] +
+                        sortedFinalizationTimes[sortedFinalizationTimes.length / 2]) /
+                    2
+                )
+            : 0;
 
     const tooltips = {
         validators: "The total number of nodes participating in the consensus protocol.",
@@ -111,7 +129,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
                     <Tooltip content={tooltips.timeToLock}>
                         <div className="stat-label">Time to Lock</div>
                         <div className="stat-value">
-                            {avgTimeToLock > 0 ? `${avgTimeToLock}ms` : "N/A"}
+                            {medianTimeToLock > 0 ? `${medianTimeToLock}ms` : "N/A"}
                         </div>
                     </Tooltip>
                 </div>
@@ -120,7 +138,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
                     <Tooltip content={tooltips.timeToFinalize}>
                         <div className="stat-label">Time to Finalize</div>
                         <div className="stat-value">
-                            {avgTimeToFinalize > 0 ? `${avgTimeToFinalize}ms` : "N/A"}
+                            {medianTimeToFinalize > 0 ? `${medianTimeToFinalize}ms` : "N/A"}
                         </div>
                     </Tooltip>
                 </div>
