@@ -170,3 +170,16 @@
         font-size: 0.8rem;
     }
 }
+
+.code-block {
+    background-color: #f4f4f4;
+    border: 1px solid #ddd;
+    border-radius: 0;
+    padding: 10px;
+    font-family: 'Consolas', monospace;
+    font-size: 0.9rem;
+    margin: 10px 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow-x: auto;
+}

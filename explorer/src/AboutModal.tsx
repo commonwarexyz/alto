@@ -48,6 +48,18 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         <p>
                             If you want to replay any of the stream, checkout <a href="">inspector</a>.
 
+
+                            <pre className="code-block">
+                                <code>
+                                    cargo install alto-inspector
+                                </code>
+                            </pre>
+
+                            <pre className="code-block">
+                                <code>
+                                    inspector get block 10
+                                </code>
+                            </pre>
                         </p>
                     </section>
 
