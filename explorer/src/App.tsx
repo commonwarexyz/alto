@@ -10,7 +10,7 @@ import AboutModal from './AboutModal';
 import './AboutModal.css';
 import StatsSection from "./StatsSection";
 import './StatsSection.css';
-import KeyInfoModal from './KeyInfoModal';
+import KeyInfoModal from './KeyModal.js';
 import MapOverlay from './MapOverlay';
 import './MapOverlay.css';
 
