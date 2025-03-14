@@ -735,9 +735,14 @@ const ViewChangeLatency: React.FC<ViewChangeLatencyProps> = ({ currentView, next
   }
 
   return (
-    <div className="vertical-latency-container" title={`Time between view ${currentView.view} and ${nextView.view}`}>
-      <div className="vertical-latency-line">
-        <div className="vertical-latency-value">{displayText}</div>
+    <div
+      className="latency-separator"
+      title={`Time between view ${currentView.view} and ${nextView.view}: ${displayText}`}
+    >
+      <div className="latency-line">
+        <div className="latency-indicator" >
+          <span className="latency-text">{displayText}</span>
+        </div>
       </div>
     </div>
   );

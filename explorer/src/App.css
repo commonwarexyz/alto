@@ -346,46 +346,57 @@ body {
   text-overflow: ellipsis;
 }
 
-/* Vertical latency indicator container */
-.vertical-latency-container {
+.latency-separator {
   position: relative;
-  height: 18px;
-  /* Give more space for the indicator */
+  height: 22px;
   width: 100%;
-  z-index: 2;
-  /* Above everything else */
+  margin: 1px 0;
+  display: flex;
+  align-items: center;
 }
 
-/* Vertical latency node/dot */
-.vertical-latency-line::before {
+/* Horizontal line connecting views */
+.latency-line {
+  position: relative;
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding-right: 20px;
+}
+
+.latency-line::before {
   content: '';
   position: absolute;
-  left: 30px;
-  /* Match the vertical line position */
   top: 50%;
-  transform: translate(-50%, -50%);
-  width: 6px;
-  height: 6px;
-  background-color: #ddd;
-  border: 1px solid #bbb;
-  border-radius: 50%;
+  left: 80px;
+  right: 20px;
+  height: 1px;
+  background-color: #eaeaea;
+  border-top: 1px #d0d0d0;
+  z-index: 1;
 }
 
-/* Vertical latency value */
-.vertical-latency-value {
-  position: absolute;
-  left: 10px;
-  /* Position it left of the timeline */
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 10px;
-  color: #666;
-  background-color: white;
-  padding: 1px 4px;
+/* The colored pill/badge showing the latency value */
+.latency-indicator {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 16px;
+  border-radius: 8px;
+  z-index: 2;
+}
+
+/* Text inside the latency indicator */
+.latency-text {
+  color: white;
+  font-size: 9px;
+  font-weight: bold;
+  padding: 0 6px;
+  letter-spacing: -0.2px;
   white-space: nowrap;
-  border: 1px solid #eee;
-  border-radius: 2px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 /* Maintain bar timing styles */
@@ -401,17 +412,6 @@ body {
   font-size: 10px;
   white-space: nowrap;
   transition: left 0.05s linear;
-}
-
-/* Create a subtle highlight for the vertical markers */
-.vertical-latency-container:hover .vertical-latency-value {
-  background-color: #f8f8f8;
-  border-color: #ddd;
-  z-index: 3;
-}
-
-.vertical-latency-container:hover .vertical-latency-line::before {
-  background-color: #bbb;
 }
 
 /* Footer */
@@ -608,12 +608,22 @@ body {
     left: 25px;
   }
 
-  .latency-indicator {
-    font-size: 8px;
-    top: -8px;
-  }
-
   .bar-row {
     padding: 2px 0;
+  }
+
+  .latency-line::before {
+    left: 50px;
+    right: 10px;
+  }
+
+  .latency-indicator {
+    min-width: 30px;
+    height: 14px;
+  }
+
+  .latency-text {
+    font-size: 8px;
+    padding: 0 4px;
   }
 }
