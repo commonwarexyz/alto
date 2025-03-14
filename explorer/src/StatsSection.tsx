@@ -81,6 +81,39 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
         })
         .filter((time): time is number => time !== null);
 
+    // Calculate block times (time between consecutive blocks)
+    const viewsWithBlocks = views
+        .filter(view => view.block && view.block.height && view.block.timestamp)
+        .sort((a, b) => a.block.height - b.block.height);
+
+    const blockTimes: number[] = [];
+    for (let i = 1; i < viewsWithBlocks.length; i++) {
+        const currentBlock = viewsWithBlocks[i].block;
+        const prevBlock = viewsWithBlocks[i - 1].block;
+
+        if (currentBlock && prevBlock &&
+            currentBlock.timestamp && prevBlock.timestamp &&
+            currentBlock.height === prevBlock.height + 1) {
+
+            const timeDiff = currentBlock.timestamp - prevBlock.timestamp;
+            if (timeDiff > 0 && timeDiff < 10000) { // Filter out unreasonable values (>10s)
+                blockTimes.push(timeDiff);
+            }
+        }
+    }
+
+    // Calculate median for blockTimes
+    const sortedBlockTimes = [...blockTimes].sort((a, b) => a - b);
+    const medianBlockTime =
+        sortedBlockTimes.length > 0
+            ? sortedBlockTimes.length % 2 === 1
+                ? sortedBlockTimes[Math.floor(sortedBlockTimes.length / 2)]
+                : Math.round(
+                    (sortedBlockTimes[sortedBlockTimes.length / 2 - 1] +
+                        sortedBlockTimes[sortedBlockTimes.length / 2]) /
+                    2
+                )
+            : 0;
 
     // Calculate median for notarizationTimes
     const sortedNotarizationTimes = [...notarizationTimes].sort((a, b) => a - b);
@@ -109,9 +142,9 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
             : 0;
 
     const tooltips = {
-        validators: "The total number of nodes participating in the consensus protocol.",
-        timeToLock: "Average time (in milliseconds) from block proposal to notarization (2f+1 votes). Once a block is notarized, no conflicting block can be notarized in the same view.",
-        timeToFinalize: "Average time (in milliseconds) from block proposal to finalization (2f+1 finalizes). Once finalized, the block is immutable and permanently part of the chain."
+        blockTime: "The median time (in milliseconds) between consecutive blocks. This represents how quickly the blockchain is producing new blocks.",
+        timeToLock: "The median time (in milliseconds) from block proposal to notarization (2f+1 votes). Once a block is notarized, no conflicting block can be notarized in the same view.",
+        timeToFinalize: "The median time (in milliseconds) from block proposal to finalization (2f+1 finalizes). Once finalized, the block is immutable and permanently part of the chain."
     };
 
     return (
@@ -119,9 +152,11 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
             <h2 className="stats-title">Metrics</h2>
             <div className="stats-container">
                 <div className="stat-item">
-                    <Tooltip content={tooltips.validators}>
-                        <div className="stat-label">Validators</div>
-                        <div className="stat-value">{numValidators}</div>
+                    <Tooltip content={tooltips.blockTime}>
+                        <div className="stat-label">Block Time</div>
+                        <div className="stat-value">
+                            {medianBlockTime > 0 ? `${medianBlockTime}ms` : "N/A"}
+                        </div>
                     </Tooltip>
                 </div>
 
