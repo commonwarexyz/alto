@@ -12,6 +12,8 @@ import StatsSection from "./StatsSection";
 import './StatsSection.css';
 import Tooltip from "./Tooltip";
 import './Tooltip.css';
+import KeyInfoButton from './KeyInfoButton';
+import KeyInfoModal from './KeyInfoModal';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
@@ -84,6 +86,7 @@ const App: React.FC = () => {
   const [views, setViews] = useState<ViewData[]>([]);
   const [lastObservedView, setLastObservedView] = useState<number | null>(null);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
+  const [isKeyInfoModalOpen, setIsKeyInfoModalOpen] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
   const currentTimeRef = useRef(Date.now());
   const wsRef = useRef<WebSocket | null>(null);
@@ -607,6 +610,7 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="about-button-container">
+          <KeyInfoButton onClick={() => setIsKeyInfoModalOpen(true)} />
           <button
             className="about-header-button"
             onClick={() => setIsAboutModalOpen(true)}
@@ -668,12 +672,6 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          <div className="public-key-display">
-            <Tooltip content="The public key used to verify consensus messages. This key represents the threshold signature of the validator set.">
-              <div className="public-key-label">Network Key</div>
-              <div className="public-key-value">{PUBLIC_KEY_HEX}</div>
-            </Tooltip>
-          </div>
           <div className="bars-list">
             {views.slice(0, 50).map((viewData) => (
               <Bar
@@ -692,6 +690,11 @@ const App: React.FC = () => {
       </footer>
 
       <AboutModal isOpen={isAboutModalOpen} onClose={() => setIsAboutModalOpen(false)} />
+      <KeyInfoModal
+        isOpen={isKeyInfoModalOpen}
+        onClose={() => setIsKeyInfoModalOpen(false)}
+        publicKeyHex={PUBLIC_KEY_HEX}
+      />
     </div >
   );
 };

@@ -340,6 +340,84 @@ body {
   font-weight: bold;
 }
 
+.key-header-button {
+  background: #FFD700;
+  border: 1px solid #E6C300;
+  cursor: pointer;
+  font-family: 'Consolas', monospace;
+  font-size: 0.9rem;
+  margin-right: 8px;
+  color: black;
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 0;
+}
+
+.key-header-button:hover,
+.key-header-button:focus,
+.key-header-button:active,
+.key-header-button:visited {
+  background-color: #f0f0f0;
+  color: black;
+  text-decoration: none;
+}
+
+.about-header-button {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+}
+
+.about-button-container {
+  display: flex;
+  align-items: center;
+}
+
+/* Key Info Modal Specific Styles */
+.key-info-modal .about-modal-content h3 {
+  color: #5A5A5A;
+}
+
+.key-display-box {
+  background-color: #f4f4f4;
+  border: 1px solid #ddd;
+  padding: 12px;
+  margin: 10px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: 'Consolas', monospace;
+}
+
+.key-display-box code {
+  word-break: break-all;
+  font-size: 0.85rem;
+}
+
+.copy-key-button {
+  align-self: flex-end;
+  background-color: #f0f0f0;
+  border: 1px solid #ccc;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-family: 'Consolas', monospace;
+  font-size: 0.8rem;
+}
+
+.copy-key-button:hover {
+  background-color: #e0e0e0;
+}
+
 /* Media Queries */
 @media (min-width: 768px) {
   .app-header {
@@ -391,6 +469,20 @@ body {
 
   .public-key-value {
     font-size: 16px;
+  }
+
+  .key-header-button {
+    padding: 6px 10px;
+    font-size: 0.85rem;
+    margin-right: 6px;
+  }
+
+  .key-display-box {
+    padding: 10px;
+  }
+
+  .key-display-box code {
+    font-size: 0.75rem;
   }
 }
 
@@ -515,5 +607,11 @@ body {
 
   .leaflet-control-attribution a {
     font-size: 8px !important;
+  }
+
+  .key-header-button {
+    padding: 4px 8px;
+    font-size: 0.8rem;
+    margin-right: 4px;
   }
 }
