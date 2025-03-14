@@ -130,13 +130,21 @@
     cursor: pointer;
     font-family: 'Consolas', monospace;
     font-size: 0.9rem;
+    color: black;
+    -webkit-appearance: none;
+    appearance: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
-.about-button:hover {
+.about-button:hover,
+.about-button:focus,
+.about-button:active,
+.about-button:visited {
     background-color: #e8e8e8;
+    color: black;
+    text-decoration: none;
 }
 
-/* About button in the header */
 .about-header-button {
     background: none;
     border: 1px solid #ddd;
@@ -145,10 +153,32 @@
     font-family: 'Consolas', monospace;
     font-size: 0.9rem;
     margin-left: 16px;
+    color: black;
+    -webkit-appearance: none;
+    appearance: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
-.about-header-button:hover {
+.about-header-button:hover,
+.about-header-button:focus,
+.about-header-button:active,
+.about-header-button:visited {
     background-color: #f0f0f0;
+    color: black;
+    text-decoration: none;
+}
+
+.code-block {
+    background-color: #f4f4f4;
+    border: 1px solid #ddd;
+    border-radius: 0;
+    padding: 10px;
+    font-family: 'Consolas', monospace;
+    font-size: 0.9rem;
+    margin: 10px 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow-x: auto;
 }
 
 /* Mobile optimizations */
@@ -169,17 +199,11 @@
     .about-modal-content li {
         font-size: 0.8rem;
     }
-}
 
-.code-block {
-    background-color: #f4f4f4;
-    border: 1px solid #ddd;
-    border-radius: 0;
-    padding: 10px;
-    font-family: 'Consolas', monospace;
-    font-size: 0.9rem;
-    margin: 10px 0;
-    white-space: pre-wrap;
-    word-break: break-all;
-    overflow-x: auto;
+    /* Ensure buttons stay black on mobile */
+    .about-button,
+    .about-header-button {
+        color: black !important;
+        -webkit-text-fill-color: black;
+    }
 }
