@@ -94,7 +94,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                 Message::Genesis { response } => {
                     // Use the digest of the genesis message as the initial
                     // payload.
-                    let _ = response.send(genesis_digest.clone());
+                    let _ = response.send(genesis_digest);
                 }
                 Message::Propose {
                     view,
@@ -132,7 +132,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                     }
 
                                     // Send the digest to the consensus
-                                    let result = response.send(digest.clone());
+                                    let result = response.send(digest);
                                     info!(view, ?digest, success=result.is_ok(), "proposed new block");
                                 },
                                 _ = response_closed => {

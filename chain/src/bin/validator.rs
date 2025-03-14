@@ -42,6 +42,7 @@ const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 const NOTARIZATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NULLIFY_RETRY: Duration = Duration::from_secs(10);
 const ACTIVITY_TIMEOUT: u64 = 256;
+const SKIP_TIMEOUT: u64 = 32;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(2);
 const FETCH_CONCURRENT: usize = 4;
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
@@ -211,6 +212,7 @@ fn main() {
             notarization_timeout: NOTARIZATION_TIMEOUT,
             nullify_retry: NULLIFY_RETRY,
             activity_timeout: ACTIVITY_TIMEOUT,
+            skip_timeout: SKIP_TIMEOUT,
             fetch_timeout: FETCH_TIMEOUT,
             max_fetch_count: MAX_FETCH_COUNT,
             max_fetch_size: MAX_FETCH_SIZE,

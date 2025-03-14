@@ -512,7 +512,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
                             if let Some(block) = block {
                                 let view = proof.view;
                                 let height = block.height;
-                                let digest = proof.payload.clone();
+                                let digest = proof.payload;
                                 let notarization = Notarized::new(proof, block);
                                 let notarization: Bytes = notarization.serialize().into();
                                 notarized
@@ -589,10 +589,10 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
                             // If found, store finalization
                             if let Some(block) = block {
                                 let view = proof.view;
-                                let digest = proof.payload.clone();
+                                let digest = proof.payload;
                                 let height = block.height;
                                 finalized
-                                    .put(height, proof.payload.clone(), proof.serialize().into())
+                                    .put(height, proof.payload, proof.serialize().into())
                                     .await
                                     .expect("Failed to insert finalization");
                                 blocks
@@ -867,7 +867,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
                                     debug!(?digest, height = block.height, "received block");
                                     let _ = response.send(true);
                                     blocks
-                                        .put(block.height, digest.clone(), value)
+                                        .put(block.height, digest, value)
                                         .await
                                         .expect("Failed to insert finalized block");
 

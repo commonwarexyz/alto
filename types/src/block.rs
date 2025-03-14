@@ -65,7 +65,7 @@ impl Block {
     }
 
     pub fn digest(&self) -> Digest {
-        self.digest.clone()
+        self.digest
     }
 }
 

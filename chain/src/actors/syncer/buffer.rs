@@ -33,7 +33,7 @@ impl Buffer {
 
         // Add the block to the cache
         let digest = block.digest();
-        entry.push_back(digest.clone());
+        entry.push_back(digest);
         let stored_entry = self.stored.entry(digest).or_insert((1, block));
         stored_entry.0 += 1;
     }
