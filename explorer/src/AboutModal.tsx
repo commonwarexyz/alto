@@ -102,10 +102,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         </ul>
                         <p>
                             threshold-simplex, like <a href="https://eprint.iacr.org/2023/463">Simplex Consensus</a>, is optimistically responsive and tolerates up to <i>f</i> Byzantine faults in the partially synchronous setting. English? When the leader is honest and the network is healthy,
-                            participants come to agreement at <strong>network speed</strong>.
-                        </p>
-                        <p>
-                            When every participant is directly connected to every other participant (alto employs <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>) and leaders don't "relay" aggregated/recovered signatures (alto employs all-to-all communication for minimal view latency), it turns out "network speed" (as you've seen) can be <strong>very fast</strong>.
+                            participants come to agreement at <strong>network speed</strong>. When every participant is directly connected to every other participant (alto employs <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>) and leaders don't "relay" aggregated/recovered signatures (alto employs all-to-all communication for minimal view latency), it turns out "network speed" (as you've seen) can be very fast.
                         </p>
                     </section>
                     <section>
@@ -115,10 +112,10 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             and built some infrastructure to stream each consensus message to your browser in real time (<a href="https://exoware.xyz">exoware::relay</a>).
                         </p>
                         <p>
-                            Because each consensus artifact is accompanied by a <strong>threshold signature</strong> (the public key of which is the <i>network key</i> displayed at the top of the page), your browser can (and does) verify each inbound message using <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> compiled to WASM.
+                            Because each consensus artifact is accompanied by a threshold signature (the public key of which is the <strong>network key</strong> displayed at the top of the page), your browser can (and does) verify each inbound message using <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> compiled to WASM.
                         </p>
                         <p>
-                            That's right, your browser is verifying every message you receive came from a hardcoded consensus set in real time. Don't trust infrastructure, trust the open source verifier code running on your computer.
+                            That's right, your browser is verifying every message you receive was produced form some known consensus set in real time. Don't trust our infrastructure, trust the open source verifier code running on your computer.
                         </p>
                     </section>
                     <section>
@@ -127,6 +124,10 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             Your browser measures latency by comparing the timestamp of a block (referenced in a prepared or finalization artifact) to your local time. This means that the latency you see includes the time it takes for a block to be proposed, voted upon, sent to
                             exoware::relay, and then received by your browser. While it is true that validators observe lower latency, the one that usually impacts UX is the one you're measuring here.
                         </p>
+                    </section>
+                    <section>
+                        <h3>Support</h3>
+                        <p>If you run into any issues or have any other questions, <a href="https://github.com/commonwarexyz/alto/issues">open an issue!</a></p>
                     </section>
                 </div>
                 <div className="about-modal-footer">
