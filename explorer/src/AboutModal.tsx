@@ -126,6 +126,24 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         </p>
                     </section>
                     <section>
+                        <h3>Can I replay the stream?</h3>
+                        <p>
+                            Yes! You can replay the stream or fetch arbitrary data using the <a href="https://docs.rs/alto-inspector/latest/alto_inspector/">alto-inspector</a>. To download the tool, run:
+                            <pre className="code-block">
+                                <code>
+                                    cargo install alto-inspector
+                                </code>
+                            </pre>
+
+                            And then, to fetch block 10, run:
+                            <pre className="code-block">
+                                <code>
+                                    inspector get block 10
+                                </code>
+                            </pre>
+                        </p>
+                    </section>
+                    <section>
                         <h3>Support</h3>
                         <p>If you run into any issues or have any other questions, <a href="https://github.com/commonwarexyz/alto/issues">open an issue!</a></p>
                     </section>
