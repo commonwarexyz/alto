@@ -93,7 +93,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
 
     return (
         <div className="stats-section">
-            <h2 className="stats-title">Network Stats</h2>
+            <h2 className="stats-title">Stats</h2>
             <div className="stats-container">
                 <div className="stat-item">
                     <Tooltip content={tooltips.validators}>
