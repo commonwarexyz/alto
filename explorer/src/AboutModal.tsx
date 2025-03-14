@@ -64,8 +64,11 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             The dashboards on this explorer display the progression of <i>threshold-simplex</i> over time, broken into <strong>views</strong>.
                         </p>
                         <p>
-                            Validators enter a new view <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html#specification-for-view-v">whenever they observe either <i>2f+1</i> votes for a block proposal or a timeout AND some seed (VRF).
-                                Validators finalize a view whenever they observe <i>2f+1</i> finalizes for a block proposal.</a> We color these phases as follows:
+                            Validators enter a new view whenever they observe either <i>2f+1</i> votes for a block proposal or a timeout AND some seed (VRF).
+                            Validators finalize a view whenever they observe <i>2f+1</i> finalizes for a block proposal.
+                        </p>
+                        <p>
+                            We color the phases of a view as follows:
                         </p>
                         <ul className="status-list">
                             <li>
@@ -79,7 +82,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             <li>
                                 <div className="status-indicator-wrapper">
                                     <div className="about-status-indicator" style={{ backgroundColor: "#000" }}></div>
-                                    <strong>Notarized</strong>
+                                    <strong>Locked</strong>
                                 </div>
                                 Some block <i>b</i> has received <i>2f+1</i> votes in a given view <i>v</i>. This means there can never be another prepared block in view <i>v</i> (and
                                 block <i>b</i> must be used in the canonical chain if <i>2f+1</i> participants did not timeout).
@@ -101,8 +104,22 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             </li>
                         </ul>
                         <p>
-                            threshold-simplex, like <a href="https://eprint.iacr.org/2023/463">Simplex Consensus</a>, is optimistically responsive and tolerates up to <i>f</i> Byzantine faults in the partially synchronous setting. English? When the leader is honest and the network is healthy,
-                            participants come to agreement at <strong>network speed</strong>. When every participant is directly connected to every other participant (alto employs <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>) and leaders don't "relay" aggregated/recovered signatures (alto employs all-to-all communication for minimal view latency), it turns out "network speed" (as you've seen) can be very fast.
+                            You can read more about how <i>threshold-simplex</i> works <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html">here</a>.
+                        </p>
+                    </section>
+                    <section>
+                        <h3>Why is it so fast?</h3>
+                        <p>
+                            threshold-simplex, like <a href="https://eprint.iacr.org/2023/463">Simplex Consensus</a>, runs at <strong>network speed</strong> when the leader is honest and the network is healthy (while still tolerating up to <i>f</i> Byzantine
+                            faults in the partially synchronous setting). Additionally, threshold-simplex does away with "leader relay" to save one network hop during broadcast (just message-to-all rather than message-to-leader and leader-to-all).
+                        </p>
+                        <p>
+
+
+                            This means that, in the "happy path", a block can be proposed (1 network hop)
+                        </p>
+                        <p>
+                            When every participant is directly connected to every other participant (alto employs <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>) and leaders don't "relay" aggregated/recovered signatures (alto employs all-to-all communication for minimal view latency), it turns out "network speed" (as you've seen) can be very fast.
                         </p>
                     </section>
                     <section>
