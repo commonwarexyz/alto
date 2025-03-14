@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 
 interface AboutModalProps {
     isOpen: boolean;
@@ -46,7 +46,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             All data you see is relayed from consensus to your browser with <a href="https://exoware.xyz">exoware::relay</a>.
                         </p>
                         <p>
-                            If you want to replay any of the stream, checkout <a href="">inspector</a>.
+                            If you want to replay any of the stream, checkout <a href="https://TODO">inspector</a>.
 
 
                             <pre className="code-block">
