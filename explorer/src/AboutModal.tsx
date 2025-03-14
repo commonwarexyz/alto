@@ -54,14 +54,14 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             </ul>
                         </p>
                         <p>
-                            TODO: HOOK
+                            Enough to serve as an example and nowhere near enough to slow you down when you introduce your own rules.
                         </p>
                     </section>
 
                     <section>
                         <h3>What are you looking at?</h3>
                         <p>
-                            The dashboards on this explorer display the progression of <i>threshold-simplex</i> over time, broken into <strong>views</strong>. Participants in consensus enter a new
+                            The dashboards on this explorer display the progression of <i>threshold-simplex</i> over time, broken into <strong>views</strong>. Validators enter a new
                             view <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html#specification-for-view-v">whenever they observe either <i>2f+1</i> votes for a block proposal or a timeout (<i>they may see both</i>)</a>.
                         </p>
                         <p>
@@ -69,8 +69,11 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             participants come to agreement at <strong>network speed</strong>.
                         </p>
                         <p>
-                            When every participant is directly connected to every other participant (alto uses <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>) and leader's don't "relay" aggregated/recovered signatures, it turns out network
-                            speed is <strong>really fast</strong> (even when participants are spread across the globe).
+                            When every participant is directly connected to every other participant (alto employs <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>) and leaders don't "relay" aggregated/recovered signatures (alto employs all-to-all communication for minimal view latency), it turns out "network speed" is <strong>really fast</strong>.
+                        </p>
+                        <p>
+                            To demonstrate just how fast, we deployed a cluster of <strong>10 c7g.xlarge</strong> nodes (4 vCPU, 8GB RAM) on AWS (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2) and stream all consensus
+                            messages to your browser in real time using <a href="https://exoware.xyz">exoware::relay</a>.
                         </p>
                         <p>
                             Unlike other popular consensus constructions, threshold-simplex does not employ a "leader relay" to minimize view latency and instead requires each participant to broadcast each message to all other parties (i.e. all-to-all). In alto, we use <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a> to form an encrypted connection to each participant in consensus.
