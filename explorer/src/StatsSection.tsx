@@ -143,7 +143,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
 
     const tooltips = {
         blockTime: "The median difference between consecutive block timestamps.",
-        timeToLock: "The median latency from block proposal to notarization. At most one block can be notarized per view.",
+        timeToLock: "The median latency from block proposal to lock. At most one block can be locked per view.",
         timeToFinalize: "The median latency from block proposal to finalization. Once finalized, a block is immutable."
     };
 
@@ -162,7 +162,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
 
                 <div className="stat-item">
                     <Tooltip content={tooltips.timeToLock}>
-                        <div className="stat-label">Time-to-Notarize (TTN)</div>
+                        <div className="stat-label">Time-to-Lock (TTL)</div>
                         <div className="stat-value">
                             {medianTimeToLock > 0 ? `${medianTimeToLock}ms` : "N/A"}
                         </div>
@@ -179,7 +179,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
                 </div>
             </div>
             <div className="stats-disclaimer">
-                All latency measurements are made by your browser after verifying incoming consensus artifacts.
+                All latency measurements are made by your browser after verifying incoming consensus artifacts. If a validator's clock (or your local clock) is skewed, these values may be incorrect.
             </div>
         </div>
     );
