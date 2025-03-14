@@ -838,7 +838,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   if (status === "timed_out") {
     inBarText = "MISSING";
   } else if (status === "unknown") {
-    inBarText = "UNKNOWN";
+    inBarText = "PENDING";
   } else if (block) {
     inBarText = `#${block.height} | ${hexUint8Array(block.digest)}`;
   }
