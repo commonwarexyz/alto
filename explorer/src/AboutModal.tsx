@@ -76,6 +76,9 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             messages to your browser in real time using <a href="https://exoware.xyz">exoware::relay</a>.
                         </p>
                         <p>
+                            Because each consensus artifact is signed with a threshold signature (the public key is the <i>network key</i> displayed at the top of the page), your browser can (and does) verify each message it processes using <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> (compiled to WASM). Streamed some block that never went through consensus? Your browser rejects it.
+                        </p>
+                        <p>
                             Unlike other popular consensus constructions, threshold-simplex does not employ a "leader relay" to minimize view latency and instead requires each participant to broadcast each message to all other parties (i.e. all-to-all). In alto, we use <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a> to form an encrypted connection to each participant in consensus.
                         </p>
                         <p>
