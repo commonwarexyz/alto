@@ -991,6 +991,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
                     className="latency-text notarized-latency"
                     style={{
                       left: `${notarizedLabelPosition}px`,
+                      color: "#000",
                     }}
                   >
                     {notarizedLatencyText}
@@ -1003,6 +1004,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
                   className="latency-text finalized-latency"
                   style={{
                     left: `${finalizedLabelPosition}px`,
+                    color: "#274e13ff",
                   }}
                 >
                   {finalizedLatencyText}
