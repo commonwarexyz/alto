@@ -652,7 +652,7 @@ const App: React.FC = () => {
             <h2 className="bars-title">Views</h2>
             <div className="legend-container">
               <LegendItem color="#0000eeff" label="VRF" />
-              <LegendItem color="#000" label="Notarized" />
+              <LegendItem color="#000" label="Locked" />
               <LegendItem color="#274e13ff" label="Finalized" />
             </div>
           </div>
@@ -837,7 +837,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   } else if (status === "unknown") {
     inBarText = "UNKNOWN";
   } else if (block) {
-    inBarText = isMobile ? `#${block.height}` : `#${block.height} | ${hexUint8Array(block.digest)}`;
+    inBarText = `#${block.height} | ${hexUint8Array(block.digest)}`;
   }
 
   // Calculate positions for timing labels to prevent overlap
