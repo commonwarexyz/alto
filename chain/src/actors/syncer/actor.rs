@@ -164,7 +164,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
             block_journal,
             archive::Config {
                 translator: EightCap,
-                section_mask: 0xffff_ffff_ffff_0000u64,
+                section_mask: 0xffff_ffff_fff0_0000u64,
                 pending_writes: 0,
                 replay_concurrency: 4,
                 compression: Some(3),
