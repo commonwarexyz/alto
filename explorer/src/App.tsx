@@ -10,6 +10,7 @@ import AboutModal from './AboutModal';
 import './AboutModal.css';
 import StatsSection from "./StatsSection";
 import './StatsSection.css';
+import KeyInfoModal from './KeyInfoModal';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
@@ -82,6 +83,7 @@ const App: React.FC = () => {
   const [views, setViews] = useState<ViewData[]>([]);
   const [lastObservedView, setLastObservedView] = useState<number | null>(null);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
+  const [isKeyInfoModalOpen, setIsKeyInfoModalOpen] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
   const currentTimeRef = useRef(Date.now());
   const wsRef = useRef<WebSocket | null>(null);
@@ -606,6 +608,12 @@ const App: React.FC = () => {
         </div>
         <div className="about-button-container">
           <button
+            className="key-header-button"
+            onClick={() => setIsKeyInfoModalOpen(true)}
+          >
+            ⚷
+          </button>
+          <button
             className="about-header-button"
             onClick={() => setIsAboutModalOpen(true)}
           >
@@ -616,10 +624,6 @@ const App: React.FC = () => {
 
       <main className="app-main">
         {/* Network Key */}
-        <div className="public-key-display">
-          <span className="public-key-label">Network Key:</span>
-          <span className="public-key-value">{PUBLIC_KEY_HEX}</span>
-        </div>
 
         {/* Map */}
         <div className="map-container">
@@ -656,7 +660,6 @@ const App: React.FC = () => {
         <StatsSection
           views={views}
           numValidators={LOCATIONS.length}
-          onOpenAboutModal={() => setIsAboutModalOpen(true)}
         />
 
         {/* Bars with integrated legend */}
@@ -669,6 +672,7 @@ const App: React.FC = () => {
               <LegendItem color="#274e13ff" label="Finalized" />
             </div>
           </div>
+
           <div className="bars-list">
             {views.slice(0, 50).map((viewData) => (
               <Bar
@@ -687,6 +691,11 @@ const App: React.FC = () => {
       </footer>
 
       <AboutModal isOpen={isAboutModalOpen} onClose={() => setIsAboutModalOpen(false)} />
+      <KeyInfoModal
+        isOpen={isKeyInfoModalOpen}
+        onClose={() => setIsKeyInfoModalOpen(false)}
+        publicKeyHex={PUBLIC_KEY_HEX}
+      />
     </div >
   );
 };

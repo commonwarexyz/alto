@@ -122,7 +122,10 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         <h3>How do I measure latency?</h3>
                         <p>
                             Your browser measures latency by comparing the timestamp of a block (referenced in a prepared or finalization artifact) to your local time. This means that the latency you see includes the time it takes for a block to be proposed, voted upon, sent to
-                            exoware::relay, and then received by your browser. While it is true that validators observe lower latency, the one that usually impacts UX is the one you're measuring here.
+                            exoware::relay, and then received by your browser.
+                        </p>
+                        <p>
+                            While it is true that validators observe lower latency, the one that usually impacts UX is the one you're measuring here.
                         </p>
                     </section>
                     <section>
