@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface AboutModalProps {
     isOpen: boolean;
@@ -6,24 +6,59 @@ interface AboutModalProps {
 }
 
 const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
+    // Add effect to handle link targets
+    useEffect(() => {
+        if (isOpen) {
+            // Find all links in the modal and set them to open in new tabs
+            const modalLinks = document.querySelectorAll('.about-modal-content a');
+            modalLinks.forEach(link => {
+                if (link instanceof HTMLAnchorElement) {
+                    link.setAttribute('target', '_blank');
+                    link.setAttribute('rel', 'noopener noreferrer');
+                }
+            });
+        }
+    }, [isOpen]);
     if (!isOpen) return null;
 
     return (
         <div className="about-modal-overlay">
             <div className="about-modal">
                 <div className="about-modal-header">
-                    <h2>alto: <i>A minimal blockchain built with the Commonware Library.</i></h2>
+                    <h2>alto: <i>A minimal blockchain built with the Commonware Library</i></h2>
                 </div>
                 <div className="about-modal-content">
                     <section>
                         <h3>About</h3>
                         <p>
-                            This explorer visualizes <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html">alto's consensus progress</a> in real-time.
+                            This explorer visualizes <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html">alto's consensus</a> in real time.
                         </p>
                         <p>
-                            This dashboard visualizes the alto consensus protocol in real-time. alto is a Byzantine Fault Tolerant (BFT)
-                            consensus mechanism that ensures distributed systems can reach agreement even when some participants may be faulty
-                            or malicious.
+                            Using the <i>network key</i> displayed at the top of the page, your browser verifies that any data
+                            displayed was signed by at least <i>2f+1</i> of the <i>3f+1</i> validators in the network using WASM-compiled
+                            cryptography from the Commonware Library.
+                        </p>
+                    </section>
+
+                    <section>
+                        <h3>Who Hosts this Example?</h3>
+                        <p>
+                            All data you see is relayed from consensus to your browser with <a href="https://exoware.xyz">exoware::relay</a>.
+                        </p>
+                        <p>
+                            If you want to replay any of the stream, checkout <a href="">inspector</a>.
+
+                        </p>
+                    </section>
+
+                    <section>
+                        <h3>The Map</h3>
+                        <p>
+                            The map displays the location of the current leader node that is proposing the block for the most recent view.
+                            Leader selection is determined by a Verifiable Random Function (VRF) using the node's signature.
+                        </p>
+                        <p>
+                            This geographic distribution helps visualize how the consensus process works across a globally distributed network.
                         </p>
                     </section>
 
@@ -71,39 +106,6 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         </p>
                     </section>
 
-                    <section>
-                        <h3>The Map</h3>
-                        <p>
-                            The map displays the location of the current leader node that is proposing the block for the most recent view.
-                            Leader selection is determined by a Verifiable Random Function (VRF) using the node's signature.
-                        </p>
-                        <p>
-                            This geographic distribution helps visualize how the consensus process works across a globally distributed network.
-                        </p>
-                    </section>
-
-                    <section>
-                        <h3>Network Key</h3>
-                        <p>
-                            The Network Key displayed at the top of the dashboard is the public key used to verify signatures from
-                            the network. This ensures that all messages received are authentic and come from authorized participants.
-                        </p>
-                    </section>
-
-                    <section>
-                        <h3>Technical Details</h3>
-                        <p>
-                            This visualization connects to the alto consensus network via WebSocket and processes three main types of messages:
-                        </p>
-                        <ul>
-                            <li><strong>Seed:</strong> Indicates the start of a new view with leader selection</li>
-                            <li><strong>Notarization:</strong> Represents quorum certificate formation</li>
-                            <li><strong>Finalization:</strong> Signals final commitment of a block</li>
-                        </ul>
-                        <p>
-                            Each message is cryptographically verified using the network public key to ensure authenticity.
-                        </p>
-                    </section>
                 </div>
                 <div className="about-modal-footer">
                     <button className="about-button" onClick={onClose}>Close</button>
