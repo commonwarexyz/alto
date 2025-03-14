@@ -27,8 +27,8 @@ interface ViewData {
   actualFinalizationLatency?: number;
 }
 
-const SCALE_DURATION = 1000; // 1 second
-const TIMEOUT_DURATION = 5000; // 5000ms
+const SCALE_DURATION = 1000; // 1s
+const TIMEOUT_DURATION = 5000; // 5s
 
 const markerIcon = new DivIcon({
   className: "custom-div-icon",
