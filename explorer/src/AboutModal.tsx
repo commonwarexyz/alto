@@ -69,10 +69,14 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             participants come to agreement at <strong>network speed</strong>.
                         </p>
                         <p>
-                            Unlike other popular consensus constructions, threshold-simplex does not employ a "leader relay" and instead requires each participant to broadcast any message to all other parties (i.e. all-to-all). With <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>, each participant has an encrypted channel to every other participant.
+                            When every participant is directly connected to every other participant (alto uses <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>) and leader's don't "relay" aggregated/recovered signatures, it turns out network
+                            speed is <strong>really fast</strong> (even when participants are spread across the globe).
                         </p>
                         <p>
-
+                            Unlike other popular consensus constructions, threshold-simplex does not employ a "leader relay" to minimize view latency and instead requires each participant to broadcast each message to all other parties (i.e. all-to-all). In alto, we use <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a> to form an encrypted connection to each participant in consensus.
+                        </p>
+                        <p>
+                            threshold-simplex, unlike Simplex Consensus, introduces <i>BLS12-381 Threshold Signatures</i> for all messages.
 
                             threshold-simplex is optimstically responsive
 
