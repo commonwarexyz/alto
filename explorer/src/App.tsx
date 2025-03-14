@@ -661,13 +661,23 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="bars-list">
-            {views.slice(0, 50).map((viewData) => (
-              <Bar
-                key={viewData.view}
-                viewData={viewData}
-                currentTime={currentTimeRef.current}
-                isMobile={isMobile}
-              />
+            {views.slice(0, 50).map((viewData, index) => (
+              <React.Fragment key={viewData.view}>
+                <Bar
+                  viewData={viewData}
+                  currentTime={currentTimeRef.current}
+                  isMobile={isMobile}
+                />
+
+                {/* Add view change latency indicator between bars (except after the last one) */}
+                {index < views.length - 1 && views[index + 1] && (
+                  <ViewChangeLatency
+                    currentView={viewData}
+                    nextView={views[index + 1]}
+                    isMobile={isMobile}
+                  />
+                )}
+              </React.Fragment>
             ))}
           </div>
         </div>
@@ -692,6 +702,51 @@ const LegendItem: React.FC<LegendItemProps> = ({ color, label }) => {
     <div className="legend-item">
       <div className="legend-color" style={{ backgroundColor: color }}></div>
       <span className="legend-label">{label}</span>
+    </div>
+  );
+};
+
+interface ViewChangeLatencyProps {
+  currentView: ViewData;
+  nextView: ViewData;
+  isMobile: boolean;
+}
+
+const ViewChangeLatency: React.FC<ViewChangeLatencyProps> = ({ currentView, nextView, isMobile }) => {
+  // Only show latency if both views have valid start times
+  if (!currentView.startTime || !nextView.startTime) {
+    return (
+      <div className="view-change-latency">
+        <div className="latency-line"></div>
+      </div>
+    );
+  }
+
+  // Calculate latency between views (absolute value in case of any ordering issues)
+  const latencyMs = Math.abs(currentView.startTime - nextView.startTime);
+
+  // Skip rendering if latency is unreasonably large (might indicate gap in data)
+  if (latencyMs > 30000) { // Skip if more than 30 seconds
+    return (
+      <div className="view-change-latency">
+        <div className="latency-line"></div>
+      </div>
+    );
+  }
+
+  // Format latency for display
+  let displayText = `${Math.round(latencyMs)}ms`;
+
+  // For larger values, convert to seconds for readability
+  if (latencyMs >= 1000) {
+    const seconds = (latencyMs / 1000).toFixed(2);
+    displayText = `${seconds}s`;
+  }
+
+  return (
+    <div className="view-change-latency">
+      <div className="latency-line"></div>
+      <div className="latency-value">{displayText}</div>
     </div>
   );
 };
