@@ -290,6 +290,56 @@ body {
   text-decoration: underline;
 }
 
+/* Fix for Leaflet popups */
+.leaflet-popup-content {
+  margin: 8px;
+  min-width: 150px;
+  font-family: 'Consolas', monospace;
+  color: black;
+}
+
+.leaflet-container {
+  font: inherit;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 0;
+  border: 1px solid #ccc;
+}
+
+/* Style override for map tiles to use monochrome */
+.leaflet-tile {
+  filter: grayscale(100%) !important;
+}
+
+/* Public Key Display */
+.public-key-display {
+  background-color: #f4f4f4;
+  border: 1px solid #ddd;
+  padding: 8px;
+  margin-bottom: 16px;
+  word-break: break-all;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  transition: background-color 0.2s ease;
+}
+
+.public-key-display:hover {
+  background-color: #e9e9e9;
+}
+
+.public-key-label {
+  font-size: 14px;
+  color: #555;
+  margin-bottom: 4px;
+}
+
+.public-key-value {
+  font-size: 18px;
+  font-weight: bold;
+}
+
 /* Media Queries */
 @media (min-width: 768px) {
   .app-header {
@@ -338,78 +388,12 @@ body {
   .legend-item {
     padding: 2px 8px;
   }
+
+  .public-key-value {
+    font-size: 16px;
+  }
 }
 
-/* Fix for Leaflet popups */
-.leaflet-popup-content {
-  margin: 8px;
-  min-width: 150px;
-  font-family: 'Consolas', monospace;
-  color: black;
-}
-
-.leaflet-container {
-  font: inherit;
-}
-
-.leaflet-popup-content-wrapper {
-  border-radius: 0;
-  border: 1px solid #ccc;
-}
-
-/* Style override for map tiles to use monochrome */
-.leaflet-tile {
-  filter: grayscale(100%) !important;
-}
-
-/* Public Key Display */
-.public-key-display {
-  background-color: #f4f4f4;
-  border: 1px solid #ddd;
-  padding: 8px;
-  margin-bottom: 16px;
-  word-break: break-all;
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-}
-
-.public-key-label {
-  font-weight: bold;
-  margin-right: 8px;
-  white-space: nowrap;
-}
-
-.public-key-value {
-  color: #333;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Connection status styling */
-.connection-status {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-  margin-left: auto;
-  padding-top: 4px;
-}
-
-.status-indicator {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 1px solid #000;
-}
-
-.status-indicator.connected {
-  background: #000;
-}
-
-.status-indicator.disconnected {
-  background: transparent;
-}
 
 @media (max-width: 480px) {
   .app-header {
@@ -503,7 +487,11 @@ body {
   }
 
   .public-key-label {
-    margin-right: 0;
+    font-size: 11px;
+  }
+
+  .public-key-value {
+    font-size: 14px;
   }
 
   .logo-container {

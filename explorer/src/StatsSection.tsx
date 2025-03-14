@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 
 // ViewData interface needs to be imported by StatsSection
 export interface ViewData {
@@ -27,8 +27,9 @@ interface TooltipProps {
     children: React.ReactNode;
 }
 
-const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
+export const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
     const [isVisible, setIsVisible] = useState(false);
+    const tooltipRef = useRef<HTMLDivElement>(null);
 
     return (
         <div
@@ -39,7 +40,10 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
         >
             {children}
             {isVisible && (
-                <div className="tooltip-content">
+                <div
+                    className="tooltip-content"
+                    ref={tooltipRef}
+                >
                     {content}
                 </div>
             )}

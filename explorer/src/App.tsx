@@ -10,6 +10,8 @@ import AboutModal from './AboutModal';
 import './AboutModal.css';
 import StatsSection from "./StatsSection";
 import './StatsSection.css';
+import Tooltip from "./Tooltip";
+import './Tooltip.css';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
@@ -616,10 +618,6 @@ const App: React.FC = () => {
 
       <main className="app-main">
         {/* Network Key */}
-        <div className="public-key-display">
-          <span className="public-key-label">Network Key:</span>
-          <span className="public-key-value">{PUBLIC_KEY_HEX}</span>
-        </div>
 
         {/* Map */}
         <div className="map-container">
@@ -668,6 +666,13 @@ const App: React.FC = () => {
               <LegendItem color="#000" label="Prepared" />
               <LegendItem color="#274e13ff" label="Finalized" />
             </div>
+          </div>
+
+          <div className="public-key-display">
+            <Tooltip content="The public key used to verify consensus messages. This key represents the threshold signature of the validator set.">
+              <div className="public-key-label">Network Key</div>
+              <div className="public-key-value">{PUBLIC_KEY_HEX}</div>
+            </Tooltip>
           </div>
           <div className="bars-list">
             {views.slice(0, 50).map((viewData) => (
