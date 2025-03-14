@@ -146,14 +146,14 @@
 }
 
 .about-header-button {
-    background: none;
-    border: 1px solid #ddd;
+    background: black;
+    border: 1px solid black;
     padding: 6px 12px;
     cursor: pointer;
     font-family: 'Consolas', monospace;
     font-size: 0.9rem;
     margin-left: 16px;
-    color: black;
+    color: white;
     -webkit-appearance: none;
     appearance: none;
     -webkit-tap-highlight-color: transparent;
@@ -201,9 +201,13 @@
     }
 
     /* Ensure buttons stay black on mobile */
-    .about-button,
-    .about-header-button {
+    .about-button {
         color: black !important;
         -webkit-text-fill-color: black;
+    }
+
+    .about-header-button {
+        color: white !important;
+        -webkit-text-fill-color: white;
     }
 }
