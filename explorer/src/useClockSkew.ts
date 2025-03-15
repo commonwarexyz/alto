@@ -1,35 +1,190 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+
+/**
+ * Options for the clock skew detection
+ */
+interface ClockSkewOptions {
+    /** The endpoint URL to fetch server time from */
+    endpoint?: string;
+    /** Number of samples to collect for statistical analysis */
+    sampleCount?: number;
+    /** Request timeout in milliseconds */
+    timeout?: number;
+    /** Delay between retries in milliseconds */
+    retryDelay?: number;
+    /** Maximum number of retry attempts per sample */
+    maxRetries?: number;
+}
 
 /**
  * A hook that detects and manages clock skew between the user's local time
- * and an external time source.
+ * and an external time source using multiple samples for better accuracy.
  *
- * @returns An object containing:
- *   - clockSkew: The detected clock skew in milliseconds (can be positive or negative)
- *   - adjustTime: A function to adjust a timestamp using the detected skew
- *   - loading: Boolean indicating if the skew detection is in progress
- *   - error: Any error that occurred during skew detection
+ * @param options Configuration options
+ * @returns An object containing clock skew information and utility functions
  */
-export const useClockSkew = () => {
+/**
+ * Remove statistical outliers from an array of numbers
+ * Uses the Interquartile Range (IQR) method
+ */
+const removeOutliers = (samples: number[]): number[] => {
+    if (samples.length < 4) return [...samples]; // Need at least 4 samples for quartile calculation
+
+    // Sort the samples
+    const sorted = [...samples].sort((a, b) => a - b);
+
+    // Calculate Q1 (25th percentile) and Q3 (75th percentile)
+    const q1Index = Math.floor(sorted.length * 0.25);
+    const q3Index = Math.floor(sorted.length * 0.75);
+    const q1 = sorted[q1Index];
+    const q3 = sorted[q3Index];
+
+    // Calculate IQR and bounds
+    const iqr = q3 - q1;
+    const lowerBound = q1 - 1.5 * iqr;
+    const upperBound = q3 + 1.5 * iqr;
+
+    // Filter out samples outside the bounds
+    return sorted.filter(sample => sample >= lowerBound && sample <= upperBound);
+};
+
+export const useClockSkew = (options: ClockSkewOptions = {}) => {
+    const {
+        endpoint = 'https://alto.exoware.xyz/health',
+        sampleCount = 6,
+        timeout = 3000,
+        retryDelay = 1000,
+        maxRetries = 3
+    } = options;
+
+    const detectionStartedRef = useRef(false);
     const [clockSkew, setClockSkew] = useState<number>(0);
     const [loading, setLoading] = useState<boolean>(true);
     const [error, setError] = useState<Error | null>(null);
 
-    // Calculate clock skew using reliable time services
     useEffect(() => {
+        // Skip if detection was already started
+        if (detectionStartedRef.current) {
+            console.log('Clock skew detection already started, skipping duplicate initialization');
+            return;
+        }
+
+        // Mark as started before we begin
+        detectionStartedRef.current = true;
+        console.log('Starting clock skew detection');
+
         const detectClockSkew = async () => {
             try {
                 setLoading(true);
 
-                // Try Cloudflare's time API first
-                const skew = await detectClockSkewWithCloudflare() || await detectClockSkewWithGoogle();
+                // Collect multiple samples
+                const skewSamples: number[] = [];
+                let successfulSamples = 0;
+                let currentRetry = 0;
 
-                if (skew !== null) {
-                    console.log(`Clock skew detected: ${skew}ms (${skew > 0 ? 'ahead' : 'behind'})`);
-                    setClockSkew(skew);
+                while (successfulSamples < sampleCount && currentRetry < maxRetries) {
+                    try {
+                        // Create a connection timer
+                        const controller = new AbortController();
+                        const connectionTimeoutId = setTimeout(() => {
+                            controller.abort('Connection timeout exceeded');
+                        }, 200); // Set a lower timeout for connection phase
+
+                        // First, do a HEAD request to establish connection without waiting for response data
+                        const startTime = performance.now();
+                        const localStartTime = Date.now();
+
+                        try {
+                            await fetch(endpoint, {
+                                method: 'HEAD',
+                                signal: controller.signal,
+                            });
+
+                            // Connection established successfully, clear the timeout
+                            clearTimeout(connectionTimeoutId);
+                        } catch (error) {
+                            // If it's not a timeout error, rethrow
+                            if (!(error instanceof DOMException && error.name === 'AbortError')) {
+                                throw error;
+                            }
+                            // Otherwise, continue with the regular request
+                            clearTimeout(connectionTimeoutId);
+                        }
+
+                        // Now perform the actual request
+                        const response = await fetch(endpoint, {
+                            signal: AbortSignal.timeout(timeout),
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(`API returned status ${response.status}`);
+                        }
+
+                        const endTime = performance.now();
+                        const networkLatency = Math.floor((endTime - startTime) / 4);
+
+                        // Parse the server time
+                        const text = await response.text();
+                        const serverTime = parseInt(text, 10);
+
+                        if (isNaN(serverTime)) {
+                            throw new Error('Invalid server time format');
+                        }
+
+                        // Calculate the adjusted local time when server responded
+                        const adjustedLocalTime = localStartTime + networkLatency;
+
+                        // Calculate skew and store it
+                        const skew = adjustedLocalTime - serverTime;
+                        skewSamples.push(skew);
+                        successfulSamples++;
+
+                        // Add a small delay between requests to avoid network congestion
+                        if (successfulSamples < sampleCount) {
+                            // Randomize the delay slightly to avoid patterns
+                            const randomDelay = 200 + Math.floor(Math.random() * 100);
+                            await new Promise(resolve => setTimeout(resolve, randomDelay));
+                        }
+                    } catch (err) {
+                        console.warn(`Sample ${successfulSamples + 1} failed:`, err);
+                        currentRetry++;
+
+                        if (currentRetry < maxRetries) {
+                            // Exponential backoff
+                            const delay = retryDelay * Math.pow(2, currentRetry - 1);
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                        }
+                    }
+                }
+
+                if (skewSamples.length > 0) {
+                    // Apply outlier detection and removal
+                    const filteredSamples = removeOutliers(skewSamples);
+
+                    if (filteredSamples.length === 0) {
+                        // If all samples were considered outliers, fall back to the median of original samples
+                        skewSamples.sort((a, b) => a - b);
+                        const mid = Math.floor(skewSamples.length / 2);
+                        const fallbackSkew = skewSamples.length % 2 === 0
+                            ? Math.round((skewSamples[mid - 1] + skewSamples[mid]) / 2)
+                            : skewSamples[mid];
+
+                        console.log(`All samples considered outliers, using median as fallback: ${fallbackSkew}ms`);
+                        setClockSkew(fallbackSkew);
+                    } else {
+                        // Calculate the mean of the filtered samples
+                        const sum = filteredSamples.reduce((acc, val) => acc + val, 0);
+                        const meanSkew = Math.round(sum / filteredSamples.length);
+
+                        console.log(`Clock skew detected: ${meanSkew}ms (${meanSkew > 0 ? 'ahead' : 'behind'})`);
+                        console.log(`All samples (ms): ${skewSamples.join(', ')}`);
+                        console.log(`After outlier removal (ms): ${filteredSamples.join(', ')}`);
+                        console.log(`Removed ${skewSamples.length - filteredSamples.length} outliers`);
+
+                        setClockSkew(meanSkew);
+                    }
                 } else {
-                    // If both methods fail, default to no adjustment
-                    console.warn('Failed to detect clock skew, using system clock');
+                    console.warn('Failed to collect any valid clock skew samples');
                     setClockSkew(0);
                 }
 
@@ -37,102 +192,35 @@ export const useClockSkew = () => {
             } catch (err) {
                 console.error('Clock skew detection failed:', err);
                 setError(err instanceof Error ? err : new Error(String(err)));
-                setLoading(false);
-
-                // Fallback to no skew adjustment in case of error
                 setClockSkew(0);
-            }
-        };
-
-        // Method 1: Use Cloudflare's time.cloudflare.com API
-        const detectClockSkewWithCloudflare = async (): Promise<number | null> => {
-            try {
-                // Record request start time
-                const requestStartTime = Date.now();
-
-                // Fetch time from Cloudflare
-                const response = await fetch('https://time.cloudflare.com', {
-                    // Set a timeout to prevent hanging
-                    signal: AbortSignal.timeout(3000)
-                });
-
-                // Record request end time
-                const requestEndTime = Date.now();
-
-                if (!response.ok) {
-                    throw new Error('Cloudflare time API returned non-OK response');
-                }
-
-                const data = await response.json();
-
-                // Cloudflare returns time in seconds with fractional part
-                const serverTime = data.now * 1000; // Convert to milliseconds
-
-                // Calculate approximate network latency (round-trip / 2)
-                const networkLatency = Math.floor((requestEndTime - requestStartTime) / 2);
-
-                // Calculate user's local time at the moment server responded
-                const adjustedLocalTime = requestStartTime + networkLatency;
-
-                // Calculate skew (positive means user's clock is ahead, negative means it's behind)
-                return adjustedLocalTime - serverTime;
-            } catch (err) {
-                console.warn('Cloudflare time detection failed:', err);
-                return null;
-            }
-        };
-
-        // Method 2: Use Google's servers via HTTP date header
-        const detectClockSkewWithGoogle = async (): Promise<number | null> => {
-            try {
-                // Record request start time
-                const requestStartTime = Date.now();
-
-                // Fetch from Google with a unique query param to prevent caching
-                const response = await fetch(`https://www.google.com/generate_204?nocache=${Date.now()}`, {
-                    method: 'HEAD',
-                    // Set a timeout to prevent hanging
-                    signal: AbortSignal.timeout(3000)
-                });
-
-                // Record request end time
-                const requestEndTime = Date.now();
-
-                if (!response.ok) {
-                    throw new Error('Google HEAD request failed');
-                }
-
-                // Get Date header from response
-                const dateHeader = response.headers.get('date');
-
-                if (!dateHeader) {
-                    throw new Error('No date header in Google response');
-                }
-
-                // Parse the server timestamp (comes in HTTP date format)
-                const serverTime = new Date(dateHeader).getTime();
-
-                // Calculate approximate network latency (round-trip / 2)
-                const networkLatency = Math.floor((requestEndTime - requestStartTime) / 2);
-
-                // Calculate user's local time at the moment server responded
-                const adjustedLocalTime = requestStartTime + networkLatency;
-
-                // Calculate skew (positive means user's clock is ahead, negative means it's behind)
-                return adjustedLocalTime - serverTime;
-            } catch (err) {
-                console.warn('Google time detection failed:', err);
-                return null;
+                setLoading(false);
             }
         };
 
         detectClockSkew();
-    }, []);
+    }, [endpoint, sampleCount, timeout, retryDelay, maxRetries]);
 
     // Function to adjust any timestamp using the detected skew
     const adjustTime = (timestamp: number): number => {
         return timestamp - clockSkew;
     };
 
-    return { clockSkew, adjustTime, loading, error };
+    // Function to convert local time to server time
+    const toServerTime = (localTime: number = Date.now()): number => {
+        return localTime - clockSkew;
+    };
+
+    // Function to convert server time to local time
+    const toLocalTime = (serverTime: number): number => {
+        return serverTime + clockSkew;
+    };
+
+    return {
+        clockSkew,
+        adjustTime,
+        toServerTime,
+        toLocalTime,
+        loading,
+        error
+    };
 };
