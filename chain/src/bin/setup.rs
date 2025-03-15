@@ -11,7 +11,7 @@ use commonware_cryptography::{
 use commonware_deployer::ec2;
 use commonware_utils::{from_hex_formatted, hex, quorum};
 use rand::{rngs::OsRng, seq::IteratorRandom};
-use std::{collections::BTreeMap, fs};
+use std::{collections::BTreeMap, fs, ops::AddAssign};
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -346,12 +346,13 @@ fn indexer(sub_matches: &ArgMatches) {
         "count exceeds number of peers"
     );
 
-    // Group peers by region
+    // Group peers by area (prefix of region)
     let mut region_to_peers: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for instance in &config.instances {
         let peer_name = instance.name.clone();
         let region = instance.region.clone();
-        region_to_peers.entry(region).or_default().push(peer_name);
+        let area = region.split('-').next().unwrap().to_string();
+        region_to_peers.entry(area).or_default().push(peer_name);
     }
 
     // Sort peers within each region for deterministic selection
@@ -365,6 +366,7 @@ fn indexer(sub_matches: &ArgMatches) {
     // Select peers for indexers in a round-robin fashion across regions
     let mut selected = Vec::new();
     let mut region_index = 0;
+    let mut assigned_regions = BTreeMap::new();
     while selected.len() < count && !region_to_peers.is_empty() {
         let region = &regions[region_index % regions.len()];
         if let Some(peers) = region_to_peers.get_mut(region) {
@@ -374,6 +376,7 @@ fn indexer(sub_matches: &ArgMatches) {
                 if peers.is_empty() {
                     region_to_peers.remove(region); // Remove region if no peers remain
                 }
+                assigned_regions.entry(region).or_insert(0).add_assign(1);
             }
         }
         region_index += 1;
@@ -425,6 +428,9 @@ fn indexer(sub_matches: &ArgMatches) {
             }
         }
     }
+
+    // Log assignment of indexers to regions
+    info!(assignments = ?assigned_regions, "configured indexers");
 }
 
 // Region-to-location mapping
