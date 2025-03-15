@@ -13,6 +13,7 @@ import './StatsSection.css';
 import KeyInfoModal from './KeyModal';
 import MapOverlay from './MapOverlay';
 import './MapOverlay.css';
+import { useClockSkew } from './useClockSkew';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
@@ -87,7 +88,8 @@ const App: React.FC = () => {
   const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
   const [isKeyInfoModalOpen, setIsKeyInfoModalOpen] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
-  const currentTimeRef = useRef(Date.now());
+  const { adjustTime } = useClockSkew();
+  const currentTimeRef = useRef(adjustTime(Date.now()));
   const wsRef = useRef<WebSocket | null>(null);
 
   // Manage WebSocket lifecycle
@@ -157,7 +159,7 @@ const App: React.FC = () => {
               location: undefined,
               locationName: undefined,
               status: "unknown",
-              startTime: Date.now(),
+              startTime: adjustTime(Date.now()),
               timeoutId: timeoutId
             });
           }
@@ -203,7 +205,7 @@ const App: React.FC = () => {
         location: LOCATIONS[locationIndex][0],
         locationName: LOCATIONS[locationIndex][1],
         status: "growing",
-        startTime: Date.now(),
+        startTime: adjustTime(Date.now()),
         signature: seed.signature,
       };
 
@@ -270,7 +272,7 @@ const App: React.FC = () => {
       }
 
       let newViews = [...prevViews];
-      const currentTime = Date.now();
+      const currentTime = adjustTime(Date.now());
 
       // Calculate a reasonable start time using the block timestamp if available
       let calculatedStartTime = currentTime;
@@ -354,7 +356,7 @@ const App: React.FC = () => {
     setViews((prevViews) => {
       const index = prevViews.findIndex((v) => v.view === view);
       let newViews = [...prevViews];
-      const currentTime = Date.now();
+      const currentTime = adjustTime(Date.now());
 
       // Calculate a reasonable start time using the block timestamp if available
       let calculatedStartTime = currentTime;
@@ -444,7 +446,7 @@ const App: React.FC = () => {
   // Update current time every 50ms to force re-render for growing bars
   useEffect(() => {
     const interval = setInterval(() => {
-      currentTimeRef.current = Date.now();
+      currentTimeRef.current = adjustTime(Date.now());
       // Force re-render without relying on state updates
       setViews(views => [...views]);
     }, 50);
