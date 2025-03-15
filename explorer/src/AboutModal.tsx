@@ -118,30 +118,26 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section>
                         <h3>Where is the data coming from?</h3>
                         <p>
-                            To power this explorer, we deployed alto to a cluster of <strong>25 c7g.xlarge</strong> nodes (4 vCPU, 8GB RAM) on AWS in <strong>10 regions</strong> (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2)
-                            and built some infrastructure to stream each consensus message to your browser in real time (<a href="https://exoware.xyz">exoware::relay</a>).
+                            We deployed alto to a cluster of <strong>25 validators</strong> running c7g.xlarge (4 vCPU, 8GB RAM) nodes on AWS in <strong>10 regions</strong> (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2).
                         </p>
                         <p>
-                            Because each consensus artifact is accompanied by a threshold signature (the public key of which is the <strong>network key</strong> displayed at the top of the page), your browser can (and does) verify each inbound message using <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> compiled to WASM.
+                            When you visit this page, however, you don't connect to any of those nodes. You connect to custom-built infrastructure (<a href="https://exoware.xyz">exoware::relay</a>) that streams consensus
+                            artifacts to your browser in real time.
                         </p>
                         <p>
-                            That's right, your browser is verifying every message you receive was produced form some known consensus set in real time. Don't trust our infrastructure, trust the open source verifier code running on your computer.
-                        </p>
-                    </section>
-                    <section>
-                        <h3>How do I measure latency?</h3>
-                        <p>
-                            Your browser measures latency by comparing the timestamp of a block (referenced in a prepared or finalization artifact) to your local time. This means that the latency you see includes the time it takes for a block to be proposed, voted upon, sent to
-                            exoware::relay, and then received by your browser.
+                            Because each consensus artifact is accompanied by a threshold signature, your browser can (and does) verify each inbound message using <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> compiled to WASM.
                         </p>
                         <p>
-                            While it is true that validators observe lower latency, the one that usually impacts UX is the one you're measuring here.
+                            That's right, your browser is verifying every message it receives was emitted from consensus in real time. Don't trust an API, trust the open source verifier code running on your computer.
                         </p>
                     </section>
                     <section>
                         <h3>Can I replay the stream?</h3>
                         <p>
-                            Yes! You can replay the stream or fetch arbitrary data using the <a href="https://docs.rs/alto-inspector/latest/alto_inspector/">alto-inspector</a>. To download the tool, run:
+                            Yes! You can replay the stream or fetch arbitrary data using the <a href="https://docs.rs/alto-inspector/latest/alto_inspector/">alto-inspector</a>.
+                        </p>
+                        <p>
+                            To download the tool, run:
                             <pre className="code-block">
                                 <code>
                                     cargo install alto-inspector
