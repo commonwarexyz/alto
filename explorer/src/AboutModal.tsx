@@ -43,7 +43,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section>
                         <h3>What is alto?</h3>
                         <p>
-                            <a href="https://github.com/commonwarexyz/alto">alto</a> is a minimal (and wicked fast) blockchain built with the Commonware Library.
+                            <a href="https://github.com/commonwarexyz/alto">alto</a> is a minimal (and wicked fast) blockchain built with the <a href="https://github.com/commonwarexyz/monorepo">Commonware Library</a>.
                         </p>
                         <p>
                             By minimal, we mean minimal. alto's state transition function consists of just <strong>3 rules</strong>. Each block must:
@@ -61,11 +61,12 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section>
                         <h3>What are you looking at?</h3>
                         <p>
-                            The dashboards on this explorer display the progression of <i>threshold-simplex</i> over time, broken into <strong>views</strong>.
+                            This explorer displays the progression of <i>threshold-simplex</i> over time, broken into <strong>views</strong>.
                         </p>
                         <p>
-                            Validators enter a new view whenever they observe either <i>2f+1</i> votes for a block proposal or a timeout AND some seed (VRF).
-                            Validators finalize a view whenever they observe <i>2f+1</i> finalizes for a block proposal.
+                            Validators enter a new view whenever they observe either <i>2f+1</i> votes for a block proposal or <i>2f+1</i> nullifies
+                            (to skip this view) AND some seed (a VRF used to select the next leader). Validators finalize a view whenever they
+                            observe <i>2f+1</i> finalizes for a block proposal.
                         </p>
                         <p>
                             We color the phases of a view as follows:
@@ -76,16 +77,15 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                                     <div className="about-status-indicator" style={{ backgroundColor: "#0000eeff" }}></div>
                                     <strong>Seed</strong>
                                 </div>
-                                Some leader (selected via a BLS12-381 VRF) is proposing a block to be voted upon. The dot on the map (of the same color)
-                                is the region where the leader is located.
+                                Some leader has been elected to propose a block. The dot on the map (of the same color) is the region where the leader is located.
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">
                                     <div className="about-status-indicator" style={{ backgroundColor: "#000" }}></div>
                                     <strong>Locked</strong>
                                 </div>
-                                Some block <i>b</i> has received <i>2f+1</i> votes in a given view <i>v</i>. This means there can never be another prepared block in view <i>v</i> (and
-                                block <i>b</i> must be used in the canonical chain if <i>2f+1</i> participants did not timeout).
+                                Some block <i>b</i> has received <i>2f+1</i> votes in a given view <i>v</i>. This means there can never be another locked block
+                                in view <i>v</i> (and block <i>b</i> must be used in the canonical chain if <i>2f+1</i> participants did not move to nullify).
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">
@@ -94,32 +94,25 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                                 </div>
                                 The block <i>b</i> in view <i>v</i> has received <i>2f+1</i> finalizes. The block is now immutable.
                             </li>
-                            <li>
-                                <div className="status-indicator-wrapper">
-                                    <div className="about-status-indicator" style={{ backgroundColor: "#f4ccccff" }}></div>
-                                    <strong>Timed Out</strong>
-                                </div>
-                                For some reason, your browser did not detect that a view was <i>prepared</i> or <i>finalized</i> in a reasonable amount of time. This could be due to network instability or from your browser
-                                disconnecting from the consensus stream.
-                            </li>
                         </ul>
                         <p>
-                            You can read more about how <i>threshold-simplex</i> works <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html">here</a>.
+                            You can read more about the design of <i>threshold-simplex</i> <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html">here</a>.
                         </p>
                     </section>
                     <section>
                         <h3>Why is it so fast?</h3>
                         <p>
-                            threshold-simplex, like <a href="https://eprint.iacr.org/2023/463">Simplex Consensus</a>, runs at <strong>network speed</strong> when the leader is honest and the network is healthy (while still tolerating up to <i>f</i> Byzantine
-                            faults in the partially synchronous setting). Additionally, threshold-simplex does away with "leader relay" to save one network hop during broadcast (just message-to-all rather than message-to-leader and leader-to-all).
+                            <i>threshold-simplex</i>, like <a href="https://eprint.iacr.org/2023/463">Simplex Consensus</a>, employs <strong>all-to-all broadcast</strong> and <strong>progress-driven view transitions</strong> to
+                            operate at optimal latency (under the partial synchrony model).
+                        </p>
+                        <p>
+                            English? All validators in alto are connected directly to each other (using <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>) and send
+                            consensus messages directly to each other (without going through a "leader relay"). As soon as any validator observes <i>2f+1</i> votes for a block proposal, the broadcast a threshold signature
+                            representing their observation (by combining the <i>2f+1</i> partial signatures observed) and enter the next view immediately (before waiting for finalization or any timeout). While working on the next view,
+                            validators continue working towards finalization of the previous view (in parallel).
                         </p>
                         <p>
 
-
-                            This means that, in the "happy path", a block can be proposed (1 network hop)
-                        </p>
-                        <p>
-                            When every participant is directly connected to every other participant (alto employs <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>) and leaders don't "relay" aggregated/recovered signatures (alto employs all-to-all communication for minimal view latency), it turns out "network speed" (as you've seen) can be very fast.
                         </p>
                     </section>
                     <section>
