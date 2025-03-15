@@ -103,16 +103,16 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         <h3>Why is it so fast?</h3>
                         <p>
                             <i>threshold-simplex</i>, like <a href="https://eprint.iacr.org/2023/463">Simplex Consensus</a>, employs <strong>all-to-all broadcast</strong> and <strong>progress-driven view transitions</strong> to
-                            operate at optimal latency (under the partial synchrony model).
+                            achieve optimal latency in both the optimistic and pessimistic case (under the partial synchrony model).
                         </p>
                         <p>
-                            English? All validators in alto are connected directly to each other (using <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>) and send
-                            consensus messages directly to each other (without going through a "leader relay"). As soon as any validator observes <i>2f+1</i> votes for a block proposal, the broadcast a threshold signature
-                            representing their observation (by combining the <i>2f+1</i> partial signatures observed) and enter the next view immediately (before waiting for finalization or any timeout). While working on the next view,
-                            validators continue working towards finalization of the previous view (in parallel).
+                            Using authenticated connections (provided by <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>), each validator
+                            sends consensus messages directly to every other validator (no leader relay or multi-hop gossip). As soon as any validator observes <i>2f+1</i> votes for a block proposal, they broadcast
+                            a threshold signature (again directly) to all other validators and enter the next view immediately (without waiting for finalization or any timeout). If a validator sees a threshold signature
+                            for a view <i>v</i>, they enter view <i>v+1</i> immediately (ensuring validators stay synchronized without using a clock).
                         </p>
                         <p>
-
+                            English? <i>threshold-simplex</i> moves at <strong>network speed</strong> (and it turns out that's pretty fast in 2025).
                         </p>
                     </section>
                     <section>
