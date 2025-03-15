@@ -17,13 +17,6 @@ interface ClockSkewOptions {
 }
 
 /**
- * A hook that detects and manages clock skew between the user's local time
- * and an external time source using multiple samples for better accuracy.
- *
- * @param options Configuration options
- * @returns An object containing clock skew information and utility functions
- */
-/**
  * Remove statistical outliers from an array of numbers
  * Uses the Interquartile Range (IQR) method
  */
@@ -50,8 +43,8 @@ const removeOutliers = (samples: number[]): number[] => {
 
 export const useClockSkew = (options: ClockSkewOptions = {}) => {
     const {
-        endpoint = 'https://alto.exoware.xyz/health',
-        sampleCount = 6,
+        endpoint = 'https://1.1.1.1/cdn-cgi/trace',
+        sampleCount = 7,
         timeout = 3000,
         retryDelay = 1000,
         maxRetries = 3
@@ -88,9 +81,9 @@ export const useClockSkew = (options: ClockSkewOptions = {}) => {
                         const controller = new AbortController();
                         const connectionTimeoutId = setTimeout(() => {
                             controller.abort('Connection timeout exceeded');
-                        }, 200); // Set a lower timeout for connection phase
+                        }, 200);
 
-                        // First, do a HEAD request to establish connection without waiting for response data
+                        // First, do a HEAD request to establish connection
                         const startTime = performance.now();
                         const localStartTime = Date.now();
 
@@ -99,19 +92,15 @@ export const useClockSkew = (options: ClockSkewOptions = {}) => {
                                 method: 'HEAD',
                                 signal: controller.signal,
                             });
-
-                            // Connection established successfully, clear the timeout
                             clearTimeout(connectionTimeoutId);
                         } catch (error) {
-                            // If it's not a timeout error, rethrow
                             if (!(error instanceof DOMException && error.name === 'AbortError')) {
                                 throw error;
                             }
-                            // Otherwise, continue with the regular request
                             clearTimeout(connectionTimeoutId);
                         }
 
-                        // Now perform the actual request
+                        // Perform the actual request
                         const response = await fetch(endpoint, {
                             signal: AbortSignal.timeout(timeout),
                         });
@@ -123,13 +112,19 @@ export const useClockSkew = (options: ClockSkewOptions = {}) => {
                         const endTime = performance.now();
                         const networkLatency = Math.floor((endTime - startTime) / 4);
 
-                        // Parse the server time
+                        // Parse the server time from the /cdn-cgi/trace response
                         const text = await response.text();
-                        const serverTime = parseInt(text, 10);
-
-                        if (isNaN(serverTime)) {
-                            throw new Error('Invalid server time format');
+                        const lines = text.split('\n');
+                        const tsLine = lines.find(line => line.startsWith('ts='));
+                        if (!tsLine) {
+                            throw new Error('ts field not found in response');
                         }
+                        const serverTimeStr = tsLine.substring(3); // Extract value after 'ts='
+                        const serverTimeFloat = parseFloat(serverTimeStr);
+                        if (isNaN(serverTimeFloat)) {
+                            throw new Error('Invalid ts field format');
+                        }
+                        const serverTime = Math.floor(serverTimeFloat * 1000); // Convert seconds to milliseconds
 
                         // Calculate the adjusted local time when server responded
                         const adjustedLocalTime = localStartTime + networkLatency;
@@ -139,9 +134,8 @@ export const useClockSkew = (options: ClockSkewOptions = {}) => {
                         skewSamples.push(skew);
                         successfulSamples++;
 
-                        // Add a small delay between requests to avoid network congestion
+                        // Add a small delay between requests
                         if (successfulSamples < sampleCount) {
-                            // Randomize the delay slightly to avoid patterns
                             const randomDelay = 200 + Math.floor(Math.random() * 100);
                             await new Promise(resolve => setTimeout(resolve, randomDelay));
                         }
@@ -150,7 +144,6 @@ export const useClockSkew = (options: ClockSkewOptions = {}) => {
                         currentRetry++;
 
                         if (currentRetry < maxRetries) {
-                            // Exponential backoff
                             const delay = retryDelay * Math.pow(2, currentRetry - 1);
                             await new Promise(resolve => setTimeout(resolve, delay));
                         }
@@ -162,7 +155,7 @@ export const useClockSkew = (options: ClockSkewOptions = {}) => {
                     const filteredSamples = removeOutliers(skewSamples);
 
                     if (filteredSamples.length === 0) {
-                        // If all samples were considered outliers, fall back to the median of original samples
+                        // Fallback to median if all samples are outliers
                         skewSamples.sort((a, b) => a - b);
                         const mid = Math.floor(skewSamples.length / 2);
                         const fallbackSkew = skewSamples.length % 2 === 0
@@ -172,7 +165,7 @@ export const useClockSkew = (options: ClockSkewOptions = {}) => {
                         console.log(`All samples considered outliers, using median as fallback: ${fallbackSkew}ms`);
                         setClockSkew(fallbackSkew);
                     } else {
-                        // Calculate the mean of the filtered samples
+                        // Calculate mean of filtered samples
                         const sum = filteredSamples.reduce((acc, val) => acc + val, 0);
                         const meanSkew = Math.round(sum / filteredSamples.length);
 
