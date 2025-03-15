@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
-// ViewData interface needs to be imported by StatsSection
+// ViewData interface (no changes)
 export interface ViewData {
     view: number;
     location?: [number, number];
@@ -34,7 +34,6 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
     // Handle clicks outside the tooltip to close it
     useEffect(() => {
         if (!isVisible) return;
-
         const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
             if (
                 containerRef.current &&
@@ -44,12 +43,9 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
             }
         };
 
-        // Add event listeners
         document.addEventListener('mousedown', handleOutsideClick);
         document.addEventListener('touchstart', handleOutsideClick);
-
         return () => {
-            // Clean up
             document.removeEventListener('mousedown', handleOutsideClick);
             document.removeEventListener('touchstart', handleOutsideClick);
         };
@@ -57,7 +53,6 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
 
     // Separate handlers for desktop and mobile
     const handleDesktopInteraction = () => {
-        // Only use these on non-touch devices
         if (window.matchMedia('(hover: hover)').matches) {
             return {
                 onMouseEnter: () => setIsVisible(true),
@@ -68,7 +63,6 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
     };
 
     const handleClick = (e: React.MouseEvent | React.TouchEvent) => {
-        // Prevent event from propagating to parent elements
         e.stopPropagation();
         setIsVisible(!isVisible);
     };
@@ -79,7 +73,6 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
             ref={containerRef}
             onClick={handleClick}
             onTouchEnd={(e) => {
-                // Prevent double-triggering with click event on mobile
                 e.preventDefault();
                 handleClick(e);
             }}
@@ -100,11 +93,10 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
 };
 
 const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => {
-    // Calculate average time-to-lock (notarization latency)
+    // Calculation logic (unchanged from original)
     const notarizationTimes = views
         .filter(view => (view.status === "notarized" || view.status === "finalized"))
         .map(view => {
-            // Use actualNotarizationLatency if available, otherwise calculate from timestamps
             if (view.actualNotarizationLatency !== undefined && view.actualNotarizationLatency > 0) {
                 return view.actualNotarizationLatency;
             } else if (view.notarizationTime && view.startTime) {
@@ -115,11 +107,9 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
         })
         .filter((time): time is number => time !== null);
 
-    // Calculate average time-to-finalize
     const finalizationTimes = views
         .filter(view => view.status === "finalized")
         .map(view => {
-            // Use actualFinalizationLatency if available, otherwise calculate from timestamps
             if (view.actualFinalizationLatency !== undefined && view.actualFinalizationLatency > 0) {
                 return view.actualFinalizationLatency;
             } else if (view.finalizationTime && view.startTime) {
@@ -130,7 +120,6 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
         })
         .filter((time): time is number => time !== null);
 
-    // Calculate block times (time between consecutive blocks)
     const viewsWithBlocks = views
         .filter(view => view.block && view.block.height && view.block.timestamp)
         .sort((a, b) => a.block.height - b.block.height);
@@ -139,11 +128,9 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
     for (let i = 1; i < viewsWithBlocks.length; i++) {
         const currentBlock = viewsWithBlocks[i].block;
         const prevBlock = viewsWithBlocks[i - 1].block;
-
         if (currentBlock && prevBlock &&
             currentBlock.timestamp && prevBlock.timestamp &&
             currentBlock.height === prevBlock.height + 1) {
-
             const timeDiff = currentBlock.timestamp - prevBlock.timestamp;
             if (timeDiff > 0 && timeDiff < 10000) { // Filter out unreasonable values (>10s)
                 blockTimes.push(timeDiff);
@@ -151,7 +138,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
         }
     }
 
-    // Calculate median for blockTimes
+    // Calculate medians
     const sortedBlockTimes = [...blockTimes].sort((a, b) => a - b);
     const medianBlockTime =
         sortedBlockTimes.length > 0
@@ -164,7 +151,6 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
                 )
             : 0;
 
-    // Calculate median for notarizationTimes
     const sortedNotarizationTimes = [...notarizationTimes].sort((a, b) => a - b);
     const medianTimeToLock =
         sortedNotarizationTimes.length > 0
@@ -177,7 +163,6 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
                 )
             : 0;
 
-    // Calculate median for finalizationTimes
     const sortedFinalizationTimes = [...finalizationTimes].sort((a, b) => a - b);
     const medianTimeToFinalize =
         sortedFinalizationTimes.length > 0
@@ -191,44 +176,55 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
             : 0;
 
     const tooltips = {
-        blockTime: "The median difference between consecutive block timestamps.",
-        timeToLock: "The median latency from block proposal to receiving 2f+1 votes. Locked blocks must be included in the canonical chain if the view is not nullified.",
-        timeToFinalize: "The median latency from block proposal to receiving 2f+1 finalizes. Once finalized, a block is immutable."
+        blockTime: "The median difference between consecutive block timestamps. This is calculated from on-chain validator data.",
+        timeToLock: "The median latency from block proposal to receiving 2f+1 votes, as observed by your browser. Locked blocks must be included in the canonical chain if the view is not nullified.",
+        timeToFinalize: "The median latency from block proposal to receiving 2f+1 finalizes, as observed by your browser. Once finalized, a block is immutable."
     };
 
     return (
-        <div className="stats-section">
+        <div className="stats-card">
             <h2 className="stats-title">Summary</h2>
-            <div className="stats-container">
-                <div className="stat-item">
+
+            <div className="stats-grid">
+                <div className="stat-box validator-metrics">
+                    <div className="source-label">VALIDATOR DATA</div>
                     <Tooltip content={tooltips.blockTime}>
-                        <div className="stat-label">Block Time</div>
-                        <div className="stat-value">
-                            {medianBlockTime > 0 ? `${medianBlockTime}ms` : "N/A"}
+                        <div className="metric-container">
+                            <div className="stat-label">Block Time (Time-to-Lock)</div>
+                            <div className="stat-value">
+                                {medianBlockTime > 0 ? `${medianBlockTime}ms` : "N/A"}
+                            </div>
                         </div>
                     </Tooltip>
                 </div>
 
-                <div className="stat-item">
-                    <Tooltip content={tooltips.timeToLock}>
-                        <div className="stat-label">Time-to-Lock (TTL)</div>
-                        <div className="stat-value">
-                            {medianTimeToLock > 0 ? `${medianTimeToLock}ms` : "N/A"}
-                        </div>
-                    </Tooltip>
-                </div>
+                <div className="stat-box browser-metrics">
+                    <div className="source-label">BROWSER MEASUREMENTS</div>
+                    <div className="browser-metrics-container">
+                        <Tooltip content={tooltips.timeToLock}>
+                            <div className="metric-container">
+                                <div className="stat-label">Time-to-Lock</div>
+                                <div className="stat-value">
+                                    {medianTimeToLock > 0 ? `${medianTimeToLock}ms` : "N/A"}
+                                </div>
+                            </div>
+                        </Tooltip>
 
-                <div className="stat-item">
-                    <Tooltip content={tooltips.timeToFinalize}>
-                        <div className="stat-label">Time-to-Finalize (TTF)</div>
-                        <div className="stat-value">
-                            {medianTimeToFinalize > 0 ? `${medianTimeToFinalize}ms` : "N/A"}
-                        </div>
-                    </Tooltip>
+                        <Tooltip content={tooltips.timeToFinalize}>
+                            <div className="metric-container">
+                                <div className="stat-label">Time-to-Finalize</div>
+                                <div className="stat-value">
+                                    {medianTimeToFinalize > 0 ? `${medianTimeToFinalize}ms` : "N/A"}
+                                </div>
+                            </div>
+                        </Tooltip>
+                    </div>
                 </div>
             </div>
+
             <div className="stats-disclaimer">
-                All latency measurements are made by your browser after verifying incoming consensus artifacts. If a validator's clock (or your local clock) is skewed, these values may appear incorrect.
+                All latency measurements are made by your browser after verifying incoming consensus artifacts.
+                If a validator's clock (or your local clock) is skewed, these values may appear incorrect.
             </div>
         </div>
     );
