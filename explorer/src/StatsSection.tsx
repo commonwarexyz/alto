@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 
 // ViewData interface needs to be imported by StatsSection
 export interface ViewData {
@@ -29,19 +29,68 @@ interface TooltipProps {
 const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
     const [isVisible, setIsVisible] = useState(false);
     const tooltipRef = useRef<HTMLDivElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Handle clicks outside the tooltip to close it
+    useEffect(() => {
+        if (!isVisible) return;
+
+        const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
+            if (
+                containerRef.current &&
+                !containerRef.current.contains(event.target as Node)
+            ) {
+                setIsVisible(false);
+            }
+        };
+
+        // Add event listeners
+        document.addEventListener('mousedown', handleOutsideClick);
+        document.addEventListener('touchstart', handleOutsideClick);
+
+        return () => {
+            // Clean up
+            document.removeEventListener('mousedown', handleOutsideClick);
+            document.removeEventListener('touchstart', handleOutsideClick);
+        };
+    }, [isVisible]);
+
+    // Separate handlers for desktop and mobile
+    const handleDesktopInteraction = () => {
+        // Only use these on non-touch devices
+        if (window.matchMedia('(hover: hover)').matches) {
+            return {
+                onMouseEnter: () => setIsVisible(true),
+                onMouseLeave: () => setIsVisible(false)
+            };
+        }
+        return {};
+    };
+
+    const handleClick = (e: React.MouseEvent | React.TouchEvent) => {
+        // Prevent event from propagating to parent elements
+        e.stopPropagation();
+        setIsVisible(!isVisible);
+    };
 
     return (
         <div
             className="tooltip-container"
-            onMouseEnter={() => setIsVisible(true)}
-            onMouseLeave={() => setIsVisible(false)}
-            onClick={() => setIsVisible(!isVisible)}
+            ref={containerRef}
+            onClick={handleClick}
+            onTouchEnd={(e) => {
+                // Prevent double-triggering with click event on mobile
+                e.preventDefault();
+                handleClick(e);
+            }}
+            {...handleDesktopInteraction()}
         >
             {children}
             {isVisible && (
                 <div
                     className="tooltip-content"
                     ref={tooltipRef}
+                    onClick={(e) => e.stopPropagation()}
                 >
                     {content}
                 </div>
