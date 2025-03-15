@@ -179,7 +179,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
                 </div>
             </div>
             <div className="stats-disclaimer">
-                All latency measurements are made by your browser after verifying incoming consensus artifacts. If a validator's clock (or your local clock) is skewed, these values may be incorrect.
+                All latency measurements are made by your browser after verifying incoming consensus artifacts. If a validator's clock (or your local clock) is skewed, these values may appear incorrect.
             </div>
         </div>
     );
