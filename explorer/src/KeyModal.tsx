@@ -27,50 +27,51 @@ const KeyInfoModal: React.FC<KeyInfoModalProps> = ({ isOpen, onClose, publicKeyH
         <div className="about-modal-overlay">
             <div className="about-modal">
                 <div className="about-modal-header">
-                    <h2>Network Key Information</h2>
+                    <h2>Verifying Inbound Messages</h2>
                 </div>
                 <div className="about-modal-content">
                     <section>
-                        <h3>What is the Network Key?</h3>
+                        <h3>I'm verifying threshold signatures?</h3>
                         <p>
-                            This key is a BLS12-381 public key that represents the threshold signature of the validator set.
-                            It's used to verify all consensus messages received by your browser.
-                        </p>
-                    </section>
-
-                    <section>
-                        <h3>How Message Verification Works</h3>
-                        <p>
-                            When your browser receives a consensus message (seed, notarization, or finalization):
+                            When your browser receives a consensus message (seed, notarization, or finalization)
+                            from the <a href="https://exoware.xyz">exoware::relay</a>:
                         </p>
                         <ol>
-                            <li>The message arrives containing a BLS signature</li>
-                            <li>Your browser uses WebAssembly to verify this signature against the network key</li>
-                            <li>If the signature is valid, the message is processed and displayed</li>
-                            <li>If invalid, the message is rejected</li>
+                            <li>The message arrives containing a <i>BLS12-381</i> signature.</li>
+                            <li>Your browser uses <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> (compiled to WebAssembly) to verify this signature against the static <strong>Network Key</strong>.</li>
+                            <li>If the signature is valid, the message is processed and displayed.</li>
+                            <li>If invalid, the message is rejected.</li>
                         </ol>
-                        <p>
-                            This creates a trustless system where you don't need to trust our infrastructure.
-                            Your browser directly verifies that each message was produced by the consensus set.
-                        </p>
                     </section>
 
                     <section>
-                        <h3>The Network Key</h3>
-                        <pre className="code-block">
-                            <code>{publicKeyHex}</code>
-                        </pre>
-                    </section>
-
-                    <section>
-                        <h3>Technical Details</h3>
+                        <h3>What is a Network Key?</h3>
                         <p>
-                            The BLS12-381 signature scheme allows for threshold signatures, where a subset of validators (at least 2f+1 out of 3f+1)
-                            can produce a valid signature. This is what enables the Byzantine fault tolerance of the consensus system.
+                            This key is a <i>BLS12-381</i> public key that represents a shared secret maintained by all validators. Any <strong>2f+1</strong> validators can use this shares of this key to sign messages on behalf of alto (e.g. during each consensus view).
                         </p>
                         <p>
-                            The WASM module used for verification (<code>alto_types.js</code>) efficiently verifies these signatures on the client side,
-                            eliminating the need to trust the server for correctness.
+                            The <strong>Network Key</strong> for alto is:
+                            <pre className="code-block">
+                                <code>{publicKeyHex}</code>
+                            </pre>
+                        </p>
+                        <p>
+                            <i>
+                                In a production environment, you would hardcode this in your binary or store it locally rather than relying
+                                on a website to provide it (like with <a href="https://docs.rs/alto-inspector/latest/alto_inspector">alto-inspector</a>).
+                            </i>
+                        </p>
+                    </section>
+                    <section>
+                        <h3>Can validators be rotated if they maintain parts of this secret?</h3>
+                        <p>
+                            When validators rotate in/out, they generate new shares of the Network Key (derived from their share) and collaborate
+                            with other validators to generate a new dealing of the shared secret that can still generate valid signatures for the
+                            same Network Key.
+                        </p>
+                        <p>
+                            The Commonware Library <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/dkg/index.html">provides an implementation</a> for performing a synchronous DKG/Resharing but you can bring whatever construction you'd like (it isn't enshrined
+                            into alto)!
                         </p>
                     </section>
                 </div>
