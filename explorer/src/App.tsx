@@ -259,7 +259,7 @@ const App: React.FC = () => {
 
       return newViews;
     });
-  }, [lastObservedView]);
+  }, [lastObservedView, adjustTime]);
 
   const handleNotarization = useCallback((notarized: NotarizedJs) => {
     const view = notarized.proof.view;
@@ -349,7 +349,7 @@ const App: React.FC = () => {
 
       return newViews;
     });
-  }, []);
+  }, [adjustTime]);
 
   const handleFinalization = useCallback((finalized: FinalizedJs) => {
     const view = finalized.proof.view;
@@ -441,7 +441,7 @@ const App: React.FC = () => {
 
       return newViews;
     });
-  }, []);
+  }, [adjustTime]);
 
   // Update current time every 50ms to force re-render for growing bars
   useEffect(() => {
@@ -451,7 +451,7 @@ const App: React.FC = () => {
       setViews(views => [...views]);
     }, 50);
     return () => clearInterval(interval);
-  }, []);
+  }, [adjustTime]);
 
   // Update handler refs when the handlers change
   useEffect(() => {
