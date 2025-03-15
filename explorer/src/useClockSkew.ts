@@ -69,7 +69,7 @@ export const useClockSkew = () => {
                 // Calculate skew
                 const adjustedLocalTime = localStartTime + networkLatency;
                 const skew = adjustedLocalTime - serverTime;
-                console.log('computed clock skew:', skew);
+                console.log('Local clock skew:', skew);
 
                 // Update state with the new skew
                 setClockSkew(skew);
