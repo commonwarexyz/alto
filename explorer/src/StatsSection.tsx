@@ -183,14 +183,14 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
 
     return (
         <div className="stats-card">
-            <h2 className="stats-title">Summary</h2>
+            <h2 className="stats-title">Performance</h2>
 
             <div className="stats-grid">
                 <div className="stat-box validator-metrics">
-                    <div className="source-label">VALIDATOR DATA</div>
+                    <div className="source-label">VALIDATOR LATENCY</div>
                     <Tooltip content={tooltips.blockTime}>
                         <div className="metric-container">
-                            <div className="stat-label">Block Time (Time-to-Lock)</div>
+                            <div className="stat-label">Block Time</div>
                             <div className="stat-value">
                                 {medianBlockTime > 0 ? `${medianBlockTime}ms` : "N/A"}
                             </div>
@@ -199,7 +199,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
                 </div>
 
                 <div className="stat-box browser-metrics">
-                    <div className="source-label">BROWSER MEASUREMENTS</div>
+                    <div className="source-label">BROWSER LATENCY</div>
                     <div className="browser-metrics-container">
                         <Tooltip content={tooltips.timeToLock}>
                             <div className="metric-container">
@@ -223,8 +223,8 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
             </div>
 
             <div className="stats-disclaimer">
-                All latency measurements are made by your browser after verifying incoming consensus artifacts.
-                If a validator's clock (or your local clock) is skewed, these values may appear incorrect.
+                All latency measurements made by your browser are done so after verifying the integrity of consensus artifacts using the network key.
+                Local clock skew is automatically detected and corrected.
             </div>
         </div>
     );
