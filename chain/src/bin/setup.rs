@@ -17,6 +17,8 @@ use uuid::Uuid;
 
 const BINARY_NAME: &str = "validator";
 const PORT: u16 = 4545;
+const STORAGE_CLASS: &str = "gp3";
+const DASHBOARD_FILE: &str = "dashboard.json";
 
 fn main() {
     // Initialize logger
@@ -60,10 +62,16 @@ fn main() {
                         .value_parser(value_parser!(i32)),
                 )
                 .arg(
-                    Arg::new("storage_class")
-                        .long("storage-class")
+                    Arg::new("monitoring_instance_type")
+                        .long("monitoring-instance-type")
                         .required(true)
                         .value_parser(value_parser!(String)),
+                )
+                .arg(
+                    Arg::new("monitoring_storage_size")
+                        .long("monitoring-storage-size")
+                        .required(true)
+                        .value_parser(value_parser!(i32)),
                 )
                 .arg(
                     Arg::new("worker_threads")
@@ -170,10 +178,13 @@ fn generate(sub_matches: &ArgMatches) {
         .unwrap()
         .clone();
     let storage_size = *sub_matches.get_one::<i32>("storage_size").unwrap();
-    let storage_class = sub_matches
-        .get_one::<String>("storage_class")
+    let monitoring_instance_type = sub_matches
+        .get_one::<String>("monitoring_instance_type")
         .unwrap()
         .clone();
+    let monitoring_storage_size = *sub_matches
+        .get_one::<i32>("monitoring_storage_size")
+        .unwrap();
     let worker_threads = *sub_matches.get_one::<usize>("worker_threads").unwrap();
     let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
     let message_backlog = *sub_matches.get_one::<usize>("message_backlog").unwrap();
@@ -264,7 +275,7 @@ fn generate(sub_matches: &ArgMatches) {
             region,
             instance_type: instance_type.clone(),
             storage_size,
-            storage_class: storage_class.clone(),
+            storage_class: STORAGE_CLASS.to_string(),
             binary: BINARY_NAME.to_string(),
             config: peer_config_file,
         };
@@ -276,10 +287,10 @@ fn generate(sub_matches: &ArgMatches) {
         tag,
         instances: instance_configs,
         monitoring: ec2::MonitoringConfig {
-            instance_type: instance_type.clone(),
-            storage_size,
-            storage_class: storage_class.clone(),
-            dashboard: "dashboard.json".to_string(),
+            instance_type: monitoring_instance_type,
+            storage_size: monitoring_storage_size,
+            storage_class: STORAGE_CLASS.to_string(),
+            dashboard: DASHBOARD_FILE.to_string(),
         },
         ports: vec![ec2::PortConfig {
             protocol: "tcp".to_string(),
@@ -292,7 +303,7 @@ fn generate(sub_matches: &ArgMatches) {
     fs::create_dir_all(&output).unwrap();
     fs::copy(
         format!("{}/{}", current_dir, dashboard),
-        format!("{}/dashboard.json", output),
+        format!("{}/{}", output, DASHBOARD_FILE),
     )
     .unwrap();
     for (peer_config_file, peer_config) in peer_configs {
