@@ -1,65 +1,85 @@
-.stats-section {
+.stats-card {
     background-color: white;
     border: 1px solid #ccc;
-    padding: 12px;
-    margin-bottom: 16px;
-    width: 100%;
+    padding: 16px;
     font-family: 'Consolas', monospace;
 }
 
 .stats-title {
-    margin: 0 0 12px 0;
-    font-size: 18px;
-    font-weight: normal;
-    font-family: 'Consolas', monospace;
+    margin: 0 0 16px 0;
+    font-size: 20px;
+    font-weight: 500;
 }
 
-.stats-disclaimer {
-    font-style: italic;
-    color: #888;
-    font-size: 12px;
-    text-align: center;
-    margin-top: 12px;
-    padding: 0 8px;
-}
-
-.stats-container {
+.stats-grid {
     display: flex;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 16px;
+    gap: 12px;
 }
 
-.stat-item {
+.stat-box {
+    position: relative;
+    padding: 12px;
+}
+
+.validator-metrics {
     flex: 1;
-    min-width: 120px;
-    padding: 8px 12px;
-    background-color: #f4f4f4;
-    border: 1px solid #ddd;
-    transition: background-color 0.2s ease;
+    background-color: #f5f5f5;
+    border-left: 4px solid #2c3e50;
 }
 
-.stat-item:hover {
-    background-color: #e9e9e9;
+.browser-metrics {
+    flex: 2;
+    background-color: #ffb30068;
+    border-left: 4px solid #ffb200;
+}
+
+.browser-metrics-container {
+    display: flex;
+    gap: 20px;
+}
+
+.browser-metrics-container .metric-container {
+    flex: 1;
+}
+
+.source-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+    color: #555;
+    font-weight: 600;
+}
+
+.metric-container {
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.7);
+    transition: background-color 0.2s;
+}
+
+.metric-container:hover {
+    background: rgba(255, 255, 255, 0.9);
 }
 
 .stat-label {
-    font-size: 14px;
+    font-size: 13px;
     color: #555;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
 }
 
 .stat-value {
-    font-size: 18px;
+    font-size: 22px;
     font-weight: bold;
+    color: #2c3e50;
 }
 
-.stat-sample {
-    display: block;
-    font-size: 12px;
-    font-weight: normal;
+.stats-disclaimer {
+    margin-top: 16px;
+    font-style: italic;
     color: #777;
-    margin-top: 2px;
+    font-size: 12px;
+    line-height: 1.4;
+    text-align: center;
 }
 
 .tooltip-container {
@@ -67,7 +87,6 @@
     display: inline-block;
     width: 100%;
     cursor: pointer;
-    touch-action: manipulation;
 }
 
 .tooltip-content {
@@ -79,15 +98,12 @@
     color: white;
     text-align: center;
     padding: 8px 12px;
-    border-radius: 0;
     z-index: 1000;
     width: 250px;
-    max-width: 90vw;
+    max-width: 100%;
     font-size: 12px;
     line-height: 1.4;
-    margin-bottom: 6px;
-    margin-top: 6px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    margin-bottom: 8px;
 }
 
 .tooltip-content::after {
@@ -101,64 +117,21 @@
     border-color: #333 transparent transparent transparent;
 }
 
-@media (max-width: 768px) {
-    .stats-container {
-        flex-direction: row;
-        flex-wrap: nowrap;
-        gap: 6px;
+@media (max-width: 639px) {
+    .stats-grid {
+        flex-direction: column;
     }
 
-    .stat-item {
-        min-width: unset;
-        padding: 6px 4px;
-    }
-
-    .stat-value {
-        font-size: 16px;
-    }
-
-    .tooltip-content {
-        width: 200px;
-        font-size: 11px;
-    }
-}
-
-@media (max-width: 480px) {
-    .stats-section {
-        padding: 10px 8px;
-    }
-
-    .stats-title {
-        font-size: 16px;
-        margin-bottom: 8px;
-    }
-
-    .stat-label {
-        font-size: 11px;
+    .browser-metrics-container {
+        flex-direction: column;
+        gap: 12px;
     }
 
     .stat-value {
-        font-size: 14px;
-    }
-
-    .stat-sample {
-        font-size: 9px;
+        font-size: 18px;
     }
 
     .stats-disclaimer {
-        font-size: 10px;
-        margin-top: 8px;
-    }
-
-    .tooltip-content {
-        width: 160px;
-        max-width: 80vw;
-        font-size: 10px;
-        left: 50%;
-        transform: translateX(-50%);
-    }
-
-    .tooltip-content::after {
-        left: 50%;
+        font-size: 11px;
     }
 }
