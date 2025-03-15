@@ -1,21 +1,22 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
-// The endpoint to fetch server time
+// The source to use as a time oracle
 const endpoint = 'https://1.1.1.1/cdn-cgi/trace';
 
-// Timeout for the request in milliseconds
+// Timeout for any request (in milliseconds)
 const timeout = 3000;
 
-// Interval to fetch server time in milliseconds
+// Interval to fetch server time (in milliseconds)
 const interval = 30000;
 
 /**
  * Custom hook to detect clock skew between client and server
- * Runs every 30 seconds and uses the latest successful measurement as the skew
+ * Runs once on mount and then every 30 seconds, using the latest successful measurement as the skew
  */
 export const useClockSkew = () => {
     const [clockSkew, setClockSkew] = useState<number>(0);
     const [error, setError] = useState<Error | null>(null);
+    const isFirstMountRef = useRef(true);
 
     useEffect(() => {
         const fetchSkew = async () => {
@@ -68,7 +69,7 @@ export const useClockSkew = () => {
                 // Calculate skew
                 const adjustedLocalTime = localStartTime + networkLatency;
                 const skew = adjustedLocalTime - serverTime;
-                console.log('calculated skew:', skew);
+                console.log('computed clock skew:', skew);
 
                 // Update state with the new skew
                 setClockSkew(skew);
@@ -80,8 +81,11 @@ export const useClockSkew = () => {
             }
         };
 
-        // Run immediately on mount
-        fetchSkew();
+        // Run immediately only on the first mount
+        if (isFirstMountRef.current) {
+            isFirstMountRef.current = false;
+            fetchSkew();
+        }
 
         // Set up an interval to run every 30 seconds
         const intervalId = setInterval(fetchSkew, interval);
@@ -95,19 +99,5 @@ export const useClockSkew = () => {
         return timestamp - clockSkew;
     };
 
-    const toServerTime = (localTime: number = Date.now()): number => {
-        return localTime - clockSkew;
-    };
-
-    const toLocalTime = (serverTime: number): number => {
-        return serverTime + clockSkew;
-    };
-
-    return {
-        clockSkew,
-        adjustTime,
-        toServerTime,
-        toLocalTime,
-        error,
-    };
+    return adjustTime;
 };
