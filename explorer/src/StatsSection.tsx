@@ -182,7 +182,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
 
     return (
         <div className="stats-card">
-            <h2 className="stats-title">Performance</h2>
+            <h2 className="stats-title">Latency</h2>
 
             <div className="stats-grid">
                 <div className="stat-box validator-metrics">
