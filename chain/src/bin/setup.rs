@@ -11,12 +11,14 @@ use commonware_cryptography::{
 use commonware_deployer::ec2;
 use commonware_utils::{from_hex_formatted, hex, quorum};
 use rand::{rngs::OsRng, seq::IteratorRandom};
-use std::{collections::BTreeMap, fs};
+use std::{collections::BTreeMap, fs, ops::AddAssign};
 use tracing::{error, info};
 use uuid::Uuid;
 
 const BINARY_NAME: &str = "validator";
 const PORT: u16 = 4545;
+const STORAGE_CLASS: &str = "gp3";
+const DASHBOARD_FILE: &str = "dashboard.json";
 
 fn main() {
     // Initialize logger
@@ -60,10 +62,16 @@ fn main() {
                         .value_parser(value_parser!(i32)),
                 )
                 .arg(
-                    Arg::new("storage_class")
-                        .long("storage-class")
+                    Arg::new("monitoring_instance_type")
+                        .long("monitoring-instance-type")
                         .required(true)
                         .value_parser(value_parser!(String)),
+                )
+                .arg(
+                    Arg::new("monitoring_storage_size")
+                        .long("monitoring-storage-size")
+                        .required(true)
+                        .value_parser(value_parser!(i32)),
                 )
                 .arg(
                     Arg::new("worker_threads")
@@ -170,10 +178,13 @@ fn generate(sub_matches: &ArgMatches) {
         .unwrap()
         .clone();
     let storage_size = *sub_matches.get_one::<i32>("storage_size").unwrap();
-    let storage_class = sub_matches
-        .get_one::<String>("storage_class")
+    let monitoring_instance_type = sub_matches
+        .get_one::<String>("monitoring_instance_type")
         .unwrap()
         .clone();
+    let monitoring_storage_size = *sub_matches
+        .get_one::<i32>("monitoring_storage_size")
+        .unwrap();
     let worker_threads = *sub_matches.get_one::<usize>("worker_threads").unwrap();
     let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
     let message_backlog = *sub_matches.get_one::<usize>("message_backlog").unwrap();
@@ -264,7 +275,7 @@ fn generate(sub_matches: &ArgMatches) {
             region,
             instance_type: instance_type.clone(),
             storage_size,
-            storage_class: storage_class.clone(),
+            storage_class: STORAGE_CLASS.to_string(),
             binary: BINARY_NAME.to_string(),
             config: peer_config_file,
         };
@@ -276,10 +287,10 @@ fn generate(sub_matches: &ArgMatches) {
         tag,
         instances: instance_configs,
         monitoring: ec2::MonitoringConfig {
-            instance_type: instance_type.clone(),
-            storage_size,
-            storage_class: storage_class.clone(),
-            dashboard: "dashboard.json".to_string(),
+            instance_type: monitoring_instance_type,
+            storage_size: monitoring_storage_size,
+            storage_class: STORAGE_CLASS.to_string(),
+            dashboard: DASHBOARD_FILE.to_string(),
         },
         ports: vec![ec2::PortConfig {
             protocol: "tcp".to_string(),
@@ -292,7 +303,7 @@ fn generate(sub_matches: &ArgMatches) {
     fs::create_dir_all(&output).unwrap();
     fs::copy(
         format!("{}/{}", current_dir, dashboard),
-        format!("{}/dashboard.json", output),
+        format!("{}/{}", output, DASHBOARD_FILE),
     )
     .unwrap();
     for (peer_config_file, peer_config) in peer_configs {
@@ -325,50 +336,77 @@ fn indexer(sub_matches: &ArgMatches) {
         std::process::exit(1);
     }
 
-    // Collect and sort file paths
-    let mut file_paths = Vec::new();
-    for entry in fs::read_dir(&dir).unwrap() {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
-                if file_name.ends_with(".yaml") && file_name != "config.yaml" {
-                    file_paths.push(path);
+    // Read config.yaml to get peer-to-region mappings
+    let config_path = format!("{}/config.yaml", dir);
+    let config_content = fs::read_to_string(&config_path).expect("failed to read config.yaml");
+    let config: ec2::Config =
+        serde_yaml::from_str(&config_content).expect("failed to parse config.yaml");
+    assert!(
+        count <= config.instances.len(),
+        "count exceeds number of peers"
+    );
+
+    // Group peers by area (prefix of region)
+    let mut region_to_peers: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for instance in &config.instances {
+        let peer_name = instance.name.clone();
+        let region = instance.region.clone();
+        let area = region.split('-').next().unwrap().to_string();
+        region_to_peers.entry(area).or_default().push(peer_name);
+    }
+
+    // Sort peers within each region for deterministic selection
+    for peers in region_to_peers.values_mut() {
+        peers.sort();
+    }
+
+    // Get sorted list of regions for consistent iteration
+    let regions: Vec<String> = region_to_peers.keys().cloned().collect();
+
+    // Select peers for indexers in a round-robin fashion across regions
+    let mut selected = Vec::new();
+    let mut region_index = 0;
+    let mut assigned_regions = BTreeMap::new();
+    while selected.len() < count && !region_to_peers.is_empty() {
+        let region = &regions[region_index % regions.len()];
+        if let Some(peers) = region_to_peers.get_mut(region) {
+            if !peers.is_empty() {
+                let peer = peers.remove(0); // Take the first available peer
+                selected.push(peer);
+                if peers.is_empty() {
+                    region_to_peers.remove(region); // Remove region if no peers remain
                 }
+                assigned_regions.entry(region).or_insert(0).add_assign(1);
             }
         }
+        region_index += 1;
     }
-    file_paths.sort();
 
-    // Iterate over sorted file paths and add indexer URL
-    let mut applied = 0;
-    for path in file_paths {
-        if applied >= count {
-            break;
-        }
-        let relative_path = path.strip_prefix(&dir).unwrap();
-        match fs::read_to_string(&path) {
+    // Update configuration files for selected peers
+    for peer_name in &selected {
+        let config_file = format!("{}/{}.yaml", dir, peer_name);
+        let relative_path = format!("{}.yaml", peer_name);
+        match fs::read_to_string(&config_file) {
             Ok(content) => match serde_yaml::from_str::<Config>(&content) {
                 Ok(mut config) => {
                     config.indexer = Some(url.clone());
                     match serde_yaml::to_string(&config) {
                         Ok(updated_content) => {
-                            if let Err(e) = fs::write(&path, updated_content) {
+                            if let Err(e) = fs::write(&config_file, updated_content) {
                                 error!(
                                     path = ?relative_path,
                                     error = ?e,
-                                    "failed to write",
+                                    "failed to write"
                                 );
                             } else {
                                 info!(path = ?relative_path, "updated");
-                                applied += 1;
                             }
                         }
                         Err(e) => {
                             error!(
                                 path = ?relative_path,
                                 error = ?e,
-                                "failed to serialize config",
+                                "failed to serialize config"
                             );
                         }
                     }
@@ -385,11 +423,14 @@ fn indexer(sub_matches: &ArgMatches) {
                 error!(
                     path = ?relative_path,
                     error = ?e,
-                    "failed to read",
+                    "failed to read"
                 );
             }
         }
     }
+
+    // Log assignment of indexers to regions
+    info!(assignments = ?assigned_regions, "configured indexers");
 }
 
 // Region-to-location mapping
