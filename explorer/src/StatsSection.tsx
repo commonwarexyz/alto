@@ -176,7 +176,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
             : 0;
 
     const tooltips = {
-        blockTime: "The median difference between consecutive block timestamps. This is calculated from on-chain validator data.",
+        blockTime: "The median difference between consecutive block timestamps. This is calculated from streamed blocks.",
         timeToLock: "The median latency from block proposal to receiving 2f+1 votes, as observed by your browser. Locked blocks must be included in the canonical chain if the view is not nullified.",
         timeToFinalize: "The median latency from block proposal to receiving 2f+1 finalizes, as observed by your browser. Once finalized, a block is immutable."
     };
