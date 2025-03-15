@@ -142,14 +142,14 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
             : 0;
 
     const tooltips = {
-        blockTime: "The median time (in milliseconds) between consecutive blocks. This represents how quickly the blockchain is producing new blocks.",
-        timeToLock: "The median time (in milliseconds) from block proposal to notarization (2f+1 votes). Once a block is notarized, no conflicting block can be notarized in the same view.",
-        timeToFinalize: "The median time (in milliseconds) from block proposal to finalization (2f+1 finalizes). Once finalized, the block is immutable and permanently part of the chain."
+        blockTime: "The median difference between consecutive block timestamps.",
+        timeToLock: "The median latency from block proposal to receiving 2f+1 votes. Locked blocks must be included in the canonical chain if the view is not nullified.",
+        timeToFinalize: "The median latency from block proposal to receiving 2f+1 finalizes. Once finalized, a block is immutable."
     };
 
     return (
         <div className="stats-section">
-            <h2 className="stats-title">Performance</h2>
+            <h2 className="stats-title">Summary</h2>
             <div className="stats-container">
                 <div className="stat-item">
                     <Tooltip content={tooltips.blockTime}>
@@ -162,7 +162,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
 
                 <div className="stat-item">
                     <Tooltip content={tooltips.timeToLock}>
-                        <div className="stat-label">Time to Lock</div>
+                        <div className="stat-label">Time-to-Lock (TTL)</div>
                         <div className="stat-value">
                             {medianTimeToLock > 0 ? `${medianTimeToLock}ms` : "N/A"}
                         </div>
@@ -171,7 +171,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
 
                 <div className="stat-item">
                     <Tooltip content={tooltips.timeToFinalize}>
-                        <div className="stat-label">Time to Finalize</div>
+                        <div className="stat-label">Time-to-Finalize (TTF)</div>
                         <div className="stat-value">
                             {medianTimeToFinalize > 0 ? `${medianTimeToFinalize}ms` : "N/A"}
                         </div>
@@ -179,7 +179,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
                 </div>
             </div>
             <div className="stats-disclaimer">
-                Metrics calculated from recent network activity. Measured from your browser's perspective.
+                All latency measurements are made by your browser after verifying incoming consensus artifacts. If a validator's clock (or your local clock) is skewed, these values may appear incorrect.
             </div>
         </div>
     );

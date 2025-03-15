@@ -43,7 +43,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section>
                         <h3>What is alto?</h3>
                         <p>
-                            <a href="https://github.com/commonwarexyz/alto">alto</a> is a minimal (and wicked fast) blockchain built with the Commonware Library.
+                            <a href="https://github.com/commonwarexyz/alto">alto</a> is a minimal (and wicked fast) blockchain built with the <a href="https://github.com/commonwarexyz/monorepo">Commonware Library</a>.
                         </p>
                         <p>
                             By minimal, we mean minimal. alto's state transition function consists of just <strong>3 rules</strong>. Each block must:
@@ -61,11 +61,15 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section>
                         <h3>What are you looking at?</h3>
                         <p>
-                            The dashboards on this explorer display the progression of <i>threshold-simplex</i> over time, broken into <strong>views</strong>.
+                            This explorer displays the progression of <i>threshold-simplex</i> over time, broken into <strong>views</strong>.
                         </p>
                         <p>
-                            Validators enter a new view <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html#specification-for-view-v">whenever they observe either <i>2f+1</i> votes for a block proposal or a timeout AND some seed (VRF).
-                                Validators finalize a view whenever they observe <i>2f+1</i> finalizes for a block proposal.</a> We color these phases as follows:
+                            Validators enter a new view whenever they observe either <i>2f+1</i> votes for a block proposal or <i>2f+1</i> nullifies
+                            (to skip this view) AND some seed (a VRF used to select the next leader). Validators finalize a view whenever they
+                            observe <i>2f+1</i> finalizes for a block proposal.
+                        </p>
+                        <p>
+                            We color the phases of a view as follows:
                         </p>
                         <ul className="status-list">
                             <li>
@@ -73,16 +77,15 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                                     <div className="about-status-indicator" style={{ backgroundColor: "#0000eeff" }}></div>
                                     <strong>Seed</strong>
                                 </div>
-                                Some leader (selected via a BLS12-381 VRF) is proposing a block to be voted upon. The dot on the map (of the same color)
-                                is the region where the leader is located.
+                                Some leader has been elected to propose a block. The dot on the map (of the same color) is the region where the leader is located.
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">
                                     <div className="about-status-indicator" style={{ backgroundColor: "#000" }}></div>
-                                    <strong>Prepared</strong>
+                                    <strong>Locked</strong>
                                 </div>
-                                Some block <i>b</i> has received <i>2f+1</i> votes in a given view <i>v</i>. This means there can never be another prepared block in view <i>v</i> (and
-                                block <i>b</i> must be used in the canonical chain if <i>2f+1</i> participants did not timeout).
+                                Some block <i>b</i> has received <i>2f+1</i> votes in a given view <i>v</i>. This means there can never be another locked block
+                                in view <i>v</i> (and block <i>b</i> must be used in the canonical chain if <i>2f+1</i> participants did not move to nullify).
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">
@@ -91,47 +94,50 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                                 </div>
                                 The block <i>b</i> in view <i>v</i> has received <i>2f+1</i> finalizes. The block is now immutable.
                             </li>
-                            <li>
-                                <div className="status-indicator-wrapper">
-                                    <div className="about-status-indicator" style={{ backgroundColor: "#f4ccccff" }}></div>
-                                    <strong>Timed Out</strong>
-                                </div>
-                                For some reason, your browser did not detect that a view was <i>prepared</i> or <i>finalized</i> in a reasonable amount of time. This could be due to network instability or from your browser
-                                disconnecting from the consensus stream.
-                            </li>
                         </ul>
                         <p>
-                            threshold-simplex, like <a href="https://eprint.iacr.org/2023/463">Simplex Consensus</a>, is optimistically responsive and tolerates up to <i>f</i> Byzantine faults in the partially synchronous setting. English? When the leader is honest and the network is healthy,
-                            participants come to agreement at <strong>network speed</strong>. When every participant is directly connected to every other participant (alto employs <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>) and leaders don't "relay" aggregated/recovered signatures (alto employs all-to-all communication for minimal view latency), it turns out "network speed" (as you've seen) can be very fast.
+                            You can read more about the design of <i>threshold-simplex</i> <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html">here</a>.
+                        </p>
+                    </section>
+                    <section>
+                        <h3>Why is it so fast?</h3>
+                        <p>
+                            <i>threshold-simplex</i>, like <a href="https://eprint.iacr.org/2023/463">Simplex Consensus</a>, employs <strong>all-to-all broadcast</strong> and <strong>progress-driven view transitions</strong> to
+                            achieve optimal latency in both the optimistic and pessimistic case (under the partial synchrony model).
+                        </p>
+                        <p>
+                            Using authenticated connections (provided by <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>), each validator
+                            sends consensus messages directly to every other validator (no leader relay or multi-hop gossip). As soon as any validator observes <i>2f+1</i> votes for a block proposal, they broadcast
+                            a threshold signature (again directly) to all other validators and enter the next view immediately (without waiting for finalization or any timeout). If a validator sees a threshold signature
+                            for a view <i>v</i>, they enter view <i>v+1</i> immediately (ensuring validators stay synchronized without using a clock).
+                        </p>
+                        <p>
+                            English? <i>threshold-simplex</i> moves at <strong>network speed</strong> (and it turns out that's pretty fast in 2025).
                         </p>
                     </section>
                     <section>
                         <h3>Where is the data coming from?</h3>
                         <p>
-                            To power this explorer, we deployed alto to a cluster of <strong>25 c7g.xlarge</strong> nodes (4 vCPU, 8GB RAM) on AWS in <strong>10 regions</strong> (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2)
-                            and built some infrastructure to stream each consensus message to your browser in real time (<a href="https://exoware.xyz">exoware::relay</a>).
+                            We deployed alto to a cluster of <strong>25 validators</strong> running c7g.xlarge (4 vCPU, 8GB RAM) nodes on AWS in <strong>10 regions</strong> (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2).
                         </p>
                         <p>
-                            Because each consensus artifact is accompanied by a threshold signature (the public key of which is the <strong>network key</strong> displayed at the top of the page), your browser can (and does) verify each inbound message using <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> compiled to WASM.
+                            When you visit this page, however, you don't connect to any of those nodes. You connect to custom-built infrastructure (<a href="https://exoware.xyz">exoware::relay</a>) that streams consensus
+                            artifacts to your browser in real time.
                         </p>
                         <p>
-                            That's right, your browser is verifying every message you receive was produced form some known consensus set in real time. Don't trust our infrastructure, trust the open source verifier code running on your computer.
-                        </p>
-                    </section>
-                    <section>
-                        <h3>How do I measure latency?</h3>
-                        <p>
-                            Your browser measures latency by comparing the timestamp of a block (referenced in a prepared or finalization artifact) to your local time. This means that the latency you see includes the time it takes for a block to be proposed, voted upon, sent to
-                            exoware::relay, and then received by your browser.
+                            Because each consensus artifact is accompanied by a threshold signature, your browser can (and does) verify each inbound message using <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> compiled to WASM.
                         </p>
                         <p>
-                            While it is true that validators observe lower latency, the one that usually impacts UX is the one you're measuring here.
+                            That's right, your browser is verifying every message it receives was emitted from consensus in real time. Don't trust an API, trust the open source verifier code running on your computer.
                         </p>
                     </section>
                     <section>
                         <h3>Can I replay the stream?</h3>
                         <p>
-                            Yes! You can replay the stream or fetch arbitrary data using the <a href="https://docs.rs/alto-inspector/latest/alto_inspector/">alto-inspector</a>. To download the tool, run:
+                            Yes! You can replay the stream or fetch arbitrary data using the <a href="https://docs.rs/alto-inspector/latest/alto_inspector">alto-inspector</a>.
+                        </p>
+                        <p>
+                            To download the tool, run:
                             <pre className="code-block">
                                 <code>
                                     cargo install alto-inspector
