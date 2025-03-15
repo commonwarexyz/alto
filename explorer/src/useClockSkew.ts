@@ -15,7 +15,6 @@ const interval = 30000;
  */
 export const useClockSkew = () => {
     const [clockSkew, setClockSkew] = useState<number>(0);
-    const [error, setError] = useState<Error | null>(null);
     const isFirstMountRef = useRef(true);
 
     useEffect(() => {
@@ -73,10 +72,8 @@ export const useClockSkew = () => {
 
                 // Update state with the new skew
                 setClockSkew(skew);
-                setError(null);
             } catch (err) {
                 console.error('Failed to fetch skew:', err);
-                setError(err instanceof Error ? err : new Error(String(err)));
                 // Keep the previous skew if the request fails
             }
         };
@@ -92,7 +89,7 @@ export const useClockSkew = () => {
 
         // Cleanup interval on unmount
         return () => clearInterval(intervalId);
-    }, [endpoint, timeout]);
+    }, []);
 
     // Utility functions
     const adjustTime = (timestamp: number): number => {
