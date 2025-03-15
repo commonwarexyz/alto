@@ -325,50 +325,74 @@ fn indexer(sub_matches: &ArgMatches) {
         std::process::exit(1);
     }
 
-    // Collect and sort file paths
-    let mut file_paths = Vec::new();
-    for entry in fs::read_dir(&dir).unwrap() {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
-                if file_name.ends_with(".yaml") && file_name != "config.yaml" {
-                    file_paths.push(path);
+    // Read config.yaml to get peer-to-region mappings
+    let config_path = format!("{}/config.yaml", dir);
+    let config_content = fs::read_to_string(&config_path).expect("failed to read config.yaml");
+    let config: ec2::Config =
+        serde_yaml::from_str(&config_content).expect("failed to parse config.yaml");
+    assert!(
+        count <= config.instances.len(),
+        "count exceeds number of peers"
+    );
+
+    // Group peers by region
+    let mut region_to_peers: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for instance in &config.instances {
+        let peer_name = instance.name.clone();
+        let region = instance.region.clone();
+        region_to_peers.entry(region).or_default().push(peer_name);
+    }
+
+    // Sort peers within each region for deterministic selection
+    for peers in region_to_peers.values_mut() {
+        peers.sort();
+    }
+
+    // Get sorted list of regions for consistent iteration
+    let regions: Vec<String> = region_to_peers.keys().cloned().collect();
+
+    // Select peers for indexers in a round-robin fashion across regions
+    let mut selected = Vec::new();
+    let mut region_index = 0;
+    while selected.len() < count && !region_to_peers.is_empty() {
+        let region = &regions[region_index % regions.len()];
+        if let Some(peers) = region_to_peers.get_mut(region) {
+            if !peers.is_empty() {
+                let peer = peers.remove(0); // Take the first available peer
+                selected.push(peer);
+                if peers.is_empty() {
+                    region_to_peers.remove(region); // Remove region if no peers remain
                 }
             }
         }
+        region_index += 1;
     }
-    file_paths.sort();
 
-    // Iterate over sorted file paths and add indexer URL
-    let mut applied = 0;
-    for path in file_paths {
-        if applied >= count {
-            break;
-        }
-        let relative_path = path.strip_prefix(&dir).unwrap();
-        match fs::read_to_string(&path) {
+    // Update configuration files for selected peers
+    for peer_name in &selected {
+        let config_file = format!("{}/{}.yaml", dir, peer_name);
+        let relative_path = format!("{}.yaml", peer_name);
+        match fs::read_to_string(&config_file) {
             Ok(content) => match serde_yaml::from_str::<Config>(&content) {
                 Ok(mut config) => {
                     config.indexer = Some(url.clone());
                     match serde_yaml::to_string(&config) {
                         Ok(updated_content) => {
-                            if let Err(e) = fs::write(&path, updated_content) {
+                            if let Err(e) = fs::write(&config_file, updated_content) {
                                 error!(
                                     path = ?relative_path,
                                     error = ?e,
-                                    "failed to write",
+                                    "failed to write"
                                 );
                             } else {
                                 info!(path = ?relative_path, "updated");
-                                applied += 1;
                             }
                         }
                         Err(e) => {
                             error!(
                                 path = ?relative_path,
                                 error = ?e,
-                                "failed to serialize config",
+                                "failed to serialize config"
                             );
                         }
                     }
@@ -385,7 +409,7 @@ fn indexer(sub_matches: &ArgMatches) {
                 error!(
                     path = ?relative_path,
                     error = ?e,
-                    "failed to read",
+                    "failed to read"
                 );
             }
         }
