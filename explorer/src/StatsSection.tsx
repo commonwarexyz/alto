@@ -176,7 +176,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
             : 0;
 
     const tooltips = {
-        blockTime: "The median difference between consecutive block timestamps. This is calculated from streamed blocks.",
+        blockTime: "The median difference between consecutive block timestamps. This is calculated from streamed blocks and is roughly equivalent to how quickly validators lock a view.",
         timeToLock: "The median latency from block proposal to receiving 2f+1 votes, as observed by your browser. Locked blocks must be included in the canonical chain if the view is not nullified.",
         timeToFinalize: "The median latency from block proposal to receiving 2f+1 finalizes, as observed by your browser. Once finalized, a block is immutable."
     };
@@ -187,7 +187,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
 
             <div className="stats-grid">
                 <div className="stat-box validator-metrics">
-                    <div className="source-label">VALIDATOR LATENCY</div>
+                    <div className="source-label">CLUSTER</div>
                     <Tooltip content={tooltips.blockTime}>
                         <div className="metric-container">
                             <div className="stat-label">Block Time</div>
@@ -199,11 +199,11 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
                 </div>
 
                 <div className="stat-box browser-metrics">
-                    <div className="source-label">BROWSER LATENCY</div>
+                    <div className="source-label">BROWSER</div>
                     <div className="browser-metrics-container">
                         <Tooltip content={tooltips.timeToLock}>
                             <div className="metric-container">
-                                <div className="stat-label">Time-to-Lock</div>
+                                <div className="stat-label">Locked</div>
                                 <div className="stat-value">
                                     {medianTimeToLock > 0 ? `${medianTimeToLock}ms` : "N/A"}
                                 </div>
@@ -212,7 +212,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
 
                         <Tooltip content={tooltips.timeToFinalize}>
                             <div className="metric-container">
-                                <div className="stat-label">Time-to-Finalize</div>
+                                <div className="stat-label">Finalized</div>
                                 <div className="stat-value">
                                     {medianTimeToFinalize > 0 ? `${medianTimeToFinalize}ms` : "N/A"}
                                 </div>
@@ -223,7 +223,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, numValidators }) => 
             </div>
 
             <div className="stats-disclaimer">
-                All latency measurements made by your browser are done so after verifying the integrity of consensus artifacts using the network key.
+                All latency measurements made by your browser are only performed after verifying the integrity of incoming artifacts with the network key.
                 Local clock skew is automatically detected and corrected.
             </div>
         </div>

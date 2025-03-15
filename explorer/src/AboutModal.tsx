@@ -47,12 +47,12 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         </p>
                         <p>
                             By minimal, we mean minimal. alto's state transition function consists of just <strong>3 rules</strong>. Each block must:
-                            <ul>
-                                <li>Increase the height by 1</li>
-                                <li>Reference the digest of its parent</li>
-                                <li>Propose a new timestamp greater than its parent (<i>but not more than 500ms in the future</i>)</li>
-                            </ul>
                         </p>
+                        <ul>
+                            <li>Increase the height by 1</li>
+                            <li>Reference the digest of its parent</li>
+                            <li>Propose a new timestamp greater than its parent (<i>but not more than 500ms in the future</i>)</li>
+                        </ul>
                         <p>
                             That's it!
                         </p>
