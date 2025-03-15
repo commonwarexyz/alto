@@ -84,9 +84,6 @@ export const useClockSkew = (options: ClockSkewOptions = {}) => {
                         }, 200);
 
                         // First, do a HEAD request to establish connection
-                        const startTime = performance.now();
-                        const localStartTime = Date.now();
-
                         try {
                             await fetch(endpoint, {
                                 method: 'HEAD',
@@ -101,6 +98,8 @@ export const useClockSkew = (options: ClockSkewOptions = {}) => {
                         }
 
                         // Perform the actual request
+                        const startTime = performance.now();
+                        const localStartTime = Date.now();
                         const response = await fetch(endpoint, {
                             signal: AbortSignal.timeout(timeout),
                         });
@@ -108,7 +107,6 @@ export const useClockSkew = (options: ClockSkewOptions = {}) => {
                         if (!response.ok) {
                             throw new Error(`API returned status ${response.status}`);
                         }
-
                         const endTime = performance.now();
                         const networkLatency = Math.floor((endTime - startTime) / 4);
 
