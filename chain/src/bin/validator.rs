@@ -97,7 +97,7 @@ fn main() {
     let threshold = quorum(peers_u32).expect("unable to derive quorum");
     let identity = from_hex_formatted(&config.identity).expect("Could not parse identity");
     let identity = poly::Public::deserialize(&identity, threshold).expect("Identity is invalid");
-    let identity_public = poly::public(&identity);
+    let identity_public = *poly::public(&identity);
     let public_key = signer.public_key();
     let ip = peers.get(&public_key).expect("Could not find self in IPs");
     info!(
@@ -133,7 +133,7 @@ fn main() {
     // Initialize runtime
     let cfg = tokio::Config {
         tcp_nodelay: Some(true),
-        threads: config.worker_threads,
+        worker_threads: config.worker_threads,
         storage_directory: PathBuf::from(config.directory),
         ..Default::default()
     };

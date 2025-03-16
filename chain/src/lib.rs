@@ -777,7 +777,8 @@ mod tests {
             let (public, shares) = ops::generate_shares(&mut context, None, n, threshold);
 
             // Define mock indexer
-            let indexer = MockIndexer::new("", poly::public(&public).into());
+            let public_key = *poly::public(&public);
+            let indexer = MockIndexer::new("", public_key.into());
 
             // Create instances
             let mut public_keys = HashSet::new();

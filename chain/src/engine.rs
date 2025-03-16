@@ -74,7 +74,7 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
         let (application, supervisor, application_mailbox) = application::Actor::new(
             context.with_label("application"),
             application::Config {
-                prover: Prover::new(public, NAMESPACE),
+                prover: Prover::new(*public, NAMESPACE),
                 participants: cfg.participants.clone(),
                 identity: cfg.identity.clone(),
                 share: cfg.share,
@@ -88,7 +88,7 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
             syncer::Config {
                 partition_prefix: cfg.partition_prefix.clone(),
                 public_key: cfg.signer.public_key(),
-                identity: public,
+                identity: *public,
                 participants: cfg.participants,
                 mailbox_size: cfg.mailbox_size,
                 backfill_quota: cfg.backfill_quota,
