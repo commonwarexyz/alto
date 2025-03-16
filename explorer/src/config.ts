@@ -1,5 +1,5 @@
 export const BACKEND_URL = "wss://alto.exoware.xyz/consensus/ws";
-export const PUBLIC_KEY_HEX = "8f36d5db6442097626f1de160de584c96d91fd5d09c6f3c33de3a34165d18d68d7320a9251fc80b9994c4d745f80fdc0";
+export const PUBLIC_KEY_HEX = "89c52d8766fb88c83b177c382b3af6579a41d45dc3540cd7a1f40b9b38a136468d1d9f2a3d8e9b24c5626eabc2c8a65e";
 export const LOCATIONS: [[number, number], string][] = [
     [[37.7749, -122.4194], "San Francisco"],
     [[38.8339, -77.3074], "Ashburn"],
