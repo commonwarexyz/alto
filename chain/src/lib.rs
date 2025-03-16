@@ -775,9 +775,9 @@ mod tests {
 
             // Derive threshold
             let (public, shares) = ops::generate_shares(&mut context, None, n, threshold);
+            let public_key = *poly::public(&public);
 
             // Define mock indexer
-            let public_key = *poly::public(&public);
             let indexer = MockIndexer::new("", public_key.into());
 
             // Create instances
