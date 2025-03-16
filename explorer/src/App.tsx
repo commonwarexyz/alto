@@ -532,7 +532,7 @@ const App: React.FC = () => {
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectTimeoutRef.current = null;
             connectWebSocket();
-          }, 5000);
+          }, 11000);
         }
       };
     };
