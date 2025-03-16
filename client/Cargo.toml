@@ -1,6 +1,6 @@
 [package]
 name = "alto-client"
-version = "0.0.5"
+version = "0.0.6"
 publish = true
 edition = "2021"
 license = "MIT OR Apache-2.0"

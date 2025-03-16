@@ -38,7 +38,7 @@ dependencies = [
 
 [[package]]
 name = "alto-chain"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "alto-client",
  "alto-types",
@@ -70,7 +70,7 @@ dependencies = [
 
 [[package]]
 name = "alto-client"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "alto-types",
  "bytes",
@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "alto-inspector"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "alto-client",
  "alto-types",
@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "alto-types"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "bytes",
  "commonware-cryptography",

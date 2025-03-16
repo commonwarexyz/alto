@@ -93,7 +93,7 @@ use utils::{
 mod utils;
 
 const DEFAULT_INDEXER: &str = "https://alto.exoware.xyz";
-const DEFAULT_IDENTITY: &str = "a208d6e7c46ad90588d99a3135b944a1f0c36611618a87ba6d16a1f149bec14d61d56944ab0c8e93f97c384cded3ab7e";
+const DEFAULT_IDENTITY: &str = "89c52d8766fb88c83b177c382b3af6579a41d45dc3540cd7a1f40b9b38a136468d1d9f2a3d8e9b24c5626eabc2c8a65e";
 
 #[tokio::main]
 async fn main() {
