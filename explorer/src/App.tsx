@@ -536,8 +536,8 @@ const App: React.FC = () => {
 
         // Check for potential rate limiting (code 1006 is "Abnormal Closure")
         if (event.code === 1006) {
-          const timeSinceStarted = Date.now() - wsCreationTime;
           // If connection closed very quickly, likely rate-limited
+          const timeSinceStarted = Date.now() - wsCreationTime;
           if (timeSinceStarted < 1000) {
             setErrorMessage("Too many connection attempts from your IP. Try connecting again in an hour.");
             setShowError(true);
