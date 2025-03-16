@@ -184,12 +184,10 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = fa
         <div className="stats-card">
             <div className="stats-header">
                 <h2 className="stats-title">Latency</h2>
-                {connectionError && (
-                    <div className="connection-error-badge">
-                        <span className="connection-error-dot"></span>
-                        DISCONNECTED
-                    </div>
-                )}
+                <div className={`connection-status-badge ${connectionError ? 'error' : 'success'}`}>
+                    <span className={`connection-status-dot ${connectionError ? 'error' : 'success'}`}></span>
+                    {connectionError ? 'DISCONNECTED' : 'CONNECTED'}
+                </div>
             </div>
 
             <div className="stats-grid">

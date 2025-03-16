@@ -18,27 +18,48 @@
     font-weight: 500;
 }
 
-.connection-error-badge {
+.connection-status-badge {
     display: flex;
     align-items: center;
-    background-color: rgba(244, 67, 54, 0.1);
-    color: #f44336;
     font-size: 12px;
     padding: 4px 8px;
     border-radius: 0;
+}
+
+.connection-status-badge.error {
+    background-color: rgba(244, 67, 54, 0.1);
+    color: #f44336;
     border: 1px solid #f44336;
 }
 
-.connection-error-dot {
+.connection-status-badge.success {
+    background-color: rgba(76, 175, 80, 0.1);
+    color: #4CAF50;
+    border: 1px solid #4CAF50;
+}
+
+.connection-status-dot {
     display: inline-block;
     width: 8px;
     height: 8px;
-    background-color: #f44336;
     border-radius: 50%;
     margin-right: 6px;
+}
+
+.connection-status-dot.error {
+    background-color: #f44336;
     animation: pulse 1.5s infinite;
 }
 
+.connection-status-dot.success {
+    background-color: #4CAF50;
+}
+
+/* Remove the old connection-error classes since they're replaced */
+.connection-error-badge,
+.connection-error-dot {
+    display: none;
+}
 
 @keyframes pulse {
     0% {
