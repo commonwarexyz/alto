@@ -14,6 +14,8 @@ import KeyInfoModal from './KeyModal';
 import MapOverlay from './MapOverlay';
 import './MapOverlay.css';
 import { useClockSkew } from './useClockSkew';
+import ErrorNotification from './ErrorNotification';
+import './ErrorNotification.css';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
@@ -88,6 +90,8 @@ const App: React.FC = () => {
   const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
   const [isKeyInfoModalOpen, setIsKeyInfoModalOpen] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string>("");
+  const [showError, setShowError] = useState<boolean>(false);
   const adjustTime = useClockSkew();
   const currentTimeRef = useRef(adjustTime(Date.now()));
   const wsRef = useRef<WebSocket | null>(null);
@@ -491,6 +495,7 @@ const App: React.FC = () => {
       }
 
       // Create new WebSocket connection
+      const wsCreationTime = Date.now();
       const ws = new WebSocket(BACKEND_URL);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
@@ -526,6 +531,16 @@ const App: React.FC = () => {
 
       ws.onclose = (event) => {
         console.error(`WebSocket closed with code: ${event.code}`);
+
+        // Check for potential rate limiting (code 1006 is "Abnormal Closure")
+        if (event.code === 1006) {
+          const timeSinceStarted = Date.now() - wsCreationTime;
+          // If connection closed very quickly (less than 500ms), likely rate limited
+          if (timeSinceStarted < 1000) {
+            setErrorMessage("Rate limited (429): Too many connection attempts. Try connecting again in an hour.");
+            setShowError(true);
+          }
+        }
 
         // Only attempt to reconnect if we still have a reference to this websocket
         if (wsRef.current === ws) {
@@ -570,6 +585,12 @@ const App: React.FC = () => {
 
   return (
     <div className="app-container">
+      <ErrorNotification
+        message={errorMessage}
+        isVisible={showError}
+        onDismiss={() => setShowError(false)}
+        autoHideDuration={15000}
+      />
       <header className="app-header">
         <div className="logo-container">
           <div className="logo-line">
@@ -627,8 +648,6 @@ const App: React.FC = () => {
       </header>
 
       <main className="app-main">
-        {/* Network Key */}
-
         {/* Map */}
         <div className="map-container">
           <MapContainer center={center} zoom={1} style={{ height: "100%", width: "100%" }} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false} dragging={false}>

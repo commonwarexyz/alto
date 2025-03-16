@@ -1,0 +1,56 @@
+.error-notification {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1100;
+    padding: 10px;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.error-content {
+    background-color: #f44336;
+    color: white;
+    padding: 12px 16px;
+    border-radius: 0;
+    font-family: 'Consolas', monospace;
+    display: flex;
+    align-items: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    max-width: 90%;
+    pointer-events: auto;
+    border: 1px solid #d32f2f;
+}
+
+.error-message {
+    flex: 1;
+    margin-right: 12px;
+    font-size: 14px;
+}
+
+.error-dismiss {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.error-dismiss:hover {
+    opacity: 0.8;
+}
+
+@media (max-width: 480px) {
+    .error-content {
+        padding: 8px 12px;
+        width: 90%;
+    }
+
+    .error-message {
+        font-size: 12px;
+    }
+}
