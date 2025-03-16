@@ -541,10 +541,13 @@ const App: React.FC = () => {
           if (timeSinceStarted < 1000) {
             setErrorMessage("Too many connection attempts. Try connecting again in an hour.");
             setShowError(true);
+
+            // Clear reference to prevent reconnection
+            wsRef.current = null;
           }
         }
 
-        // Only attempt to reconnect if we still have a reference to this websocket
+        // Only attempt to reconnect if we still have a reference to this websocket (and we didn't detect a rate limit error)
         if (wsRef.current === ws) {
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectTimeoutRef.current = null;
