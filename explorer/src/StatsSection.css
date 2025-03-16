@@ -33,9 +33,9 @@
 }
 
 .connection-status-badge.success {
-    background-color: rgba(39, 78, 19, 0.1);
-    color: #274e13;
-    border: 1px solid #274e13;
+    background-color: rgba(34, 139, 34, 0.1);
+    color: #228B22;
+    border: 1px solid #228B22;
 }
 
 .connection-status-dot {
@@ -52,7 +52,7 @@
 }
 
 .connection-status-dot.success {
-    background-color: #274e13;
+    background-color: #228B22;
 }
 
 /* Remove the old connection-error classes since they're replaced */
