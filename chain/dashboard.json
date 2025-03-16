@@ -1132,7 +1132,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "network_tracker_connections{job=~\"$Validator\", region=~\"$Region\"}",
+                    "expr": "network_spawner_connections{job=~\"$Validator\", region=~\"$Region\"}",
                     "fullMetaSearch": false,
                     "includeNullMetadata": true,
                     "legendFormat": "{{job}} ({{instance}})",
