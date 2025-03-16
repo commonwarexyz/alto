@@ -91,6 +91,7 @@ const App: React.FC = () => {
   const [isKeyInfoModalOpen, setIsKeyInfoModalOpen] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [connectionStatusKnown, setConnectionStatusKnown] = useState<boolean>(false);
   const [showError, setShowError] = useState<boolean>(false);
   const adjustTime = useClockSkew();
   const currentTimeRef = useRef(adjustTime(Date.now()));
@@ -504,6 +505,7 @@ const App: React.FC = () => {
         console.log("WebSocket connected");
         setErrorMessage("");
         setShowError(false);
+        setConnectionStatusKnown(true);
       };
 
       ws.onmessage = (event) => {
@@ -544,8 +546,12 @@ const App: React.FC = () => {
 
             // Clear reference to prevent reconnection
             wsRef.current = null;
+          } else {
+            setErrorMessage("Disconnected from server. Reconnecting...");
+            setShowError(true);
           }
         }
+        setConnectionStatusKnown(true);
 
         // Only attempt to reconnect if we still have a reference to this websocket (and we didn't detect a rate limit error)
         if (wsRef.current === ws) {
@@ -689,6 +695,7 @@ const App: React.FC = () => {
         <StatsSection
           views={views}
           connectionError={errorMessage.length > 0}
+          connectionStatusKnown={connectionStatusKnown}
         />
 
         {/* Bars with integrated legend */}

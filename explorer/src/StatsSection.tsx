@@ -19,6 +19,7 @@ export interface ViewData {
 interface StatsSectionProps {
     views: ViewData[];
     connectionError?: boolean;
+    connectionStatusKnown?: boolean;
 }
 
 interface TooltipProps {
@@ -91,7 +92,7 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
     );
 };
 
-const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = false }) => {
+const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = false, connectionStatusKnown = false }) => {
     // Calculation logic (unchanged from original)
     const notarizationTimes = views
         .filter(view => (view.status === "notarized" || view.status === "finalized"))
@@ -184,10 +185,12 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = fa
         <div className="stats-card">
             <div className="stats-header">
                 <h2 className="stats-title">Latency</h2>
-                <div className={`connection-status-badge ${connectionError ? 'error' : 'success'}`}>
-                    <span className={`connection-status-dot ${connectionError ? 'error' : 'success'}`}></span>
-                    {connectionError ? 'DISCONNECTED' : 'CONNECTED'}
-                </div>
+                {connectionStatusKnown && (
+                    <div className={`connection-status-badge ${connectionError ? 'error' : 'success'}`}>
+                        <span className={`connection-status-dot ${connectionError ? 'error' : 'success'}`}></span>
+                        {connectionError ? 'DISCONNECTED' : 'CONNECTED'}
+                    </div>
+                )}
             </div>
 
             <div className="stats-grid">
