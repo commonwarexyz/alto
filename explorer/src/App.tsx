@@ -502,6 +502,8 @@ const App: React.FC = () => {
 
       ws.onopen = () => {
         console.log("WebSocket connected");
+        setErrorMessage("");
+        setShowError(false);
       };
 
       ws.onmessage = (event) => {
@@ -537,7 +539,7 @@ const App: React.FC = () => {
           const timeSinceStarted = Date.now() - wsCreationTime;
           // If connection closed very quickly (less than 500ms), likely rate limited
           if (timeSinceStarted < 1000) {
-            setErrorMessage("Rate limited (429): Too many connection attempts. Try connecting again in an hour.");
+            setErrorMessage("Too many connection attempts. Try connecting again in an hour.");
             setShowError(true);
           }
         }
