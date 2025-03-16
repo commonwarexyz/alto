@@ -203,7 +203,7 @@ body {
 }
 
 .bar-segment.finalized {
-  background-color: #d9ead3ff;
+  background-color: #228b221b;
   z-index: 1;
   border-right: 1px solid #888;
 }
@@ -214,7 +214,7 @@ body {
 }
 
 .bar-segment.timed-out {
-  background-color: #f4ccccff;
+  background-color: rgba(255, 0, 0, 0.1);
   width: 100% !important;
   right: 0;
   max-width: 100%;
@@ -234,7 +234,7 @@ body {
 }
 
 .finalization-marker {
-  background-color: #274e13ff;
+  background-color: #228B22ff;
   z-index: 3;
 }
 

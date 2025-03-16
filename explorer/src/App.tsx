@@ -705,7 +705,7 @@ const App: React.FC = () => {
             <div className="legend-container">
               <LegendItem color="#0000eeff" label="Seed" />
               <LegendItem color="#000" label="Locked" />
-              <LegendItem color="#274e13ff" label="Finalized" />
+              <LegendItem color="#228B22ff" label="Finalized" />
             </div>
           </div>
 
@@ -1067,7 +1067,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
                   className="latency-text finalized-latency"
                   style={{
                     left: `${finalizedLabelPosition}px`,
-                    color: "#274e13ff",
+                    color: "#228B22ff",
                   }}
                 >
                   {finalizedLatencyText}

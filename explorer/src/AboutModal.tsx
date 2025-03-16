@@ -90,7 +90,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">
-                                    <div className="about-status-indicator" style={{ backgroundColor: "#274e13ff" }}></div>
+                                    <div className="about-status-indicator" style={{ backgroundColor: "#228B22ff" }}></div>
                                     <strong>Finalized</strong>
                                 </div>
                                 The block <i>b</i> in view <i>v</i> has received <i>2f+1</i> finalizes. The block is now immutable.
