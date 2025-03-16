@@ -5,10 +5,53 @@
     font-family: 'Consolas', monospace;
 }
 
+.stats-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
 .stats-title {
-    margin: 0 0 16px 0;
+    margin: 0;
     font-size: 20px;
     font-weight: 500;
+}
+
+.connection-error-badge {
+    display: flex;
+    align-items: center;
+    background-color: rgba(244, 67, 54, 0.1);
+    color: #f44336;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 0;
+    border: 1px solid #f44336;
+}
+
+.connection-error-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background-color: #f44336;
+    border-radius: 50%;
+    margin-right: 6px;
+    animation: pulse 1.5s infinite;
+}
+
+
+@keyframes pulse {
+    0% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.4;
+    }
+
+    100% {
+        opacity: 1;
+    }
 }
 
 .stats-grid {

@@ -688,7 +688,7 @@ const App: React.FC = () => {
         {/* Stats Section */}
         <StatsSection
           views={views}
-          numValidators={LOCATIONS.length}
+          connectionError={errorMessage.length > 0}
         />
 
         {/* Bars with integrated legend */}
