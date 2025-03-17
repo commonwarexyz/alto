@@ -61,7 +61,6 @@ body {
 /* Map container */
 .map-container {
   height: 300px;
-  margin-bottom: 16px;
   border: 1px solid #ccc;
   border-radius: 0;
   overflow: hidden;
@@ -390,7 +389,6 @@ body {
 
   .map-container {
     height: 400px;
-    margin-bottom: 20px;
   }
 
   .bar-row {
