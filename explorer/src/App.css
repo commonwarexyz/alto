@@ -114,7 +114,7 @@ body {
 .bars-container {
   background: white;
   border: 1px solid #ccc;
-  padding: 12px 8px 12px 12px;
+  padding: 16px;
   width: 100%;
   overflow-x: hidden;
   max-width: 100%;
@@ -445,10 +445,6 @@ body {
 
   .map-container {
     height: 250px;
-  }
-
-  .bars-container {
-    padding: 10px 4px 10px 12px;
   }
 
   .bar-row {
