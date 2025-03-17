@@ -14,8 +14,8 @@
 
 .stats-title {
     margin: 0;
-    font-size: 20px;
-    font-weight: 500;
+    font-size: 18px;
+    font-weight: normal;
 }
 
 .connection-status-badge {
@@ -107,7 +107,7 @@
 }
 
 .source-label {
-    font-size: 11px;
+    font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 8px;
@@ -190,12 +190,56 @@
         flex-direction: column;
         gap: 12px;
     }
+}
+
+@media (min-width: 768px) {
+    .source-label {
+        font-size: 13px;
+    }
+
+    .stats-title {
+        font-size: 20px;
+    }
+
+    .stat-label {
+        font-size: 14px;
+    }
 
     .stat-value {
-        font-size: 18px;
+        font-size: 16px;
     }
 
     .stats-disclaimer {
+        font-size: 10px;
+    }
+
+    .connection-status-badge {
+        font-size: 14px;
+    }
+}
+
+@media (max-width: 480px) {
+    .source-label {
         font-size: 11px;
+    }
+
+    .stats-title {
+        font-size: 16px;
+    }
+
+    .stat-label {
+        font-size: 10px;
+    }
+
+    .stat-value {
+        font-size: 12px;
+    }
+
+    .stats-disclaimer {
+        font-size: 9px;
+    }
+
+    .connection-status-badge {
+        font-size: 10px;
     }
 }
