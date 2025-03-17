@@ -75,7 +75,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             <li>
                                 <div className="status-indicator-wrapper">
                                     <div className="about-status-indicator" style={{ backgroundColor: "#0000eeff" }}></div>
-                                    <strong>Seed</strong>
+                                    <strong>Seeded</strong>
                                 </div>
                                 Some leader has been elected to propose a block. The dot on the map (of the same color) is the region where the leader is located.
                                 A new leader is elected for each view.

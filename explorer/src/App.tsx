@@ -703,7 +703,7 @@ const App: React.FC = () => {
           <div className="bars-header">
             <h2 className="bars-title">Timeline</h2>
             <div className="legend-container">
-              <LegendItem color="#0000eeff" label="Seed" />
+              <LegendItem color="#0000eeff" label="Seeded" />
               <LegendItem color="#000" label="Locked" />
               <LegendItem color="#228B22ff" label="Finalized" />
             </div>
