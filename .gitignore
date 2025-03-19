@@ -4,3 +4,4 @@
 *.vscode
 /chain/assets
 /types/pkg
+.idea
