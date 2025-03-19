@@ -32,6 +32,7 @@ use tracing::{error, info, Level};
 
 const SYSTEM_METRICS_REFRESH: Duration = Duration::from_secs(5);
 const METRICS_PORT: u16 = 9090;
+const PROFILES_PORT: u16 = 9091;
 
 const VOTER_CHANNEL: u32 = 0;
 const RESOLVER_CHANNEL: u32 = 1;

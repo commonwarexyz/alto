@@ -33,6 +33,7 @@ governor = { workspace = true }
 prometheus-client = { workspace = true }
 clap = { workspace = true }
 sysinfo = "0.33.1"
+pprof = { version = "0.14.0", features = ["protobuf", "flamegraph"] }
 axum = "0.8.1"
 uuid = "1.15.1"
 serde = { version = "1.0.218", features = ["derive"] }
