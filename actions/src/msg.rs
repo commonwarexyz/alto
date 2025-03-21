@@ -1,8 +1,9 @@
-use types::Address;
+use alto_types::Address;
+
 pub struct SequencerMsg {
     pub chain_id: Vec<u8>,
     pub data: Vec<u8>,
-    pub from_address: Address::new(),
+    pub from_address: Address,
     pub relayer_id: u64,
 }
 

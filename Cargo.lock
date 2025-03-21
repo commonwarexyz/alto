@@ -37,6 +37,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "alto-actions"
+version = "0.1.0"
+dependencies = [
+ "alto-types",
+]
+
+[[package]]
 name = "alto-chain"
 version = "0.0.4"
 dependencies = [
@@ -127,6 +134,10 @@ dependencies = [
 [[package]]
 name = "alto-vm"
 version = "0.1.0"
+dependencies = [
+ "alto-actions",
+ "alto-storage",
+]
 
 [[package]]
 name = "anstream"

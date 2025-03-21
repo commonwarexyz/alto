@@ -1,5 +1,5 @@
 [workspace]
-members = [
+members = [ "actions",
     "chain",
     "client",
     "inspector",
@@ -12,6 +12,9 @@ resolver = "2"
 [workspace.dependencies]
 alto-client = { version = "0.0.4", path = "client" }
 alto-types = { version = "0.0.4", path = "types" }
+alto-actions = { version = "0.1.0", path = "actions"}
+alto-storage = { version = "0.1.0", path = "storage"}
+alto-vm = { version = "0.1.0", path = "vm"}
 commonware-consensus = { version = "0.0.40" }
 commonware-cryptography = { version = "0.0.40" }
 commonware-deployer = { version = "0.0.40" }

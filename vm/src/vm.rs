@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use alto_storage::database::Database;
+use alto_storage::hashmap_db::HashmapDb;
+use alto_actions::transfer::Transfer;
 
 struct VM {
     state_db: Box<dyn Database>
@@ -7,8 +9,8 @@ struct VM {
 impl VM {
     pub fn new() {
         Self {
-            state_db: Box::new(HashMapDb::new())
-        }
+            state_db: Box::new(HashmapDb::new())
+        };
     }
 
     pub fn execute(msg: Transfer) {

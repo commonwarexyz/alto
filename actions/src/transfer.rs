@@ -1,7 +1,8 @@
+use alto_types::Address;
 
 pub struct Transfer {
-    pub from_address: Address::new(),
-    pub to_address: Address::new(),
+    pub from_address: Address,
+    pub to_address: Address,
     pub value: u64,
 }
 
