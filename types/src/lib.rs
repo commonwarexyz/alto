@@ -15,6 +15,17 @@ pub const NOTARIZE_NAMESPACE: &[u8] = b"_ALTO_NOTARIZE";
 pub const NULLIFY_NAMESPACE: &[u8] = b"_ALTO_NULLIFY";
 pub const FINALIZE_NAMESPACE: &[u8] = b"_ALTO_FINALIZE";
 
+const ADDRESSLEN: usize = 33;
+
+#[derive(Hash, Eq, PartialEq)]
+pub struct Address([u8;ADDRESSLEN]);
+
+impl Address {
+    pub fn new() -> Self {
+        Self([0;ADDRESSLEN])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

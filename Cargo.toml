@@ -3,7 +3,9 @@ members = [
     "chain",
     "client",
     "inspector",
+    "storage",
     "types",
+    "vm",
 ]
 resolver = "2"
 

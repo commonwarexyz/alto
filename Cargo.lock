@@ -103,6 +103,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "alto-storage"
+version = "0.1.0"
+dependencies = [
+ "alto-types",
+]
+
+[[package]]
 name = "alto-types"
 version = "0.0.4"
 dependencies = [
@@ -116,6 +123,10 @@ dependencies = [
  "thiserror 2.0.12",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "alto-vm"
+version = "0.1.0"
 
 [[package]]
 name = "anstream"
