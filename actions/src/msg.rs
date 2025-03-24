@@ -12,7 +12,7 @@ impl SequencerMsg {
         Self {
             chain_id: vec![],
             data: vec![],
-            from_address: Address::new(),
+            from_address: Address::empty(),
             relayer_id: 0,
         }
     }

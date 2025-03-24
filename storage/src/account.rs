@@ -2,7 +2,7 @@ use commonware_cryptography::{ed25519::PublicKey, Ed25519, Scheme};
 use alto_types::Address;
 use rand::rngs::OsRng;
 
-pub(crate) type Balance = u64;
+pub type Balance = u64;
 
 #[derive(Clone, Debug)]
 pub struct Account {

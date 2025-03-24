@@ -6,5 +6,4 @@ edition = "2024"
 [dependencies]
 alto-storage = { workspace = true }
 alto-actions = { workspace = true }
-#alto-storage = { path = "../storage" }
-#alto-actions = { path = "../actions" }
+alto-types = { workspace = true }

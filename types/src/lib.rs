@@ -24,14 +24,16 @@ pub struct Address([u8;ADDRESSLEN]);
 
 impl Address {
     pub fn new(slice: &[u8]) -> Self {
-        assert_le!(slice.len(), ADDRESSLEN);
-        let mut address = Self::empty();
-        address.0.copy_from_slice(slice);
-        address
+        assert_le!(slice.len(), ADDRESSLEN, "address slice is too large");
+        let mut arr = [0u8; ADDRESSLEN];
+        arr[..slice.len()].copy_from_slice(slice);
+        Address(arr)
     }
+
     pub fn empty() -> Self {
         Self([0;ADDRESSLEN])
     }
+
     pub fn is_empty(&self) -> bool {
         self.0 == Self::empty().0
     }
