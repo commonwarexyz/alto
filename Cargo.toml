@@ -37,6 +37,7 @@ tracing-subscriber = "0.3.19"
 governor = "0.6.3"
 prometheus-client = "0.22.3"
 clap = "4.5.18"
+more-asserts = "0.3.1"
 
 [profile.bench]
 # Because we enable overflow checks in "release," we should benchmark with them.

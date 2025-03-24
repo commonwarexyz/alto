@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 alto-types = { workspace = true }
+commonware-cryptography = { workspace = true }
+rand = "0.8.5"

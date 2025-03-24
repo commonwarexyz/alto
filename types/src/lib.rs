@@ -6,6 +6,8 @@ mod consensus;
 pub use consensus::{leader_index, Finalization, Kind, Notarization, Nullification, Seed};
 pub mod wasm;
 mod codec;
+use more_asserts;
+use more_asserts::assert_le;
 
 // We don't use functions here to guard against silent changes.
 pub const NAMESPACE: &[u8] = b"_ALTO";
@@ -15,14 +17,23 @@ pub const NOTARIZE_NAMESPACE: &[u8] = b"_ALTO_NOTARIZE";
 pub const NULLIFY_NAMESPACE: &[u8] = b"_ALTO_NULLIFY";
 pub const FINALIZE_NAMESPACE: &[u8] = b"_ALTO_FINALIZE";
 
-const ADDRESSLEN: usize = 33;
+const ADDRESSLEN: usize = 32;
 
-#[derive(Hash, Eq, PartialEq)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct Address([u8;ADDRESSLEN]);
 
 impl Address {
-    pub fn new() -> Self {
+    pub fn new(slice: &[u8]) -> Self {
+        assert_le!(slice.len(), ADDRESSLEN);
+        let mut address = Self::empty();
+        address.0.copy_from_slice(slice);
+        address
+    }
+    pub fn empty() -> Self {
         Self([0;ADDRESSLEN])
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0 == Self::empty().0
     }
 }
 
