@@ -1,6 +1,6 @@
 use alto_actions::transfer::{Transfer, TransferError};
 use alto_storage::database::Database;
-use alto_storage::hashmap_db::HashmapDb;
+use alto_storage::hashmap_db::HashmapDatabase;
 use alto_storage::account::Balance;
 use alto_types::Address;
 
@@ -14,12 +14,12 @@ struct VM {
 impl VM {
     pub fn new() -> Self {
         Self {
-            state_db: Box::new(HashmapDb::new()),
+            state_db: Box::new(HashmapDatabase::new()),
         }
     }
 
     pub fn new_test_vm() -> Self {
-        let mut state_db = Box::new(HashmapDb::new());
+        let mut state_db = Box::new(HashmapDatabase::new());
         state_db.set_balance(&Self::test_faucet_address(), TEST_FAUCET_BALANCE);
 
         Self {

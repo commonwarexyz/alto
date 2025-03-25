@@ -7,3 +7,4 @@ edition = "2024"
 alto-types = { workspace = true }
 commonware-cryptography = { workspace = true }
 rand = "0.8.5"
+rocksdb = "0.23.0"
