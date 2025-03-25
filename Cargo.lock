@@ -114,6 +114,8 @@ name = "alto-storage"
 version = "0.1.0"
 dependencies = [
  "alto-types",
+ "bytes",
+ "commonware-codec",
  "commonware-cryptography",
  "rand",
  "rocksdb",
@@ -124,6 +126,7 @@ name = "alto-types"
 version = "0.0.4"
 dependencies = [
  "bytes",
+ "commonware-codec",
  "commonware-cryptography",
  "commonware-utils",
  "getrandom 0.2.15",
@@ -881,6 +884,17 @@ name = "colorchoice"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
+
+[[package]]
+name = "commonware-codec"
+version = "0.0.43"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65ebb5fc2fbf7d3fbdaf8d3dd3afdb80f03ee02a7d5a9fefc979235a2c06569a"
+dependencies = [
+ "bytes",
+ "paste",
+ "thiserror 2.0.12",
+]
 
 [[package]]
 name = "commonware-consensus"
@@ -2431,6 +2445,12 @@ dependencies = [
  "smallvec",
  "windows-targets",
 ]
+
+[[package]]
+name = "paste"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pem-rfc7468"

@@ -37,6 +37,14 @@ impl Address {
     pub fn is_empty(&self) -> bool {
         self.0 == Self::empty().0
     }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+
+    pub fn as_bytes(&self) -> &[u8;ADDRESSLEN] {
+        &self.0
+    }
 }
 
 #[cfg(test)]
