@@ -9,9 +9,6 @@ use bytes::{BufMut, Bytes};
 
 
 const SAL_ROCKS_DB_PATH: &str = "rocksdb";
-const ACCOUNTS_PREFIX: &[u8] = b"sal_accounts";
-
-const WRITE_BUFFER_CAPACITY: u64 = 500;
 
 pub struct RocksDbDatabase {
     db: DB,
@@ -27,6 +24,7 @@ impl RocksDbDatabase {
         Ok(RocksDbDatabase { db })
     }
 
+    /*
     pub fn key_accounts(addr: &Address) -> Vec<u8> {
         Self::make_multi_key(ACCOUNTS_PREFIX, addr.as_slice())
     }
@@ -38,10 +36,11 @@ impl RocksDbDatabase {
         key.extend_from_slice(sub_id);
         key
     }
+     */
 }
 
 impl Database for RocksDbDatabase {
-
+/*
     fn get_account(&self, address: &Address) -> Result<Option<Account>, Box<dyn Error>> {
         let key = Self::key_accounts(address);
         let result = self.get(key.as_slice())?;
@@ -89,7 +88,9 @@ impl Database for RocksDbDatabase {
         }
     }
 
-    fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn Error>> {
+ */
+
+    fn put(&mut self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn Error>> {
         self.db.put(key, value)?;
         Ok(())
     }

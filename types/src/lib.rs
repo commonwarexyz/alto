@@ -20,7 +20,7 @@ pub const FINALIZE_NAMESPACE: &[u8] = b"_ALTO_FINALIZE";
 const ADDRESSLEN: usize = 32;
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
-pub struct Address([u8;ADDRESSLEN]);
+pub struct Address(pub [u8;ADDRESSLEN]);
 
 impl Address {
     pub fn new(slice: &[u8]) -> Self {
@@ -28,6 +28,14 @@ impl Address {
         let mut arr = [0u8; ADDRESSLEN];
         arr[..slice.len()].copy_from_slice(slice);
         Address(arr)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, &'static str> {
+        if bytes.len() != 32 {
+            return Err("Address must be 32 bytes.");
+        }
+
+        Ok(Address(<[u8; 32]>::try_from(bytes.clone()).unwrap()))
     }
 
     pub fn empty() -> Self {
