@@ -1,6 +1,9 @@
 //! Common types used throughout `alto`.
 
 mod block;
+
+use commonware_cryptography::{Ed25519, Scheme};
+use commonware_cryptography::ed25519::{PrivateKey, PublicKey};
 pub use block::{Block, Finalized, Notarized};
 mod consensus;
 pub use consensus::{leader_index, Finalization, Kind, Notarization, Nullification, Seed};
@@ -8,6 +11,7 @@ pub mod wasm;
 mod codec;
 use more_asserts;
 use more_asserts::assert_le;
+use rand::rngs::OsRng;
 
 // We don't use functions here to guard against silent changes.
 pub const NAMESPACE: &[u8] = b"_ALTO";
@@ -53,6 +57,17 @@ impl Address {
     pub fn as_bytes(&self) -> &[u8;ADDRESSLEN] {
         &self.0
     }
+}
+
+pub fn create_test_keypair() -> (PublicKey, PrivateKey) {
+    let mut rng = OsRng;
+    // generates keypair using random number generator
+    let keypair = Ed25519::new(&mut rng);
+
+    let public_key = keypair.public_key();
+    let private_key = keypair.private_key();
+
+    (public_key, private_key)
 }
 
 #[cfg(test)]

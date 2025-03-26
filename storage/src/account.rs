@@ -34,8 +34,8 @@ impl Codec for Account {
     }
 
     fn read(reader: &mut impl Reader) -> Result<Self, Error> {
-        let addr_bytes = <[u8; 32]>::read(reader)?;
-        let address = Address::from_bytes(&addr_bytes).unwrap();
+        let addr_bytes = <[u8; 33]>::read(reader)?;
+        let address = Address::from_bytes(&addr_bytes[1..]).unwrap();
         let balance = <u64>::read(reader)?;
         Ok(Self{address, balance})
     }

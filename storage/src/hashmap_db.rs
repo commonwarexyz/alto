@@ -17,12 +17,11 @@ impl HashmapDatabase {
 
 impl Database for HashmapDatabase {
     fn put(&mut self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-        //self.data.insert(String::from_utf8(key.into())?, value.into())
-        let str_value: String = String::from_utf8(value.into()).unwrap();
-        match self.data.insert(String::from_utf8(key.into())?, str_value) {
-            Some(_) => Ok(()),
-            None => Err("hashmap db insert failed".into()),
-        }
+        let str_value: String = String::from_utf8(value.into())?;
+        let key_value: String = String::from_utf8(key.into())?;
+
+        self.data.insert(key_value, str_value);
+        Ok(())
     }
 
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
