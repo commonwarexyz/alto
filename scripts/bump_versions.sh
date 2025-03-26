@@ -24,7 +24,7 @@ find . -name "Cargo.toml" | while read -r cargo_file; do
   name=""
   while IFS= read -r line; do
     # 1) Match workspace deps like: alto-foo = { version = "0.0.3", path = "foo" }
-    if [[ "${line}" =~ ^[[:space:]]*(alto-[^[:space:]]+)[[:space:]]*=\ {[[:space:]]*version[[:space:]]*=[[:space:]]*\"([0-9]+\.[0-9]+\.[0-9]+)\" ]]; then
+    if [[ "${line}" =~ ^[[:space:]]*(alto-[^[:space:]]+)[[:space:]]*=[[:space:]]*\{[[:space:]]*version[[:space:]]*=[[:space:]]*\"([0-9]+\.[0-9]+\.[0-9]+)\" ]]; then
       old="${BASH_REMATCH[2]}"
       new="$(bump_version "${old}")"
       line="${line/${old}/${new}}"
