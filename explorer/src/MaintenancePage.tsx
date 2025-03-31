@@ -25,27 +25,71 @@ const MaintenancePage: React.FC = () => {
         return filteredColors[Math.floor(Math.random() * filteredColors.length)];
     };
 
+    // Use a ref to store the logo's natural dimensions
+    const logoDimensionsRef = useRef({ width: 0, height: 0 });
+
+    // Measure logo once after initial render
     useEffect(() => {
-        // Initialize position if needed
-        if (!initializedRef.current && containerRef.current && logoRef.current) {
-            const containerWidth = containerRef.current.clientWidth;
-            const containerHeight = containerRef.current.clientHeight;
-            const logoWidth = logoRef.current.clientWidth;
-            const logoHeight = logoRef.current.clientHeight;
+        const measureLogo = () => {
+            if (logoRef.current && containerRef.current) {
+                // Get the natural dimensions of the logo
+                const rect = logoRef.current.getBoundingClientRect();
+                logoDimensionsRef.current = {
+                    width: rect.width,
+                    height: rect.height
+                };
 
-            // Set initial position
-            positionRef.current = {
-                x: Math.random() * (containerWidth - logoWidth),
-                y: Math.random() * (containerHeight - logoHeight)
-            };
+                console.log("Measured logo: ", logoDimensionsRef.current);
+            }
+        };
 
-            initializedRef.current = true;
+        // Measure immediately and after a short delay to ensure accuracy
+        measureLogo();
+        const timer = setTimeout(measureLogo, 200);
 
-            // Force a re-render to show initial position
-            logoRef.current.style.left = `${positionRef.current.x}px`;
-            logoRef.current.style.top = `${positionRef.current.y}px`;
-        }
+        return () => clearTimeout(timer);
+    }, []);
 
+    useEffect(() => {
+        // Wait a short time to ensure logo has been properly measured
+        const initTimeout = setTimeout(() => {
+            if (!initializedRef.current && containerRef.current && logoRef.current) {
+                const containerWidth = containerRef.current.clientWidth;
+                const containerHeight = containerRef.current.clientHeight;
+
+                // Make sure we have measured the logo
+                if (logoDimensionsRef.current.width === 0) {
+                    const rect = logoRef.current.getBoundingClientRect();
+                    logoDimensionsRef.current = {
+                        width: rect.width,
+                        height: rect.height
+                    };
+                }
+
+                const logoWidth = logoDimensionsRef.current.width;
+                const logoHeight = logoDimensionsRef.current.height;
+
+                console.log("Container size: ", containerWidth, containerHeight);
+                console.log("Logo size: ", logoWidth, logoHeight);
+
+                // Set initial position
+                positionRef.current = {
+                    x: Math.random() * (containerWidth - logoWidth),
+                    y: Math.random() * (containerHeight - logoHeight)
+                };
+
+                initializedRef.current = true;
+
+                // Force a re-render to show initial position
+                logoRef.current.style.left = `${positionRef.current.x}px`;
+                logoRef.current.style.top = `${positionRef.current.y}px`;
+            }
+        }, 100); // Short delay to ensure measurements
+
+        return () => clearTimeout(initTimeout);
+    }, []);
+
+    useEffect(() => {
         // Animation function that doesn't depend on React state for positioning
         const animate = () => {
             if (!containerRef.current || !logoRef.current) {
@@ -55,15 +99,18 @@ const MaintenancePage: React.FC = () => {
 
             const containerWidth = containerRef.current.clientWidth;
             const containerHeight = containerRef.current.clientHeight;
-            const logoWidth = logoRef.current.clientWidth;
-            const logoHeight = logoRef.current.clientHeight;
+
+            // Use our stored dimensions to avoid recalculating during animation
+            const logoWidth = logoDimensionsRef.current.width;
+            const logoHeight = logoDimensionsRef.current.height;
 
             // Update position based on current direction
             let newX = positionRef.current.x + speed * directionRef.current.x;
             let newY = positionRef.current.y + speed * directionRef.current.y;
             let colorChanged = false;
 
-            // Handle horizontal boundaries
+            // Handle horizontal boundaries with a small buffer
+            const rightEdgeThreshold = containerWidth - logoWidth;
             if (newX <= 0) {
                 // Hit left edge
                 directionRef.current.x = Math.abs(directionRef.current.x); // Ensure positive
@@ -72,17 +119,18 @@ const MaintenancePage: React.FC = () => {
                     setColor(getRandomColor());
                     colorChanged = true;
                 }
-            } else if (newX + logoWidth >= containerWidth) {
+            } else if (newX >= rightEdgeThreshold) {
                 // Hit right edge
                 directionRef.current.x = -Math.abs(directionRef.current.x); // Ensure negative
-                newX = containerWidth - logoWidth; // Stop at boundary
+                newX = rightEdgeThreshold; // Stop exactly at boundary
                 if (!colorChanged) {
                     setColor(getRandomColor());
                     colorChanged = true;
                 }
             }
 
-            // Handle vertical boundaries
+            // Handle vertical boundaries with a small buffer
+            const bottomEdgeThreshold = containerHeight - logoHeight;
             if (newY <= 0) {
                 // Hit top edge
                 directionRef.current.y = Math.abs(directionRef.current.y); // Ensure positive
@@ -91,10 +139,10 @@ const MaintenancePage: React.FC = () => {
                     setColor(getRandomColor());
                     colorChanged = true;
                 }
-            } else if (newY + logoHeight >= containerHeight) {
+            } else if (newY >= bottomEdgeThreshold) {
                 // Hit bottom edge
                 directionRef.current.y = -Math.abs(directionRef.current.y); // Ensure negative
-                newY = containerHeight - logoHeight; // Stop at boundary
+                newY = bottomEdgeThreshold; // Stop exactly at boundary
                 if (!colorChanged) {
                     setColor(getRandomColor());
                     colorChanged = true;
@@ -167,7 +215,6 @@ const MaintenancePage: React.FC = () => {
                 }}
             >
                 <div className="logo-content">
-                    <div className="logo-text">alto</div>
                     <div className="maintenance-text">
                         <p>Under Maintenance</p>
                         <p className="small-text">Follow <a href="https://x.com/commonwarexyz" target="_blank" rel="noopener noreferrer">@commonwarexyz</a> for updates</p>
