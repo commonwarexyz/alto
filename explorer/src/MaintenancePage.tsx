@@ -224,7 +224,7 @@ const MaintenancePage: React.FC = () => {
             >
                 <div className="logo-content">
                     <div className="maintenance-text">
-                        <p>Under Maintenance</p>
+                        <p>Under<br />Maintenance</p>
                         <p className="small-text">Follow <a href="https://x.com/commonwarexyz" target="_blank" rel="noopener noreferrer">@commonwarexyz</a> for updates</p>
                     </div>
                 </div>

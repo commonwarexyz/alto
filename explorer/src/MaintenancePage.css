@@ -11,15 +11,12 @@
 
 .dvd-logo {
     position: absolute;
-    padding: 40px 60px;
+    padding: 30px 25px;
     background-color: currentColor;
     border: 4px solid;
     user-select: none;
     box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
-    width: fit-content;
-    /* Prevent squishing */
-    white-space: nowrap;
-    /* Keep content from wrapping */
+    max-width: 300px;
     transform: translateZ(0);
     /* Hardware acceleration */
 }
@@ -31,16 +28,21 @@
     justify-content: center;
     text-align: center;
     color: #000;
+    width: 100%;
 }
 
 .maintenance-text {
     font-size: 32px;
     font-weight: bold;
+    word-wrap: break-word;
+    width: 100%;
 }
 
 .small-text {
     font-size: 24px;
     margin-top: 16px;
+    word-wrap: break-word;
+    width: 100%;
 }
 
 .dvd-logo a {
@@ -89,17 +91,18 @@
 
 /* Responsive adjustments */
 @media (max-width: 480px) {
+    .dvd-logo {
+        max-width: 220px;
+        padding: 15px 20px;
+        border-width: 3px;
+    }
+
     .maintenance-text {
         font-size: 20px;
     }
 
     .small-text {
-        font-size: 16px;
+        font-size: 14px;
         margin-top: 8px;
-    }
-
-    .dvd-logo {
-        padding: 16px 24px;
-        border-width: 3px;
     }
 }
