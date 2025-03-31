@@ -7,11 +7,12 @@ const MaintenancePage: React.FC = () => {
     const positionRef = useRef({ x: 50, y: 50 });
     const directionRef = useRef({ x: 1, y: 1 });
     const [color, setColor] = useState('#0000ee');
+    const currentColorRef = useRef('#0000ee');
     const animationFrameRef = useRef<number | null>(null);
     const initializedRef = useRef(false);
 
     // Speed in pixels per frame
-    const speed = 1.5;
+    const speed = 0.75;
 
     // Array of vibrant colors for the bouncing logo
     const colors = [
@@ -21,8 +22,15 @@ const MaintenancePage: React.FC = () => {
 
     // Get a random color that's different from the current one
     const getRandomColor = () => {
-        const filteredColors = colors.filter(c => c !== color);
+        const filteredColors = colors.filter(c => c !== currentColorRef.current);
         return filteredColors[Math.floor(Math.random() * filteredColors.length)];
+    };
+
+    // Update color function that ensures the color always changes
+    const updateColor = () => {
+        const newColor = getRandomColor();
+        currentColorRef.current = newColor;
+        setColor(newColor);
     };
 
     // Use a ref to store the logo's natural dimensions
@@ -116,7 +124,7 @@ const MaintenancePage: React.FC = () => {
                 directionRef.current.x = Math.abs(directionRef.current.x); // Ensure positive
                 newX = 0; // Stop at boundary
                 if (!colorChanged) {
-                    setColor(getRandomColor());
+                    updateColor();
                     colorChanged = true;
                 }
             } else if (newX >= rightEdgeThreshold) {
@@ -124,7 +132,7 @@ const MaintenancePage: React.FC = () => {
                 directionRef.current.x = -Math.abs(directionRef.current.x); // Ensure negative
                 newX = rightEdgeThreshold; // Stop exactly at boundary
                 if (!colorChanged) {
-                    setColor(getRandomColor());
+                    updateColor();
                     colorChanged = true;
                 }
             }
@@ -136,7 +144,7 @@ const MaintenancePage: React.FC = () => {
                 directionRef.current.y = Math.abs(directionRef.current.y); // Ensure positive
                 newY = 0; // Stop at boundary
                 if (!colorChanged) {
-                    setColor(getRandomColor());
+                    updateColor();
                     colorChanged = true;
                 }
             } else if (newY >= bottomEdgeThreshold) {
@@ -144,7 +152,7 @@ const MaintenancePage: React.FC = () => {
                 directionRef.current.y = -Math.abs(directionRef.current.y); // Ensure negative
                 newY = bottomEdgeThreshold; // Stop exactly at boundary
                 if (!colorChanged) {
-                    setColor(getRandomColor());
+                    updateColor();
                     colorChanged = true;
                 }
             }
