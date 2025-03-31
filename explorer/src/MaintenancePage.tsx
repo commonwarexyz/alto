@@ -17,6 +17,11 @@ const MaintenancePage: React.FC = () => {
     // Use a ref to store the logo's natural dimensions
     const logoDimensionsRef = useRef({ width: 0, height: 0 });
 
+    // Handle click on the logo
+    const handleLogoClick = () => {
+        window.open("https://x.com/commonwarexyz", "_blank", "noopener,noreferrer");
+    };
+
     // Measure logo once after initial render
     useEffect(() => {
         const measureLogo = () => {
@@ -221,11 +226,12 @@ const MaintenancePage: React.FC = () => {
                     color: color,
                     borderColor: color
                 }}
+                onClick={handleLogoClick}
             >
                 <div className="logo-content">
                     <div className="maintenance-text">
                         <p>Under<br />Maintenance</p>
-                        <p className="small-text">Follow <a href="https://x.com/commonwarexyz" target="_blank" rel="noopener noreferrer">@commonwarexyz</a> for updates</p>
+                        <p className="small-text">Follow <span className="link-text">@commonwarexyz</span> for updates</p>
                     </div>
                 </div>
             </div>

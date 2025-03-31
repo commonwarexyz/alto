@@ -18,7 +18,7 @@
     box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
     max-width: 300px;
     transform: translateZ(0);
-    /* Hardware acceleration */
+    cursor: pointer;
 }
 
 .logo-content {
@@ -45,12 +45,12 @@
     width: 100%;
 }
 
-.dvd-logo a {
-    color: #000;
+/* Style for the link text */
+.link-text {
     text-decoration: underline;
 }
 
-.dvd-logo a:hover {
+.dvd-logo:hover .link-text {
     opacity: 0.8;
 }
 
