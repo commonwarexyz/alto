@@ -16,7 +16,7 @@
     border: 4px solid;
     user-select: none;
     box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
-    max-width: 300px;
+    max-width: 350px;
     transform: translateZ(0);
     cursor: pointer;
 }
