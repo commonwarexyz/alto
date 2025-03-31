@@ -12,7 +12,7 @@ const MaintenancePage: React.FC = () => {
     const initializedRef = useRef(false);
 
     // Speed in pixels per frame
-    const speed = 0.75;
+    const speed = 0.5;
 
     // Use a ref to store the logo's natural dimensions
     const logoDimensionsRef = useRef({ width: 0, height: 0 });
