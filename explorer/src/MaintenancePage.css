@@ -40,20 +40,28 @@
 .maintenance-links a {
     padding: 8px 16px;
     text-decoration: none;
-    color: #000;
-    border: 1px solid #000;
+    color: white;
+    background-color: black;
+    border: 1px solid black;
     display: flex;
     align-items: center;
-    gap: 8px;
+    transition: opacity 0.2s;
 }
 
 .maintenance-links a:first-child {
-    color: #0000eeff;
-    border-color: #0000eeff;
+    color: white;
+    background-color: black;
+    border-color: black;
 }
 
 .maintenance-links a:hover {
-    background-color: #f0f0f0;
+    opacity: 0.9;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.maintenance-links a:first-child:hover {
+    opacity: 0.9;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .link-icon {

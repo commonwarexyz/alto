@@ -17,6 +17,7 @@ import { useClockSkew } from './useClockSkew';
 import ErrorNotification from './ErrorNotification';
 import './ErrorNotification.css';
 import MaintenancePage from './MaintenancePage';
+import LoadingPage from './LoadingPage';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
@@ -97,6 +98,7 @@ const App: React.FC = () => {
   const [connectionStatusKnown, setConnectionStatusKnown] = useState<boolean>(false);
   const [showError, setShowError] = useState<boolean>(false);
   const [isInMaintenance, setIsInMaintenance] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const healthCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const adjustTime = useClockSkew();
   const currentTimeRef = useRef(adjustTime(Date.now()));
@@ -133,19 +135,28 @@ const App: React.FC = () => {
       console.error("Health check failed:", error);
       setIsInMaintenance(true);
       return false;
+    } finally {
+      // Mark loading as complete regardless of result
+      setIsLoading(false);
     }
   }, []);
 
   // Run health check on initial load and periodically
   useEffect(() => {
-    // Run initial health check
+    // Run initial health check immediately - this will set isLoading to false when complete
     checkHealth();
 
-    // Set up periodic health checks
-    healthCheckIntervalRef.current = setInterval(checkHealth, HEALTH_CHECK_INTERVAL);
+    // Only set up periodic checks after the initial check
+    const setupInterval = () => {
+      healthCheckIntervalRef.current = setInterval(checkHealth, HEALTH_CHECK_INTERVAL);
+    };
+
+    // Wait for the initial check before setting up the interval
+    const initialCheckTimeout = setTimeout(setupInterval, 1000);
 
     return () => {
-      // Clean up interval on unmount
+      // Clean up interval and timeout on unmount
+      clearTimeout(initialCheckTimeout);
       if (healthCheckIntervalRef.current) {
         clearInterval(healthCheckIntervalRef.current);
       }
@@ -521,6 +532,9 @@ const App: React.FC = () => {
 
   // WebSocket connection management with fixed single-connection approach
   useEffect(() => {
+    // If loading, don't start
+    if (isLoading) return;
+
     // Skip if in maintenance mode
     if (isInMaintenance) {
       // If there's an existing WebSocket connection, close it
@@ -530,7 +544,7 @@ const App: React.FC = () => {
           wsRef.current = null;
           ws.close();
         } catch (err) {
-          console.error("Closing WebSocket during maintenance:", err);
+          console.error("Error closing WebSocket during maintenance:", err);
         }
       }
       return;
@@ -554,7 +568,7 @@ const App: React.FC = () => {
           wsRef.current = null;
           ws.close();
         } catch (err) {
-          console.error("Closing existing WebSocket:", err);
+          console.error("Error closing existing WebSocket:", err);
         }
       }
 
@@ -652,7 +666,12 @@ const App: React.FC = () => {
         }
       }
     };
-  }, [isInMaintenance]);
+  }, [isLoading, isInMaintenance]);
+
+  // Loading state - show loading page until health check completes
+  if (isLoading) {
+    return <LoadingPage />;
+  }
 
   // If we're in maintenance mode, show the maintenance page
   if (isInMaintenance) {
