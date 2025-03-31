@@ -17,7 +17,6 @@ import { useClockSkew } from './useClockSkew';
 import ErrorNotification from './ErrorNotification';
 import './ErrorNotification.css';
 import MaintenancePage from './MaintenancePage';
-import LoadingPage from './LoadingPage';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
@@ -668,9 +667,9 @@ const App: React.FC = () => {
     };
   }, [isLoading, isInMaintenance]);
 
-  // Loading state - show loading page until health check completes
+  // Loading state - show nothing until we get the result of the health check
   if (isLoading) {
-    return <LoadingPage />;
+    return null;
   }
 
   // If we're in maintenance mode, show the maintenance page
