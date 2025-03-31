@@ -16,6 +16,7 @@ import './MapOverlay.css';
 import { useClockSkew } from './useClockSkew';
 import ErrorNotification from './ErrorNotification';
 import './ErrorNotification.css';
+import MaintenancePage from './MaintenancePage';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
@@ -39,6 +40,8 @@ interface ViewData {
 
 const SCALE_DURATION = 750; // 750ms
 const TIMEOUT_DURATION = 5000; // 5s
+const HEALTH_CHECK_URL = "https://alto.exoware.xyz/health";
+const HEALTH_CHECK_INTERVAL = 60000; // Check health every minute
 
 const markerIcon = new DivIcon({
   className: "custom-div-icon",
@@ -93,6 +96,8 @@ const App: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [connectionStatusKnown, setConnectionStatusKnown] = useState<boolean>(false);
   const [showError, setShowError] = useState<boolean>(false);
+  const [isInMaintenance, setIsInMaintenance] = useState<boolean>(false);
+  const healthCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const adjustTime = useClockSkew();
   const currentTimeRef = useRef(adjustTime(Date.now()));
   const wsRef = useRef<WebSocket | null>(null);
@@ -103,6 +108,49 @@ const App: React.FC = () => {
   const handleFinalizedRef = useRef<typeof handleFinalization>(null!);
   const isInitializedRef = useRef(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Health check function
+  const checkHealth = useCallback(async () => {
+    try {
+      const response = await fetch(HEALTH_CHECK_URL, {
+        method: "GET",
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0"
+        }
+      });
+
+      if (response.status !== 200) {
+        console.error(`Health check failed with status: ${response.status}`);
+        setIsInMaintenance(true);
+        return false;
+      } else {
+        setIsInMaintenance(false);
+        return true;
+      }
+    } catch (error) {
+      console.error("Health check failed:", error);
+      setIsInMaintenance(true);
+      return false;
+    }
+  }, []);
+
+  // Run health check on initial load and periodically
+  useEffect(() => {
+    // Run initial health check
+    checkHealth();
+
+    // Set up periodic health checks
+    healthCheckIntervalRef.current = setInterval(checkHealth, HEALTH_CHECK_INTERVAL);
+
+    return () => {
+      // Clean up interval on unmount
+      if (healthCheckIntervalRef.current) {
+        clearInterval(healthCheckIntervalRef.current);
+      }
+    };
+  }, [checkHealth]);
 
   // Initialize logo animations
   useEffect(() => {
@@ -473,6 +521,21 @@ const App: React.FC = () => {
 
   // WebSocket connection management with fixed single-connection approach
   useEffect(() => {
+    // Skip if in maintenance mode
+    if (isInMaintenance) {
+      // If there's an existing WebSocket connection, close it
+      if (wsRef.current) {
+        try {
+          const ws = wsRef.current;
+          wsRef.current = null;
+          ws.close();
+        } catch (err) {
+          console.error("Closing WebSocket during maintenance:", err);
+        }
+      }
+      return;
+    }
+
     // Skip if already initialized to prevent duplicate connections during development mode's double-invocation
     if (isInitializedRef.current) return;
     isInitializedRef.current = true;
@@ -491,7 +554,7 @@ const App: React.FC = () => {
           wsRef.current = null;
           ws.close();
         } catch (err) {
-          console.error("Error closing existing WebSocket:", err);
+          console.error("Closing existing WebSocket:", err);
         }
       }
 
@@ -589,7 +652,12 @@ const App: React.FC = () => {
         }
       }
     };
-  }, []);
+  }, [isInMaintenance]);
+
+  // If we're in maintenance mode, show the maintenance page
+  if (isInMaintenance) {
+    return <MaintenancePage />;
+  }
 
   // Define center using LatLng
   const center = new LatLng(0, 0);

@@ -1,0 +1,83 @@
+.maintenance-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    width: 100%;
+    background-color: white;
+    font-family: 'Inconsolata', 'Consolas', 'Monaco', 'Courier New', monospace;
+    padding: 20px;
+    animation: fadeIn 0.5s ease-in;
+}
+
+.maintenance-content {
+    text-align: center;
+    padding: 2rem;
+    max-width: 500px;
+    border: 1px solid #ccc;
+}
+
+.maintenance-content h1 {
+    font-size: 1.5rem;
+    margin: 2rem 0 1rem;
+    font-weight: normal;
+}
+
+.maintenance-content p {
+    margin-bottom: 1rem;
+    line-height: 1.5;
+}
+
+.maintenance-links {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 2rem;
+    flex-wrap: wrap;
+}
+
+.maintenance-links a {
+    padding: 8px 16px;
+    text-decoration: none;
+    color: #000;
+    border: 1px solid #000;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.maintenance-links a:first-child {
+    color: #0000eeff;
+    border-color: #0000eeff;
+}
+
+.maintenance-links a:hover {
+    background-color: #f0f0f0;
+}
+
+.link-icon {
+    font-weight: bold;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+    .maintenance-content {
+        padding: 1.5rem;
+    }
+
+    .maintenance-links {
+        flex-direction: column;
+        align-items: center;
+    }
+}
