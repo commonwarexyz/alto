@@ -177,7 +177,7 @@ const MaintenancePage: React.FC = () => {
                 cancelAnimationFrame(animationFrameRef.current);
             }
         };
-    }, []); // No external dependencies now
+    }, []);
 
     // Handle window resize to keep logo in bounds
     useEffect(() => {
