@@ -90,14 +90,16 @@
 /* Responsive adjustments */
 @media (max-width: 480px) {
     .maintenance-text {
-        font-size: 28px;
-    }
-
-    .small-text {
         font-size: 20px;
     }
 
+    .small-text {
+        font-size: 16px;
+        margin-top: 8px;
+    }
+
     .dvd-logo {
-        padding: 30px 40px;
+        padding: 16px 24px;
+        border-width: 3px;
     }
 }
