@@ -14,25 +14,6 @@ const MaintenancePage: React.FC = () => {
     // Speed in pixels per frame
     const speed = 0.75;
 
-    // Array of vibrant colors for the bouncing logo
-    const colors = [
-        '#0000ee', '#ee0000', '#00ee00', '#ee00ee',
-        '#eeee00', '#00eeee', '#ff7700', '#7700ff'
-    ];
-
-    // Get a random color that's different from the current one
-    const getRandomColor = () => {
-        const filteredColors = colors.filter(c => c !== currentColorRef.current);
-        return filteredColors[Math.floor(Math.random() * filteredColors.length)];
-    };
-
-    // Update color function that ensures the color always changes
-    const updateColor = () => {
-        const newColor = getRandomColor();
-        currentColorRef.current = newColor;
-        setColor(newColor);
-    };
-
     // Use a ref to store the logo's natural dimensions
     const logoDimensionsRef = useRef({ width: 0, height: 0 });
 
@@ -98,6 +79,25 @@ const MaintenancePage: React.FC = () => {
     }, []);
 
     useEffect(() => {
+        // Move colors array outside the component to avoid dependency issues
+        const colors = [
+            '#0000ee', '#ee0000', '#00ee00', '#ee00ee',
+            '#eeee00', '#00eeee', '#ff7700', '#7700ff'
+        ];
+
+        // Get a random color that's different from the current one
+        const getRandomColor = () => {
+            const filteredColors = colors.filter(c => c !== currentColorRef.current);
+            return filteredColors[Math.floor(Math.random() * filteredColors.length)];
+        };
+
+        // Update color function that ensures the color always changes
+        const updateColor = () => {
+            const newColor = getRandomColor();
+            currentColorRef.current = newColor;
+            setColor(newColor);
+        };
+
         // Animation function that doesn't depend on React state for positioning
         const animate = () => {
             if (!containerRef.current || !logoRef.current) {
@@ -177,7 +177,7 @@ const MaintenancePage: React.FC = () => {
                 cancelAnimationFrame(animationFrameRef.current);
             }
         };
-    }, []); // Run once on mount
+    }, []); // No external dependencies now
 
     // Handle window resize to keep logo in bounds
     useEffect(() => {
@@ -224,8 +224,8 @@ const MaintenancePage: React.FC = () => {
             >
                 <div className="logo-content">
                     <div className="maintenance-text">
-                        <p>UNDER<br />DEVELOPMENT</p>
-                        <p className="small-text">Follow <a href="https://x.com/commonwarexyz" target="_blank" rel="noopener noreferrer">@commonwarexyz</a> for updates.</p>
+                        <p>Under<br />Maintenance</p>
+                        <p className="small-text">Follow <a href="https://x.com/commonwarexyz" target="_blank" rel="noopener noreferrer">@commonwarexyz</a> for updates</p>
                     </div>
                 </div>
             </div>
