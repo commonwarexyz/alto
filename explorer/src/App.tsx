@@ -127,7 +127,7 @@ const App: React.FC = () => {
         setIsInMaintenance(true);
         return false;
       } else {
-        setIsInMaintenance(true);
+        setIsInMaintenance(false);
         return true;
       }
     } catch (error) {
