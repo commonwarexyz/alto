@@ -40,7 +40,6 @@ interface ViewData {
 
 const SCALE_DURATION = 750; // 750ms
 const TIMEOUT_DURATION = 5000; // 5s
-const HEALTH_CHECK_URL = "https://alto.exoware.xyz/health";
 const HEALTH_CHECK_INTERVAL = 60000; // Check health every minute
 
 const markerIcon = new DivIcon({
@@ -113,7 +112,7 @@ const App: React.FC = () => {
   // Health check function
   const checkHealth = useCallback(async () => {
     try {
-      const response = await fetch(HEALTH_CHECK_URL, {
+      const response = await fetch(`https://${BACKEND_URL}/health`, {
         method: "GET",
         headers: {
           "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -573,7 +572,7 @@ const App: React.FC = () => {
 
       // Create new WebSocket connection
       const wsCreationTime = Date.now();
-      const ws = new WebSocket(BACKEND_URL);
+      const ws = new WebSocket(`wss://${BACKEND_URL}/consensus/ws`);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
