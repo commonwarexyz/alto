@@ -1,47 +1,92 @@
-.maintenance-container {
+.dvd-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: #000;
+    overflow: hidden;
+    font-family: 'Inconsolata', 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.dvd-logo {
+    position: absolute;
+    padding: 30px 25px;
+    background-color: currentColor;
+    border: 4px solid;
+    user-select: none;
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+    max-width: 350px;
+    transform: translateZ(0);
+    cursor: pointer;
+}
+
+.logo-content {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    min-height: 100vh;
-    width: 100%;
-    background-color: white;
-    font-family: 'Inconsolata', 'Consolas', 'Monaco', 'Courier New', monospace;
-    padding: 20px;
-    animation: fadeIn 0.5s ease-in;
-}
-
-.maintenance-content {
     text-align: center;
-    padding: 2rem;
-    max-width: 500px;
-    border: 1px solid #ccc;
+    color: #000;
+    width: 100%;
 }
 
-.maintenance-content h1 {
-    font-size: 1.5rem;
-    margin: 2rem 0 1rem;
-    font-weight: normal;
+.maintenance-text {
+    font-size: 32px;
+    font-weight: bold;
+    word-wrap: break-word;
+    width: 100%;
 }
 
-.maintenance-content p {
-    margin-bottom: 1rem;
-    line-height: 1.5;
+.small-text {
+    font-size: 18px;
+    margin-top: 16px;
+    word-wrap: break-word;
+    width: 100%;
 }
 
-@keyframes fadeIn {
-    from {
-        opacity: 0;
+/* Style for the link text */
+.link-text {
+    text-decoration: underline;
+}
+
+.dvd-logo:hover .link-text {
+    opacity: 0.8;
+}
+
+/* Add a slight glow effect */
+@keyframes glow {
+    0% {
+        box-shadow: 0 0 5px currentColor;
     }
 
-    to {
-        opacity: 1;
+    50% {
+        box-shadow: 0 0 20px currentColor;
     }
+
+    100% {
+        box-shadow: 0 0 5px currentColor;
+    }
+}
+
+.dvd-logo {
+    animation: glow 3s infinite ease-in-out;
 }
 
 /* Responsive adjustments */
 @media (max-width: 480px) {
-    .maintenance-content {
-        padding: 1.5rem;
+    .dvd-logo {
+        max-width: 220px;
+        padding: 15px 20px;
+        border-width: 3px;
+    }
+
+    .maintenance-text {
+        font-size: 20px;
+    }
+
+    .small-text {
+        font-size: 14px;
+        margin-top: 8px;
     }
 }
