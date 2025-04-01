@@ -230,7 +230,7 @@ const MaintenancePage: React.FC = () => {
             >
                 <div className="logo-content">
                     <div className="maintenance-text">
-                        <p>DEPLOYING UPGRADE</p>
+                        <p>UPGRADE DEPLOYING</p>
                         <p className="small-text">Monitor progress<br />at <span className="link-text">@commonwarexyz</span>.</p>
                     </div>
                 </div>
