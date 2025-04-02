@@ -193,30 +193,35 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
             // Use proper parsing functions from the WASM module
             try {
                 if (searchType === 'seed') {
-                    // For seeds we expect a kind byte at the beginning
-                    const result = parse_seed(PUBLIC_KEY, data.slice(1));
+                    // Parse seed data directly without slicing
+                    const result = parse_seed(PUBLIC_KEY, data);
                     if (!result) throw new Error("Failed to parse seed data");
                     return result;
                 } else if (searchType === 'notarization') {
-                    // For notarizations we expect a kind byte at the beginning
-                    const result = parse_notarized(PUBLIC_KEY, data.slice(1));
+                    // Parse notarization data directly without slicing
+                    const result = parse_notarized(PUBLIC_KEY, data);
                     if (!result) throw new Error("Failed to parse notarization data");
                     return result;
                 } else if (searchType === 'finalization') {
-                    // For finalizations we expect a kind byte at the beginning
-                    const result = parse_finalized(PUBLIC_KEY, data.slice(1));
+                    // Parse finalization data directly without slicing
+                    const result = parse_finalized(PUBLIC_KEY, data);
                     if (!result) throw new Error("Failed to parse finalization data");
                     return result;
                 } else if (searchType === 'block') {
-                    // For blocks, if coming from the 'latest' endpoint, we get a finalized object
                     if (query === 'latest') {
-                        const result = parse_finalized(PUBLIC_KEY, data.slice(1));
+                        // For 'latest' query, we get a finalized object
+                        const result = parse_finalized(PUBLIC_KEY, data);
                         if (!result) throw new Error("Failed to parse latest block data");
                         return result;
+                    } else if (typeof query === 'number') {
+                        // For index queries, we also get a finalized object
+                        const result = parse_finalized(PUBLIC_KEY, data);
+                        if (!result) throw new Error("Failed to parse block data by height");
+                        return result;
                     } else {
-                        // For specific block queries, we get just the block
+                        // For digest queries, we get a plain block
                         const result = parse_block(data);
-                        if (!result) throw new Error("Failed to parse block data");
+                        if (!result) throw new Error("Failed to parse block data by digest");
                         return result;
                     }
                 }
