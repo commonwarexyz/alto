@@ -317,7 +317,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
 
                 {showHelp && (
                     <div className="search-help-panel">
-                        <h3>Search Help</h3>
+                        <h3>Help</h3>
                         <p>You can search for:</p>
                         <ul>
                             <li><strong>Block</strong>: by height (number), digest (hex), or "latest"</li>
@@ -333,7 +333,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                     <form onSubmit={handleSearch} className="search-form">
                         <div className="search-options">
                             <div className="search-type-selector">
-                                <label>Search for:</label>
+                                <label>Type:</label>
                                 <select
                                     value={searchType}
                                     onChange={(e) => setSearchType(e.target.value as SearchType)}
