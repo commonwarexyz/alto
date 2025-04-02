@@ -122,17 +122,23 @@
 
 .search-button {
     padding: 8px 16px;
-    background-color: #0000ee;
+    background-color: #ffb200;
+    border: 1px solid #ffb200;
     color: white;
-    border: none;
     border-radius: 0;
     cursor: pointer;
     font-family: 'Consolas', monospace;
     height: 38px;
 }
 
-.search-button:hover {
-    background-color: #0000cc;
+.search-button:hover,
+.search-button:focus,
+.search-button:active,
+.search-button:visited {
+    background-color: #f0f0f0;
+    text-decoration: none;
+    color: #ffb200;
+    -webkit-text-fill-color: #ffb200;
 }
 
 .search-button:disabled {
@@ -144,10 +150,6 @@
     background-color: #f0f0f0;
     color: black;
     border: 1px solid #ccc;
-}
-
-.search-button.cancel:hover {
-    background-color: #e0e0e0;
 }
 
 .search-error {
@@ -239,7 +241,6 @@
 .search-result-value {
     font-family: 'Consolas', monospace;
     word-break: break-all;
-    color: #0000ee;
 }
 
 /* Special formatting for different types of values */

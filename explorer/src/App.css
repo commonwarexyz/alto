@@ -547,8 +547,8 @@ body {
 
 
 .search-header-button {
-  background: #228B22;
-  border: 1px solid #228B22;
+  background: #ffb200;
+  border: 1px solid #ffb200;
   cursor: pointer;
   font-family: 'Consolas', monospace;
   font-size: 0.9rem;
@@ -573,8 +573,8 @@ body {
 .search-header-button:visited {
   background-color: #f0f0f0;
   text-decoration: none;
-  color: #228B22;
-  -webkit-text-fill-color: #228B22;
+  color: #ffb200;
+  -webkit-text-fill-color: #ffb200;
 }
 
 @media (max-width: 480px) {

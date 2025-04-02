@@ -735,7 +735,7 @@ const App: React.FC = () => {
             className="search-header-button"
             onClick={() => setIsSearchModalOpen(true)}
           >
-            🔍
+            ⛏
           </button>
           <button
             className="key-header-button"
