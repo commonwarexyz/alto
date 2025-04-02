@@ -1,10 +1,4 @@
-/**
- * Constants for time calculations
- */
-export const MS_PER_SECOND = 1000;
-export const MS_PER_MINUTE = 60000;
-export const MS_PER_HOUR = 3600000;
-export const MS_PER_DAY = 86400000;
+import { MS_PER_SECOND, MS_PER_MINUTE, MS_PER_HOUR, MS_PER_DAY } from './types';
 
 /**
  * Converts a hexadecimal string to a Uint8Array.
@@ -55,7 +49,6 @@ export function hexUint8Array(arr: Uint8Array | undefined, len: number = 8): str
  * @returns A formatted string representing the age
  */
 export function formatAge(age: number): string {
-
     if (age < MS_PER_SECOND) {
         return `${age}ms`;
     } else if (age < MS_PER_MINUTE) {

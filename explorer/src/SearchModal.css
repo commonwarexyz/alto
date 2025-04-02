@@ -190,8 +190,9 @@
 }
 
 .search-result-item {
-    border: 1px solid #eee;
+    border: 1px solid #ddd;
     background-color: #f9f9f9;
+    margin-bottom: 12px;
 }
 
 .search-result-header {
@@ -199,6 +200,14 @@
     background-color: #f0f0f0;
     border-bottom: 1px solid #eee;
     font-family: 'Consolas', monospace;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.search-result-header strong {
+    font-weight: bold;
+    font-size: 0.95rem;
 }
 
 .search-result-content {
@@ -207,21 +216,49 @@
 
 .search-result-field {
     display: flex;
-    margin-bottom: 6px;
+    margin-bottom: 10px;
     font-size: 0.9rem;
     align-items: baseline;
     flex-wrap: wrap;
+    border-bottom: 1px dotted #eee;
+    padding-bottom: 6px;
+}
+
+.search-result-field:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
 }
 
 .search-result-key {
     font-weight: bold;
-    margin-right: 8px;
-    min-width: 80px;
+    margin-right: 12px;
+    min-width: 90px;
+    color: #333;
 }
 
 .search-result-value {
     font-family: 'Consolas', monospace;
     word-break: break-all;
+    color: #0000ee;
+}
+
+/* Special formatting for different types of values */
+.search-result-value.digest {
+    color: #228B22;
+}
+
+.search-result-value.timestamp {
+    color: #333;
+}
+
+.search-result-value.age {
+    color: #666;
+    font-style: italic;
+}
+
+.search-result-value.signature {
+    color: #0000ee;
+    font-family: 'Consolas', monospace;
 }
 
 .search-result-json {
@@ -230,6 +267,10 @@
     word-break: break-word;
     font-size: 0.9rem;
     overflow-x: auto;
+    padding: 10px;
+    background-color: #f5f5f5;
+    border: 1px solid #eee;
+    border-radius: 0;
 }
 
 .search-modal-footer {

@@ -1,40 +1,64 @@
+// View statuses
+export type ViewStatus = "growing" | "notarized" | "finalized" | "timed_out" | "unknown";
+
+// Search types
+export type SearchType = 'block' | 'notarization' | 'finalization' | 'seed';
+
+// Block data
+export interface BlockJs {
+    height: number;
+    timestamp: number;
+    digest: Uint8Array;
+    parent_digest?: Uint8Array;
+}
+
+// Seed (for leader election)
 export interface SeedJs {
     view: number;
     signature: Uint8Array;
 }
 
+// Proof for notarizations and finalizations
 export interface ProofJs {
     view: number;
-    parent: number;
-    payload: Uint8Array;
-    signature: Uint8Array;
+    threshold?: number;
+    signature?: Uint8Array;
 }
 
-export interface BlockJs {
-    parent: Uint8Array;
-    height: number;
-    timestamp: number;
-    digest: Uint8Array;
-}
-
+// Notarized block
 export interface NotarizedJs {
     proof: ProofJs;
     block: BlockJs;
 }
 
+// Finalized block
 export interface FinalizedJs {
     proof: ProofJs;
+    quorum: boolean;
     block: BlockJs;
 }
 
-// WASM module interface
-interface AltoTypes {
-    parse_seed: (publicKey: Uint8Array | null, bytes: Uint8Array) => SeedJs | null;
-    parse_notarized: (publicKey: Uint8Array | null, bytes: Uint8Array) => NotarizedJs | null;
-    parse_finalized: (publicKey: Uint8Array | null, bytes: Uint8Array) => FinalizedJs | null;
+// View data for timeline display
+export interface ViewData {
+    view: number;
+    location?: [number, number];
+    locationName?: string;
+    status: ViewStatus;
+    startTime: number;
+    notarizationTime?: number;
+    finalizationTime?: number;
+    signature?: Uint8Array;
+    block?: BlockJs;
+    timeoutId?: NodeJS.Timeout;
+    actualNotarizationLatency?: number;
+    actualFinalizationLatency?: number;
 }
 
-export declare const init: () => Promise<void>;
-export declare const parse_seed: AltoTypes["parse_seed"];
-export declare const parse_notarized: AltoTypes["parse_notarized"];
-export declare const parse_finalized: AltoTypes["parse_finalized"];
+// Type for search results
+export type SearchResult = SeedJs | NotarizedJs | FinalizedJs | BlockJs | null;
+
+// Time constants
+export const MS_PER_SECOND = 1000;
+export const MS_PER_MINUTE = 60000;
+export const MS_PER_HOUR = 3600000;
+export const MS_PER_DAY = 86400000;
