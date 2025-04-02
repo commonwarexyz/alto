@@ -222,19 +222,18 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                 signature: hexUint8Array(result.signature as Uint8Array, 64)
             };
         } else if ('proof' in result && 'block' in result) {
-            resultType = lastSearchType === 'finalization' ? 'Finalization' : 'Notarization';
+            resultType = (lastSearchType === 'finalization' || lastSearchType === 'block') ? 'Finalization' : 'Notarization';
             const dataObj = result as (NotarizedJs | FinalizedJs);
             const block = dataObj.block;
             const now = Date.now();
             const age = now - Number(block.timestamp);
 
             formattedResult = {
-                view: dataObj.proof.view,
                 height: block.height,
-                timestamp: new Date(Number(block.timestamp)).toLocaleString(),
-                age: formatAge(age),
+                parent: hexUint8Array(block.parent, 64),
+                timestamp: `${new Date(Number(block.timestamp)).toLocaleString()} (${formatAge(age)})`,
+                view: dataObj.proof.view,
                 digest: hexUint8Array(block.digest as Uint8Array, 64),
-                parent: hexUint8Array(block.parent, 64)
             };
 
             if (dataObj.proof.signature) {
@@ -248,13 +247,11 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
 
             formattedResult = {
                 height: block.height,
-                timestamp: new Date(Number(block.timestamp)).toLocaleString(),
-                age: formatAge(age),
-                digest: hexUint8Array(block.digest as Uint8Array, 64),
-                parent: hexUint8Array(block.parent, 64)
+                parent: hexUint8Array(block.parent, 64),
+                timestamp: `${new Date(Number(block.timestamp)).toLocaleString()} (${formatAge(age)})`,
             };
         } else {
-            resultType = 'Unknown Data';
+            resultType = 'Unknown';
             formattedResult = {
                 raw: JSON.stringify(result, (key, value) => {
                     if (value && value.constructor === Uint8Array) {
