@@ -115,27 +115,32 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
             if (Array.isArray(parsedQuery)) {
                 // Handle range query
                 const [start, end] = parsedQuery;
-                const rangeResults: SearchResult[] = [];
 
                 // Limit range size to prevent too many requests
                 const maxRangeSize = 20;
                 const actualEnd = Math.min(end, start + maxRangeSize - 1);
 
+                // Clear any existing results before starting a new search
+                setResults([]);
+                let foundAnyResults = false;
+
+                // Process each index in the range sequentially
                 for (let i = start; i <= actualEnd; i++) {
                     try {
                         const result = await fetchSingleItem(i);
                         if (result) {
-                            rangeResults.push(result);
+                            // Immediately add this result to the results array
+                            setResults(prevResults => [...prevResults, result]);
+                            foundAnyResults = true;
                         }
                     } catch (err) {
                         console.error(`Error fetching ${searchType} at index ${i}:`, err);
                     }
                 }
 
-                if (rangeResults.length === 0) {
+                // After trying all indices, if we didn't find anything, show an error
+                if (!foundAnyResults) {
                     setError(`No results found for range ${start}..${actualEnd}`);
-                } else {
-                    setResults(rangeResults);
                 }
             } else {
                 // Handle single item query
@@ -179,7 +184,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                 break;
         }
 
-        setIsLoading(true);
         try {
             const response = await fetch(`${baseUrl}${endpoint}`);
 
@@ -242,8 +246,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
         } catch (error) {
             console.error(`Error fetching ${searchType}:`, error);
             throw error;
-        } finally {
-            setIsLoading(false);
         }
     };
 
@@ -431,17 +433,17 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                     )}
 
                     <div className="search-results">
-                        <h3>Results</h3>
-                        {isLoading ? (
-                            <div className="search-loading">Loading...</div>
-                        ) : results.length > 0 ? (
+                        <h3>Results {isLoading && <span className="search-loading-indicator">(Loading...)</span>}</h3>
+                        {results.length > 0 ? (
                             <div className="search-result-list">
                                 {results.map((result, index) => renderSearchResult(result, index))}
                             </div>
                         ) : (
-                            <div className="search-no-results">
-                                {error ? null : 'No results to display. Try a different search.'}
-                            </div>
+                            !error && (
+                                <div className="search-no-results">
+                                    {isLoading ? "Searching..." : "No results to display. Try a different search."}
+                                </div>
+                            )
                         )}
                     </div>
                 </div>
