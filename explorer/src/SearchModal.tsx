@@ -17,7 +17,7 @@ interface SearchResultWithLatency {
 
 const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
     const [searchType, setSearchType] = useState<SearchType>('block');
-    const [searchQuery, setSearchQuery] = useState<string>('42');
+    const [searchQuery, setSearchQuery] = useState<string>('42645');
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const [results, setResults] = useState<SearchResultWithLatency[]>([]);
