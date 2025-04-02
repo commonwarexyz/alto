@@ -9,7 +9,7 @@ export interface BlockJs {
     height: number;
     timestamp: number;
     digest: Uint8Array;
-    parent_digest?: Uint8Array;
+    parent: Uint8Array;
 }
 
 // Seed (for leader election)

@@ -290,13 +290,15 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                 height: block.height,
                 timestamp: new Date(Number(block.timestamp)).toLocaleString(),
                 age: formatAge(age),
-                digest: hexUint8Array(block.digest as Uint8Array, 64) // Show full digest
+                digest: hexUint8Array(block.digest as Uint8Array, 64),
+                parent: hexUint8Array(block.parent, 64)
             };
 
             // Add signature if available
             if (dataObj.proof.signature) {
                 formattedResult.signature = hexUint8Array(dataObj.proof.signature, 64); // Show full signature
             }
+
         } else if ('height' in result && 'timestamp' in result && 'digest' in result) {
             // This is a Block object
             resultType = 'Block';
@@ -308,13 +310,9 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                 height: block.height,
                 timestamp: new Date(Number(block.timestamp)).toLocaleString(),
                 age: formatAge(age),
-                digest: hexUint8Array(block.digest as Uint8Array, 64) // Show full digest
+                digest: hexUint8Array(block.digest as Uint8Array, 64),
+                parent: hexUint8Array(block.parent, 64)
             };
-
-            // Add parent digest if available
-            if (block.parent_digest) {
-                formattedResult.parent_digest = hexUint8Array(block.parent_digest, 64); // Show full parent digest
-            }
         } else {
             // Unknown or unrecognized data structure
             resultType = 'Unknown Data';
@@ -335,7 +333,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
             if (key === 'timestamp') return `${baseClass} timestamp`;
             if (key === 'age') return `${baseClass} age`;
             if (key === 'signature') return `${baseClass} signature`;
-            if (key === 'parent_digest') return `${baseClass} digest`;
+            if (key === 'parent') return `${baseClass} digest`;
             return baseClass;
         };
 
@@ -343,7 +341,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
             <div key={index} className="search-result-item">
                 <div className="search-result-header">
                     <strong>{resultType}</strong>
-                    {formattedResult.view && <span>View {formattedResult.view}</span>}
                     {formattedResult.height && !formattedResult.view && <span>Height {formattedResult.height}</span>}
                 </div>
                 <div className="search-result-content">
