@@ -264,9 +264,10 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
 
         const getValueClass = (key: string, value: any) => {
             const baseClass = "search-result-value";
+            if (key === 'height') return `${baseClass} view`;
+            if (key === 'view') return `${baseClass} view`;
             if (key === 'digest') return `${baseClass} digest`;
             if (key === 'timestamp') return `${baseClass} timestamp`;
-            if (key === 'age') return `${baseClass} age`;
             if (key === 'signature') return `${baseClass} signature`;
             if (key === 'parent') return `${baseClass} digest`;
             return baseClass;
@@ -277,7 +278,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                 <div className="search-result-header">
                     <strong>{resultType}</strong>
                     <div className="header-right">
-                        {formattedResult.height && !formattedResult.view && <span>Height {formattedResult.height}</span>}
                         <span className="latency">{latency}ms</span>
                     </div>
                 </div>

@@ -244,16 +244,15 @@
 
 /* Special formatting for different types of values */
 .search-result-value.digest {
-    color: #228B22;
+    color: #333;
 }
 
 .search-result-value.timestamp {
     color: #333;
 }
 
-.search-result-value.age {
-    color: #666;
-    font-style: italic;
+.search-result-value.view {
+    color: #333;
 }
 
 .search-result-value.signature {
