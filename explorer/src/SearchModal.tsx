@@ -10,17 +10,21 @@ interface SearchModalProps {
     onClose: () => void;
 }
 
+interface SearchResultWithLatency {
+    result: SearchResult;
+    latency: number;
+}
+
 const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
     const [searchType, setSearchType] = useState<SearchType>('block');
     const [searchQuery, setSearchQuery] = useState<string>('latest');
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
-    const [results, setResults] = useState<SearchResult[]>([]);
+    const [results, setResults] = useState<SearchResultWithLatency[]>([]);
     const [lastSearchType, setLastSearchType] = useState<SearchType | null>(null);
     const [showHelp, setShowHelp] = useState<boolean>(false);
     const [wasmInitialized, setWasmInitialized] = useState<boolean>(false);
 
-    // Initialize WASM module on component mount
     useEffect(() => {
         const initWasm = async () => {
             try {
@@ -37,63 +41,39 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
         }
     }, [wasmInitialized]);
 
-    // Helper function to convert a number to U64 hex representation
     const numberToU64Hex = (num: number): string => {
-        // Create a buffer for 8 bytes (u64)
         const buffer = new ArrayBuffer(8);
         const view = new DataView(buffer);
-
-        // Set the value as a big-endian u64
-        // JavaScript can only handle 53 bits precisely, but this should be sufficient
-        // for our block heights and view numbers
-        view.setBigUint64(0, BigInt(num), false); // false = big-endian
-
-        // Convert to hex string
+        view.setBigUint64(0, BigInt(num), false);
         return Array.from(new Uint8Array(buffer))
             .map(b => b.toString(16).padStart(2, '0'))
             .join('');
     };
 
-    // Parse the query string into an appropriate format following the client library patterns
     const parseQuery = (query: string, type: SearchType): string | number | [number, number] | null => {
         if (query === 'latest') {
-            // All endpoints support 'latest' query
             return 'latest';
         }
-
-        // Check if it's a range query (e.g., "10..20")
         if (query.includes('..')) {
             const [start, end] = query.split('..');
             const startNum = parseInt(start, 10);
             const endNum = parseInt(end, 10);
-
             if (isNaN(startNum) || isNaN(endNum) || startNum > endNum) {
                 return null;
             }
-
             return [startNum, endNum];
         }
-
-        // Check if it's a hex digest (for blocks only)
         if (type === 'block' && (query.startsWith('0x') || /^[0-9a-fA-F]{64}$/.test(query))) {
-            // The client lib expects digest queries without 0x prefix
             const hexValue = query.startsWith('0x') ? query.slice(2) : query;
-
-            // Validate it's a proper hex string of correct length
             if (!/^[0-9a-fA-F]{64}$/.test(hexValue)) {
                 return null;
             }
-
             return hexValue;
         }
-
-        // Check if it's a numeric index
         const num = parseInt(query, 10);
         if (isNaN(num) || num < 0) {
             return null;
         }
-
-        // For numeric indices, the client just uses the number directly
         return num;
     };
 
@@ -101,7 +81,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
         setIsLoading(true);
         setError(null);
         setResults([]);
-        // Store the current search type
         setLastSearchType(searchType);
 
         const parsedQuery = parseQuery(searchQuery, searchType);
@@ -113,24 +92,20 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
 
         try {
             if (Array.isArray(parsedQuery)) {
-                // Handle range query
                 const [start, end] = parsedQuery;
-
-                // Limit range size to prevent too many requests
                 const maxRangeSize = 20;
                 const actualEnd = Math.min(end, start + maxRangeSize - 1);
-
-                // Clear any existing results before starting a new search
                 setResults([]);
                 let foundAnyResults = false;
 
-                // Process each index in the range sequentially
                 for (let i = start; i <= actualEnd; i++) {
                     try {
+                        const startTime = performance.now();
                         const result = await fetchSingleItem(i);
+                        const endTime = performance.now();
+                        const latency = Math.round(endTime - startTime);
                         if (result) {
-                            // Immediately add this result to the results array
-                            setResults(prevResults => [...prevResults, result]);
+                            setResults(prevResults => [...prevResults, { result, latency }]);
                             foundAnyResults = true;
                         }
                     } catch (err) {
@@ -138,15 +113,16 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                     }
                 }
 
-                // After trying all indices, if we didn't find anything, show an error
                 if (!foundAnyResults) {
                     setError(`No results found for range ${start}..${actualEnd}`);
                 }
             } else {
-                // Handle single item query
+                const startTime = performance.now();
                 const result = await fetchSingleItem(parsedQuery);
+                const endTime = performance.now();
+                const latency = Math.round(endTime - startTime);
                 if (result) {
-                    setResults([result]);
+                    setResults([{ result, latency }]);
                 } else {
                     setError(`No results found for ${searchType} ${parsedQuery}`);
                 }
@@ -167,8 +143,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
         const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
 
         let endpoint = '';
-
-        // Match endpoint patterns from client.rs
         switch (searchType) {
             case 'block':
                 endpoint = `/block/${typeof query === 'number' ? numberToU64Hex(query) : query}`;
@@ -186,7 +160,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
 
         try {
             const response = await fetch(`${baseUrl}${endpoint}`);
-
             if (!response.ok) {
                 if (response.status === 404) {
                     return null;
@@ -197,36 +170,25 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
             const arrayBuffer = await response.arrayBuffer();
             const data = new Uint8Array(arrayBuffer);
 
-            // Use proper parsing functions from the WASM module
             try {
                 if (searchType === 'seed') {
-                    // Parse seed data directly without slicing
                     const result = parse_seed(PUBLIC_KEY, data);
                     if (!result) throw new Error("Failed to parse seed data");
                     return result;
                 } else if (searchType === 'notarization') {
-                    // Parse notarization data directly without slicing
                     const result = parse_notarized(PUBLIC_KEY, data);
                     if (!result) throw new Error("Failed to parse notarization data");
                     return result;
                 } else if (searchType === 'finalization') {
-                    // Parse finalization data directly without slicing
                     const result = parse_finalized(PUBLIC_KEY, data);
                     if (!result) throw new Error("Failed to parse finalization data");
                     return result;
                 } else if (searchType === 'block') {
-                    if (query === 'latest') {
-                        // For 'latest' query, we get a finalized object
+                    if (query === 'latest' || typeof query === 'number') {
                         const result = parse_finalized(PUBLIC_KEY, data);
-                        if (!result) throw new Error("Failed to parse latest block data");
-                        return result;
-                    } else if (typeof query === 'number') {
-                        // For index queries, we also get a finalized object
-                        const result = parse_finalized(PUBLIC_KEY, data);
-                        if (!result) throw new Error("Failed to parse block data by height");
+                        if (!result) throw new Error("Failed to parse block data");
                         return result;
                     } else {
-                        // For digest queries, we get a plain block
                         const result = parse_block(data);
                         if (!result) throw new Error("Failed to parse block data by digest");
                         return result;
@@ -234,13 +196,10 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                 }
             } catch (parseError) {
                 console.error(`Error parsing ${searchType} data:`, parseError);
-                const errorMessage = parseError instanceof Error
-                    ? parseError.message
-                    : String(parseError);
+                const errorMessage = parseError instanceof Error ? parseError.message : String(parseError);
                 throw new Error(`Failed to parse ${searchType} data: ${errorMessage}`);
             }
 
-            // Fallback: return raw data (should not normally reach here)
             console.warn(`Unexpected data format for ${searchType}, returning raw data`);
             return data as any;
         } catch (error) {
@@ -249,37 +208,21 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
         }
     };
 
-    const renderSearchResult = (result: SearchResult, index: number) => {
+    const renderSearchResult = (item: SearchResultWithLatency, index: number) => {
+        const { result, latency } = item;
         if (!result) return null;
 
-        // Format the result based on its type
         let formattedResult: Record<string, any> = {};
         let resultType;
 
-        // Attempt to determine the type of the result
         if ('view' in result && 'signature' in result && !('proof' in result)) {
-            // This is a Seed object
             resultType = 'Seed';
             formattedResult = {
                 view: result.view,
-                signature: hexUint8Array(result.signature as Uint8Array, 64) // Show full signature
+                signature: hexUint8Array(result.signature as Uint8Array, 64)
             };
         } else if ('proof' in result && 'block' in result) {
-            // This is either a Notarization or Finalization object
-
-            // Determine the type based on the search type that was used for the query
-            if (lastSearchType === 'finalization') {
-                resultType = 'Finalization';
-            } else if (lastSearchType === 'notarization') {
-                resultType = 'Notarization';
-            } else if (lastSearchType === 'block') {
-                // For block searches, always show as Finalization if it has a proof
-                resultType = 'Finalization';
-            } else {
-                // Fallback detection if lastSearchType is null
-                resultType = 'quorum' in result ? 'Finalization' : 'Notarization';
-            }
-
+            resultType = lastSearchType === 'finalization' ? 'Finalization' : 'Notarization';
             const dataObj = result as (NotarizedJs | FinalizedJs);
             const block = dataObj.block;
             const now = Date.now();
@@ -294,13 +237,10 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                 parent: hexUint8Array(block.parent, 64)
             };
 
-            // Add signature if available
             if (dataObj.proof.signature) {
-                formattedResult.signature = hexUint8Array(dataObj.proof.signature, 64); // Show full signature
+                formattedResult.signature = hexUint8Array(dataObj.proof.signature, 64);
             }
-
         } else if ('height' in result && 'timestamp' in result && 'digest' in result) {
-            // This is a Block object
             resultType = 'Block';
             const block = result as BlockJs;
             const now = Date.now();
@@ -314,19 +254,17 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                 parent: hexUint8Array(block.parent, 64)
             };
         } else {
-            // Unknown or unrecognized data structure
             resultType = 'Unknown Data';
             formattedResult = {
                 raw: JSON.stringify(result, (key, value) => {
                     if (value && value.constructor === Uint8Array) {
-                        return hexUint8Array(value as Uint8Array, 64); // Show full binary data
+                        return hexUint8Array(value as Uint8Array, 64);
                     }
                     return value;
                 }, 2)
             };
         }
 
-        // Helper function to get CSS class for specific field types
         const getValueClass = (key: string, value: any) => {
             const baseClass = "search-result-value";
             if (key === 'digest') return `${baseClass} digest`;
@@ -341,7 +279,10 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
             <div key={index} className="search-result-item">
                 <div className="search-result-header">
                     <strong>{resultType}</strong>
-                    {formattedResult.height && !formattedResult.view && <span>Height {formattedResult.height}</span>}
+                    <div className="header-right">
+                        {formattedResult.height && !formattedResult.view && <span>Height {formattedResult.height}</span>}
+                        <span className="latency">{latency}ms</span>
+                    </div>
                 </div>
                 <div className="search-result-content">
                     {Object.entries(formattedResult).map(([key, value]) => (
@@ -439,7 +380,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                         <h3>Results</h3>
                         {results.length > 0 ? (
                             <div className="search-result-list">
-                                {results.map((result, index) => renderSearchResult(result, index))}
+                                {results.map((item, index) => renderSearchResult(item, index))}
                             </div>
                         ) : (
                             !error && (

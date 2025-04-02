@@ -305,3 +305,14 @@
         width: 100%;
     }
 }
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.latency {
+    font-size: 0.8em;
+    color: #666;
+}
