@@ -273,8 +273,8 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
             } else if (lastSearchType === 'notarization') {
                 resultType = 'Notarization';
             } else if (lastSearchType === 'block') {
-                // For block searches returning finalized data, show as Block instead
-                resultType = 'Block';
+                // For block searches, always show as Finalization if it has a proof
+                resultType = 'Finalization';
             } else {
                 // Fallback detection if lastSearchType is null
                 resultType = 'quorum' in result ? 'Finalization' : 'Notarization';
@@ -399,10 +399,10 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                                     value={searchType}
                                     onChange={(e) => setSearchType(e.target.value as SearchType)}
                                 >
-                                    <option value="block">Block</option>
+                                    <option value="seed">Seed</option>
                                     <option value="notarization">Notarization</option>
                                     <option value="finalization">Finalization</option>
-                                    <option value="seed">Seed</option>
+                                    <option value="block">Block</option>
                                 </select>
                             </div>
 
