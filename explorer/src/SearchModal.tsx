@@ -262,7 +262,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
             resultType = 'Seed';
             formattedResult = {
                 view: result.view,
-                signature: hexUint8Array(result.signature as Uint8Array, 16)
+                signature: hexUint8Array(result.signature as Uint8Array, 64) // Show full signature
             };
         } else if ('proof' in result && 'block' in result) {
             // This is either a Notarization or Finalization object
@@ -290,8 +290,13 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                 height: block.height,
                 timestamp: new Date(Number(block.timestamp)).toLocaleString(),
                 age: formatAge(age),
-                digest: hexUint8Array(block.digest as Uint8Array, 16)
+                digest: hexUint8Array(block.digest as Uint8Array, 64) // Show full digest
             };
+
+            // Add signature if available
+            if (dataObj.proof.signature) {
+                formattedResult.signature = hexUint8Array(dataObj.proof.signature, 64); // Show full signature
+            }
         } else if ('height' in result && 'timestamp' in result && 'digest' in result) {
             // This is a Block object
             resultType = 'Block';
@@ -303,12 +308,12 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                 height: block.height,
                 timestamp: new Date(Number(block.timestamp)).toLocaleString(),
                 age: formatAge(age),
-                digest: hexUint8Array(block.digest as Uint8Array, 16)
+                digest: hexUint8Array(block.digest as Uint8Array, 64) // Show full digest
             };
 
             // Add parent digest if available
             if (block.parent_digest) {
-                formattedResult.parent_digest = hexUint8Array(block.parent_digest, 16);
+                formattedResult.parent_digest = hexUint8Array(block.parent_digest, 64); // Show full parent digest
             }
         } else {
             // Unknown or unrecognized data structure
@@ -316,7 +321,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
             formattedResult = {
                 raw: JSON.stringify(result, (key, value) => {
                     if (value && value.constructor === Uint8Array) {
-                        return hexUint8Array(value as Uint8Array, 16);
+                        return hexUint8Array(value as Uint8Array, 64); // Show full binary data
                     }
                     return value;
                 }, 2)
@@ -330,6 +335,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
             if (key === 'timestamp') return `${baseClass} timestamp`;
             if (key === 'age') return `${baseClass} age`;
             if (key === 'signature') return `${baseClass} signature`;
+            if (key === 'parent_digest') return `${baseClass} digest`;
             return baseClass;
         };
 
