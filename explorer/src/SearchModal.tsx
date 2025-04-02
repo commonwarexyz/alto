@@ -277,9 +277,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
             <div key={index} className="search-result-item">
                 <div className="search-result-header">
                     <strong>{resultType}</strong>
-                    <div className="header-right">
-                        <span className="latency">{latency}ms</span>
-                    </div>
                 </div>
                 <div className="search-result-content">
                     {Object.entries(formattedResult).map(([key, value]) => (
@@ -288,6 +285,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                             <span className={getValueClass(key, value)}>{String(value)}</span>
                         </div>
                     ))}
+                    <span className="latency">Response Latency: {latency}ms</span>
                 </div>
             </div>
         );
@@ -308,7 +306,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
         <div className="search-modal-overlay">
             <div className="search-modal">
                 <div className="search-modal-header">
-                    <h2>Search Alto Explorer</h2>
+                    <h2>Search for Artifacts</h2>
                     <button
                         className="search-help-button"
                         onClick={() => setShowHelp(!showHelp)}

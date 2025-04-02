@@ -280,6 +280,15 @@
     justify-content: flex-end;
 }
 
+.latency {
+    margin-top: 16px;
+    font-style: italic;
+    color: #777;
+    font-size: 12px;
+    line-height: 1.4;
+    text-align: center;
+}
+
 /* Mobile optimizations */
 @media (max-width: 768px) {
     .search-modal {
@@ -304,15 +313,8 @@
     .search-button {
         width: 100%;
     }
-}
 
-.header-right {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.latency {
-    font-size: 0.8em;
-    color: #666;
+    .latency {
+        font-size: 12px;
+    }
 }
