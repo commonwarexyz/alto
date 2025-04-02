@@ -149,9 +149,29 @@
 }
 
 .search-button.cancel {
-    background-color: #f0f0f0;
+    padding: 8px 16px;
+    background-color: #f4f4f4;
+    border: 1px solid #ddd;
+    cursor: pointer;
+    font-family: 'Consolas', monospace;
+    font-size: 0.9rem;
     color: black;
-    border: 1px solid #ccc;
+    -webkit-text-fill-color: black;
+    -webkit-appearance: none;
+    appearance: none;
+    -webkit-tap-highlight-color: transparent;
+    height: auto;
+    /* Override the 38px height from .search-button */
+}
+
+.search-button.cancel:hover,
+.search-button.cancel:focus,
+.search-button.cancel:active,
+.search-button.cancel:visited {
+    background-color: #e8e8e8;
+    color: black;
+    -webkit-text-fill-color: black;
+    text-decoration: none;
 }
 
 .search-error {
