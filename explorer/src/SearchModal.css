@@ -366,7 +366,14 @@
         font-size: 1rem;
     }
 
+    .search-result-key {
+        min-width: auto;
+        margin-bottom: 4px;
+    }
+
     .search-result-field {
+        flex-direction: column;
+        align-items: flex-start;
         font-size: 0.8rem;
     }
 
