@@ -16,6 +16,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const [results, setResults] = useState<SearchResult[]>([]);
+    const [lastSearchType, setLastSearchType] = useState<SearchType | null>(null);
     const [showHelp, setShowHelp] = useState<boolean>(false);
     const [wasmInitialized, setWasmInitialized] = useState<boolean>(false);
 
@@ -100,6 +101,8 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
         setIsLoading(true);
         setError(null);
         setResults([]);
+        // Store the current search type
+        setLastSearchType(searchType);
 
         const parsedQuery = parseQuery(searchQuery, searchType);
         if (parsedQuery === null) {
@@ -259,31 +262,29 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                 view: result.view,
                 signature: hexUint8Array(result.signature as Uint8Array, 16)
             };
-        } else if ('proof' in result && 'block' in result && !('quorum' in result)) {
-            // This is a Notarized object
-            resultType = 'Notarization';
-            const notarized = result as NotarizedJs;
-            const block = notarized.block;
+        } else if ('proof' in result && 'block' in result) {
+            // This is either a Notarization or Finalization object
+
+            // Determine the type based on the search type that was used for the query
+            if (lastSearchType === 'finalization') {
+                resultType = 'Finalization';
+            } else if (lastSearchType === 'notarization') {
+                resultType = 'Notarization';
+            } else if (lastSearchType === 'block') {
+                // For block searches returning finalized data, show as Block instead
+                resultType = 'Block';
+            } else {
+                // Fallback detection if lastSearchType is null
+                resultType = 'quorum' in result ? 'Finalization' : 'Notarization';
+            }
+
+            const dataObj = result as (NotarizedJs | FinalizedJs);
+            const block = dataObj.block;
             const now = Date.now();
             const age = now - Number(block.timestamp);
 
             formattedResult = {
-                view: notarized.proof.view,
-                height: block.height,
-                timestamp: new Date(Number(block.timestamp)).toLocaleString(),
-                age: formatAge(age),
-                digest: hexUint8Array(block.digest as Uint8Array, 16)
-            };
-        } else if ('proof' in result && 'block' in result && 'quorum' in result) {
-            // This is a Finalized object
-            resultType = 'Finalization';
-            const finalized = result as FinalizedJs;
-            const block = finalized.block;
-            const now = Date.now();
-            const age = now - Number(block.timestamp);
-
-            formattedResult = {
-                view: finalized.proof.view,
+                view: dataObj.proof.view,
                 height: block.height,
                 timestamp: new Date(Number(block.timestamp)).toLocaleString(),
                 age: formatAge(age),
