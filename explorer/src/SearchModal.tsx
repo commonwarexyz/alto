@@ -436,7 +436,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                     )}
 
                     <div className="search-results">
-                        <h3>Results {isLoading && <span className="search-loading-indicator">(Loading...)</span>}</h3>
+                        <h3>Results</h3>
                         {results.length > 0 ? (
                             <div className="search-result-list">
                                 {results.map((result, index) => renderSearchResult(result, index))}
