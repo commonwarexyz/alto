@@ -143,8 +143,11 @@
 }
 
 .search-button:disabled {
-    background-color: #cccccc;
+    background-color: #f0f0f0;
     cursor: not-allowed;
+    text-decoration: none;
+    color: #ffb200;
+    -webkit-text-fill-color: #ffb200;
 }
 
 .search-button.cancel {
