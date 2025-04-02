@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './SearchModal.css';
 import { BACKEND_URL, PUBLIC_KEY_HEX } from './config';
-import { FinalizedJs, NotarizedJs, SeedJs, BlockJs, SearchType, SearchResult } from './types';
+import { FinalizedJs, NotarizedJs, BlockJs, SearchType, SearchResult } from './types';
 import { hexToUint8Array, hexUint8Array, formatAge } from './utils';
+import init, { parse_seed, parse_notarized, parse_finalized, parse_block } from "./alto_types/alto_types.js";
 
 interface SearchModalProps {
     isOpen: boolean;
@@ -16,6 +17,41 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
     const [error, setError] = useState<string | null>(null);
     const [results, setResults] = useState<SearchResult[]>([]);
     const [showHelp, setShowHelp] = useState<boolean>(false);
+    const [wasmInitialized, setWasmInitialized] = useState<boolean>(false);
+
+    // Initialize WASM module on component mount
+    useEffect(() => {
+        const initWasm = async () => {
+            try {
+                await init();
+                setWasmInitialized(true);
+            } catch (error) {
+                console.error("Failed to initialize WASM module:", error);
+                setError("Failed to initialize search functionality. Please try again later.");
+            }
+        };
+
+        if (!wasmInitialized) {
+            initWasm();
+        }
+    }, [wasmInitialized]);
+
+    // Helper function to convert a number to U64 hex representation
+    const numberToU64Hex = (num: number): string => {
+        // Create a buffer for 8 bytes (u64)
+        const buffer = new ArrayBuffer(8);
+        const view = new DataView(buffer);
+
+        // Set the value as a big-endian u64
+        // JavaScript can only handle 53 bits precisely, but this should be sufficient
+        // for our block heights and view numbers
+        view.setBigUint64(0, BigInt(num), false); // false = big-endian
+
+        // Convert to hex string
+        return Array.from(new Uint8Array(buffer))
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
+    };
 
     // Parse the query string into an appropriate format following the client library patterns
     const parseQuery = (query: string, type: SearchType): string | number | [number, number] | null => {
@@ -115,7 +151,11 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
     };
 
     const fetchSingleItem = async (query: string | number): Promise<SearchResult> => {
-        const baseUrl = `https://${BACKEND_URL}/consensus`;
+        if (!wasmInitialized) {
+            throw new Error("Search functionality is still initializing. Please try again in a moment.");
+        }
+
+        const baseUrl = `https://${BACKEND_URL}`;
         const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
 
         let endpoint = '';
@@ -123,16 +163,16 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
         // Match endpoint patterns from client.rs
         switch (searchType) {
             case 'block':
-                endpoint = `/block/${query}`;
+                endpoint = `/block/${typeof query === 'number' ? numberToU64Hex(query) : query}`;
                 break;
             case 'notarization':
-                endpoint = `/notarization/${query}`;
+                endpoint = `/notarization/${typeof query === 'number' ? numberToU64Hex(query) : query}`;
                 break;
             case 'finalization':
-                endpoint = `/finalization/${query}`;
+                endpoint = `/finalization/${typeof query === 'number' ? numberToU64Hex(query) : query}`;
                 break;
             case 'seed':
-                endpoint = `/seed/${query}`;
+                endpoint = `/seed/${typeof query === 'number' ? numberToU64Hex(query) : query}`;
                 break;
         }
 
@@ -150,63 +190,46 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
             const arrayBuffer = await response.arrayBuffer();
             const data = new Uint8Array(arrayBuffer);
 
-            // Parse the binary response based on the type
-            // In a real implementation, we would use the proper parsing functions from alto_types.js
-            // For this prototype, we're using a simplified approach
-
-            if (searchType === 'seed') {
-                // We would use parse_seed(PUBLIC_KEY, data.slice(1)) in a full implementation
-                // For now, create a simplified seed object
-                return {
-                    view: Number(query) || 0,
-                    signature: data.slice(-48), // Take last 48 bytes as signature
-                };
-            } else if (searchType === 'notarization') {
-                // We would use parse_notarized(PUBLIC_KEY, data.slice(1)) in a full implementation
-                // For now, create a simplified notarized object with block data
-                return {
-                    proof: {
-                        view: Number(query) || 0,
-                        parent: 0,
-                        payload: new Uint8Array(),
-                        signature: data.slice(-48)
-                    },
-                    block: {
-                        height: data[8] * 256 + data[9], // Simplified height extraction
-                        timestamp: Date.now() - Math.random() * 10000, // Fake timestamp
-                        digest: data.slice(-32), // Take last 32 bytes as digest
-                        parent: new Uint8Array(32) // Empty parent digest
+            // Use proper parsing functions from the WASM module
+            try {
+                if (searchType === 'seed') {
+                    // For seeds we expect a kind byte at the beginning
+                    const result = parse_seed(PUBLIC_KEY, data.slice(1));
+                    if (!result) throw new Error("Failed to parse seed data");
+                    return result;
+                } else if (searchType === 'notarization') {
+                    // For notarizations we expect a kind byte at the beginning
+                    const result = parse_notarized(PUBLIC_KEY, data.slice(1));
+                    if (!result) throw new Error("Failed to parse notarization data");
+                    return result;
+                } else if (searchType === 'finalization') {
+                    // For finalizations we expect a kind byte at the beginning
+                    const result = parse_finalized(PUBLIC_KEY, data.slice(1));
+                    if (!result) throw new Error("Failed to parse finalization data");
+                    return result;
+                } else if (searchType === 'block') {
+                    // For blocks, if coming from the 'latest' endpoint, we get a finalized object
+                    if (query === 'latest') {
+                        const result = parse_finalized(PUBLIC_KEY, data.slice(1));
+                        if (!result) throw new Error("Failed to parse latest block data");
+                        return result;
+                    } else {
+                        // For specific block queries, we get just the block
+                        const result = parse_block(data);
+                        if (!result) throw new Error("Failed to parse block data");
+                        return result;
                     }
-                };
-            } else if (searchType === 'finalization') {
-                // We would use parse_finalized(PUBLIC_KEY, data.slice(1)) in a full implementation
-                // For now, create a simplified finalized object with block data
-                return {
-                    proof: {
-                        view: Number(query) || 0,
-                        parent: 0,
-                        payload: new Uint8Array(),
-                        signature: data.slice(-48)
-                    },
-                    block: {
-                        height: data[8] * 256 + data[9], // Simplified height extraction
-                        timestamp: Date.now() - Math.random() * 10000, // Fake timestamp
-                        digest: data.slice(-32), // Take last 32 bytes as digest
-                        parent: new Uint8Array(32) // Empty parent digest
-                    }
-                };
-            } else if (searchType === 'block') {
-                // We would use parse_block(data) in a full implementation
-                // For now, create a simplified block object
-                return {
-                    height: typeof query === 'number' ? query : 0,
-                    timestamp: Date.now() - Math.random() * 10000, // Fake timestamp
-                    digest: data.slice(-32), // Take last 32 bytes as digest
-                    parent: new Uint8Array(32) // Empty parent digest
-                };
+                }
+            } catch (parseError) {
+                console.error(`Error parsing ${searchType} data:`, parseError);
+                const errorMessage = parseError instanceof Error
+                    ? parseError.message
+                    : String(parseError);
+                throw new Error(`Failed to parse ${searchType} data: ${errorMessage}`);
             }
 
-            // Fallback: return raw data
+            // Fallback: return raw data (should not normally reach here)
+            console.warn(`Unexpected data format for ${searchType}, returning raw data`);
             return data as any;
         } catch (error) {
             console.error(`Error fetching ${searchType}:`, error);
@@ -224,37 +247,63 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
         let resultType;
 
         // Attempt to determine the type of the result
-        if ('view' in result && 'signature' in result) {
+        if ('view' in result && 'signature' in result && !('proof' in result)) {
+            // This is a Seed object
             resultType = 'Seed';
             formattedResult = {
                 view: result.view,
                 signature: hexUint8Array(result.signature as Uint8Array, 16)
             };
-        } else if ('proof' in result && 'block' in result) {
+        } else if ('proof' in result && 'block' in result && !('quorum' in result)) {
+            // This is a Notarized object
             resultType = 'Notarization';
-            const block = result.block;
+            const notarized = result as NotarizedJs;
+            const block = notarized.block;
             const now = Date.now();
             const age = now - Number(block.timestamp);
 
             formattedResult = {
-                view: result.proof.view,
+                view: notarized.proof.view,
+                height: block.height,
+                timestamp: new Date(Number(block.timestamp)).toLocaleString(),
+                age: formatAge(age),
+                digest: hexUint8Array(block.digest as Uint8Array, 16)
+            };
+        } else if ('proof' in result && 'block' in result && 'quorum' in result) {
+            // This is a Finalized object
+            resultType = 'Finalization';
+            const finalized = result as FinalizedJs;
+            const block = finalized.block;
+            const now = Date.now();
+            const age = now - Number(block.timestamp);
+
+            formattedResult = {
+                view: finalized.proof.view,
                 height: block.height,
                 timestamp: new Date(Number(block.timestamp)).toLocaleString(),
                 age: formatAge(age),
                 digest: hexUint8Array(block.digest as Uint8Array, 16)
             };
         } else if ('height' in result && 'timestamp' in result && 'digest' in result) {
+            // This is a Block object
             resultType = 'Block';
+            const block = result as BlockJs;
             const now = Date.now();
-            const age = now - Number(result.timestamp);
+            const age = now - Number(block.timestamp);
 
             formattedResult = {
-                height: result.height,
-                timestamp: new Date(Number(result.timestamp)).toLocaleString(),
+                height: block.height,
+                timestamp: new Date(Number(block.timestamp)).toLocaleString(),
                 age: formatAge(age),
-                digest: hexUint8Array(result.digest as Uint8Array, 16)
+                digest: hexUint8Array(block.digest as Uint8Array, 16)
             };
+
+            // Add parent digest if available
+            if (block.parent_digest) {
+                formattedResult.parent_digest = hexUint8Array(block.parent_digest, 16);
+            }
         } else {
+            // Unknown or unrecognized data structure
             resultType = 'Unknown Data';
             formattedResult = {
                 raw: JSON.stringify(result, (key, value) => {
@@ -297,6 +346,10 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
 
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
+        if (!wasmInitialized) {
+            setError("Search functionality is still initializing. Please try again in a moment.");
+            return;
+        }
         fetchData();
     };
 
@@ -358,7 +411,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                             <button
                                 type="submit"
                                 className="search-button"
-                                disabled={isLoading}
+                                disabled={isLoading || !wasmInitialized}
                             >
                                 {isLoading ? 'Searching...' : 'Search'}
                             </button>
