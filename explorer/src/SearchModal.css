@@ -1,0 +1,266 @@
+.search-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    padding: 20px;
+}
+
+.search-modal {
+    background-color: white;
+    border: 1px solid #ccc;
+    width: 100%;
+    max-width: 800px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    font-family: 'Consolas', monospace;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.search-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid #eee;
+    background-color: #f0f0f0;
+}
+
+.search-modal-header h2 {
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: normal;
+}
+
+.search-help-button {
+    width: 24px;
+    height: 24px;
+    border-radius: 0;
+    border: 1px solid #ccc;
+    background-color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.search-help-panel {
+    padding: 12px 20px;
+    background-color: #f8f8f8;
+    border-bottom: 1px solid #eee;
+    font-size: 0.9rem;
+}
+
+.search-help-panel h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 1rem;
+}
+
+.search-help-panel p {
+    margin: 8px 0;
+}
+
+.search-help-panel ul {
+    margin: 8px 0;
+    padding-left: 20px;
+}
+
+.search-help-panel li {
+    margin-bottom: 4px;
+}
+
+.search-modal-content {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.search-form {
+    margin-bottom: 20px;
+}
+
+.search-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-end;
+}
+
+.search-type-selector,
+.search-query-input {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.search-type-selector label,
+.search-query-input label {
+    font-size: 0.9rem;
+    font-weight: bold;
+}
+
+.search-type-selector select,
+.search-query-input input {
+    padding: 8px 12px;
+    border: 1px solid #ccc;
+    border-radius: 0;
+    font-family: 'Consolas', monospace;
+    min-width: 200px;
+    background-color: white;
+}
+
+.search-button {
+    padding: 8px 16px;
+    background-color: #0000ee;
+    color: white;
+    border: none;
+    border-radius: 0;
+    cursor: pointer;
+    font-family: 'Consolas', monospace;
+    height: 38px;
+}
+
+.search-button:hover {
+    background-color: #0000cc;
+}
+
+.search-button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+
+.search-button.cancel {
+    background-color: #f0f0f0;
+    color: black;
+    border: 1px solid #ccc;
+}
+
+.search-button.cancel:hover {
+    background-color: #e0e0e0;
+}
+
+.search-error {
+    background-color: #ffeeee;
+    border: 1px solid #ffcccc;
+    color: #cc0000;
+    padding: 10px;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+}
+
+.search-results h3 {
+    margin-top: 0;
+    margin-bottom: 16px;
+    font-size: 1.1rem;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #eee;
+}
+
+.search-loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+    color: #666;
+}
+
+.search-no-results {
+    padding: 20px;
+    color: #666;
+    text-align: center;
+    border: 1px dashed #ccc;
+    background-color: #f9f9f9;
+}
+
+.search-result-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.search-result-item {
+    border: 1px solid #eee;
+    background-color: #f9f9f9;
+}
+
+.search-result-header {
+    padding: 8px 12px;
+    background-color: #f0f0f0;
+    border-bottom: 1px solid #eee;
+    font-family: 'Consolas', monospace;
+}
+
+.search-result-content {
+    padding: 12px;
+}
+
+.search-result-field {
+    display: flex;
+    margin-bottom: 6px;
+    font-size: 0.9rem;
+    align-items: baseline;
+    flex-wrap: wrap;
+}
+
+.search-result-key {
+    font-weight: bold;
+    margin-right: 8px;
+    min-width: 80px;
+}
+
+.search-result-value {
+    font-family: 'Consolas', monospace;
+    word-break: break-all;
+}
+
+.search-result-json {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.9rem;
+    overflow-x: auto;
+}
+
+.search-modal-footer {
+    padding: 16px 20px;
+    border-top: 1px solid #eee;
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+    .search-modal {
+        max-width: 95%;
+    }
+
+    .search-modal-header h2 {
+        font-size: 1rem;
+    }
+
+    .search-options {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .search-type-selector select,
+    .search-query-input input {
+        width: 100%;
+        min-width: unset;
+    }
+
+    .search-button {
+        width: 100%;
+    }
+}

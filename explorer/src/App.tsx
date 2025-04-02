@@ -17,6 +17,8 @@ import { useClockSkew } from './useClockSkew';
 import ErrorNotification from './ErrorNotification';
 import './ErrorNotification.css';
 import MaintenancePage from './MaintenancePage';
+import SearchModal from './SearchModal';
+import './SearchModal.css';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
@@ -97,6 +99,7 @@ const App: React.FC = () => {
   const [showError, setShowError] = useState<boolean>(false);
   const [isInMaintenance, setIsInMaintenance] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState<boolean>(false);
   const healthCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const adjustTime = useClockSkew();
   const currentTimeRef = useRef(adjustTime(Date.now()));
@@ -729,6 +732,12 @@ const App: React.FC = () => {
         </div>
         <div className="about-button-container">
           <button
+            className="search-header-button"
+            onClick={() => setIsSearchModalOpen(true)}
+          >
+            🔍
+          </button>
+          <button
             className="key-header-button"
             onClick={() => setIsKeyInfoModalOpen(true)}
           >
@@ -821,6 +830,10 @@ const App: React.FC = () => {
         isOpen={isKeyInfoModalOpen}
         onClose={() => setIsKeyInfoModalOpen(false)}
         publicKeyHex={PUBLIC_KEY_HEX}
+      />
+      <SearchModal
+        isOpen={isSearchModalOpen}
+        onClose={() => setIsSearchModalOpen(false)}
       />
     </div >
   );
