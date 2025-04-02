@@ -4,7 +4,8 @@ import { LatLng, DivIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
 import { BACKEND_URL, LOCATIONS, PUBLIC_KEY_HEX } from "./config";
-import { SeedJs, NotarizedJs, FinalizedJs, BlockJs } from "./types";
+import { SeedJs, NotarizedJs, FinalizedJs, ViewData } from "./types";
+import { hexToUint8Array, hexUint8Array } from "./utils";
 import "./App.css";
 import AboutModal from './AboutModal';
 import './AboutModal.css';
@@ -22,23 +23,6 @@ import './SearchModal.css';
 
 // Export PUBLIC_KEY as a Uint8Array for use in the application
 const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
-
-type ViewStatus = "growing" | "notarized" | "finalized" | "timed_out" | "unknown";
-
-interface ViewData {
-  view: number;
-  location?: [number, number];
-  locationName?: string;
-  status: ViewStatus;
-  startTime: number;
-  notarizationTime?: number;
-  finalizationTime?: number;
-  signature?: Uint8Array;
-  block?: BlockJs;
-  timeoutId?: NodeJS.Timeout;
-  actualNotarizationLatency?: number;
-  actualFinalizationLatency?: number;
-}
 
 const SCALE_DURATION = 750; // 750ms
 const TIMEOUT_DURATION = 5000; // 5s
@@ -1195,43 +1179,5 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     </div>
   );
 };
-
-/**
- * Converts a hexadecimal string to a Uint8Array.
- * @param hex - The hexadecimal string to convert.
- * @returns A Uint8Array representation of the hex string.
- * @throws Error if the hex string has an odd length or contains invalid characters.
- */
-function hexToUint8Array(hex: string): Uint8Array {
-  if (hex.length % 2 !== 0) {
-    throw new Error("Hex string must have an even length");
-  }
-  const bytes: number[] = [];
-  for (let i = 0; i < hex.length; i += 2) {
-    const byteStr = hex.substr(i, 2);
-    const byte = parseInt(byteStr, 16);
-    if (isNaN(byte)) {
-      throw new Error(`Invalid hex character in string: ${byteStr}`);
-    }
-    bytes.push(byte);
-  }
-  return new Uint8Array(bytes);
-}
-
-/**
- * Converts a Uint8Array to a hex string (keeping up to len).
- * @param arr - The Uint8Array to convert
- * @param len - Max number of characters to keep (default: 5)
- * @returns A representation of the Uint8Array as a hex string.
- */
-function hexUint8Array(arr: Uint8Array | undefined, len: number = 8): string {
-  if (!arr || arr.length === 0) return "";
-
-  // Convert the entire array to hex
-  const fullHex = Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
-
-  // Get last 5 characters of the hex string
-  return fullHex.slice(-len);
-}
 
 export default App;
