@@ -719,19 +719,19 @@ const App: React.FC = () => {
             className="search-header-button"
             onClick={() => setIsSearchModalOpen(true)}
           >
-            ⛏
+            ⛏︎
           </button>
           <button
             className="key-header-button"
             onClick={() => setIsKeyInfoModalOpen(true)}
           >
-            ⚷
+            ⚷︎
           </button>
           <button
             className="about-header-button"
             onClick={() => setIsAboutModalOpen(true)}
           >
-            ?
+            ?︎
           </button>
         </div>
       </header>

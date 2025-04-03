@@ -582,3 +582,12 @@ body {
     font-size: 0.8rem;
   }
 }
+
+.search-header-button,
+.key-header-button,
+.about-header-button {
+  text-rendering: optimizeLegibility;
+  -webkit-font-feature-settings: "liga" 0;
+  font-feature-settings: "liga" 0;
+  font-variant-emoji: text;
+}
