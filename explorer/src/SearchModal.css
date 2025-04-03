@@ -119,6 +119,11 @@
     min-width: 200px;
     background-color: white;
     height: 38px;
+    -webkit-appearance: none;
+    appearance: none;
+    color: black;
+    -webkit-text-fill-color: black;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .search-button {
