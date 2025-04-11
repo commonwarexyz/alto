@@ -22,9 +22,12 @@ ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
 RUN rustup default stable
 RUN rustup target add aarch64-unknown-linux-gnu
 
+# Set RUSTFLAGS
+ENV RUSTFLAGS="-C force-frame-pointers=yes"
+
 # Set the working directory
 WORKDIR /alto
 
 # Build the binary
 ENTRYPOINT ["/bin/bash", "-c"]
-CMD ["cd chain && cargo build --release --bin validator --target aarch64-unknown-linux-gnu && cp ../target/aarch64-unknown-linux-gnu/release/validator assets"]
+CMD ["cd chain && cargo build --profile release-with-debug --bin validator --target aarch64-unknown-linux-gnu && cp ../target/aarch64-unknown-linux-gnu/release-with-debug/validator assets"]
