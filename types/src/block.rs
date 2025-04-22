@@ -1,7 +1,7 @@
-use crate::{Finalization, Notarization};
 use bytes::{Buf, BufMut};
-use commonware_cryptography::{bls12381::PublicKey, sha256::Digest, Hasher, Sha256};
-use commonware_utils::{Array, SizedSerialize};
+use commonware_codec::{Error, FixedSize, Read, ReadExt, Write};
+use commonware_consensus::threshold_simplex::types::Notarization;
+use commonware_cryptography::{bls12381::PublicKey, sha256::Digest, Digestible, Hasher, Sha256};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
@@ -36,23 +36,21 @@ impl Block {
             digest,
         }
     }
+}
 
-    pub fn serialize(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(Self::SERIALIZED_LEN);
-        bytes.extend_from_slice(&self.parent);
-        bytes.put_u64(self.height);
-        bytes.put_u64(self.timestamp);
-        bytes
+impl Write for Block {
+    fn write(&self, writer: &mut impl BufMut) {
+        self.parent.write(writer);
+        self.height.write(writer);
+        self.timestamp.write(writer);
     }
+}
 
-    pub fn deserialize(mut bytes: &[u8]) -> Option<Self> {
-        // Parse the block
-        if bytes.len() != Self::SERIALIZED_LEN {
-            return None;
-        }
-        let parent = Digest::read_from(&mut bytes).ok()?;
-        let height = bytes.get_u64();
-        let timestamp = bytes.get_u64();
+impl Read for Block {
+    fn read_cfg(reader: &mut impl Buf, cfg: &()) -> Result<Self, Error> {
+        let parent = Digest::read(reader)?;
+        let height = u64::read(reader)?;
+        let timestamp = u64::read(reader)?;
 
         // Return block
         let digest = Self::compute_digest(&parent, height, timestamp);
@@ -63,27 +61,30 @@ impl Block {
             digest,
         })
     }
+}
 
-    pub fn digest(&self) -> Digest {
+impl FixedSize for Block {
+    const SIZE: usize = Digest::SIZE + u64::SIZE + u64::SIZE;
+}
+
+impl Digestible<Digest> for Block {
+    fn digest(&self) -> Digest {
         self.digest
     }
 }
 
-impl SizedSerialize for Block {
-    const SERIALIZED_LEN: usize =
-        Digest::SERIALIZED_LEN + u64::SERIALIZED_LEN + u64::SERIALIZED_LEN;
-}
-
 pub struct Notarized {
-    pub proof: Notarization,
+    pub proof: Notarization<Digest>,
     pub block: Block,
 }
 
 impl Notarized {
-    pub fn new(proof: Notarization, block: Block) -> Self {
+    pub fn new(proof: Notarization<Digest>, block: Block) -> Self {
         Self { proof, block }
     }
+}
 
+impl Write for Notarized {
     pub fn serialize(&self) -> Vec<u8> {
         let block = self.block.serialize();
         let mut bytes = Vec::with_capacity(Notarization::SERIALIZED_LEN + block.len());
@@ -91,7 +92,9 @@ impl Notarized {
         bytes.extend_from_slice(&block);
         bytes
     }
+}
 
+impl Read for Notarized {
     pub fn deserialize(public: Option<&PublicKey>, bytes: &[u8]) -> Option<Self> {
         // Deserialize the proof and block
         let (proof, block) = bytes.split_at_checked(Notarization::SERIALIZED_LEN)?;
@@ -104,6 +107,10 @@ impl Notarized {
         }
         Some(Self { proof, block })
     }
+}
+
+impl FixedSize for Notarized {
+    const SIZE: usize = Notarization::SIZE + Block::SIZE;
 }
 
 pub struct Finalized {
