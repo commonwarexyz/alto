@@ -1,4 +1,5 @@
-use crate::{leader_index as compute_leader_index, Block, Finalized, Notarized, Seed};
+use crate::{leader_index as compute_leader_index, Block, Finalized, Notarized};
+use commonware_codec::DecodeExt;
 use commonware_cryptography::bls12381::PublicKey;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -38,11 +39,9 @@ pub struct FinalizedJs {
 }
 
 #[wasm_bindgen]
-pub fn parse_seed(public_key: Option<Vec<u8>>, bytes: Vec<u8>) -> JsValue {
-    let mut public = None;
-    if let Some(pk) = public_key {
-        public = Some(PublicKey::try_from(pk).expect("invalid public key"));
-    }
+pub fn parse_seed(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
+    let public_key = PublicKey::decode(public_key.into()).expect("invalid public key");
+    // TODO: keep seed separate?
     match Seed::deserialize(public.as_ref(), &bytes) {
         Some(s) => {
             let seed_js = SeedJs {
@@ -56,11 +55,8 @@ pub fn parse_seed(public_key: Option<Vec<u8>>, bytes: Vec<u8>) -> JsValue {
 }
 
 #[wasm_bindgen]
-pub fn parse_notarized(public_key: Option<Vec<u8>>, bytes: Vec<u8>) -> JsValue {
-    let mut public = None;
-    if let Some(pk) = public_key {
-        public = Some(PublicKey::try_from(pk).expect("invalid public key"));
-    }
+pub fn parse_notarized(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
+    let public_key = PublicKey::decode(public_key.into()).expect("invalid public key");
     match Notarized::deserialize(public.as_ref(), &bytes) {
         Some(n) => {
             let notarized_js = NotarizedJs {
