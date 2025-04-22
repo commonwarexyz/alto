@@ -47,8 +47,12 @@ pub enum Error {
     Tungstenite(#[from] tokio_tungstenite::tungstenite::Error),
     #[error("failed: {0}")]
     Failed(reqwest::StatusCode),
-    #[error("invalid data")]
-    InvalidData,
+    #[error("invalid data: {0}")]
+    InvalidData(#[from] commonware_codec::Error),
+    #[error("invalid signature")]
+    InvalidSignature,
+    #[error("unexpected response")]
+    UnexpectedResponse,
 }
 
 #[derive(Clone)]

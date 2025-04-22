@@ -74,6 +74,8 @@ version = "0.0.6"
 dependencies = [
  "alto-types",
  "bytes",
+ "commonware-codec",
+ "commonware-consensus",
  "commonware-cryptography",
  "commonware-utils",
  "futures",

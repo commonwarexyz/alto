@@ -3,11 +3,40 @@
 mod block;
 pub use block::{Block, Finalized, Notarized};
 mod consensus;
+use commonware_utils::hex;
 pub use consensus::leader_index;
 pub mod wasm;
 
-// We don't use functions here to guard against silent changes.
 pub const NAMESPACE: &[u8] = b"_ALTO";
+
+#[repr(u8)]
+pub enum Kind {
+    Seed = 0,
+    Notarization = 1,
+    Nullification = 2,
+    Finalization = 3,
+}
+
+impl Kind {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Seed),
+            1 => Some(Self::Notarization),
+            2 => Some(Self::Nullification),
+            3 => Some(Self::Finalization),
+            _ => None,
+        }
+    }
+
+    pub fn to_hex(&self) -> String {
+        match self {
+            Self::Seed => hex(&[0]),
+            Self::Notarization => hex(&[1]),
+            Self::Nullification => hex(&[2]),
+            Self::Finalization => hex(&[3]),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

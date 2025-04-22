@@ -1,6 +1,9 @@
 use crate::{Client, Error, IndexQuery, Query};
-use alto_types::{Block, Finalized, Kind, Notarized, Seed};
+use alto_types::{Block, Finalized, Kind, Notarized, NAMESPACE};
 use bytes::Bytes;
+use commonware_codec::DecodeExt;
+use commonware_consensus::threshold_simplex::types::{Seed, Viewable};
+use commonware_cryptography::Digestible;
 use futures::{channel::mpsc::unbounded, Stream, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::Message as TMessage};
 
@@ -76,18 +79,21 @@ impl Client {
             return Err(Error::Failed(result.status()));
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let result = Seed::deserialize(Some(&self.public), &bytes).ok_or(Error::InvalidData)?;
+        let seed = Seed::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+        if !seed.verify(NAMESPACE, self.public.as_ref()) {
+            return Err(Error::InvalidSignature);
+        }
 
         // Verify the seed matches the query
         match query {
             IndexQuery::Latest => {}
             IndexQuery::Index(index) => {
-                if result.view != index {
-                    return Err(Error::InvalidData);
+                if seed.view() != index {
+                    return Err(Error::UnexpectedResponse);
                 }
             }
         }
-        Ok(result)
+        Ok(seed)
     }
 
     pub async fn notarization_upload(&self, notarized: Bytes) -> Result<(), Error> {
@@ -116,19 +122,21 @@ impl Client {
             return Err(Error::Failed(result.status()));
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let result =
-            Notarized::deserialize(Some(&self.public), &bytes).ok_or(Error::InvalidData)?;
+        let notarized = Notarized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+        if !notarized.verify(self.public.as_ref()) {
+            return Err(Error::InvalidSignature);
+        }
 
         // Verify the notarization matches the query
         match query {
             IndexQuery::Latest => {}
             IndexQuery::Index(index) => {
-                if result.proof.view != index {
-                    return Err(Error::InvalidData);
+                if notarized.proof.view() != index {
+                    return Err(Error::UnexpectedResponse);
                 }
             }
         }
-        Ok(result)
+        Ok(notarized)
     }
 
     pub async fn finalization_upload(&self, finalized: Bytes) -> Result<(), Error> {
@@ -157,19 +165,21 @@ impl Client {
             return Err(Error::Failed(result.status()));
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let result =
-            Finalized::deserialize(Some(&self.public), &bytes).ok_or(Error::InvalidData)?;
+        let finalized = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+        if !finalized.verify(self.public.as_ref()) {
+            return Err(Error::InvalidSignature);
+        }
 
         // Verify the finalization matches the query
         match query {
             IndexQuery::Latest => {}
             IndexQuery::Index(index) => {
-                if result.proof.view != index {
-                    return Err(Error::InvalidData);
+                if finalized.proof.view() != index {
+                    return Err(Error::UnexpectedResponse);
                 }
             }
         }
-        Ok(result)
+        Ok(finalized)
     }
 
     pub async fn block_get(&self, query: Query) -> Result<Payload, Error> {
@@ -188,22 +198,26 @@ impl Client {
         // Verify the block matches the query
         let result = match query {
             Query::Latest => {
-                let result =
-                    Finalized::deserialize(Some(&self.public), &bytes).ok_or(Error::InvalidData)?;
+                let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+                if !result.verify(self.public.as_ref()) {
+                    return Err(Error::InvalidSignature);
+                }
                 Payload::Finalized(Box::new(result))
             }
             Query::Index(index) => {
-                let result =
-                    Finalized::deserialize(Some(&self.public), &bytes).ok_or(Error::InvalidData)?;
+                let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+                if !result.verify(self.public.as_ref()) {
+                    return Err(Error::InvalidSignature);
+                }
                 if result.block.height != index {
-                    return Err(Error::InvalidData);
+                    return Err(Error::UnexpectedResponse);
                 }
                 Payload::Finalized(Box::new(result))
             }
             Query::Digest(digest) => {
-                let result = Block::deserialize(&bytes).ok_or(Error::InvalidData)?;
+                let result = Block::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
                 if result.digest() != digest {
-                    return Err(Error::InvalidData);
+                    return Err(Error::UnexpectedResponse);
                 }
                 Payload::Block(result)
             }
