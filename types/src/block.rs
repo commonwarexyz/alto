@@ -1,11 +1,10 @@
+use crate::NAMESPACE;
 use bytes::{Buf, BufMut};
 use commonware_codec::{Error, FixedSize, Read, ReadExt, Write};
 use commonware_consensus::threshold_simplex::types::{Finalization, Notarization};
 use commonware_cryptography::{
     bls12381::primitives::group::Public, sha256::Digest, Digestible, Hasher, Sha256,
 };
-
-use crate::NAMESPACE;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
@@ -90,7 +89,7 @@ impl Notarized {
     }
 
     pub fn verify(&self, public_key: &Public) -> bool {
-        self.proof.verify(&NAMESPACE, public_key)
+        self.proof.verify(NAMESPACE, public_key)
     }
 }
 
@@ -133,7 +132,7 @@ impl Finalized {
     }
 
     pub fn verify(&self, public_key: &Public) -> bool {
-        self.proof.verify(&NAMESPACE, public_key)
+        self.proof.verify(NAMESPACE, public_key)
     }
 }
 
