@@ -1,6 +1,5 @@
 use bytes::{Buf, BufMut};
 use commonware_codec::{Error, FixedSize, Read, ReadExt, Write};
-use commonware_consensus::threshold_simplex::types::{Finalization, Notarization};
 use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,17 +46,18 @@ impl Write for Block {
 }
 
 impl Read for Block {
-    fn read_cfg(reader: &mut impl Buf, cfg: &()) -> Result<Self, Error> {
+    fn read_cfg(reader: &mut impl Buf, _: &()) -> Result<Self, Error> {
         let parent = Digest::read(reader)?;
         let height = u64::read(reader)?;
         let timestamp = u64::read(reader)?;
 
-        // Return block
+        // Pre-compute the digest
         let digest = Self::compute_digest(&parent, height, timestamp);
-        Some(Self {
+        Ok(Self {
             parent,
             height,
             timestamp,
+
             digest,
         })
     }
@@ -71,80 +71,4 @@ impl Digestible<Digest> for Block {
     fn digest(&self) -> Digest {
         self.digest
     }
-}
-
-pub struct Notarized {
-    pub proof: Notarization<Digest>,
-    pub block: Block,
-}
-
-impl Notarized {
-    pub fn new(proof: Notarization<Digest>, block: Block) -> Self {
-        Self { proof, block }
-    }
-}
-
-impl Write for Notarized {
-    fn write(&self, buf: &mut impl BufMut) {
-        self.proof.write(buf);
-        self.block.write(buf);
-    }
-}
-
-impl Read for Notarized {
-    fn read_cfg(buf: &mut impl Buf, cfg: &()) -> Result<Self, Error> {
-        let proof = Notarization::<Digest>::read(buf)?;
-        let block = Block::read(buf)?;
-
-        // Ensure the proof is for the block
-        if proof.payload != block.digest() {
-            return Err(Error::Invalid(
-                "types::Notarized",
-                "Proof payload does not match block digest",
-            ));
-        }
-        Ok(Self { proof, block })
-    }
-}
-
-impl FixedSize for Notarized {
-    const SIZE: usize = Notarization::SIZE + Block::SIZE;
-}
-
-pub struct Finalized {
-    pub proof: Finalization<Digest>,
-    pub block: Block,
-}
-
-impl Finalized {
-    pub fn new(proof: Finalization<Digest>, block: Block) -> Self {
-        Self { proof, block }
-    }
-}
-
-impl Write for Finalized {
-    fn write(&self, buf: &mut impl BufMut) {
-        self.proof.write(buf);
-        self.block.write(buf);
-    }
-}
-
-impl Read for Finalized {
-    fn read_cfg(buf: &mut impl Buf, cfg: &()) -> Result<Self, Error> {
-        let proof = Finalization::<Digest>::read(buf)?;
-        let block = Block::read(buf)?;
-
-        // Ensure the proof is for the block
-        if proof.payload != block.digest() {
-            return Err(Error::Invalid(
-                "types::Finalized",
-                "Proof payload does not match block digest",
-            ));
-        }
-        Ok(Self { proof, block })
-    }
-}
-
-impl FixedSize for Finalized {
-    const SIZE: usize = Finalization::SIZE + Block::SIZE;
 }

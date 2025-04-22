@@ -17,7 +17,7 @@ pub const FINALIZE_NAMESPACE: &[u8] = b"_ALTO_FINALIZE";
 #[cfg(test)]
 mod tests {
     use super::*;
-    use commonware_cryptography::{hash, Bls12381, Scheme};
+    use commonware_cryptography::{hash, Bls12381};
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
