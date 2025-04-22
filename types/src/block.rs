@@ -1,7 +1,7 @@
 use bytes::{Buf, BufMut};
 use commonware_codec::{Error, FixedSize, Read, ReadExt, Write};
-use commonware_consensus::threshold_simplex::types::Notarization;
-use commonware_cryptography::{bls12381::PublicKey, sha256::Digest, Digestible, Hasher, Sha256};
+use commonware_consensus::threshold_simplex::types::{Finalization, Notarization};
+use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
@@ -85,27 +85,25 @@ impl Notarized {
 }
 
 impl Write for Notarized {
-    pub fn serialize(&self) -> Vec<u8> {
-        let block = self.block.serialize();
-        let mut bytes = Vec::with_capacity(Notarization::SERIALIZED_LEN + block.len());
-        bytes.extend_from_slice(&self.proof.serialize());
-        bytes.extend_from_slice(&block);
-        bytes
+    fn write(&self, buf: &mut impl BufMut) {
+        self.proof.write(buf);
+        self.block.write(buf);
     }
 }
 
 impl Read for Notarized {
-    pub fn deserialize(public: Option<&PublicKey>, bytes: &[u8]) -> Option<Self> {
-        // Deserialize the proof and block
-        let (proof, block) = bytes.split_at_checked(Notarization::SERIALIZED_LEN)?;
-        let proof = Notarization::deserialize(public, proof)?;
-        let block = Block::deserialize(block)?;
+    fn read_cfg(buf: &mut impl Buf, cfg: &()) -> Result<Self, Error> {
+        let proof = Notarization::<Digest>::read(buf)?;
+        let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
         if proof.payload != block.digest() {
-            return None;
+            return Err(Error::Invalid(
+                "types::Notarized",
+                "Proof payload does not match block digest",
+            ));
         }
-        Some(Self { proof, block })
+        Ok(Self { proof, block })
     }
 }
 
@@ -114,33 +112,39 @@ impl FixedSize for Notarized {
 }
 
 pub struct Finalized {
-    pub proof: Finalization,
+    pub proof: Finalization<Digest>,
     pub block: Block,
 }
 
 impl Finalized {
-    pub fn new(proof: Finalization, block: Block) -> Self {
+    pub fn new(proof: Finalization<Digest>, block: Block) -> Self {
         Self { proof, block }
     }
+}
 
-    pub fn serialize(&self) -> Vec<u8> {
-        let block = self.block.serialize();
-        let mut bytes = Vec::with_capacity(Finalization::SERIALIZED_LEN + block.len());
-        bytes.extend_from_slice(&self.proof.serialize());
-        bytes.extend_from_slice(&block);
-        bytes
+impl Write for Finalized {
+    fn write(&self, buf: &mut impl BufMut) {
+        self.proof.write(buf);
+        self.block.write(buf);
     }
+}
 
-    pub fn deserialize(public: Option<&PublicKey>, bytes: &[u8]) -> Option<Self> {
-        // Deserialize the proof and block
-        let (proof, block) = bytes.split_at_checked(Finalization::SERIALIZED_LEN)?;
-        let proof = Finalization::deserialize(public, proof)?;
-        let block = Block::deserialize(block)?;
+impl Read for Finalized {
+    fn read_cfg(buf: &mut impl Buf, cfg: &()) -> Result<Self, Error> {
+        let proof = Finalization::<Digest>::read(buf)?;
+        let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
         if proof.payload != block.digest() {
-            return None;
+            return Err(Error::Invalid(
+                "types::Finalized",
+                "Proof payload does not match block digest",
+            ));
         }
-        Some(Self { proof, block })
+        Ok(Self { proof, block })
     }
+}
+
+impl FixedSize for Finalized {
+    const SIZE: usize = Finalization::SIZE + Block::SIZE;
 }
