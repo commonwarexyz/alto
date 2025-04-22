@@ -1,6 +1,10 @@
-use crate::{leader_index as compute_leader_index, Block, Finalized, Notarized};
-use commonware_codec::DecodeExt;
-use commonware_cryptography::bls12381::PublicKey;
+use crate::{leader_index as compute_leader_index, Block, Finalized, Notarized, NAMESPACE};
+use commonware_codec::{DecodeExt, Encode};
+use commonware_consensus::threshold_simplex::types::{Seed, Viewable};
+use commonware_cryptography::bls12381::{
+    primitives::group::{Public, G1},
+    PublicKey,
+};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -40,18 +44,18 @@ pub struct FinalizedJs {
 
 #[wasm_bindgen]
 pub fn parse_seed(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
-    let public_key = PublicKey::decode(public_key.into()).expect("invalid public key");
-    // TODO: keep seed separate?
-    match Seed::deserialize(public.as_ref(), &bytes) {
-        Some(s) => {
-            let seed_js = SeedJs {
-                view: s.view,
-                signature: s.signature.to_vec(),
-            };
-            serde_wasm_bindgen::to_value(&seed_js).unwrap_or(JsValue::NULL)
-        }
-        None => JsValue::NULL,
+    let public_key = Public::decode(public_key.as_ref()).expect("invalid public key");
+    let Ok(seed) = Seed::decode(bytes.as_ref()) else {
+        return JsValue::NULL;
+    };
+    if !seed.verify(&NAMESPACE, &public_key) {
+        return JsValue::NULL;
     }
+    let seed_js = SeedJs {
+        view: seed.view(),
+        signature: seed.signature.encode().to_vec(),
+    };
+    serde_wasm_bindgen::to_value(&seed_js).unwrap_or(JsValue::NULL)
 }
 
 #[wasm_bindgen]
