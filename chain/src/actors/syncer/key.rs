@@ -1,20 +1,15 @@
+use bytes::{Buf, BufMut};
+use commonware_codec::{Error, FixedSize, Read, ReadExt, Write};
 use commonware_cryptography::sha256::Digest;
-use commonware_utils::{Array, SizedSerialize};
+use commonware_utils::Array;
 use std::{
     cmp::{Ord, PartialOrd},
     fmt::{Debug, Display},
     hash::Hash,
     ops::Deref,
 };
-use thiserror::Error;
 
-const SERIALIZED_LEN: usize = 1 + Digest::SERIALIZED_LEN;
-
-#[derive(Error, Debug, PartialEq)]
-pub enum Error {
-    #[error("invalid length")]
-    InvalidLength,
-}
+const SIZE: usize = u8::SIZE + Digest::SIZE;
 
 pub enum Value {
     Notarized(u64),
@@ -24,11 +19,11 @@ pub enum Value {
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
-pub struct MultiIndex([u8; SERIALIZED_LEN]);
+pub struct MultiIndex([u8; SIZE]);
 
 impl MultiIndex {
     pub fn new(value: Value) -> Self {
-        let mut bytes = [0; SERIALIZED_LEN];
+        let mut bytes = [0; SIZE];
         match value {
             Value::Notarized(value) => {
                 bytes[0] = 0;
@@ -49,17 +44,17 @@ impl MultiIndex {
     pub fn to_value(&self) -> Value {
         match self.0[0] {
             0 => {
-                let bytes: [u8; u64::SERIALIZED_LEN] = self.0[1..9].try_into().unwrap();
+                let bytes: [u8; u64::SIZE] = self.0[1..9].try_into().unwrap();
                 let value = u64::from_be_bytes(bytes);
                 Value::Notarized(value)
             }
             1 => {
-                let bytes: [u8; u64::SERIALIZED_LEN] = self.0[1..9].try_into().unwrap();
+                let bytes: [u8; u64::SIZE] = self.0[1..9].try_into().unwrap();
                 let value = u64::from_be_bytes(bytes);
                 Value::Finalized(value)
             }
             2 => {
-                let bytes: [u8; Digest::SERIALIZED_LEN] = self.0[1..].try_into().unwrap();
+                let bytes: [u8; Digest::SIZE] = self.0[1..].try_into().unwrap();
                 let digest = Digest::from(bytes);
                 Value::Digest(digest)
             }
@@ -68,55 +63,48 @@ impl MultiIndex {
     }
 }
 
-impl Array for MultiIndex {
-    type Error = Error;
-}
+impl Array for MultiIndex {}
 
-impl SizedSerialize for MultiIndex {
-    const SERIALIZED_LEN: usize = SERIALIZED_LEN;
-}
-
-impl From<[u8; MultiIndex::SERIALIZED_LEN]> for MultiIndex {
-    fn from(value: [u8; MultiIndex::SERIALIZED_LEN]) -> Self {
-        Self(value)
+impl Write for MultiIndex {
+    fn write(&self, writer: &mut impl BufMut) {
+        writer.put_slice(&self.0);
     }
 }
 
-impl TryFrom<&[u8]> for MultiIndex {
-    type Error = Error;
+impl Read for MultiIndex {
+    fn read_cfg(reader: &mut impl Buf, _: &()) -> Result<Self, Error> {
+        let bytes = <[u8; SIZE]>::read(reader)?;
+        Ok(Self(bytes))
+    }
+}
 
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if value.len() != MultiIndex::SERIALIZED_LEN {
-            return Err(Error::InvalidLength);
+impl FixedSize for MultiIndex {
+    const SIZE: usize = SIZE;
+}
+
+impl Debug for MultiIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0[0] {
+            0 => {
+                let bytes: [u8; u64::SIZE] = self.0[1..9].try_into().unwrap();
+                write!(f, "notarized({})", u64::from_be_bytes(bytes))
+            }
+            1 => {
+                let bytes: [u8; u64::SIZE] = self.0[1..9].try_into().unwrap();
+                write!(f, "finalized({})", u64::from_be_bytes(bytes))
+            }
+            2 => {
+                let bytes: [u8; Digest::SIZE] = self.0[1..].try_into().unwrap();
+                write!(f, "digest({})", Digest::from(bytes))
+            }
+            _ => unreachable!(),
         }
-        let array: [u8; MultiIndex::SERIALIZED_LEN] =
-            value.try_into().map_err(|_| Error::InvalidLength)?;
-        Ok(Self(array))
     }
 }
 
-impl TryFrom<&Vec<u8>> for MultiIndex {
-    type Error = Error;
-
-    fn try_from(value: &Vec<u8>) -> Result<Self, Self::Error> {
-        Self::try_from(value.as_slice())
-    }
-}
-
-impl TryFrom<Vec<u8>> for MultiIndex {
-    type Error = Error;
-
-    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        if value.len() != MultiIndex::SERIALIZED_LEN {
-            return Err(Error::InvalidLength);
-        }
-
-        // If the length is correct, we can safely convert the vector into a boxed slice without any
-        // copies.
-        let boxed_slice = value.into_boxed_slice();
-        let boxed_array: Box<[u8; MultiIndex::SERIALIZED_LEN]> =
-            boxed_slice.try_into().map_err(|_| Error::InvalidLength)?;
-        Ok(Self(*boxed_array))
+impl Display for MultiIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(self, f)
     }
 }
 
@@ -128,33 +116,8 @@ impl AsRef<[u8]> for MultiIndex {
 
 impl Deref for MultiIndex {
     type Target = [u8];
-    fn deref(&self) -> &[u8] {
+
+    fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-impl Debug for MultiIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.0[0] {
-            0 => {
-                let bytes: [u8; u64::SERIALIZED_LEN] = self.0[1..9].try_into().unwrap();
-                write!(f, "notarized({})", u64::from_be_bytes(bytes))
-            }
-            1 => {
-                let bytes: [u8; u64::SERIALIZED_LEN] = self.0[1..9].try_into().unwrap();
-                write!(f, "finalized({})", u64::from_be_bytes(bytes))
-            }
-            2 => {
-                let bytes: [u8; Digest::SERIALIZED_LEN] = self.0[1..].try_into().unwrap();
-                write!(f, "digest({})", Digest::from(bytes))
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl Display for MultiIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(self, f)
     }
 }

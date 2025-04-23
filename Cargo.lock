@@ -45,6 +45,7 @@ dependencies = [
  "axum",
  "bytes",
  "clap",
+ "commonware-codec",
  "commonware-consensus",
  "commonware-cryptography",
  "commonware-deployer",

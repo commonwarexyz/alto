@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use commonware_runtime::{Blob, Metrics, Storage};
+use commonware_runtime::{Metrics, Storage};
 use commonware_storage::archive::{self, Archive, Identifier, Translator};
 use commonware_utils::Array;
 use futures::lock::Mutex;
@@ -7,25 +7,23 @@ use std::sync::Arc;
 
 /// Archive wrapper that handles all locking.
 #[derive(Clone)]
-pub struct Wrapped<T, K, B, R>
+pub struct Wrapped<T, K, R>
 where
     T: Translator,
     K: Array,
-    B: Blob,
-    R: Storage<B> + Metrics,
+    R: Storage + Metrics,
 {
-    inner: Arc<Mutex<Archive<T, K, B, R>>>,
+    inner: Arc<Mutex<Archive<T, K, R>>>,
 }
 
-impl<T, K, B, R> Wrapped<T, K, B, R>
+impl<T, K, R> Wrapped<T, K, R>
 where
     T: Translator,
     K: Array,
-    B: Blob,
-    R: Storage<B> + Metrics,
+    R: Storage + Metrics,
 {
     /// Creates a new `Wrapped` from an existing `Archive`.
-    pub fn new(archive: Archive<T, K, B, R>) -> Self {
+    pub fn new(archive: Archive<T, K, R>) -> Self {
         Self {
             inner: Arc::new(Mutex::new(archive)),
         }
