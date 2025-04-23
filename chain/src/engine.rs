@@ -5,13 +5,16 @@ use crate::{
 use alto_types::NAMESPACE;
 use commonware_consensus::threshold_simplex::{self, Engine as Consensus};
 use commonware_cryptography::{
-    bls12381::primitives::{group, poly::public, poly::Poly},
+    bls12381::primitives::{
+        group,
+        poly::{public, Poly},
+    },
     ed25519::PublicKey,
     sha256::Digest,
-    Ed25519, Scheme,
+    Ed25519, Signer,
 };
 use commonware_p2p::{Receiver, Sender};
-use commonware_runtime::{Blob, Clock, Handle, Metrics, Spawner, Storage};
+use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
 use commonware_storage::journal::variable::{self, Journal};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
@@ -43,38 +46,30 @@ pub struct Config<I: Indexer> {
     pub indexer: Option<I>,
 }
 
-pub struct Engine<
-    B: Blob,
-    E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
-    I: Indexer,
-> {
+pub struct Engine<E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics, I: Indexer> {
     context: E,
 
     application: application::Actor<E>,
-    syncer: syncer::Actor<B, E, I>,
+    syncer: syncer::Actor<E, I>,
     syncer_mailbox: syncer::Mailbox,
     consensus: Consensus<
-        B,
         E,
         Ed25519,
         Digest,
         application::Mailbox,
         application::Mailbox,
-        application::Mailbox,
+        syncer::Mailbox,
         application::Supervisor,
     >,
 }
 
-impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metrics, I: Indexer>
-    Engine<B, E, I>
-{
+impl<E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics, I: Indexer> Engine<E, I> {
     pub async fn new(context: E, cfg: Config<I>) -> Self {
         // Create the application
         let public = public(&cfg.identity);
         let (application, supervisor, application_mailbox) = application::Actor::new(
             context.with_label("application"),
             application::Config {
-                prover: Prover::new(*public, NAMESPACE),
                 participants: cfg.participants.clone(),
                 identity: cfg.identity.clone(),
                 share: cfg.share,
@@ -115,7 +110,7 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
                 crypto: cfg.signer,
                 automaton: application_mailbox.clone(),
                 relay: application_mailbox.clone(),
-                committer: application_mailbox,
+                reporter: syncer_mailbox.clone(),
                 supervisor,
                 mailbox_size: cfg.mailbox_size,
                 replay_concurrency: 1,
@@ -126,7 +121,6 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
                 activity_timeout: cfg.activity_timeout,
                 skip_timeout: cfg.skip_timeout,
                 max_fetch_count: cfg.max_fetch_count,
-                max_fetch_size: cfg.max_fetch_size,
                 fetch_concurrent: cfg.fetch_concurrent,
                 fetch_rate_per_peer: cfg.fetch_rate_per_peer,
             },
