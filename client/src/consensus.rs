@@ -242,7 +242,7 @@ impl Client {
                         // Get kind
                         let kind = data[0];
                         let Some(kind) = Kind::from_u8(kind) else {
-                            let _ = sender.unbounded_send(Err(Error::InvalidData));
+                            let _ = sender.unbounded_send(Err(Error::UnexpectedResponse));
                             return;
                         };
                         let data = &data[1..];
@@ -250,27 +250,53 @@ impl Client {
                         // Deserialize the message
                         match kind {
                             Kind::Seed => {
-                                if let Some(seed) = Seed::deserialize(Some(&public), data) {
-                                    let _ = sender.unbounded_send(Ok(Message::Seed(seed)));
-                                } else {
-                                    let _ = sender.unbounded_send(Err(Error::InvalidData));
+                                let result = Seed::decode(data);
+                                match result {
+                                    Ok(seed) => {
+                                        if !seed.verify(NAMESPACE, public.as_ref()) {
+                                            let _ =
+                                                sender.unbounded_send(Err(Error::InvalidSignature));
+                                            return;
+                                        }
+                                        let _ = sender.unbounded_send(Ok(Message::Seed(seed)));
+                                    }
+                                    Err(e) => {
+                                        let _ = sender.unbounded_send(Err(Error::InvalidData(e)));
+                                    }
                                 }
                             }
                             Kind::Notarization => {
-                                if let Some(payload) = Notarized::deserialize(Some(&public), data) {
-                                    let _ =
-                                        sender.unbounded_send(Ok(Message::Notarization(payload)));
-                                } else {
-                                    let _ = sender.unbounded_send(Err(Error::InvalidData));
+                                let result = Notarized::decode(data);
+                                match result {
+                                    Ok(notarized) => {
+                                        if !notarized.verify(public.as_ref()) {
+                                            let _ =
+                                                sender.unbounded_send(Err(Error::InvalidSignature));
+                                            return;
+                                        }
+                                        let _ = sender
+                                            .unbounded_send(Ok(Message::Notarization(notarized)));
+                                    }
+                                    Err(e) => {
+                                        let _ = sender.unbounded_send(Err(Error::InvalidData(e)));
+                                    }
                                 }
                             }
-                            Kind::Nullification => {} // Ignore nullifications
                             Kind::Finalization => {
-                                if let Some(payload) = Finalized::deserialize(Some(&public), data) {
-                                    let _ =
-                                        sender.unbounded_send(Ok(Message::Finalization(payload)));
-                                } else {
-                                    let _ = sender.unbounded_send(Err(Error::InvalidData));
+                                let result = Finalized::decode(data);
+                                match result {
+                                    Ok(finalized) => {
+                                        if !finalized.verify(public.as_ref()) {
+                                            let _ =
+                                                sender.unbounded_send(Err(Error::InvalidSignature));
+                                            return;
+                                        }
+                                        let _ = sender
+                                            .unbounded_send(Ok(Message::Finalization(finalized)));
+                                    }
+                                    Err(e) => {
+                                        let _ = sender.unbounded_send(Err(Error::InvalidData(e)));
+                                    }
                                 }
                             }
                         }

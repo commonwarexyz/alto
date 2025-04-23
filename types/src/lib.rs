@@ -13,8 +13,7 @@ pub const NAMESPACE: &[u8] = b"_ALTO";
 pub enum Kind {
     Seed = 0,
     Notarization = 1,
-    Nullification = 2,
-    Finalization = 3,
+    Finalization = 2,
 }
 
 impl Kind {
@@ -22,8 +21,7 @@ impl Kind {
         match value {
             0 => Some(Self::Seed),
             1 => Some(Self::Notarization),
-            2 => Some(Self::Nullification),
-            3 => Some(Self::Finalization),
+            2 => Some(Self::Finalization),
             _ => None,
         }
     }
@@ -32,8 +30,7 @@ impl Kind {
         match self {
             Self::Seed => hex(&[0]),
             Self::Notarization => hex(&[1]),
-            Self::Nullification => hex(&[2]),
-            Self::Finalization => hex(&[3]),
+            Self::Finalization => hex(&[2]),
         }
     }
 }
