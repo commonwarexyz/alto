@@ -9,7 +9,7 @@ use commonware_cryptography::{
     ed25519::{PrivateKey, PublicKey},
     Ed25519, Signer,
 };
-use commonware_deployer::ec2::Hosts;
+use commonware_deployer::ec2::{Hosts, METRICS_PORT};
 use commonware_p2p::authenticated;
 use commonware_runtime::{tokio, Clock, Metrics, Network, Runner, Spawner};
 use commonware_utils::{from_hex_formatted, quorum, union_unique};
@@ -26,8 +26,6 @@ use std::{
     time::Duration,
 };
 use tracing::{error, info, Level};
-
-const METRICS_PORT: u16 = 9090;
 
 const VOTER_CHANNEL: u32 = 0;
 const RESOLVER_CHANNEL: u32 = 1;
