@@ -1,6 +1,6 @@
 use commonware_consensus::{
-    threshold_simplex::types::{Activity, Context, Finalization, Notarization, View},
-    Automaton, Relay, Reporter,
+    threshold_simplex::types::{Context, View},
+    Automaton, Relay,
 };
 use commonware_cryptography::sha256::Digest;
 use futures::{
@@ -25,12 +25,6 @@ pub enum Message {
         parent: (View, Digest),
         payload: Digest,
         response: oneshot::Sender<bool>,
-    },
-    Notarization {
-        notarization: Notarization<Digest>,
-    },
-    Finalization {
-        finalization: Finalization<Digest>,
     },
 }
 
@@ -103,29 +97,5 @@ impl Relay for Mailbox {
             .send(Message::Broadcast { payload: digest })
             .await
             .expect("Failed to send broadcast");
-    }
-}
-
-impl Reporter for Mailbox {
-    type Activity = Activity<Digest>;
-
-    async fn report(&mut self, activity: Self::Activity) {
-        match activity {
-            Activity::Notarization(notarization) => {
-                self.sender
-                    .send(Message::Notarization { notarization })
-                    .await
-                    .expect("Failed to send notarization");
-            }
-            Activity::Finalization(finalization) => {
-                self.sender
-                    .send(Message::Finalization { finalization })
-                    .await
-                    .expect("Failed to send finalization");
-            }
-            _ => {
-                // Ignore other activities
-            }
-        }
     }
 }
