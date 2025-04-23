@@ -1,12 +1,10 @@
 use alto_chain::Config;
 use clap::{value_parser, Arg, ArgMatches, Command};
+use commonware_codec::{Decode, DecodeExt, Encode};
 use commonware_cryptography::{
-    bls12381::{
-        dkg::ops,
-        primitives::{group::Element, poly},
-    },
+    bls12381::{dkg::ops, primitives::poly},
     ed25519::PublicKey,
-    Ed25519, Scheme,
+    Ed25519, Signer,
 };
 use commonware_deployer::ec2;
 use commonware_utils::{from_hex_formatted, hex, quorum};
@@ -229,12 +227,9 @@ fn generate(sub_matches: &ArgMatches) {
 
     // Generate consensus key
     let peers_u32 = peers as u32;
-    let threshold = quorum(peers_u32).expect("unable to derive quorum");
+    let threshold = quorum(peers_u32);
     let (identity, shares) = ops::generate_shares(&mut OsRng, None, peers_u32, threshold);
-    info!(
-        identity = hex(&poly::public(&identity).serialize()),
-        "generated network key"
-    );
+    info!(identity = ?poly::public(&identity), "generated network key");
 
     // Generate instance configurations
     assert!(
@@ -249,8 +244,8 @@ fn generate(sub_matches: &ArgMatches) {
         let peer_config_file = format!("{}.yaml", name);
         let peer_config = Config {
             private_key: scheme.private_key().to_string(),
-            share: hex(&shares[index].serialize()),
-            identity: hex(&identity.serialize()),
+            share: hex(&shares[index].encode()),
+            identity: hex(&identity.encode()),
 
             port: PORT,
             directory: "/home/ubuntu/data".to_string(),
@@ -278,6 +273,7 @@ fn generate(sub_matches: &ArgMatches) {
             storage_class: STORAGE_CLASS.to_string(),
             binary: BINARY_NAME.to_string(),
             config: peer_config_file,
+            profiling: false,
         };
         instance_configs.push(instance);
     }
@@ -468,7 +464,7 @@ fn explorer(sub_matches: &ArgMatches) {
     for instance in &config.instances {
         let region = &instance.region;
         let public_key = from_hex_formatted(&instance.name).expect("invalid public key");
-        let public_key = PublicKey::try_from(public_key).expect("invalid public key");
+        let public_key = PublicKey::decode(public_key.as_ref()).expect("invalid public key");
         let (coords, city) = get_aws_location(region).expect("unknown region");
         participants.insert(
             public_key,
@@ -477,7 +473,7 @@ fn explorer(sub_matches: &ArgMatches) {
     }
 
     // Order by public key
-    let threshold = quorum(participants.len() as u32).expect("invalid quorum");
+    let threshold = quorum(participants.len() as u32);
     let mut locations = Vec::new();
     for (_, location) in participants {
         locations.push(location);
@@ -493,14 +489,15 @@ fn explorer(sub_matches: &ArgMatches) {
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
     let identity_hex = peer_config.identity;
     let identity = from_hex_formatted(&identity_hex).expect("invalid identity");
-    let identity = poly::Public::deserialize(&identity, threshold).expect("identity is invalid");
+    let identity = poly::Public::decode_cfg(identity.as_ref(), &(threshold as usize))
+        .expect("identity is invalid");
     let identity_public = poly::public(&identity);
     let config_ts = format!(
         "export const BACKEND_URL = \"{}/consensus/ws\";\n\
         export const PUBLIC_KEY_HEX = \"{}\";\n\
         export const LOCATIONS: [[number, number], string][] = [\n{}\n];",
         backend_url,
-        hex(&identity_public.serialize()),
+        hex(&identity_public.encode()),
         locations_str
     );
 
