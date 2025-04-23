@@ -15,8 +15,8 @@ use crate::{
 };
 use alto_types::{Block, Finalized, Notarized};
 use bytes::Bytes;
-use commonware_codec::{Decode, DecodeExt};
-use commonware_consensus::threshold_simplex::types::Finalization;
+use commonware_codec::{Decode, DecodeExt, Encode};
+use commonware_consensus::threshold_simplex::types::{Finalization, Seedable, Viewable};
 use commonware_cryptography::{bls12381, ed25519::PublicKey, sha256::Digest, Digestible};
 use commonware_macros::select;
 use commonware_p2p::{utils::requester, Receiver, Recipients, Sender};
@@ -341,9 +341,9 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             .await
                             .expect("Failed to get finalization");
                         if let Some(finalization) = finalization {
-                            let finalization = Finalization::deserialize(None, &finalization)
+                            let finalization = Finalization::decode(finalization.as_ref())
                                 .expect("Failed to deserialize finalization");
-                            *last_view_processed.lock().await = finalization.view;
+                            *last_view_processed.lock().await = finalization.view();
                         }
                         continue;
                     }
@@ -358,7 +358,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 .await
                                 .expect("Failed to get finalized block")
                                 .expect("Gapped block missing");
-                            let gapped_block = Block::deserialize(&gapped_block)
+                            let gapped_block = Block::decode(gapped_block.as_ref())
                                 .expect("Failed to deserialize block");
 
                             // Attempt to repair one block from other sources
@@ -368,10 +368,10 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 .await
                                 .expect("Failed to get verified block");
                             if let Some(verified) = verified {
-                                let verified = Block::deserialize(&verified)
+                                let verified = Block::decode(verified.as_ref())
                                     .expect("Failed to deserialize block");
                                 blocks
-                                    .put(verified.height, target_block, verified.serialize().into())
+                                    .put(verified.height, target_block, verified.encode().into())
                                     .await
                                     .expect("Failed to insert finalized block");
                                 debug!(height = verified.height, "repaired block from verified");
@@ -382,13 +382,13 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 .await
                                 .expect("Failed to get notarized block");
                             if let Some(notarization) = notarization {
-                                let notarization = Notarized::deserialize(None, &notarization)
+                                let notarization = Notarized::decode(notarization.as_ref())
                                     .expect("Failed to deserialize block");
                                 blocks
                                     .put(
                                         notarization.block.height,
                                         target_block,
-                                        notarization.block.serialize().into(),
+                                        notarization.block.encode().into(),
                                     )
                                     .await
                                     .expect("Failed to insert finalized block");
@@ -466,24 +466,23 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                         Message::Broadcast { payload } => {
                             broadcast_network
                                 .0
-                                .send(Recipients::All, payload.serialize().into(), true)
+                                .send(Recipients::All, payload.encode().into(), true)
                                 .await
                                 .expect("Failed to broadcast");
                         }
                         Message::Verified { view, payload } => {
                             verified
-                                .put(view, payload.digest(), payload.serialize().into())
+                                .put(view, payload.digest(), payload.encode().into())
                                 .await
                                 .expect("Failed to insert verified block");
                         }
-                        Message::Notarized { proof, seed } => {
+                        Message::Notarization { notarization } => {
                             // Upload seed to indexer (if available)
                             if let Some(indexer) = self.indexer.as_ref() {
                                 self.context.with_label("indexer").spawn({
                                     let indexer = indexer.clone();
-                                    let view = proof.view;
+                                    let seed = notarization.seed();
                                     move |_| async move {
-                                        let seed = seed.serialize().into();
                                         let result = indexer.seed_upload(seed).await;
                                         if let Err(e) = result {
                                             warn!(?e, "failed to upload seed");

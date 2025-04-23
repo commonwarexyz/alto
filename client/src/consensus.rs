@@ -1,7 +1,6 @@
 use crate::{Client, Error, IndexQuery, Query};
 use alto_types::{Block, Finalized, Kind, Notarized, NAMESPACE};
-use bytes::Bytes;
-use commonware_codec::DecodeExt;
+use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::threshold_simplex::types::{Seed, Viewable};
 use commonware_cryptography::Digestible;
 use futures::{channel::mpsc::unbounded, Stream, StreamExt};
@@ -53,11 +52,11 @@ pub enum Message {
 }
 
 impl Client {
-    pub async fn seed_upload(&self, seed: Bytes) -> Result<(), Error> {
+    pub async fn seed_upload(&self, seed: Seed) -> Result<(), Error> {
         let result = self
             .client
             .post(seed_upload_path(self.uri.clone()))
-            .body(seed)
+            .body(seed.encode().to_vec())
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -96,11 +95,11 @@ impl Client {
         Ok(seed)
     }
 
-    pub async fn notarization_upload(&self, notarized: Bytes) -> Result<(), Error> {
+    pub async fn notarized_upload(&self, notarized: Notarized) -> Result<(), Error> {
         let result = self
             .client
             .post(notarization_upload_path(self.uri.clone()))
-            .body(notarized)
+            .body(notarized.encode().to_vec())
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -110,7 +109,7 @@ impl Client {
         Ok(())
     }
 
-    pub async fn notarization_get(&self, query: IndexQuery) -> Result<Notarized, Error> {
+    pub async fn notarized_get(&self, query: IndexQuery) -> Result<Notarized, Error> {
         // Get the notarization
         let result = self
             .client
@@ -139,11 +138,11 @@ impl Client {
         Ok(notarized)
     }
 
-    pub async fn finalization_upload(&self, finalized: Bytes) -> Result<(), Error> {
+    pub async fn finalized_upload(&self, finalized: Finalized) -> Result<(), Error> {
         let result = self
             .client
             .post(finalization_upload_path(self.uri.clone()))
-            .body(finalized)
+            .body(finalized.encode().to_vec())
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -153,7 +152,7 @@ impl Client {
         Ok(())
     }
 
-    pub async fn finalization_get(&self, query: IndexQuery) -> Result<Finalized, Error> {
+    pub async fn finalized_get(&self, query: IndexQuery) -> Result<Finalized, Error> {
         // Get the finalization
         let result = self
             .client

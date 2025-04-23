@@ -1,8 +1,8 @@
-use std::future::Future;
-
-use bytes::Bytes;
+use alto_types::{Finalized, Notarized};
+use commonware_consensus::threshold_simplex::types::Seed;
 use commonware_cryptography::bls12381;
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 
 pub mod actors;
 pub mod engine;
@@ -15,46 +15,44 @@ pub trait Indexer: Clone + Send + Sync + 'static {
     fn new(uri: &str, public: bls12381::PublicKey) -> Self;
 
     /// Upload a seed to the indexer.
-    fn seed_upload(&self, seed: Bytes) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn seed_upload(&self, seed: Seed) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Upload a notarization to the indexer.
-    fn notarization_upload(
+    fn notarized_upload(
         &self,
-        notarized: Bytes,
+        notarized: Notarized,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Upload a finalization to the indexer.
-    fn finalization_upload(
+    fn finalized_upload(
         &self,
-        finalized: Bytes,
+        finalized: Finalized,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 impl Indexer for alto_client::Client {
     type Error = alto_client::Error;
+
     fn new(uri: &str, public: bls12381::PublicKey) -> Self {
         Self::new(uri, public)
     }
 
-    fn seed_upload(
-        &self,
-        seed: bytes::Bytes,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+    fn seed_upload(&self, seed: Seed) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.seed_upload(seed)
     }
 
-    fn notarization_upload(
+    fn notarized_upload(
         &self,
-        notarization: bytes::Bytes,
+        notarized: Notarized,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.notarization_upload(notarization)
+        self.notarized_upload(notarized)
     }
 
-    fn finalization_upload(
+    fn finalized_upload(
         &self,
-        finalization: bytes::Bytes,
+        finalized: Finalized,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.finalization_upload(finalization)
+        self.finalized_upload(finalized)
     }
 }
 
