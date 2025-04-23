@@ -218,29 +218,23 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
     pub fn start(
         mut self,
-        broadcast_network: (
-            impl Sender<PublicKey = PublicKey>,
-            impl Receiver<PublicKey = PublicKey>,
-        ),
         backfill_network: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
+        buffer: buffered::Mailbox<Digest, Block>,
     ) -> Handle<()> {
-        self.context.spawn_ref()(self.run(broadcast_network, backfill_network))
+        self.context.spawn_ref()(self.run(backfill_network, buffer))
     }
 
     /// Run the application actor.
     async fn run(
         mut self,
-        broadcast_network: (
-            impl Sender<PublicKey = PublicKey>,
-            impl Receiver<PublicKey = PublicKey>,
-        ),
         backfill_network: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
+        mut buffer: buffered::Mailbox<Digest, Block>,
     ) {
         // Initialize resolver
         let coordinator = Coordinator::new(self.participants.clone());
@@ -424,17 +418,6 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         });
 
         // Handle messages
-        let (buffer_engine, mut buffer) = buffered::Engine::<_, _, Digest, _, Block, _, _>::new(
-            self.context.with_label("buffer"),
-            buffered::Config {
-                public_key: self.public_key,
-                mailbox_size: 128,
-                deque_size: 128,
-                priority: true,
-                decode_config: (),
-            },
-        );
-        buffer_engine.start(broadcast_network); // TODO: handle
         let mut latest_view = 0;
         let mut outstanding_notarize = BTreeSet::new();
         loop {

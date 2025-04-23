@@ -2,14 +2,15 @@ use crate::{
     actors::{application, syncer},
     Indexer,
 };
-use alto_types::NAMESPACE;
+use alto_types::{Block, NAMESPACE};
+use commonware_broadcast::buffered;
 use commonware_consensus::threshold_simplex::{self, Engine as Consensus};
 use commonware_cryptography::{
     bls12381::primitives::{
         group,
         poly::{public, Poly},
     },
-    ed25519::PublicKey,
+    ed25519::{self, PublicKey},
     sha256::Digest,
     Ed25519, Signer,
 };
@@ -31,6 +32,7 @@ pub struct Config<I: Indexer> {
     pub participants: Vec<PublicKey>,
     pub mailbox_size: usize,
     pub backfill_quota: Quota,
+    pub deque_size: usize,
 
     pub leader_timeout: Duration,
     pub notarization_timeout: Duration,
@@ -50,6 +52,8 @@ pub struct Engine<E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metr
     context: E,
 
     application: application::Actor<E>,
+    buffer: buffered::Engine<E, ed25519::PublicKey, Digest, (), Block>,
+    buffer_mailbox: buffered::Mailbox<Digest, Block>,
     syncer: syncer::Actor<E, I>,
     syncer_mailbox: syncer::Mailbox,
     consensus: Consensus<
@@ -74,6 +78,18 @@ impl<E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics, I: Index
                 identity: cfg.identity.clone(),
                 share: cfg.share,
                 mailbox_size: cfg.mailbox_size,
+            },
+        );
+
+        // Create the buffer
+        let (buffer, buffer_mailbox) = buffered::Engine::new(
+            context.with_label("buffer"),
+            buffered::Config {
+                public_key: cfg.signer.public_key(),
+                mailbox_size: cfg.mailbox_size,
+                deque_size: cfg.deque_size,
+                priority: true,
+                decode_config: (),
             },
         );
 
@@ -131,6 +147,8 @@ impl<E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics, I: Index
             context,
 
             application,
+            buffer,
+            buffer_mailbox,
             syncer,
             syncer_mailbox,
             consensus,
@@ -191,15 +209,23 @@ impl<E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics, I: Index
         // Start the application
         let application_handle = self.application.start(self.syncer_mailbox);
 
+        // Start the buffer
+        let buffer_handle = self.buffer.start(broadcast_network);
+
         // Start the syncer
-        let syncer_handle = self.syncer.start(broadcast_network, backfill_network);
+        let syncer_handle = self.syncer.start(backfill_network, self.buffer_mailbox);
 
         // Start consensus
         let consensus_handle = self.consensus.start(voter_network, resolver_network);
 
         // Wait for any actor to finish
-        if let Err(e) =
-            try_join_all(vec![application_handle, syncer_handle, consensus_handle]).await
+        if let Err(e) = try_join_all(vec![
+            application_handle,
+            buffer_handle,
+            syncer_handle,
+            consensus_handle,
+        ])
+        .await
         {
             error!(?e, "engine failed");
         } else {

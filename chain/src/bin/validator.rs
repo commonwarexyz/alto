@@ -207,6 +207,7 @@ fn main() {
             share,
             participants: peer_keys,
             mailbox_size: config.mailbox_size,
+            deque_size: config.deque_size,
             backfill_quota: backfiller_limit,
             leader_timeout: LEADER_TIMEOUT,
             notarization_timeout: NOTARIZATION_TIMEOUT,

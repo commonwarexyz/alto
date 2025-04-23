@@ -96,6 +96,12 @@ fn main() {
                         .value_parser(value_parser!(usize)),
                 )
                 .arg(
+                    Arg::new("deque_size")
+                        .long("deque-size")
+                        .required(true)
+                        .value_parser(value_parser!(usize)),
+                )
+                .arg(
                     Arg::new("dashboard")
                         .long("dashboard")
                         .required(true)
@@ -187,6 +193,7 @@ fn generate(sub_matches: &ArgMatches) {
     let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
     let message_backlog = *sub_matches.get_one::<usize>("message_backlog").unwrap();
     let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
+    let deque_size = *sub_matches.get_one::<usize>("deque_size").unwrap();
     let dashboard = sub_matches.get_one::<String>("dashboard").unwrap().clone();
     let output = sub_matches.get_one::<String>("output").unwrap().clone();
 
@@ -257,6 +264,7 @@ fn generate(sub_matches: &ArgMatches) {
 
             message_backlog,
             mailbox_size,
+            deque_size,
 
             indexer: None,
         };

@@ -72,6 +72,7 @@ pub struct Config {
 
     pub message_backlog: usize,
     pub mailbox_size: usize,
+    pub deque_size: usize,
 
     pub indexer: Option<String>,
 }
@@ -266,6 +267,7 @@ mod tests {
                     share: shares[idx].clone(),
                     participants: validators.clone(),
                     mailbox_size: 1024,
+                    deque_size: 10,
                     backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     leader_timeout: Duration::from_secs(1),
                     notarization_timeout: Duration::from_secs(2),
@@ -425,6 +427,7 @@ mod tests {
                     share: shares[idx].clone(),
                     participants: validators.clone(),
                     mailbox_size: 1024,
+                    deque_size: 10,
                     backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     leader_timeout: Duration::from_secs(1),
                     notarization_timeout: Duration::from_secs(2),
@@ -509,6 +512,7 @@ mod tests {
                 share,
                 participants: validators.clone(),
                 mailbox_size: 1024,
+                deque_size: 10,
                 backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
                 leader_timeout: Duration::from_secs(1),
                 notarization_timeout: Duration::from_secs(2),
@@ -639,6 +643,7 @@ mod tests {
                         share: shares[idx].clone(),
                         participants: validators.clone(),
                         mailbox_size: 1024,
+                        deque_size: 10,
                         backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
                         leader_timeout: Duration::from_secs(1),
                         notarization_timeout: Duration::from_secs(2),
@@ -805,6 +810,7 @@ mod tests {
                     share: shares[idx].clone(),
                     participants: validators.clone(),
                     mailbox_size: 1024,
+                    deque_size: 10,
                     backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     leader_timeout: Duration::from_secs(1),
                     notarization_timeout: Duration::from_secs(2),
