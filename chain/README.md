@@ -22,7 +22,7 @@ cargo install commonware-deployer
 ### Create Deployer Artifacts
 
 ```bash
-cargo run --bin setup -- generate --peers 50 --bootstrappers 5 --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,eu-north-1,ap-south-1,sa-east-1,eu-central-1,ap-northeast-2,ap-southeast-2 --monitoring-instance-type c7g.4xlarge --monitoring-storage-size 100 --instance-type c7g.xlarge --storage-size 40 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --dashboard dashboard.json --output assets
+cargo run --bin setup -- generate --peers 50 --bootstrappers 5 --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,eu-north-1,ap-south-1,sa-east-1,eu-central-1,ap-northeast-2,ap-southeast-2 --monitoring-instance-type c7g.4xlarge --monitoring-storage-size 100 --instance-type c7g.xlarge --storage-size 40 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --dashboard dashboard.json --output assets
 ```
 
 _We use 1 less `worker-threads` than the number of `vCPUs` to leave a core for `blocking-threads`._
