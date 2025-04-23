@@ -20,7 +20,7 @@ use commonware_cryptography::{bls12381, ed25519::PublicKey, sha256::Digest, Dige
 use commonware_macros::select;
 use commonware_p2p::{utils::requester, Receiver, Sender};
 use commonware_resolver::{p2p, Resolver};
-use commonware_runtime::{Clock, Handle, Metrics, RwLock, Spawner, Storage};
+use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
 use commonware_storage::{
     archive::{self, Archive, Identifier},
     index::translator::{EightCap, TwoCap},
@@ -32,7 +32,14 @@ use futures::{channel::mpsc, StreamExt};
 use governor::{clock::Clock as GClock, Quota};
 use prometheus_client::metrics::gauge::Gauge;
 use rand::Rng;
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeSet,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tracing::{debug, info, warn};
 
 /// Application actor.
@@ -261,7 +268,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         resolver_engine.start(backfill_network);
 
         // Process all finalized blocks in order (fetching any that are missing)
-        // let last_view_processed = Arc::new(RwLock::new(0));
+        let last_view_processed = Arc::new(AtomicU64::new(0));
         let verified = Wrapped::<_, _, _, Block>::new(self.verified);
         let notarized = Wrapped::<_, _, _, Notarized>::new(self.notarized);
         let finalized = Wrapped::<_, _, _, Finalization<Digest>>::new(self.finalized);
@@ -324,7 +331,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             .await
                             .expect("Failed to get finalization");
                         if let Some(finalization) = finalization {
-                            *last_view_processed.write().await = finalization.view();
+                            last_view_processed.store(finalization.view(), Ordering::Release);
                         }
                         continue;
                     }
@@ -581,7 +588,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 debug!(view, height, "finalized block stored");
 
                                 // Prune blocks
-                                let last_view_processed = *last_view_processed.read().await;
+                                let last_view_processed = last_view_processed.load(Ordering::Acquire);
                                 let min_view = last_view_processed.saturating_sub(self.activity_timeout);
                                 verified
                                     .prune(min_view)
