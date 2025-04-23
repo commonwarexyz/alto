@@ -13,19 +13,18 @@ use crate::{
     },
     Indexer,
 };
-use alto_types::{Block, Finalization, Finalized, Notarized};
+use alto_types::{Block, Finalized, Notarized};
 use bytes::Bytes;
-use commonware_cryptography::{bls12381, ed25519::PublicKey, sha256::Digest};
+use commonware_codec::{Decode, DecodeExt};
+use commonware_consensus::threshold_simplex::types::Finalization;
+use commonware_cryptography::{bls12381, ed25519::PublicKey, sha256::Digest, Digestible};
 use commonware_macros::select;
 use commonware_p2p::{utils::requester, Receiver, Recipients, Sender};
 use commonware_resolver::{p2p, Resolver};
-use commonware_runtime::{Blob, Clock, Handle, Metrics, Spawner, Storage};
+use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
 use commonware_storage::{
-    archive::{
-        self,
-        translator::{EightCap, TwoCap},
-        Archive, Identifier,
-    },
+    archive::{self, Archive, Identifier},
+    index::translator::{EightCap, TwoCap},
     journal::{self, variable::Journal},
     metadata::{self, Metadata},
 };
@@ -46,7 +45,7 @@ use std::{
 use tracing::{debug, info, warn};
 
 /// Application actor.
-pub struct Actor<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Indexer> {
+pub struct Actor<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> {
     context: R,
     public_key: PublicKey,
     public: bls12381::PublicKey,
@@ -58,19 +57,19 @@ pub struct Actor<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<
     indexer: Option<I>,
 
     // Blocks verified stored by view<>digest
-    verified: Archive<TwoCap, Digest, B, R>,
+    verified: Archive<TwoCap, Digest, R>,
     // Blocks notarized stored by view<>digest
-    notarized: Archive<TwoCap, Digest, B, R>,
+    notarized: Archive<TwoCap, Digest, R>,
 
     // Finalizations stored by height
-    finalized: Archive<EightCap, Digest, B, R>,
+    finalized: Archive<EightCap, Digest, R>,
     // Blocks finalized stored by height
     //
     // We store this separately because we may not have the finalization for a block
-    blocks: Archive<EightCap, Digest, B, R>,
+    blocks: Archive<EightCap, Digest, R>,
 
     // Finalizer storage
-    finalizer: Metadata<B, R, FixedBytes<1>>,
+    finalizer: Metadata<R, FixedBytes<1>>,
 
     // Latest height metric
     finalized_height: Gauge,
@@ -78,7 +77,7 @@ pub struct Actor<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<
     contiguous_height: Gauge,
 }
 
-impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Indexer> Actor<B, R, I> {
+impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R, I> {
     /// Create a new application actor.
     pub async fn init(context: R, config: Config<I>) -> (Self, Mailbox) {
         // Initialize verified blocks
@@ -326,7 +325,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
                             .cancel(MultiIndex::new(Value::Finalized(next)))
                             .await;
                         let block =
-                            Block::deserialize(&block).expect("Failed to deserialize block");
+                            Block::decode(block.as_ref()).expect("Failed to deserialize block");
                         resolver
                             .cancel(MultiIndex::new(Value::Digest(block.digest())))
                             .await;

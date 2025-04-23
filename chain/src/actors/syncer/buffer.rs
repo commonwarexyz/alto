@@ -1,5 +1,5 @@
 use alto_types::Block;
-use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
+use commonware_cryptography::{ed25519::PublicKey, sha256::Digest, Digestible};
 use std::collections::{HashMap, VecDeque};
 
 pub struct Buffer {
