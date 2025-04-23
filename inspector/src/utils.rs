@@ -1,7 +1,9 @@
 use alto_client::{IndexQuery, Query};
-use alto_types::{Finalized, Notarized, Seed};
-use commonware_cryptography::sha256::Digest;
-use commonware_utils::{SizedSerialize, SystemTimeExt};
+use alto_types::{Finalized, Notarized};
+use commonware_codec::FixedSize;
+use commonware_consensus::threshold_simplex::types::{Seed, Viewable};
+use commonware_cryptography::{sha256::Digest, Digestible};
+use commonware_utils::SystemTimeExt;
 use std::time;
 use tracing::{debug, info};
 
@@ -39,7 +41,7 @@ pub fn parse_query(query: &str) -> Option<QueryKind> {
         Some(QueryKind::Single(Query::Index(index)))
     } else {
         let bytes = commonware_utils::from_hex(query)?;
-        let digest: [u8; Digest::SERIALIZED_LEN] = bytes.try_into().ok()?;
+        let digest: [u8; Digest::SIZE] = bytes.try_into().ok()?;
         Some(QueryKind::Single(Query::Digest(digest.into())))
     }
 }
@@ -91,7 +93,7 @@ pub fn log_notarization(notarized: Notarized) {
     let age_ms = now.saturating_sub(notarized.block.timestamp);
     let age_str = format_age(age_ms);
     info!(
-        view = notarized.proof.view,
+        view = notarized.proof.view(),
         height = notarized.block.height,
         timestamp = notarized.block.timestamp,
         age = %age_str,
@@ -105,7 +107,7 @@ pub fn log_finalization(finalized: Finalized) {
     let age_ms = now.saturating_sub(finalized.block.timestamp);
     let age_str = format_age(age_ms);
     info!(
-        view = finalized.proof.view,
+        view = finalized.proof.view(),
         height = finalized.block.height,
         timestamp = finalized.block.timestamp,
         age = %age_str,

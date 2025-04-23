@@ -81,6 +81,7 @@ use alto_client::{
     Client, IndexQuery, Query,
 };
 use clap::{value_parser, Arg, Command};
+use commonware_codec::DecodeExt;
 use commonware_cryptography::bls12381::PublicKey;
 use commonware_utils::from_hex_formatted;
 use futures::StreamExt;
@@ -175,7 +176,7 @@ async fn main() {
         let indexer = matches.get_one::<String>("indexer").unwrap();
         let identity = matches.get_one::<String>("identity").unwrap();
         let identity = from_hex_formatted(identity).expect("Failed to decode identity");
-        let identity = PublicKey::try_from(identity).expect("Invalid identity");
+        let identity = PublicKey::decode(identity.as_ref()).expect("Invalid identity");
         let client = Client::new(indexer, identity);
 
         let mut stream = client.listen().await.expect("Failed to connect to indexer");
@@ -194,7 +195,7 @@ async fn main() {
         let indexer = matches.get_one::<String>("indexer").unwrap();
         let identity = matches.get_one::<String>("identity").unwrap();
         let identity = from_hex_formatted(identity).expect("Failed to decode identity");
-        let identity = PublicKey::try_from(identity).expect("Invalid identity");
+        let identity = PublicKey::decode(identity.as_ref()).expect("Invalid identity");
         let client = Client::new(indexer, identity);
         let prepare_flag = matches.get_flag("prepare");
 
@@ -236,7 +237,7 @@ async fn main() {
                     IndexQueryKind::Single(query) => {
                         let start = std::time::Instant::now();
                         let notarized = client
-                            .notarization_get(query)
+                            .notarized_get(query)
                             .await
                             .expect("Failed to get notarization");
                         log_latency(start);
@@ -246,7 +247,7 @@ async fn main() {
                         for view in start_view..end_view {
                             let start = std::time::Instant::now();
                             let query = IndexQuery::Index(view);
-                            match client.notarization_get(query).await {
+                            match client.notarized_get(query).await {
                                 Ok(notarized) => {
                                     log_latency(start);
                                     log_notarization(notarized);
@@ -265,7 +266,7 @@ async fn main() {
                     IndexQueryKind::Single(query) => {
                         let start = std::time::Instant::now();
                         let finalized = client
-                            .finalization_get(query)
+                            .finalized_get(query)
                             .await
                             .expect("Failed to get finalization");
                         log_latency(start);
@@ -275,7 +276,7 @@ async fn main() {
                         for view in start_view..end_view {
                             let start = std::time::Instant::now();
                             let query = IndexQuery::Index(view);
-                            match client.finalization_get(query).await {
+                            match client.finalized_get(query).await {
                                 Ok(finalized) => {
                                     log_latency(start);
                                     log_finalization(finalized);

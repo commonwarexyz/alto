@@ -96,6 +96,8 @@ dependencies = [
  "alto-types",
  "bytes",
  "clap",
+ "commonware-codec",
+ "commonware-consensus",
  "commonware-cryptography",
  "commonware-utils",
  "futures",
