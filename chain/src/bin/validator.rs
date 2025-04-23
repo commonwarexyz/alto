@@ -1,20 +1,18 @@
 use alto_chain::{engine, Config};
 use alto_client::Client;
-use alto_types::P2P_NAMESPACE;
+use alto_types::NAMESPACE;
 use axum::{routing::get, serve, Extension, Router};
 use clap::{Arg, Command};
+use commonware_codec::{Decode, DecodeExt};
 use commonware_cryptography::{
-    bls12381::primitives::{
-        group::{self, Element},
-        poly,
-    },
+    bls12381::primitives::{group, poly},
     ed25519::{PrivateKey, PublicKey},
-    Ed25519, Scheme,
+    Ed25519, Signer,
 };
-use commonware_deployer::ec2::Peers;
+use commonware_deployer::ec2::Hosts;
 use commonware_p2p::authenticated;
 use commonware_runtime::{tokio, Clock, Metrics, Network, Runner, Spawner};
-use commonware_utils::{from_hex_formatted, hex, quorum};
+use commonware_utils::{from_hex_formatted, quorum, union_unique};
 use futures::future::try_join_all;
 use governor::Quota;
 use prometheus_client::metrics::gauge::Gauge;
@@ -72,13 +70,13 @@ fn main() {
     // Load peers
     let peer_file = matches.get_one::<String>("peers").unwrap();
     let peers_file = std::fs::read_to_string(peer_file).expect("Could not read peers file");
-    let peers: Peers = serde_yaml::from_str(&peers_file).expect("Could not parse peers file");
+    let peers: Hosts = serde_yaml::from_str(&peers_file).expect("Could not parse peers file");
     let peers: HashMap<PublicKey, IpAddr> = peers
-        .peers
+        .hosts
         .into_iter()
         .map(|peer| {
             let key = from_hex_formatted(&peer.name).expect("Could not parse peer key");
-            let key = PublicKey::try_from(key).expect("Peer key is invalid");
+            let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
             (key, peer.ip)
         })
         .collect();
@@ -90,19 +88,20 @@ fn main() {
     let config_file = std::fs::read_to_string(config_file).expect("Could not read config file");
     let config: Config = serde_yaml::from_str(&config_file).expect("Could not parse config file");
     let key = from_hex_formatted(&config.private_key).expect("Could not parse private key");
-    let key = PrivateKey::try_from(key).expect("Private key is invalid");
-    let signer = <Ed25519 as Scheme>::from(key).expect("Could not create signer");
+    let key = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
+    let signer = <Ed25519 as Signer>::from(key).expect("Could not create signer");
     let share = from_hex_formatted(&config.share).expect("Could not parse share");
-    let share = group::Share::deserialize(&share).expect("Share is invalid");
-    let threshold = quorum(peers_u32).expect("unable to derive quorum");
+    let share = group::Share::decode(share.as_ref()).expect("Share is invalid");
+    let threshold = quorum(peers_u32);
     let identity = from_hex_formatted(&config.identity).expect("Could not parse identity");
-    let identity = poly::Public::deserialize(&identity, threshold).expect("Identity is invalid");
+    let identity = poly::Public::decode_cfg(identity.as_ref(), &(threshold as usize))
+        .expect("Identity is invalid");
     let identity_public = *poly::public(&identity);
     let public_key = signer.public_key();
     let ip = peers.get(&public_key).expect("Could not find self in IPs");
     info!(
         ?public_key,
-        identity = hex(&identity_public.serialize()),
+        ?identity_public,
         ?ip,
         port = config.port,
         "loaded config"
@@ -122,7 +121,7 @@ fn main() {
     let mut bootstrappers = Vec::new();
     for bootstrapper in &config.bootstrappers {
         let key = from_hex_formatted(bootstrapper).expect("Could not parse bootstrapper key");
-        let key = PublicKey::try_from(key).expect("Bootstrapper key is invalid");
+        let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
         let ip = peers.get(&key).expect("Could not find bootstrapper in IPs");
         let bootstrapper_socket = format!("{}:{}", ip, config.port);
         let bootstrapper_socket = SocketAddr::from_str(&bootstrapper_socket)
@@ -137,12 +136,13 @@ fn main() {
         storage_directory: PathBuf::from(config.directory),
         ..Default::default()
     };
-    let (executor, context) = tokio::Executor::init(cfg);
+    let executor = tokio::Runner::new(cfg);
 
     // Configure network
+    let p2p_namespace = union_unique(NAMESPACE, b"_P2P");
     let mut p2p_cfg = authenticated::Config::aggressive(
         signer.clone(),
-        P2P_NAMESPACE,
+        &p2p_namespace,
         SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
         SocketAddr::new(*ip, config.port),
         bootstrappers,
@@ -151,7 +151,7 @@ fn main() {
     p2p_cfg.mailbox_size = config.mailbox_size;
 
     // Start runtime
-    executor.start(async move {
+    executor.start(|context| async move {
         // Start p2p
         let (mut network, mut oracle) =
             authenticated::Network::new(context.with_label("network"), p2p_cfg);
