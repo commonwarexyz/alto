@@ -3,7 +3,6 @@ use governor::Quota;
 
 mod actor;
 mod archive;
-mod buffer;
 mod coordinator;
 pub mod handler;
 mod key;

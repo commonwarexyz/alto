@@ -10,6 +10,7 @@ resolver = "2"
 [workspace.dependencies]
 alto-client = { version = "0.0.6", path = "client" }
 alto-types = { version = "0.0.6", path = "types" }
+commonware-broadcast = { version = "0.0.45", path = "../monorepo/broadcast" }
 commonware-codec = { version = "0.0.45", path = "../monorepo/codec" }
 commonware-consensus = { version = "0.0.45", path = "../monorepo/consensus" }
 commonware-cryptography = { version = "0.0.45", path = "../monorepo/cryptography" }

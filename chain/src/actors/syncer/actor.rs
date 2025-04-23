@@ -1,6 +1,5 @@
 use super::{
     archive::Wrapped,
-    buffer::Buffer,
     coordinator::Coordinator,
     handler::Handler,
     ingress::{Mailbox, Message},
@@ -14,11 +13,12 @@ use crate::{
     Indexer,
 };
 use alto_types::{Block, Finalized, Notarized};
+use commonware_broadcast::{buffered, Broadcaster};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::threshold_simplex::types::{Finalization, Seedable, Viewable};
 use commonware_cryptography::{bls12381, ed25519::PublicKey, sha256::Digest, Digestible};
 use commonware_macros::select;
-use commonware_p2p::{utils::requester, Receiver, Recipients, Sender};
+use commonware_p2p::{utils::requester, Receiver, Sender};
 use commonware_resolver::{p2p, Resolver};
 use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
 use commonware_storage::{
@@ -28,19 +28,11 @@ use commonware_storage::{
     metadata::{self, Metadata},
 };
 use commonware_utils::array::FixedBytes;
-use futures::{
-    channel::{mpsc, oneshot},
-    lock::Mutex,
-    StreamExt,
-};
+use futures::{channel::mpsc, lock::Mutex, StreamExt};
 use governor::{clock::Clock as GClock, Quota};
 use prometheus_client::metrics::gauge::Gauge;
 use rand::Rng;
-use std::{
-    collections::{BTreeSet, HashMap},
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
 
 /// Application actor.
@@ -241,7 +233,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
     /// Run the application actor.
     async fn run(
         mut self,
-        mut broadcast_network: (
+        broadcast_network: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
@@ -262,7 +254,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                 producer: handler,
                 mailbox_size: self.mailbox_size,
                 requester_config: requester::Config {
-                    public_key: self.public_key,
+                    public_key: self.public_key.clone(),
                     rate_limit: self.backfill_quota,
                     initial: Duration::from_secs(1),
                     timeout: Duration::from_secs(2),
@@ -432,17 +424,20 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         });
 
         // Handle messages
-        let mut buffer = Buffer::new(10);
-        let mut waiters: HashMap<Digest, Vec<oneshot::Sender<Block>>> = HashMap::new();
+        let (buffer_engine, mut buffer) = buffered::Engine::<_, _, Digest, _, Block, _, _>::new(
+            self.context.with_label("buffer"),
+            buffered::Config {
+                public_key: self.public_key,
+                mailbox_size: 128,
+                deque_size: 128,
+                priority: true,
+                decode_config: (),
+            },
+        );
+        buffer_engine.start(broadcast_network); // TODO: handle
         let mut latest_view = 0;
         let mut outstanding_notarize = BTreeSet::new();
         loop {
-            // Clear dead waiters
-            waiters.retain(|_, waiters| {
-                waiters.retain(|waiter| !waiter.is_canceled());
-                !waiters.is_empty()
-            });
-
             // Cancel useless requests
             let mut to_cancel = Vec::new();
             outstanding_notarize.retain(|view| {
@@ -464,11 +459,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     let message = mailbox_message.expect("Mailbox closed");
                     match message {
                         Message::Broadcast { payload } => {
-                            broadcast_network
-                                .0
-                                .send(Recipients::All, payload.encode().into(), true)
-                                .await
-                                .expect("Failed to broadcast");
+                            buffer.broadcast(payload).await;
                         }
                         Message::Verified { view, payload } => {
                             verified
@@ -497,7 +488,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             // Check if in buffer
                             let proposal = &notarization.proposal;
                             let mut block = None;
-                            if let Some(buffered) = buffer.get(&proposal.payload) {
+                            if let Some(buffered) = buffer.get(proposal.payload).await {
                                 block = Some(buffered.clone());
                             }
 
@@ -567,7 +558,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             // Check if in buffer
                             let proposal = &finalization.proposal;
                             let mut block = None;
-                            if let Some(buffered) = buffer.get(&proposal.payload){
+                            if let Some(buffered) = buffer.get(proposal.payload).await{
                                 block = Some(buffered.clone());
                             }
 
@@ -646,7 +637,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                         }
                         Message::Get { view, payload, response } => {
                             // Check if in buffer
-                            let buffered = buffer.get(&payload);
+                            let buffered = buffer.get(payload).await;
                             if let Some(buffered) = buffered {
                                 debug!(height = buffered.height, "found block in buffer");
                                 let _ = response.send(buffered.clone());
@@ -689,25 +680,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
                             // Register waiter
                             debug!(view, ?payload, "registering waiter");
-                            waiters.entry(payload).or_default().push(response);
-                        }
-                    }
-                },
-                // Handle incoming broadcasts
-                broadcast_message = broadcast_network.1.recv() => {
-                    let (sender, message) = broadcast_message.expect("Broadcast closed");
-                    let Ok(block) = Block::decode(message.as_ref()) else {
-                        warn!(?sender, "failed to deserialize block");
-                        continue;
-                    };
-                    debug!(?sender, digest=?block.digest(), height=block.height, "received broadcast");
-                    buffer.add(sender, block.clone());
-
-                    // Notify waiters
-                    if let Some(waiters) = waiters.remove(&block.digest()) {
-                        debug!(?block.height, "waiter resolved via broadcast");
-                        for waiter in waiters {
-                            let _ = waiter.send(block.clone());
+                            buffer.wait_prebuilt(payload, response).await;
                         }
                     }
                 },
@@ -748,7 +721,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 },
                                 key::Value::Digest(digest) => {
                                     // Check buffer
-                                    if let Some(block) = buffer.get(&digest) {
+                                    if let Some(block) = buffer.get(digest).await {
                                         let _ = response.send(block.encode().into());
                                         continue;
                                     }
@@ -806,14 +779,6 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                         .put(view, notarization.block.digest(), value)
                                         .await
                                         .expect("Failed to insert notarized block");
-
-                                    // Notify waiters
-                                    if let Some(waiters) = waiters.remove(&notarization.block.digest()) {
-                                        debug!(view, ?notarization.block.height, "waiter resolved via notarization");
-                                        for waiter in waiters {
-                                            let _ = waiter.send(notarization.block.clone());
-                                        }
-                                    }
                                 },
                                 key::Value::Finalized(height) => {
                                     // Parse finalization
@@ -848,14 +813,6 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                         .await
                                         .expect("Failed to insert finalized block");
 
-                                    // Notify waiters
-                                    if let Some(waiters) = waiters.remove(&finalization.block.digest()) {
-                                        debug!(?finalization.block.height, "waiter resolved via finalization");
-                                        for waiter in waiters {
-                                            let _ = waiter.send(finalization.block.clone());
-                                        }
-                                    }
-
                                     // Notify finalizer
                                     let _ = finalizer_sender.try_send(());
                                 },
@@ -876,14 +833,6 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                         .put(block.height, digest, value)
                                         .await
                                         .expect("Failed to insert finalized block");
-
-                                    // Notify waiters
-                                    if let Some(waiters) = waiters.remove(&digest) {
-                                        debug!(?block.height, "waiter resolved via block");
-                                        for waiter in waiters {
-                                            let _ = waiter.send(block.clone());
-                                        }
-                                    }
 
                                     // Notify finalizer
                                     let _ = finalizer_sender.try_send(());
