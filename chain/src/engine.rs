@@ -3,7 +3,7 @@ use crate::{
     Indexer,
 };
 use alto_types::NAMESPACE;
-use commonware_consensus::threshold_simplex::{self, Engine as Consensus, Prover};
+use commonware_consensus::threshold_simplex::{self, Engine as Consensus};
 use commonware_cryptography::{
     bls12381::primitives::{group, poly::public, poly::Poly},
     ed25519::PublicKey,
@@ -45,7 +45,7 @@ pub struct Config<I: Indexer> {
 
 pub struct Engine<
     B: Blob,
-    E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metrics,
+    E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     I: Indexer,
 > {
     context: E,

@@ -4,8 +4,7 @@ use super::{
     Config,
 };
 use crate::actors::syncer;
-use alto_types::{Block, Finalization, Notarization, Seed};
-use commonware_consensus::threshold_simplex::Prover;
+use alto_types::Block;
 use commonware_cryptography::{sha256::Digest, Hasher, Sha256};
 use commonware_macros::select;
 use commonware_runtime::{Clock, Handle, Metrics, Spawner};

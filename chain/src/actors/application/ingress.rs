@@ -1,6 +1,6 @@
 use commonware_consensus::{
-    threshold_simplex::{Context, View},
-    Automaton as Au, Committer as Co, Proof, Relay as Re,
+    threshold_simplex::types::{Activity, Context, Finalization, Notarization, View},
+    Automaton, Relay, Reporter,
 };
 use commonware_cryptography::sha256::Digest;
 use futures::{
@@ -26,13 +26,11 @@ pub enum Message {
         payload: Digest,
         response: oneshot::Sender<bool>,
     },
-    Prepared {
-        proof: Proof,
-        payload: Digest,
+    Notarization {
+        notarization: Notarization<Digest>,
     },
-    Finalized {
-        proof: Proof,
-        payload: Digest,
+    Finalization {
+        finalization: Finalization<Digest>,
     },
 }
 
@@ -48,7 +46,7 @@ impl Mailbox {
     }
 }
 
-impl Au for Mailbox {
+impl Automaton for Mailbox {
     type Digest = Digest;
     type Context = Context<Self::Digest>;
 
@@ -97,7 +95,7 @@ impl Au for Mailbox {
     }
 }
 
-impl Re for Mailbox {
+impl Relay for Mailbox {
     type Digest = Digest;
 
     async fn broadcast(&mut self, digest: Self::Digest) {
@@ -108,20 +106,26 @@ impl Re for Mailbox {
     }
 }
 
-impl Co for Mailbox {
-    type Digest = Digest;
+impl Reporter for Mailbox {
+    type Activity = Activity<Digest>;
 
-    async fn prepared(&mut self, proof: Proof, payload: Self::Digest) {
-        self.sender
-            .send(Message::Prepared { proof, payload })
-            .await
-            .expect("Failed to send notarized");
-    }
-
-    async fn finalized(&mut self, proof: Proof, payload: Self::Digest) {
-        self.sender
-            .send(Message::Finalized { proof, payload })
-            .await
-            .expect("Failed to send finalized");
+    async fn report(&mut self, activity: Self::Activity) {
+        match activity {
+            Activity::Notarization(notarization) => {
+                self.sender
+                    .send(Message::Notarization { notarization })
+                    .await
+                    .expect("Failed to send notarization");
+            }
+            Activity::Finalization(finalization) => {
+                self.sender
+                    .send(Message::Finalization { finalization })
+                    .await
+                    .expect("Failed to send finalization");
+            }
+            _ => {
+                // Ignore other activities
+            }
+        }
     }
 }

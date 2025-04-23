@@ -1,10 +1,10 @@
 use alto_types::leader_index;
 use commonware_consensus::{
-    threshold_simplex::View, Activity, Proof, Supervisor as Su, ThresholdSupervisor as TSu,
+    threshold_simplex::types::View, Supervisor as Su, ThresholdSupervisor as TSu,
 };
 use commonware_cryptography::{
     bls12381::primitives::{
-        group::{self, Element},
+        group,
         poly::{self, Poly},
     },
     ed25519::PublicKey,
@@ -58,11 +58,6 @@ impl Su for Supervisor {
 
     fn is_participant(&self, _: Self::Index, candidate: &Self::PublicKey) -> Option<u32> {
         self.participants_map.get(candidate).cloned()
-    }
-
-    async fn report(&self, _: Activity, _: Proof) {
-        // We don't report activity in this example but you would otherwise use
-        // this to collect uptime and fraud proofs.
     }
 }
 
