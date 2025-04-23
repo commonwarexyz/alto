@@ -1,47 +1,51 @@
-use bytes::Bytes;
+use commonware_codec::Codec;
 use commonware_runtime::{Metrics, Storage};
 use commonware_storage::archive::{self, Archive, Identifier, Translator};
 use commonware_utils::Array;
 use futures::lock::Mutex;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 /// Archive wrapper that handles all locking.
 #[derive(Clone)]
-pub struct Wrapped<T, K, R>
+pub struct Wrapped<T, K, R, V>
 where
     T: Translator,
     K: Array,
     R: Storage + Metrics,
+    V: Codec,
 {
     inner: Arc<Mutex<Archive<T, K, R>>>,
+    _phantom: PhantomData<V>,
 }
 
-impl<T, K, R> Wrapped<T, K, R>
+impl<T, K, R, V> Wrapped<T, K, R, V>
 where
     T: Translator,
     K: Array,
     R: Storage + Metrics,
+    V: Codec,
 {
     /// Creates a new `Wrapped` from an existing `Archive`.
     pub fn new(archive: Archive<T, K, R>) -> Self {
         Self {
             inner: Arc::new(Mutex::new(archive)),
+            _phantom: PhantomData,
         }
     }
 
     /// Retrieves a value from the archive by identifier.
-    pub async fn get(
-        &self,
-        identifier: Identifier<'_, K>,
-    ) -> Result<Option<Bytes>, archive::Error> {
+    pub async fn get(&self, identifier: Identifier<'_, K>) -> Result<Option<V>, archive::Error> {
         let archive = self.inner.lock().await;
-        archive.get(identifier).await
+        let Some(result) = archive.get(identifier).await? else {
+            return Ok(None);
+        };
+        Ok(Some(V::decode_cfg(result.as_ref(), &()).unwrap()))
     }
 
     /// Inserts a value into the archive with the given index and key.
-    pub async fn put(&self, index: u64, key: K, data: Bytes) -> Result<(), archive::Error> {
+    pub async fn put(&self, index: u64, key: K, data: V) -> Result<(), archive::Error> {
         let mut archive = self.inner.lock().await;
-        archive.put(index, key, data).await?;
+        archive.put(index, key, data.encode().into()).await?;
         Ok(())
     }
 

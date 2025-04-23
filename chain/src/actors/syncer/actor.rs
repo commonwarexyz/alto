@@ -262,10 +262,10 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
         // Process all finalized blocks in order (fetching any that are missing)
         let last_view_processed = Arc::new(Mutex::new(0));
-        let verified = Wrapped::new(self.verified);
-        let notarized = Wrapped::new(self.notarized);
-        let finalized = Wrapped::new(self.finalized);
-        let blocks = Wrapped::new(self.blocks);
+        let verified = Wrapped::<_, _, _, Block>::new(self.verified);
+        let notarized = Wrapped::<_, _, _, Notarized>::new(self.notarized);
+        let finalized = Wrapped::<_, _, _, Finalization<Digest>>::new(self.finalized);
+        let blocks = Wrapped::<_, _, _, Block>::new(self.blocks);
         let (mut finalizer_sender, mut finalizer_receiver) = mpsc::channel::<()>(1);
         self.context.with_label("finalizer").spawn({
             let mut resolver = resolver.clone();
@@ -309,8 +309,6 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                         resolver
                             .cancel(MultiIndex::new(Value::Finalized(next)))
                             .await;
-                        let block =
-                            Block::decode(block.as_ref()).expect("Failed to deserialize block");
                         resolver
                             .cancel(MultiIndex::new(Value::Digest(block.digest())))
                             .await;
@@ -326,9 +324,6 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             .await
                             .expect("Failed to get finalization");
                         if let Some(finalization) = finalization {
-                            let finalization =
-                                Finalization::<Digest>::decode(finalization.as_ref())
-                                    .expect("Failed to deserialize finalization");
                             *last_view_processed.lock().await = finalization.view();
                         }
                         continue;
@@ -344,8 +339,6 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 .await
                                 .expect("Failed to get finalized block")
                                 .expect("Gapped block missing");
-                            let gapped_block = Block::decode(gapped_block.as_ref())
-                                .expect("Failed to deserialize block");
 
                             // Attempt to repair one block from other sources
                             let target_block = gapped_block.parent;
@@ -354,13 +347,12 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 .await
                                 .expect("Failed to get verified block");
                             if let Some(verified) = verified {
-                                let verified = Block::decode(verified.as_ref())
-                                    .expect("Failed to deserialize block");
+                                let height = verified.height;
                                 blocks
-                                    .put(verified.height, target_block, verified.encode().into())
+                                    .put(height, target_block, verified)
                                     .await
                                     .expect("Failed to insert finalized block");
-                                debug!(height = verified.height, "repaired block from verified");
+                                debug!(height, "repaired block from verified");
                                 continue;
                             }
                             let notarization = notarized
@@ -368,20 +360,12 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 .await
                                 .expect("Failed to get notarized block");
                             if let Some(notarization) = notarization {
-                                let notarization = Notarized::decode(notarization.as_ref())
-                                    .expect("Failed to deserialize block");
+                                let height = notarization.block.height;
                                 blocks
-                                    .put(
-                                        notarization.block.height,
-                                        target_block,
-                                        notarization.block.encode().into(),
-                                    )
+                                    .put(height, target_block, notarization.block)
                                     .await
                                     .expect("Failed to insert finalized block");
-                                debug!(
-                                    height = notarization.block.height,
-                                    "repaired block from notarizations"
-                                );
+                                debug!(height, "repaired block from notarizations");
                                 continue;
                             }
 
@@ -446,7 +430,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                         }
                         Message::Verified { view, payload } => {
                             verified
-                                .put(view, payload.digest(), payload.encode().into())
+                                .put(view, payload.digest(), payload)
                                 .await
                                 .expect("Failed to insert verified block");
                         }
@@ -478,7 +462,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             // Check if in verified blocks
                             if block.is_none() {
                                 if let Some(verified) = verified.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get verified block") {
-                                    block = Some(Block::decode(verified.as_ref()).expect("Failed to deserialize block"));
+                                    block = Some(verified);
                                 }
                             }
 
@@ -487,16 +471,12 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 let height = block.height;
                                 let digest = proposal.payload;
                                 let notarization = Notarized::new(notarization.clone(), block);
-                                notarized
-                                    .put(view, digest, notarization.encode().into())
-                                    .await
-                                    .expect("Failed to insert notarized block");
-                                debug!(view, height, "notarized block stored");
 
                                 // Upload to indexer (if available)
                                 if let Some(indexer) = self.indexer.as_ref() {
                                     self.context.with_label("indexer").spawn({
                                         let indexer = indexer.clone();
+                                        let notarization = notarization.clone();
                                         move |_| async move {
                                             let result = indexer
                                                 .notarized_upload(notarization)
@@ -509,6 +489,13 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                         }
                                     });
                                 }
+
+                                // Persist the notarization
+                                notarized
+                                    .put(view, digest, notarization)
+                                    .await
+                                    .expect("Failed to insert notarized block");
+                                debug!(view, height, "notarized block stored");
                                 continue;
                             }
 
@@ -548,14 +535,14 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             // Check if in verified
                             if block.is_none() {
                                 if let Some(verified) = verified.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get verified block") {
-                                    block = Some(Block::decode(verified.as_ref()).expect("Failed to deserialize block"));
+                                    block = Some(verified);
                                 }
                             }
 
                             // Check if in notarized
                             if block.is_none() {
                                 if let Some(notarized) = notarized.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get notarized block") {
-                                    block = Some(Notarized::decode(notarized.as_ref()).expect("Failed to deserialize block").block);
+                                    block = Some(notarized.block);
                                 }
                             }
 
@@ -563,12 +550,32 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             if let Some(block) = block {
                                 let digest = proposal.payload;
                                 let height = block.height;
+
+                                // Upload to indexer (if available)
+                                if let Some(indexer) = self.indexer.as_ref() {
+                                    self.context.with_label("indexer").spawn({
+                                        let indexer = indexer.clone();
+                                        let finalized = Finalized::new(finalization.clone(), block.clone());
+                                        move |_| async move {
+                                            let result = indexer
+                                                .finalized_upload(finalized)
+                                                .await;
+                                            if let Err(e) = result {
+                                                warn!(?e, "failed to upload finalization");
+                                                return;
+                                            }
+                                            debug!(height, "finalization uploaded to indexer");
+                                        }
+                                    });
+                                }
+
+                                // Persist the finalization
                                 finalized
-                                    .put(height, proposal.payload, finalization.encode().into())
+                                    .put(height, proposal.payload, finalization)
                                     .await
                                     .expect("Failed to insert finalization");
                                 blocks
-                                    .put(height, digest, block.encode().into())
+                                    .put(height, digest, block)
                                     .await
                                     .expect("Failed to insert finalized block");
                                 debug!(view, height, "finalized block stored");
@@ -594,23 +601,6 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 // Update metrics
                                 self.finalized_height.set(height as i64);
 
-                                // Upload to indexer (if available)
-                                if let Some(indexer) = self.indexer.as_ref() {
-                                    self.context.with_label("indexer").spawn({
-                                        let indexer = indexer.clone();
-                                        let finalized = Finalized::new(finalization, block);
-                                        move |_| async move {
-                                            let result = indexer
-                                                .finalized_upload(finalized)
-                                                .await;
-                                            if let Err(e) = result {
-                                                warn!(?e, "failed to upload finalization");
-                                                return;
-                                            }
-                                            debug!(height, "finalization uploaded to indexer");
-                                        }
-                                    });
-                                }
                                 continue;
                             }
 
@@ -630,7 +620,6 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             // Check verified blocks
                             let block = verified.get(Identifier::Key(&payload)).await.expect("Failed to get verified block");
                             if let Some(block) = block {
-                                let block = Block::decode(block.as_ref()).expect("Failed to deserialize block");
                                 debug!(height = block.height, "found block in verified");
                                 let _ = response.send(block);
                                 continue;
@@ -639,7 +628,6 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             // Check if in notarized blocks
                             let notarization = notarized.get(Identifier::Key(&payload)).await.expect("Failed to get notarized block");
                             if let Some(notarization) = notarization {
-                                let notarization = Notarized::decode(notarization.as_ref()).expect("Failed to deserialize block");
                                 let block = notarization.block;
                                 debug!(height = block.height, "found block in notarized");
                                 let _ = response.send(block);
@@ -649,7 +637,6 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             // Check if in finalized blocks
                             let block = blocks.get(Identifier::Key(&payload)).await.expect("Failed to get finalized block");
                             if let Some(block) = block {
-                                let block = Block::decode(block.as_ref()).expect("Failed to deserialize block");
                                 debug!(height = block.height, "found block in finalized");
                                 let _ = response.send(block);
                                 continue;
@@ -676,7 +663,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 key::Value::Notarized(view) => {
                                     let notarization = notarized.get(Identifier::Index(view)).await.expect("Failed to get notarized block");
                                     if let Some(notarized) = notarization {
-                                        let _ = response.send(notarized);
+                                        let _ = response.send(notarized.encode().into());
                                     } else {
                                         debug!(view, "notarization missing on request");
                                     }
@@ -688,7 +675,6 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                         debug!(height, "finalization missing on request");
                                         continue;
                                     };
-                                    let finalization = Finalization::decode(finalization.as_ref()).expect("Failed to deserialize finalization");
 
                                     // Get block
                                     let block = blocks.get(Identifier::Index(height)).await.expect("Failed to get finalized block");
@@ -696,7 +682,6 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                         debug!(height, "finalized block missing on request");
                                         continue;
                                     };
-                                    let block = Block::decode(block.as_ref()).expect("Failed to deserialize block");
 
                                     // Send finalization
                                     let payload = Finalized::new(finalization, block);
@@ -712,22 +697,21 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                     // Get verified block
                                     let block = verified.get(Identifier::Key(&digest)).await.expect("Failed to get verified block");
                                     if let Some(block) = block {
-                                        let _ = response.send(block);
+                                        let _ = response.send(block.encode().into());
                                         continue;
                                     }
 
                                     // Get notarized block
                                     let notarization = notarized.get(Identifier::Key(&digest)).await.expect("Failed to get notarized block");
                                     if let Some(notarized) = notarization {
-                                        let notarization = Notarized::decode(notarized.as_ref()).expect("Failed to deserialize notarization");
-                                        let _ = response.send(notarization.block.encode().into());
+                                        let _ = response.send(notarized.block.encode().into());
                                         continue;
                                     }
 
                                     // Get block
                                     let block = blocks.get(Identifier::Key(&digest)).await.expect("Failed to get finalized block");
                                     if let Some(block) = block {
-                                        let _ = response.send(block);
+                                        let _ = response.send(block.encode().into());
                                         continue;
                                     };
 
@@ -759,7 +743,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                     debug!(view, "received notarization");
                                     let _ = response.send(true);
                                     notarized
-                                        .put(view, notarization.block.digest(), value)
+                                        .put(view, notarization.block.digest(), notarization)
                                         .await
                                         .expect("Failed to insert notarized block");
                                 },
@@ -786,13 +770,13 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
                                     // Persist the finalization
                                     finalized
-                                        .put(height, finalization.block.digest(), finalization.proof.encode().into())
+                                        .put(height, finalization.block.digest(), finalization.proof)
                                         .await
                                         .expect("Failed to insert finalization");
 
                                     // Persist the block
                                     blocks
-                                        .put(height, finalization.block.digest(), finalization.block.encode().into())
+                                        .put(height, finalization.block.digest(), finalization.block)
                                         .await
                                         .expect("Failed to insert finalized block");
 
@@ -813,7 +797,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                     debug!(?digest, height = block.height, "received block");
                                     let _ = response.send(true);
                                     blocks
-                                        .put(block.height, digest, value)
+                                        .put(block.height, digest, block)
                                         .await
                                         .expect("Failed to insert finalized block");
 
