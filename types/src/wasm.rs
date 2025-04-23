@@ -61,7 +61,7 @@ pub fn parse_notarized(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let Ok(notarized) = Notarized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
-    if !notarized.verify(&public_key) {
+    if !notarized.verify(NAMESPACE, &public_key) {
         return JsValue::NULL;
     }
     let notarized_js = NotarizedJs {
@@ -87,7 +87,7 @@ pub fn parse_finalized(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let Ok(finalized) = Finalized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
-    if !finalized.verify(&public) {
+    if !finalized.verify(NAMESPACE, &public) {
         return JsValue::NULL;
     }
     let finalized_js = FinalizedJs {

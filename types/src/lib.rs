@@ -65,7 +65,7 @@ mod tests {
 
         // Verify notarized
         let public_key = network.public_key();
-        assert!(notarized.verify(public_key.as_ref()));
+        assert!(notarized.verify(NAMESPACE, public_key.as_ref()));
     }
 
     #[test]
@@ -90,6 +90,6 @@ mod tests {
 
         // Verify finalized
         let public_key = network.public_key();
-        assert!(finalized.verify(public_key.as_ref()));
+        assert!(finalized.verify(NAMESPACE, public_key.as_ref()));
     }
 }

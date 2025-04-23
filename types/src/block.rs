@@ -1,4 +1,3 @@
-use crate::NAMESPACE;
 use bytes::{Buf, BufMut};
 use commonware_codec::{Error, FixedSize, Read, ReadExt, Write};
 use commonware_consensus::threshold_simplex::types::{Finalization, Notarization};
@@ -88,8 +87,8 @@ impl Notarized {
         Self { proof, block }
     }
 
-    pub fn verify(&self, public_key: &Public) -> bool {
-        self.proof.verify(NAMESPACE, public_key)
+    pub fn verify(&self, namespace: &[u8], public_key: &Public) -> bool {
+        self.proof.verify(namespace, public_key)
     }
 }
 
@@ -131,8 +130,8 @@ impl Finalized {
         Self { proof, block }
     }
 
-    pub fn verify(&self, public_key: &Public) -> bool {
-        self.proof.verify(NAMESPACE, public_key)
+    pub fn verify(&self, namespace: &[u8], public_key: &Public) -> bool {
+        self.proof.verify(namespace, public_key)
     }
 }
 

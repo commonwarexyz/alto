@@ -12,7 +12,7 @@ use crate::{
     },
     Indexer,
 };
-use alto_types::{Block, Finalized, Notarized};
+use alto_types::{Block, Finalized, Notarized, NAMESPACE};
 use commonware_broadcast::{buffered, Broadcaster};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::threshold_simplex::types::{Finalization, Seedable, Viewable};
@@ -761,7 +761,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                         let _ = response.send(false);
                                         continue;
                                     };
-                                    if !notarization.verify(self.public.as_ref()) {
+                                    if !notarization.verify(NAMESPACE, self.public.as_ref()) {
                                         let _ = response.send(false);
                                         continue;
                                     }
@@ -786,7 +786,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                         let _ = response.send(false);
                                         continue;
                                     };
-                                    if !finalization.verify(self.public.as_ref()) {
+                                    if !finalization.verify(NAMESPACE, self.public.as_ref()) {
                                         let _ = response.send(false);
                                         continue;
                                     }

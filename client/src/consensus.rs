@@ -122,7 +122,7 @@ impl Client {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let notarized = Notarized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !notarized.verify(self.public.as_ref()) {
+        if !notarized.verify(NAMESPACE, self.public.as_ref()) {
             return Err(Error::InvalidSignature);
         }
 
@@ -165,7 +165,7 @@ impl Client {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let finalized = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !finalized.verify(self.public.as_ref()) {
+        if !finalized.verify(NAMESPACE, self.public.as_ref()) {
             return Err(Error::InvalidSignature);
         }
 
@@ -198,14 +198,14 @@ impl Client {
         let result = match query {
             Query::Latest => {
                 let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-                if !result.verify(self.public.as_ref()) {
+                if !result.verify(NAMESPACE, self.public.as_ref()) {
                     return Err(Error::InvalidSignature);
                 }
                 Payload::Finalized(Box::new(result))
             }
             Query::Index(index) => {
                 let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-                if !result.verify(self.public.as_ref()) {
+                if !result.verify(NAMESPACE, self.public.as_ref()) {
                     return Err(Error::InvalidSignature);
                 }
                 if result.block.height != index {
@@ -268,7 +268,7 @@ impl Client {
                                 let result = Notarized::decode(data);
                                 match result {
                                     Ok(notarized) => {
-                                        if !notarized.verify(public.as_ref()) {
+                                        if !notarized.verify(NAMESPACE, public.as_ref()) {
                                             let _ =
                                                 sender.unbounded_send(Err(Error::InvalidSignature));
                                             return;
@@ -285,7 +285,7 @@ impl Client {
                                 let result = Finalized::decode(data);
                                 match result {
                                     Ok(finalized) => {
-                                        if !finalized.verify(public.as_ref()) {
+                                        if !finalized.verify(NAMESPACE, public.as_ref()) {
                                             let _ =
                                                 sender.unbounded_send(Err(Error::InvalidSignature));
                                             return;
