@@ -79,14 +79,14 @@ pub struct Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alto_types::{Finalized, Notarized, Seed};
+    use alto_types::{Finalized, Notarized};
     use bls12381::primitives::poly;
-    use commonware_cryptography::{bls12381::dkg::ops, ed25519::PublicKey, Ed25519, Scheme};
-    use commonware_macros::test_traced;
+    use commonware_cryptography::{bls12381::dkg::ops, ed25519::PublicKey, Ed25519, Signer};
+    use commonware_macros::{select, test_traced};
     use commonware_p2p::simulated::{self, Link, Network, Oracle, Receiver, Sender};
     use commonware_runtime::{
-        deterministic::{self, Executor},
-        Clock, Metrics, Runner, Spawner,
+        deterministic::{self, Runner},
+        Clock, Metrics, Runner as _, Spawner,
     };
     use commonware_utils::quorum;
     use engine::{Config, Engine};
@@ -95,7 +95,7 @@ mod tests {
     use std::{
         collections::{HashMap, HashSet},
         num::NonZeroU32,
-        sync::{Arc, Mutex},
+        sync::Arc,
     };
     use std::{sync::atomic::AtomicBool, time::Duration};
     use tracing::info;
@@ -103,8 +103,6 @@ mod tests {
     /// MockIndexer is a simple indexer implementation for testing.
     #[derive(Clone)]
     struct MockIndexer {
-        public: bls12381::PublicKey,
-
         seed_seen: Arc<AtomicBool>,
         notarization_seen: Arc<AtomicBool>,
         finalization_seen: Arc<AtomicBool>,
@@ -113,31 +111,27 @@ mod tests {
     impl Indexer for MockIndexer {
         type Error = std::io::Error;
 
-        fn new(_: &str, public: bls12381::PublicKey) -> Self {
+        fn new(_: &str, _: bls12381::PublicKey) -> Self {
             MockIndexer {
-                public,
                 seed_seen: Arc::new(AtomicBool::new(false)),
                 notarization_seen: Arc::new(AtomicBool::new(false)),
                 finalization_seen: Arc::new(AtomicBool::new(false)),
             }
         }
 
-        async fn seed_upload(&self, seed: Bytes) -> Result<(), Self::Error> {
-            Seed::deserialize(Some(&self.public), &seed).unwrap();
+        async fn seed_upload(&self, _: Seed) -> Result<(), Self::Error> {
             self.seed_seen
                 .store(true, std::sync::atomic::Ordering::Relaxed);
             Ok(())
         }
 
-        async fn notarization_upload(&self, notarized: Bytes) -> Result<(), Self::Error> {
-            Notarized::deserialize(Some(&self.public), &notarized).unwrap();
+        async fn notarized_upload(&self, _: Notarized) -> Result<(), Self::Error> {
             self.notarization_seen
                 .store(true, std::sync::atomic::Ordering::Relaxed);
             Ok(())
         }
 
-        async fn finalization_upload(&self, finalized: Bytes) -> Result<(), Self::Error> {
-            Finalized::deserialize(Some(&self.public), &finalized).unwrap();
+        async fn finalized_upload(&self, _: Finalized) -> Result<(), Self::Error> {
             self.finalization_seen
                 .store(true, std::sync::atomic::Ordering::Relaxed);
             Ok(())
@@ -217,15 +211,15 @@ mod tests {
     fn all_online(seed: u64, link: Link) -> String {
         // Create context
         let n = 5;
-        let threshold = quorum(n).unwrap();
+        let threshold = quorum(n);
         let required_container = 10;
         let cfg = deterministic::Config {
             seed,
             timeout: Some(Duration::from_secs(30)),
             ..Default::default()
         };
-        let (executor, mut context, auditor) = Executor::init(cfg);
-        executor.start(async move {
+        let executor = Runner::from(cfg);
+        executor.start(|mut context| async move {
             // Create simulated network
             let (network, mut oracle) = Network::new(
                 context.with_label("network"),
@@ -269,7 +263,7 @@ mod tests {
                     partition_prefix: uid.clone(),
                     signer: scheme,
                     identity: public.clone(),
-                    share: shares[idx],
+                    share: shares[idx].clone(),
                     participants: validators.clone(),
                     mailbox_size: 1024,
                     backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
@@ -334,8 +328,8 @@ mod tests {
                 // Still waiting for all validators to complete
                 context.sleep(Duration::from_secs(1)).await;
             }
-        });
-        auditor.state()
+            context.auditor().state()
+        })
     }
 
     #[test_traced]
@@ -368,11 +362,11 @@ mod tests {
     fn test_backfill() {
         // Create context
         let n = 5;
-        let threshold = quorum(n).unwrap();
+        let threshold = quorum(n);
         let initial_container_required = 10;
         let final_container_required = 20;
-        let (executor, mut context, _) = Executor::timed(Duration::from_secs(30));
-        executor.start(async move {
+        let executor = Runner::timed(Duration::from_secs(30));
+        executor.start(|mut context| async move {
             // Create simulated network
             let (network, mut oracle) = Network::new(
                 context.with_label("network"),
@@ -428,7 +422,7 @@ mod tests {
                     partition_prefix: uid.clone(),
                     signer: scheme.clone(),
                     identity: public.clone(),
-                    share: shares[idx],
+                    share: shares[idx].clone(),
                     participants: validators.clone(),
                     mailbox_size: 1024,
                     backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
@@ -505,7 +499,7 @@ mod tests {
 
             // Configure engine
             let scheme = schemes[0].clone();
-            let share = shares[0];
+            let share = shares[0].clone();
             let public_key = scheme.public_key();
             let uid = format!("validator-{}", public_key);
             let config: Config<MockIndexer> = engine::Config {
@@ -582,7 +576,7 @@ mod tests {
     fn test_unclean_shutdown() {
         // Create context
         let n = 5;
-        let threshold = quorum(n).unwrap();
+        let threshold = quorum(n);
         let required_container = 100;
 
         // Derive threshold
@@ -591,141 +585,158 @@ mod tests {
 
         // Random restarts every x seconds
         let mut runs = 0;
-        let done = Arc::new(Mutex::new(false));
-        let (mut executor, mut context, _) = Executor::timed(Duration::from_secs(10));
-        while !*done.lock().unwrap() {
-            runs += 1;
-            executor.start({
-                let mut context = context.clone();
-                let public = public.clone();
-                let shares = shares.clone();
-                let done = done.clone();
-                async move {
-                    // Create simulated network
-                    let (network, mut oracle) = Network::new(
-                        context.with_label("network"),
-                        simulated::Config {
-                            max_size: 1024 * 1024,
-                        },
-                    );
+        let mut prev_ctx = None;
+        loop {
+            // Setup run
+            let public = public.clone();
+            let shares = shares.clone();
+            let f = |mut context: deterministic::Context| async move {
+                // Create simulated network
+                let (network, mut oracle) = Network::new(
+                    context.with_label("network"),
+                    simulated::Config {
+                        max_size: 1024 * 1024,
+                    },
+                );
 
-                    // Start network
-                    network.start();
+                // Start network
+                network.start();
 
-                    // Register participants
-                    let mut schemes = Vec::new();
-                    let mut validators = Vec::new();
-                    for i in 0..n {
-                        let scheme = Ed25519::from_seed(i as u64);
-                        let pk = scheme.public_key();
-                        schemes.push(scheme);
-                        validators.push(pk);
-                    }
-                    validators.sort();
-                    schemes.sort_by_key(|s| s.public_key());
-                    let mut registrations = register_validators(&mut oracle, &validators).await;
-
-                    // Link all validators
-                    let link = Link {
-                        latency: 10.0,
-                        jitter: 1.0,
-                        success_rate: 1.0,
-                    };
-                    link_validators(&mut oracle, &validators, link, None).await;
-
-                    // Create instances
-                    let mut public_keys = HashSet::new();
-                    for (idx, scheme) in schemes.into_iter().enumerate() {
-                        // Create scheme context
-                        let public_key = scheme.public_key();
-                        public_keys.insert(public_key.clone());
-
-                        // Configure engine
-                        let uid = format!("validator-{}", public_key);
-                        let config: Config<MockIndexer> = engine::Config {
-                            partition_prefix: uid.clone(),
-                            signer: scheme,
-                            identity: public.clone(),
-                            share: shares[idx],
-                            participants: validators.clone(),
-                            mailbox_size: 1024,
-                            backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
-                            leader_timeout: Duration::from_secs(1),
-                            notarization_timeout: Duration::from_secs(2),
-                            nullify_retry: Duration::from_secs(10),
-                            fetch_timeout: Duration::from_secs(1),
-                            activity_timeout: 10,
-                            skip_timeout: 5,
-                            max_fetch_count: 10,
-                            max_fetch_size: 1024 * 512,
-                            fetch_concurrent: 10,
-                            fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
-                            indexer: None,
-                        };
-                        let engine = Engine::new(context.with_label(&uid), config).await;
-
-                        // Get networking
-                        let (voter, resolver, broadcast, backfill) =
-                            registrations.remove(&public_key).unwrap();
-
-                        // Start engine
-                        engine.start(voter, resolver, broadcast, backfill);
-                    }
-
-                    // Poll metrics
-                    context
-                        .with_label("metrics")
-                        .spawn(move |context| async move {
-                            loop {
-                                let metrics = context.encode();
-
-                                // Iterate over all lines
-                                let mut success = false;
-                                for line in metrics.lines() {
-                                    // Ensure it is a metrics line
-                                    if !line.starts_with("validator-") {
-                                        continue;
-                                    }
-
-                                    // Split metric and value
-                                    let mut parts = line.split_whitespace();
-                                    let metric = parts.next().unwrap();
-                                    let value = parts.next().unwrap();
-
-                                    // If ends with peers_blocked, ensure it is zero
-                                    if metric.ends_with("_peers_blocked") {
-                                        let value = value.parse::<u64>().unwrap();
-                                        assert_eq!(value, 0);
-                                    }
-
-                                    // If ends with contiguous_height, ensure it is at least required_container
-                                    if metric.ends_with("_syncer_contiguous_height") {
-                                        let value = value.parse::<u64>().unwrap();
-                                        if value >= required_container {
-                                            success = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                                if success {
-                                    break;
-                                }
-
-                                // Still waiting for all validators to complete
-                                context.sleep(Duration::from_millis(10)).await;
-                            }
-                            *done.lock().unwrap() = true;
-                        });
-
-                    // Exit at random points until finished
-                    let wait =
-                        context.gen_range(Duration::from_millis(10)..Duration::from_millis(1_000));
-                    context.sleep(wait).await;
+                // Register participants
+                let mut schemes = Vec::new();
+                let mut validators = Vec::new();
+                for i in 0..n {
+                    let scheme = Ed25519::from_seed(i as u64);
+                    let pk = scheme.public_key();
+                    schemes.push(scheme);
+                    validators.push(pk);
                 }
-            });
+                validators.sort();
+                schemes.sort_by_key(|s| s.public_key());
+                let mut registrations = register_validators(&mut oracle, &validators).await;
 
-            // Recover context
-            (executor, context, _) = context.recover();
+                // Link all validators
+                let link = Link {
+                    latency: 10.0,
+                    jitter: 1.0,
+                    success_rate: 1.0,
+                };
+                link_validators(&mut oracle, &validators, link, None).await;
+
+                // Create instances
+                let mut public_keys = HashSet::new();
+                for (idx, scheme) in schemes.into_iter().enumerate() {
+                    // Create scheme context
+                    let public_key = scheme.public_key();
+                    public_keys.insert(public_key.clone());
+
+                    // Configure engine
+                    let uid = format!("validator-{}", public_key);
+                    let config: Config<MockIndexer> = engine::Config {
+                        partition_prefix: uid.clone(),
+                        signer: scheme,
+                        identity: public.clone(),
+                        share: shares[idx].clone(),
+                        participants: validators.clone(),
+                        mailbox_size: 1024,
+                        backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                        leader_timeout: Duration::from_secs(1),
+                        notarization_timeout: Duration::from_secs(2),
+                        nullify_retry: Duration::from_secs(10),
+                        fetch_timeout: Duration::from_secs(1),
+                        activity_timeout: 10,
+                        skip_timeout: 5,
+                        max_fetch_count: 10,
+                        max_fetch_size: 1024 * 512,
+                        fetch_concurrent: 10,
+                        fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                        indexer: None,
+                    };
+                    let engine = Engine::new(context.with_label(&uid), config).await;
+
+                    // Get networking
+                    let (voter, resolver, broadcast, backfill) =
+                        registrations.remove(&public_key).unwrap();
+
+                    // Start engine
+                    engine.start(voter, resolver, broadcast, backfill);
+                }
+
+                // Poll metrics
+                let poller = context
+                    .with_label("metrics")
+                    .spawn(move |context| async move {
+                        loop {
+                            let metrics = context.encode();
+
+                            // Iterate over all lines
+                            let mut success = false;
+                            for line in metrics.lines() {
+                                // Ensure it is a metrics line
+                                if !line.starts_with("validator-") {
+                                    continue;
+                                }
+
+                                // Split metric and value
+                                let mut parts = line.split_whitespace();
+                                let metric = parts.next().unwrap();
+                                let value = parts.next().unwrap();
+
+                                // If ends with peers_blocked, ensure it is zero
+                                if metric.ends_with("_peers_blocked") {
+                                    let value = value.parse::<u64>().unwrap();
+                                    assert_eq!(value, 0);
+                                }
+
+                                // If ends with contiguous_height, ensure it is at least required_container
+                                if metric.ends_with("_syncer_contiguous_height") {
+                                    let value = value.parse::<u64>().unwrap();
+                                    if value >= required_container {
+                                        success = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if success {
+                                break;
+                            }
+
+                            // Still waiting for all validators to complete
+                            context.sleep(Duration::from_millis(10)).await;
+                        }
+                    });
+
+                // Exit at random points until finished
+                let wait =
+                    context.gen_range(Duration::from_millis(10)..Duration::from_millis(1_000));
+
+                // Wait for one to finish
+                select! {
+                    _ = poller => {
+                        // Finished
+                        (true, context)
+                    },
+                    _ = context.sleep(wait) => {
+                        // Randomly exit
+                        (false, context)
+                    }
+                }
+            };
+
+            // Handle run
+            let (complete, context) = if let Some(prev_ctx) = prev_ctx {
+                Runner::from(prev_ctx)
+            } else {
+                Runner::timed(Duration::from_secs(30))
+            }
+            .start(f);
+            if complete {
+                break;
+            }
+
+            // Prepare for next run
+            prev_ctx = Some(context.recover());
+            runs += 1;
         }
         assert!(runs > 1);
         info!(runs, "unclean shutdown recovery worked");
@@ -735,10 +746,10 @@ mod tests {
     fn test_indexer() {
         // Create context
         let n = 5;
-        let threshold = quorum(n).unwrap();
+        let threshold = quorum(n);
         let required_container = 10;
-        let (executor, mut context, _) = Executor::timed(Duration::from_secs(30));
-        executor.start(async move {
+        let executor = Runner::timed(Duration::from_secs(30));
+        executor.start(|mut context| async move {
             // Create simulated network
             let (network, mut oracle) = Network::new(
                 context.with_label("network"),
@@ -791,7 +802,7 @@ mod tests {
                     partition_prefix: uid.clone(),
                     signer: scheme,
                     identity: public.clone(),
-                    share: shares[idx],
+                    share: shares[idx].clone(),
                     participants: validators.clone(),
                     mailbox_size: 1024,
                     backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
