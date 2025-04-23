@@ -261,7 +261,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         resolver_engine.start(backfill_network);
 
         // Process all finalized blocks in order (fetching any that are missing)
-        let last_view_processed = Arc::new(RwLock::new(0));
+        // let last_view_processed = Arc::new(RwLock::new(0));
         let verified = Wrapped::<_, _, _, Block>::new(self.verified);
         let notarized = Wrapped::<_, _, _, Notarized>::new(self.notarized);
         let finalized = Wrapped::<_, _, _, Finalization<Digest>>::new(self.finalized);
