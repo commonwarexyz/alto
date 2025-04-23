@@ -1,6 +1,7 @@
 use alto_types::leader_index;
 use commonware_consensus::{
-    threshold_simplex::types::View, Supervisor as Su, ThresholdSupervisor as TSu,
+    threshold_simplex::types::{Seed, View},
+    Supervisor as Su, ThresholdSupervisor as TSu,
 };
 use commonware_cryptography::{
     bls12381::primitives::{
@@ -66,8 +67,8 @@ impl TSu for Supervisor {
     type Identity = poly::Public;
     type Share = group::Share;
 
-    fn leader(&self, _: Self::Index, seed: Self::Seed) -> Option<Self::PublicKey> {
-        let seed = seed.serialize();
+    fn leader(&self, view: Self::Index, seed: Self::Seed) -> Option<Self::PublicKey> {
+        let seed = Seed::new(view, seed);
         let index = leader_index(&seed, self.participants.len());
         Some(self.participants[index].clone())
     }
