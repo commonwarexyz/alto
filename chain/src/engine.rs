@@ -89,7 +89,7 @@ impl<E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics, I: Index
                 mailbox_size: cfg.mailbox_size,
                 deque_size: cfg.deque_size,
                 priority: true,
-                decode_config: (),
+                codec_config: (),
             },
         );
 
@@ -110,17 +110,8 @@ impl<E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics, I: Index
         .await;
 
         // Create the consensus engine
-        let journal = Journal::init(
-            context.with_label("consensus_journal"),
-            variable::Config {
-                partition: format!("{}-consensus-journal", cfg.partition_prefix),
-            },
-        )
-        .await
-        .expect("failed to create journal");
         let consensus = Consensus::new(
             context.with_label("consensus"),
-            journal,
             threshold_simplex::Config {
                 namespace: NAMESPACE.to_vec(),
                 crypto: cfg.signer,
@@ -128,6 +119,8 @@ impl<E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics, I: Index
                 relay: application_mailbox.clone(),
                 reporter: syncer_mailbox.clone(),
                 supervisor,
+                partition: format!("{}-consensus", cfg.partition_prefix),
+                compression: Some(3),
                 mailbox_size: cfg.mailbox_size,
                 replay_concurrency: 1,
                 leader_timeout: cfg.leader_timeout,

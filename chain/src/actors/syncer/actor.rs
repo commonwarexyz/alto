@@ -79,92 +79,64 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
     /// Create a new application actor.
     pub async fn init(context: R, config: Config<I>) -> (Self, Mailbox) {
         // Initialize verified blocks
-        let verified_journal = Journal::init(
-            context.with_label("verified_journal"),
-            journal::variable::Config {
-                partition: format!("{}-verifications", config.partition_prefix),
-            },
-        )
-        .await
-        .expect("Failed to initialize verified journal");
         let verified_archive = Archive::init(
             context.with_label("verified_archive"),
-            verified_journal,
             archive::Config {
+                partition: format!("{}-verifications", config.partition_prefix),
                 translator: TwoCap,
                 section_mask: 0xffff_ffff_ffff_f000u64,
                 pending_writes: 0,
                 replay_concurrency: 4,
                 compression: Some(3),
+                codec_config: (),
             },
         )
         .await
         .expect("Failed to initialize verified archive");
 
         // Initialize notarized blocks
-        let notarized_journal = Journal::init(
-            context.with_label("notarized_journal"),
-            journal::variable::Config {
-                partition: format!("{}-notarizations", config.partition_prefix),
-            },
-        )
-        .await
-        .expect("Failed to initialize notarized journal");
         let notarized_archive = Archive::init(
             context.with_label("notarized_archive"),
-            notarized_journal,
             archive::Config {
+                partition: format!("{}-notarizations", config.partition_prefix),
                 translator: TwoCap,
                 section_mask: 0xffff_ffff_ffff_f000u64,
                 pending_writes: 0,
                 replay_concurrency: 4,
                 compression: Some(3),
+                codec_config: (),
             },
         )
         .await
         .expect("Failed to initialize notarized archive");
 
         // Initialize finalizations
-        let finalized_journal = Journal::init(
-            context.with_label("finalized_journal"),
-            journal::variable::Config {
-                partition: format!("{}-finalizations", config.partition_prefix),
-            },
-        )
-        .await
-        .expect("Failed to initialize finalized journal");
         let finalized_archive = Archive::init(
             context.with_label("finalized_archive"),
-            finalized_journal,
             archive::Config {
+                partition: format!("{}-finalizations", config.partition_prefix),
                 translator: EightCap,
                 section_mask: 0xffff_ffff_fff0_0000u64,
                 pending_writes: 0,
                 replay_concurrency: 4,
                 compression: Some(3),
+                codec_config: (),
             },
         )
         .await
         .expect("Failed to initialize finalized archive");
 
         // Initialize blocks
-        let block_journal = Journal::init(
-            context.with_label("block_journal"),
-            journal::variable::Config {
-                partition: format!("{}-blocks", config.partition_prefix),
-            },
-        )
-        .await
-        .expect("Failed to initialize block journal");
         let block_archive = Archive::init(
             context.with_label("block_archive"),
-            block_journal,
             archive::Config {
+                partition: format!("{}-blocks", config.partition_prefix),
                 translator: EightCap,
                 section_mask: 0xffff_ffff_fff0_0000u64,
                 pending_writes: 0,
                 replay_concurrency: 4,
                 compression: Some(3),
+                codec_config: (),
             },
         )
         .await
