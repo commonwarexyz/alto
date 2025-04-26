@@ -249,7 +249,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         resolver_engine.start(backfill_network);
 
         // Process all finalized blocks in order (fetching any that are missing)
-        let (mut syncer_sender, mut syncer_receiver) = mpsc::channel(2); // buffer to send processed
+        let (mut syncer_sender, mut syncer_receiver) = mpsc::channel(2); // buffer to send processed while moving forward
         let (mut finalizer_sender, mut finalizer_receiver) = mpsc::channel::<()>(1);
         self.context
             .with_label("finalizer")
