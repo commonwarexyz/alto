@@ -16,7 +16,6 @@ use commonware_cryptography::{
 };
 use commonware_p2p::{Receiver, Sender};
 use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
-use commonware_storage::journal::variable::{self, Journal};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use governor::Quota;
@@ -53,7 +52,7 @@ pub struct Engine<E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metr
 
     application: application::Actor<E>,
     buffer: buffered::Engine<E, ed25519::PublicKey, Digest, (), Block>,
-    buffer_mailbox: buffered::Mailbox<Digest, Block>,
+    buffer_mailbox: buffered::Mailbox<ed25519::PublicKey, Digest, Block>,
     syncer: syncer::Actor<E, I>,
     syncer_mailbox: syncer::Mailbox,
     consensus: Consensus<

@@ -1,5 +1,4 @@
 use super::{
-    archive::Wrapped,
     coordinator::Coordinator,
     handler::Handler,
     ingress::{Mailbox, Message},
@@ -24,23 +23,33 @@ use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
 use commonware_storage::{
     archive::{self, Archive, Identifier},
     index::translator::{EightCap, TwoCap},
-    journal::{self, variable::Journal},
     metadata::{self, Metadata},
 };
 use commonware_utils::array::FixedBytes;
-use futures::{channel::mpsc, StreamExt};
+use futures::{
+    channel::{mpsc, oneshot},
+    SinkExt, StreamExt,
+};
 use governor::{clock::Clock as GClock, Quota};
 use prometheus_client::metrics::gauge::Gauge;
 use rand::Rng;
-use std::{
-    collections::BTreeSet,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{collections::BTreeSet, time::Duration};
 use tracing::{debug, info, warn};
+
+enum Syncer {
+    Block {
+        next: u64,
+        result: oneshot::Sender<Option<Block>>,
+    },
+    Processed {
+        next: u64,
+        digest: Digest,
+    },
+    Repair {
+        next: u64,
+        result: oneshot::Sender<bool>,
+    },
+}
 
 /// Application actor.
 pub struct Actor<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> {
@@ -55,16 +64,16 @@ pub struct Actor<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Index
     indexer: Option<I>,
 
     // Blocks verified stored by view<>digest
-    verified: Archive<TwoCap, Digest, R>,
+    verified: Archive<TwoCap, R, Digest, (), Block>,
     // Blocks notarized stored by view<>digest
-    notarized: Archive<TwoCap, Digest, R>,
+    notarized: Archive<TwoCap, R, Digest, (), Notarized>,
 
     // Finalizations stored by height
-    finalized: Archive<EightCap, Digest, R>,
+    finalized: Archive<EightCap, R, Digest, (), Finalization<Digest>>,
     // Blocks finalized stored by height
     //
     // We store this separately because we may not have the finalization for a block
-    blocks: Archive<EightCap, Digest, R>,
+    blocks: Archive<EightCap, R, Digest, (), Block>,
 
     // Finalizer storage
     finalizer: Metadata<R, FixedBytes<1>>,
@@ -201,7 +210,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        buffer: buffered::Mailbox<Digest, Block>,
+        buffer: buffered::Mailbox<PublicKey, Digest, Block>,
     ) -> Handle<()> {
         self.context.spawn_ref()(self.run(backfill_network, buffer))
     }
@@ -213,7 +222,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        mut buffer: buffered::Mailbox<Digest, Block>,
+        mut buffer: buffered::Mailbox<PublicKey, Digest, Block>,
     ) {
         // Initialize resolver
         let coordinator = Coordinator::new(self.participants.clone());
@@ -240,20 +249,11 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         resolver_engine.start(backfill_network);
 
         // Process all finalized blocks in order (fetching any that are missing)
-        let last_view_processed = Arc::new(AtomicU64::new(0));
-        let verified = Wrapped::<_, _, _, Block>::new(self.verified);
-        let notarized = Wrapped::<_, _, _, Notarized>::new(self.notarized);
-        let finalized = Wrapped::<_, _, _, Finalization<Digest>>::new(self.finalized);
-        let blocks = Wrapped::<_, _, _, Block>::new(self.blocks);
+        let (mut syncer_sender, mut syncer_receiver) = mpsc::channel(2); // buffer to send processed
         let (mut finalizer_sender, mut finalizer_receiver) = mpsc::channel::<()>(1);
-        self.context.with_label("finalizer").spawn({
-            let mut resolver = resolver.clone();
-            let last_view_processed = last_view_processed.clone();
-            let verified = verified.clone();
-            let notarized = notarized.clone();
-            let finalized = finalized.clone();
-            let blocks = blocks.clone();
-            move |_| async move {
+        self.context
+            .with_label("finalizer")
+            .spawn(move |_| async move {
                 // Initialize last indexed from metadata store
                 let latest_key = FixedBytes::new([0u8]);
                 let mut last_indexed = if let Some(bytes) = self.finalizer.get(&latest_key) {
@@ -265,14 +265,18 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                 // Index all finalized blocks
                 //
                 // If using state sync, this is not necessary.
-                let mut requested_blocks = BTreeSet::new();
                 loop {
                     // Check if the next block is available
                     let next = last_indexed + 1;
-                    let block = blocks
-                        .get(Identifier::Index(next))
+                    let (block_sender, block) = oneshot::channel();
+                    syncer_sender
+                        .send(Syncer::Block {
+                            next,
+                            result: block_sender,
+                        })
                         .await
-                        .expect("Failed to get finalized block");
+                        .expect("Failed to send block request");
+                    let block = block.await.expect("Failed to receive block query");
                     if let Some(block) = block {
                         // Update metadata
                         self.finalizer
@@ -284,104 +288,47 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
                         // In an application that maintains state, you would compute the state transition function here.
 
-                        // Cancel any outstanding requests (by height and by digest)
-                        resolver
-                            .cancel(MultiIndex::new(Value::Finalized(next)))
-                            .await;
-                        resolver
-                            .cancel(MultiIndex::new(Value::Digest(block.digest())))
-                            .await;
-
                         // Update the latest indexed
                         self.contiguous_height.set(next as i64);
                         last_indexed = next;
                         info!(height = next, "indexed finalized block");
 
                         // Update last view processed (if we have a finalization for this block)
-                        let finalization = finalized
-                            .get(Identifier::Index(next))
+                        syncer_sender
+                            .send(Syncer::Processed {
+                                next,
+                                digest: block.digest(),
+                            })
                             .await
-                            .expect("Failed to get finalization");
-                        if let Some(finalization) = finalization {
-                            last_view_processed.store(finalization.view(), Ordering::Release);
-                        }
+                            .expect("Failed to send processed request");
                         continue;
                     }
 
                     // Try to connect to our latest handled block (may not exist finalizations for some heights)
-                    let (_, start_next) = blocks.next_gap(next).await;
-                    if let Some(start_next) = start_next {
-                        if last_indexed > 0 {
-                            // Get gapped block
-                            let gapped_block = blocks
-                                .get(Identifier::Index(start_next))
-                                .await
-                                .expect("Failed to get finalized block")
-                                .expect("Gapped block missing");
+                    let (repaired_sender, repaired) = oneshot::channel();
+                    syncer_sender
+                        .send(Syncer::Repair {
+                            next,
+                            result: repaired_sender,
+                        })
+                        .await
+                        .expect("Failed to send repair request");
 
-                            // Attempt to repair one block from other sources
-                            let target_block = gapped_block.parent;
-                            let verified = verified
-                                .get(Identifier::Key(&target_block))
-                                .await
-                                .expect("Failed to get verified block");
-                            if let Some(verified) = verified {
-                                let height = verified.height;
-                                blocks
-                                    .put(height, target_block, verified)
-                                    .await
-                                    .expect("Failed to insert finalized block");
-                                debug!(height, "repaired block from verified");
-                                continue;
-                            }
-                            let notarization = notarized
-                                .get(Identifier::Key(&target_block))
-                                .await
-                                .expect("Failed to get notarized block");
-                            if let Some(notarization) = notarization {
-                                let height = notarization.block.height;
-                                blocks
-                                    .put(height, target_block, notarization.block)
-                                    .await
-                                    .expect("Failed to insert finalized block");
-                                debug!(height, "repaired block from notarizations");
-                                continue;
-                            }
-
-                            // Request the parent block digest
-                            resolver
-                                .fetch(MultiIndex::new(Value::Digest(target_block)))
-                                .await;
-                        }
-
-                        // Enqueue next items (by index)
-                        let range = next..std::cmp::min(start_next, next + 20);
-                        debug!(
-                            range.start,
-                            range.end, "requesting missing finalized blocks"
-                        );
-                        for height in range {
-                            // Check if we've already requested
-                            if requested_blocks.contains(&height) {
-                                continue;
-                            }
-
-                            // Request the block
-                            let key = MultiIndex::new(Value::Finalized(height));
-                            resolver.fetch(key).await;
-                            requested_blocks.insert(height);
-                        }
-                    };
+                    // If we successfully repaired anything, try to continue
+                    if repaired.await.expect("Failed to receive repair result") {
+                        continue;
+                    }
 
                     // If not finalized, wait for some message from someone that finalized store was updated
                     debug!(height = next, "waiting to index finalized block");
                     let _ = finalizer_receiver.next().await;
                 }
-            }
-        });
+            });
 
         // Handle messages
         let mut latest_view = 0;
+        let mut requested_blocks = BTreeSet::new();
+        let mut last_view_processed: u64 = 0;
         let mut outstanding_notarize = BTreeSet::new();
         loop {
             // Cancel useless requests
@@ -405,10 +352,10 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     let message = mailbox_message.expect("Mailbox closed");
                     match message {
                         Message::Broadcast { payload } => {
-                            buffer.broadcast(payload).await;
+                            let _ = buffer.broadcast(payload).await;
                         }
                         Message::Verified { view, payload } => {
-                            verified
+                            self.verified
                                 .put(view, payload.digest(), payload)
                                 .await
                                 .expect("Failed to insert verified block");
@@ -440,7 +387,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
                             // Check if in verified blocks
                             if block.is_none() {
-                                if let Some(verified) = verified.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get verified block") {
+                                if let Some(verified) = self.verified.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get verified block") {
                                     block = Some(verified);
                                 }
                             }
@@ -470,7 +417,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 }
 
                                 // Persist the notarization
-                                notarized
+                                self.notarized
                                     .put(view, digest, notarization)
                                     .await
                                     .expect("Failed to insert notarized block");
@@ -513,14 +460,14 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
                             // Check if in verified
                             if block.is_none() {
-                                if let Some(verified) = verified.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get verified block") {
+                                if let Some(verified) = self.verified.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get verified block") {
                                     block = Some(verified);
                                 }
                             }
 
                             // Check if in notarized
                             if block.is_none() {
-                                if let Some(notarized) = notarized.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get notarized block") {
+                                if let Some(notarized) = self.notarized.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get notarized block") {
                                     block = Some(notarized.block);
                                 }
                             }
@@ -549,24 +496,23 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 }
 
                                 // Persist the finalization
-                                finalized
+                                self.finalized
                                     .put(height, proposal.payload, finalization)
                                     .await
                                     .expect("Failed to insert finalization");
-                                blocks
+                                self.blocks
                                     .put(height, digest, block)
                                     .await
                                     .expect("Failed to insert finalized block");
                                 debug!(view, height, "finalized block stored");
 
                                 // Prune blocks
-                                let last_view_processed = last_view_processed.load(Ordering::Acquire);
                                 let min_view = last_view_processed.saturating_sub(self.activity_timeout);
-                                verified
+                                self.verified
                                     .prune(min_view)
                                     .await
                                     .expect("Failed to prune verified block");
-                                notarized
+                                self.notarized
                                     .prune(min_view)
                                     .await
                                     .expect("Failed to prune notarized block");
@@ -597,7 +543,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             }
 
                             // Check verified blocks
-                            let block = verified.get(Identifier::Key(&payload)).await.expect("Failed to get verified block");
+                            let block = self.verified.get(Identifier::Key(&payload)).await.expect("Failed to get verified block");
                             if let Some(block) = block {
                                 debug!(height = block.height, "found block in verified");
                                 let _ = response.send(block);
@@ -605,7 +551,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             }
 
                             // Check if in notarized blocks
-                            let notarization = notarized.get(Identifier::Key(&payload)).await.expect("Failed to get notarized block");
+                            let notarization = self.notarized.get(Identifier::Key(&payload)).await.expect("Failed to get notarized block");
                             if let Some(notarization) = notarization {
                                 let block = notarization.block;
                                 debug!(height = block.height, "found block in notarized");
@@ -614,7 +560,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             }
 
                             // Check if in finalized blocks
-                            let block = blocks.get(Identifier::Key(&payload)).await.expect("Failed to get finalized block");
+                            let block = self.blocks.get(Identifier::Key(&payload)).await.expect("Failed to get finalized block");
                             if let Some(block) = block {
                                 debug!(height = block.height, "found block in finalized");
                                 let _ = response.send(block);
@@ -629,7 +575,84 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
                             // Register waiter
                             debug!(view, ?payload, "registering waiter");
-                            buffer.wait_prebuilt(payload, response).await;
+                            buffer.subscribe_prepared(payload, response).await;
+                        }
+                    }
+                },
+                // Handle finalizer messages next
+                syncer_message = syncer_receiver.next() => {
+                    let message = syncer_message.expect("Syncer closed");
+                    match message {
+                        Syncer::Block { next, result } => {
+                            // Check if in blocks
+                            let block = self.blocks.get(Identifier::Index(next)).await.expect("Failed to get finalized block");
+                            result.send(block).expect("Failed to send block");
+                        }
+                        Syncer::Processed { next, digest } => {
+                            // Cancel any outstanding requests (by height and by digest)
+                            resolver.cancel(MultiIndex::new(Value::Finalized(next))).await;
+                            resolver.cancel(MultiIndex::new(Value::Digest(digest))).await;
+
+                            // If finalization exists, mark as last_view_processed
+                            let finalization = self.finalized.get(Identifier::Index(next)).await.expect("Failed to get finalized block");
+                            if let Some(finalization) = finalization {
+                                last_view_processed = finalization.view();
+                            }
+
+                            // Drain requested blocks less than next
+                            requested_blocks.retain(|height| *height > next);
+                        }
+                        Syncer::Repair { next, result } => {
+                            // Find next gap
+                            let (_, start_next) = self.blocks.next_gap(next);
+                            let Some(start_next) = start_next else {
+                                result.send(false).expect("Failed to send repair result");
+                                continue;
+                            };
+
+                            // If we are at some height greater than genesis, attempt to repair the parent
+                            if next > 0 {
+                                // Get gapped block
+                                let gapped_block = self.blocks.get(Identifier::Index(start_next)).await.expect("Failed to get finalized block").expect("Gapped block missing");
+
+                                // Attempt to repair one block from other sources
+                                let target_block = gapped_block.parent;
+                                let verified = self.verified.get(Identifier::Key(&target_block)).await.expect("Failed to get verified block");
+                                if let Some(verified) = verified {
+                                    let height = verified.height;
+                                    self.blocks.put(height, target_block, verified).await.expect("Failed to insert finalized block");
+                                    debug!(height, "repaired block from verified");
+                                    result.send(true).expect("Failed to send repair result");
+                                    continue;
+                                }
+                                let notarization = self.notarized.get(Identifier::Key(&target_block)).await.expect("Failed to get notarized block");
+                                if let Some(notarization) = notarization {
+                                    let height = notarization.block.height;
+                                    self.blocks.put(height, target_block, notarization.block).await.expect("Failed to insert finalized block");
+                                    debug!(height, "repaired block from notarizations");
+                                    result.send(true).expect("Failed to send repair result");
+                                    continue;
+                                }
+
+                                // Request the parent block digest
+                                resolver.fetch(MultiIndex::new(Value::Digest(target_block))).await;
+                            }
+
+                            // Enqueue next items (by index)
+                            let range = next..std::cmp::min(start_next, next + 20);
+                            debug!(range.start, range.end, "requesting missing finalized blocks");
+                            for height in range {
+                                // Check if we've already requested
+                                if requested_blocks.contains(&height) {
+                                    continue;
+                                }
+
+                                // Request the block
+                                let key = MultiIndex::new(Value::Finalized(height));
+                                resolver.fetch(key).await;
+                                requested_blocks.insert(height);
+                            }
+                            result.send(false).expect("Failed to send repair result");
                         }
                     }
                 },
@@ -640,7 +663,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                         handler::Message::Produce { key, response } => {
                             match key.to_value() {
                                 key::Value::Notarized(view) => {
-                                    let notarization = notarized.get(Identifier::Index(view)).await.expect("Failed to get notarized block");
+                                    let notarization = self.notarized.get(Identifier::Index(view)).await.expect("Failed to get notarized block");
                                     if let Some(notarized) = notarization {
                                         let _ = response.send(notarized.encode().into());
                                     } else {
@@ -649,14 +672,14 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 },
                                 key::Value::Finalized(height) => {
                                     // Get finalization
-                                    let finalization = finalized.get(Identifier::Index(height)).await.expect("Failed to get finalization");
+                                    let finalization = self.finalized.get(Identifier::Index(height)).await.expect("Failed to get finalization");
                                     let Some(finalization) = finalization else {
                                         debug!(height, "finalization missing on request");
                                         continue;
                                     };
 
                                     // Get block
-                                    let block = blocks.get(Identifier::Index(height)).await.expect("Failed to get finalized block");
+                                    let block = self.blocks.get(Identifier::Index(height)).await.expect("Failed to get finalized block");
                                     let Some(block) = block else {
                                         debug!(height, "finalized block missing on request");
                                         continue;
@@ -674,21 +697,21 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                     }
 
                                     // Get verified block
-                                    let block = verified.get(Identifier::Key(&digest)).await.expect("Failed to get verified block");
+                                    let block = self.verified.get(Identifier::Key(&digest)).await.expect("Failed to get verified block");
                                     if let Some(block) = block {
                                         let _ = response.send(block.encode().into());
                                         continue;
                                     }
 
                                     // Get notarized block
-                                    let notarization = notarized.get(Identifier::Key(&digest)).await.expect("Failed to get notarized block");
+                                    let notarization = self.notarized.get(Identifier::Key(&digest)).await.expect("Failed to get notarized block");
                                     if let Some(notarized) = notarization {
                                         let _ = response.send(notarized.block.encode().into());
                                         continue;
                                     }
 
                                     // Get block
-                                    let block = blocks.get(Identifier::Key(&digest)).await.expect("Failed to get finalized block");
+                                    let block = self.blocks.get(Identifier::Key(&digest)).await.expect("Failed to get finalized block");
                                     if let Some(block) = block {
                                         let _ = response.send(block.encode().into());
                                         continue;
@@ -721,7 +744,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                     // Persist the notarization
                                     debug!(view, "received notarization");
                                     let _ = response.send(true);
-                                    notarized
+                                    self.notarized
                                         .put(view, notarization.block.digest(), notarization)
                                         .await
                                         .expect("Failed to insert notarized block");
@@ -748,13 +771,13 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                     let _ = response.send(true);
 
                                     // Persist the finalization
-                                    finalized
+                                    self.finalized
                                         .put(height, finalization.block.digest(), finalization.proof)
                                         .await
                                         .expect("Failed to insert finalization");
 
                                     // Persist the block
-                                    blocks
+                                    self.blocks
                                         .put(height, finalization.block.digest(), finalization.block)
                                         .await
                                         .expect("Failed to insert finalized block");
@@ -775,7 +798,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                     // Persist the block
                                     debug!(?digest, height = block.height, "received block");
                                     let _ = response.send(true);
-                                    blocks
+                                    self.blocks
                                         .put(block.height, digest, block)
                                         .await
                                         .expect("Failed to insert finalized block");
