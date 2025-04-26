@@ -19,29 +19,21 @@ use commonware_cryptography::{bls12381, ed25519::PublicKey, sha256::Digest, Dige
 use commonware_macros::select;
 use commonware_p2p::{utils::requester, Receiver, Sender};
 use commonware_resolver::{p2p, Resolver};
-use commonware_runtime::{Clock, Handle, Metrics, RwLock, Spawner, Storage};
+use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
 use commonware_storage::{
     archive::{self, Archive, Identifier},
     index::translator::{EightCap, TwoCap},
-    journal::{self, variable::Journal},
     metadata::{self, Metadata},
 };
 use commonware_utils::array::FixedBytes;
 use futures::{
     channel::{mpsc, oneshot},
-    StreamExt,
+    SinkExt, StreamExt,
 };
 use governor::{clock::Clock as GClock, Quota};
 use prometheus_client::metrics::gauge::Gauge;
 use rand::Rng;
-use std::{
-    collections::BTreeSet,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{collections::BTreeSet, time::Duration};
 use tracing::{debug, info, warn};
 
 enum Syncer {
@@ -259,9 +251,9 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         // Process all finalized blocks in order (fetching any that are missing)
         let (mut syncer_sender, mut syncer_receiver) = mpsc::channel(2); // buffer to send processed
         let (mut finalizer_sender, mut finalizer_receiver) = mpsc::channel::<()>(1);
-        self.context.with_label("finalizer").spawn({
-            let mut resolver = resolver.clone();
-            move |_| async move {
+        self.context
+            .with_label("finalizer")
+            .spawn(move |_| async move {
                 // Initialize last indexed from metadata store
                 let latest_key = FixedBytes::new([0u8]);
                 let mut last_indexed = if let Some(bytes) = self.finalizer.get(&latest_key) {
@@ -284,7 +276,8 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                         })
                         .await
                         .expect("Failed to send block request");
-                    if let Some(block) = block.await {
+                    let block = block.await.expect("Failed to receive block query");
+                    if let Some(block) = block {
                         // Update metadata
                         self.finalizer
                             .put(latest_key.clone(), next.to_be_bytes().to_vec().into());
@@ -330,13 +323,12 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     debug!(height = next, "waiting to index finalized block");
                     let _ = finalizer_receiver.next().await;
                 }
-            }
-        });
+            });
 
         // Handle messages
         let mut latest_view = 0;
         let mut requested_blocks = BTreeSet::new();
-        let mut last_view_processed = 0;
+        let mut last_view_processed: u64 = 0;
         let mut outstanding_notarize = BTreeSet::new();
         loop {
             // Cancel useless requests
@@ -515,7 +507,6 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 debug!(view, height, "finalized block stored");
 
                                 // Prune blocks
-                                let last_view_processed = last_view_processed.load(Ordering::Acquire);
                                 let min_view = last_view_processed.saturating_sub(self.activity_timeout);
                                 self.verified
                                     .prune(min_view)
@@ -612,9 +603,15 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             requested_blocks.retain(|height| *height > next);
                         }
                         Syncer::Repair { next, result } => {
-                            // Get gapped block
+                            // Find next gap
                             let (_, start_next) = self.blocks.next_gap(next);
-                            if Some(start_next) = start_next {
+                            let Some(start_next) = start_next else {
+                                result.send(false).expect("Failed to send repair result");
+                                continue;
+                            };
+
+                            // If we are at some height greater than genesis, attempt to repair the parent
+                            if next > 0 {
                                 // Get gapped block
                                 let gapped_block = self.blocks.get(Identifier::Index(start_next)).await.expect("Failed to get finalized block").expect("Gapped block missing");
 
