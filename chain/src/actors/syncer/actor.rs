@@ -27,7 +27,10 @@ use commonware_storage::{
     metadata::{self, Metadata},
 };
 use commonware_utils::array::FixedBytes;
-use futures::{channel::mpsc, StreamExt};
+use futures::{
+    channel::{mpsc, oneshot},
+    StreamExt,
+};
 use governor::{clock::Clock as GClock, Quota};
 use prometheus_client::metrics::gauge::Gauge;
 use rand::Rng;
@@ -40,6 +43,20 @@ use std::{
     time::Duration,
 };
 use tracing::{debug, info, warn};
+
+enum Syncer {
+    Block {
+        next: u64,
+        result: oneshot::Sender<Option<Block>>,
+    },
+    Processed {
+        next: u64,
+    },
+    Repair {
+        next: u64,
+        result: oneshot::Sender<bool>,
+    },
+}
 
 /// Application actor.
 pub struct Actor<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> {
@@ -239,7 +256,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         resolver_engine.start(backfill_network);
 
         // Process all finalized blocks in order (fetching any that are missing)
-        // TODO: migrate to finalizer queue
+        let (mut syncer_sender, mut syncer_receiver) = mpsc::channel::<()>(1);
         let (mut finalizer_sender, mut finalizer_receiver) = mpsc::channel::<()>(1);
         self.context.with_label("finalizer").spawn({
             let mut resolver = resolver.clone();
@@ -386,6 +403,8 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
         // Handle messages
         let mut latest_view = 0;
+        let mut requested_blocks = BTreeSet::new();
+        let mut last_view_processed = 0;
         let mut outstanding_notarize = BTreeSet::new();
         loop {
             // Cancel useless requests
@@ -634,6 +653,73 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             // Register waiter
                             debug!(view, ?payload, "registering waiter");
                             buffer.subscribe_prepared(payload, response).await;
+                        }
+                    }
+                },
+                // Handle finalizer messages next
+                syncer_message = syncer_receiver.next() => {
+                    let message = syncer_message.expect("Syncer closed");
+                    match message {
+                        Syncer::Block { next, result } => {
+                            // Check if in blocks
+                            let block = self.blocks.get(Identifier::Index(next)).await.expect("Failed to get finalized block");
+                            result.send(block).expect("Failed to send block");
+                        }
+                        Syncer::Processed { next } => {
+                            // If finalization exists, mark as last_view_processed
+                            let finalization = self.finalized.get(Identifier::Index(next)).await.expect("Failed to get finalized block");
+                            if let Some(finalization) = finalization {
+                                last_view_processed = finalization.view();
+                            }
+
+                            // Drain requested blocks less than next
+                            requested_blocks.retain(|height| *height > next);
+                        }
+                        Syncer::Repair { next, result } => {
+                            // Get gapped block
+                            let (_, start_next) = self.blocks.next_gap(next);
+                            if Some(start_next) = start_next {
+                                // Get gapped block
+                                let gapped_block = self.blocks.get(Identifier::Index(start_next)).await.expect("Failed to get finalized block").expect("Gapped block missing");
+
+                                // Attempt to repair one block from other sources
+                                let target_block = gapped_block.parent;
+                                let verified = self.verified.get(Identifier::Key(&target_block)).await.expect("Failed to get verified block");
+                                if let Some(verified) = verified {
+                                    let height = verified.height;
+                                    self.blocks.put(height, target_block, verified).await.expect("Failed to insert finalized block");
+                                    debug!(height, "repaired block from verified");
+                                    result.send(true).expect("Failed to send repair result");
+                                    continue;
+                                }
+                                let notarization = self.notarized.get(Identifier::Key(&target_block)).await.expect("Failed to get notarized block");
+                                if let Some(notarization) = notarization {
+                                    let height = notarization.block.height;
+                                    self.blocks.put(height, target_block, notarization.block).await.expect("Failed to insert finalized block");
+                                    debug!(height, "repaired block from notarizations");
+                                    result.send(true).expect("Failed to send repair result");
+                                    continue;
+                                }
+
+                                // Request the parent block digest
+                                resolver.fetch(MultiIndex::new(Value::Digest(target_block))).await;
+                            }
+
+                            // Enqueue next items (by index)
+                            let range = next..std::cmp::min(start_next, next + 20);
+                            debug!(range.start, range.end, "requesting missing finalized blocks");
+                            for height in range {
+                                // Check if we've already requested
+                                if requested_blocks.contains(&height) {
+                                    continue;
+                                }
+
+                                // Request the block
+                                let key = MultiIndex::new(Value::Finalized(height));
+                                resolver.fetch(key).await;
+                                requested_blocks.insert(height);
+                            }
+                            result.send(false).expect("Failed to send repair result");
                         }
                     }
                 },
