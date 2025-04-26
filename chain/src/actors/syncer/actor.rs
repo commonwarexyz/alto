@@ -352,7 +352,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     let message = mailbox_message.expect("Mailbox closed");
                     match message {
                         Message::Broadcast { payload } => {
-                            buffer.broadcast(payload).await;
+                            let _ = buffer.broadcast(payload).await;
                         }
                         Message::Verified { view, payload } => {
                             self.verified
