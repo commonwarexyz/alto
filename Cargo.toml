@@ -14,7 +14,7 @@ commonware-broadcast = { version = "0.0.47" }
 commonware-codec = { version = "0.0.47" }
 commonware-consensus = { version = "0.0.47" }
 commonware-cryptography = { version = "0.0.47" }
-commonware-deployer = { version = "0.0.47" }
+commonware-deployer = { version = "0.0.47", default-features = false }
 commonware-macros = { version = "0.0.47" }
 commonware-p2p = { version = "0.0.47" }
 commonware-resolver = { version = "0.0.47" }
