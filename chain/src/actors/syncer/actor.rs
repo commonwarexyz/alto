@@ -58,7 +58,7 @@ pub struct Actor<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Index
     blocks: Archive<EightCap, R, Digest, (), Block>,
 
     // Finalizer storage
-    finalizer: Metadata<R, FixedBytes<1>>,
+    finalizer_metadata: Metadata<R, FixedBytes<1>>,
 
     // Latest height metric
     finalized_height: Gauge,
@@ -177,7 +177,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                 finalized: finalized_archive,
                 blocks: block_archive,
 
-                finalizer: finalizer_metadata,
+                finalizer_metadata,
 
                 finalized_height,
                 contiguous_height,
@@ -232,14 +232,15 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
         // Process all finalized blocks in order (fetching any that are missing)
         let (mut finalizer_sender, mut finalizer_receiver) = mpsc::channel::<()>(1);
-        let (syncer_sender, mut syncer_receiver) = mpsc::channel(2); // buffer to send processed while moving forward
-        let mut orchestor = Orchestrator::new(syncer_sender);
+        let (orchestrator_sender, mut orchestrator_receiver) = mpsc::channel(2); // buffer to send processed while moving forward
+        let mut orchestor = Orchestrator::new(orchestrator_sender);
         self.context
             .with_label("finalizer")
             .spawn(move |_| async move {
                 // Initialize last indexed from metadata store
                 let latest_key = FixedBytes::new([0u8]);
-                let mut last_indexed = if let Some(bytes) = self.finalizer.get(&latest_key) {
+                let mut last_indexed = if let Some(bytes) = self.finalizer_metadata.get(&latest_key)
+                {
                     u64::from_be_bytes(bytes.to_vec().try_into().unwrap())
                 } else {
                     0
@@ -253,9 +254,9 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     let next = last_indexed + 1;
                     if let Some(block) = orchestor.get(next).await {
                         // Update metadata
-                        self.finalizer
+                        self.finalizer_metadata
                             .put(latest_key.clone(), next.to_be_bytes().to_vec());
-                        self.finalizer
+                        self.finalizer_metadata
                             .sync()
                             .await
                             .expect("Failed to sync finalizer");
@@ -556,9 +557,9 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     }
                 },
                 // Handle finalizer messages next
-                syncer_message = syncer_receiver.next() => {
-                    let message = syncer_message.expect("Syncer closed");
-                    match message {
+                orchestrator_message = orchestrator_receiver.next() => {
+                    let orchestrator_message = orchestrator_message.expect("Orchestrator closed");
+                    match orchestrator_message {
                         Orchestration::Get { next, result } => {
                             // Check if in blocks
                             let block = self.blocks.get(Identifier::Index(next)).await.expect("Failed to get finalized block");
