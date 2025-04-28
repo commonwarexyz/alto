@@ -1,7 +1,7 @@
 use super::{
     coordinator::Coordinator,
     handler::Handler,
-    ingress::{Mailbox, Message},
+    ingress::{Mailbox, Message, Orchestration, Orchestrator},
     Config,
 };
 use crate::{
@@ -26,30 +26,12 @@ use commonware_storage::{
     metadata::{self, Metadata},
 };
 use commonware_utils::array::FixedBytes;
-use futures::{
-    channel::{mpsc, oneshot},
-    SinkExt, StreamExt,
-};
+use futures::{channel::mpsc, StreamExt};
 use governor::{clock::Clock as GClock, Quota};
 use prometheus_client::metrics::gauge::Gauge;
 use rand::Rng;
 use std::{collections::BTreeSet, time::Duration};
 use tracing::{debug, info, warn};
-
-enum Syncer {
-    Block {
-        next: u64,
-        result: oneshot::Sender<Option<Block>>,
-    },
-    Processed {
-        next: u64,
-        digest: Digest,
-    },
-    Repair {
-        next: u64,
-        result: oneshot::Sender<bool>,
-    },
-}
 
 /// Application actor.
 pub struct Actor<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> {
@@ -249,8 +231,9 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         resolver_engine.start(backfill);
 
         // Process all finalized blocks in order (fetching any that are missing)
-        let (mut syncer_sender, mut syncer_receiver) = mpsc::channel(2); // buffer to send processed while moving forward
         let (mut finalizer_sender, mut finalizer_receiver) = mpsc::channel::<()>(1);
+        let (syncer_sender, mut syncer_receiver) = mpsc::channel(2); // buffer to send processed while moving forward
+        let mut orchestor = Orchestrator::new(syncer_sender);
         self.context
             .with_label("finalizer")
             .spawn(move |_| async move {
@@ -268,15 +251,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                 loop {
                     // Check if the next block is available
                     let next = last_indexed + 1;
-                    let (block_sender, block) = oneshot::channel();
-                    syncer_sender
-                        .send(Syncer::Block {
-                            next,
-                            result: block_sender,
-                        })
-                        .await
-                        .expect("Failed to send block request");
-                    let block = block.await.expect("Failed to receive block query");
+                    let block = orchestor.get(next).await;
                     if let Some(block) = block {
                         // Update metadata
                         self.finalizer
@@ -294,32 +269,16 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                         info!(height = next, "indexed finalized block");
 
                         // Update last view processed (if we have a finalization for this block)
-                        syncer_sender
-                            .send(Syncer::Processed {
-                                next,
-                                digest: block.digest(),
-                            })
-                            .await
-                            .expect("Failed to send processed request");
+                        orchestor.processed(next, block.digest()).await;
                         continue;
                     }
 
                     // Try to connect to our latest handled block (may not exist finalizations for some heights)
-                    let (repaired_sender, repaired) = oneshot::channel();
-                    syncer_sender
-                        .send(Syncer::Repair {
-                            next,
-                            result: repaired_sender,
-                        })
-                        .await
-                        .expect("Failed to send repair request");
-
-                    // If we successfully repaired anything, try to continue
-                    if repaired.await.expect("Failed to receive repair result") {
+                    if orchestor.repair(next).await {
                         continue;
                     }
 
-                    // If not finalized, wait for some message from someone that finalized store was updated
+                    // If nothing to do, wait for some message from someone that the finalized store was updated
                     debug!(height = next, "waiting to index finalized block");
                     let _ = finalizer_receiver.next().await;
                 }
@@ -601,12 +560,12 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                 syncer_message = syncer_receiver.next() => {
                     let message = syncer_message.expect("Syncer closed");
                     match message {
-                        Syncer::Block { next, result } => {
+                        Orchestration::Get { next, result } => {
                             // Check if in blocks
                             let block = self.blocks.get(Identifier::Index(next)).await.expect("Failed to get finalized block");
                             result.send(block).expect("Failed to send block");
                         }
-                        Syncer::Processed { next, digest } => {
+                        Orchestration::Processed { next, digest } => {
                             // Cancel any outstanding requests (by height and by digest)
                             resolver.cancel(MultiIndex::new(Value::Finalized(next))).await;
                             resolver.cancel(MultiIndex::new(Value::Digest(digest))).await;
@@ -620,7 +579,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             // Drain requested blocks less than next
                             requested_blocks.retain(|height| *height > next);
                         }
-                        Syncer::Repair { next, result } => {
+                        Orchestration::Repair { next, result } => {
                             // Find next gap
                             let (_, start_next) = self.blocks.next_gap(next);
                             let Some(start_next) = start_next else {

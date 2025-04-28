@@ -96,3 +96,64 @@ impl Reporter for Mailbox {
         }
     }
 }
+
+/// Enum representing the different types of messages that the `Finalizer` loop
+/// can send to the inner actor loop.
+///
+/// We break this into a separate enum to establish a separate priority for consensus messages.
+pub enum Orchestration {
+    Get {
+        next: u64,
+        result: oneshot::Sender<Option<Block>>,
+    },
+    Processed {
+        next: u64,
+        digest: Digest,
+    },
+    Repair {
+        next: u64,
+        result: oneshot::Sender<bool>,
+    },
+}
+
+#[derive(Clone)]
+pub struct Orchestrator {
+    sender: mpsc::Sender<Orchestration>,
+}
+
+impl Orchestrator {
+    pub fn new(sender: mpsc::Sender<Orchestration>) -> Self {
+        Self { sender }
+    }
+
+    pub async fn get(&mut self, next: u64) -> Option<Block> {
+        let (response, receiver) = oneshot::channel();
+        self.sender
+            .send(Orchestration::Get {
+                next,
+                result: response,
+            })
+            .await
+            .expect("Failed to send get");
+        receiver.await.unwrap()
+    }
+
+    pub async fn processed(&mut self, next: u64, digest: Digest) {
+        self.sender
+            .send(Orchestration::Processed { next, digest })
+            .await
+            .expect("Failed to send processed");
+    }
+
+    pub async fn repair(&mut self, next: u64) -> bool {
+        let (response, receiver) = oneshot::channel();
+        self.sender
+            .send(Orchestration::Repair {
+                next,
+                result: response,
+            })
+            .await
+            .expect("Failed to send repair");
+        receiver.await.unwrap()
+    }
+}
