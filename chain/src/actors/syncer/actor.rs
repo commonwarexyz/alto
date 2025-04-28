@@ -251,8 +251,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                 loop {
                     // Check if the next block is available
                     let next = last_indexed + 1;
-                    let block = orchestor.get(next).await;
-                    if let Some(block) = block {
+                    if let Some(block) = orchestor.get(next).await {
                         // Update metadata
                         self.finalizer
                             .put(latest_key.clone(), next.to_be_bytes().to_vec());
