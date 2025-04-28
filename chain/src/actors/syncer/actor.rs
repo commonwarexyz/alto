@@ -406,7 +406,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             if let Some(block) = block {
                                 let height = block.height;
                                 let digest = proposal.payload;
-                                let notarization = Notarized::new(notarization.clone(), block);
+                                let notarization = Notarized::new(notarization, block);
 
                                 // Upload to indexer (if available)
                                 if let Some(indexer) = self.indexer.as_ref() {
