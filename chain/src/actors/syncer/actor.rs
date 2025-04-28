@@ -280,7 +280,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     if let Some(block) = block {
                         // Update metadata
                         self.finalizer
-                            .put(latest_key.clone(), next.to_be_bytes().to_vec().into());
+                            .put(latest_key.clone(), next.to_be_bytes().to_vec());
                         self.finalizer
                             .sync()
                             .await
@@ -352,7 +352,8 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     let message = mailbox_message.expect("Mailbox closed");
                     match message {
                         Message::Broadcast { payload } => {
-                            let _ = buffer.broadcast(payload).await;
+                            let ack = buffer.broadcast(payload).await;
+                            drop(ack);
                         }
                         Message::Verified { view, payload } => {
                             self.verified
@@ -787,7 +788,10 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 },
                                 key::Value::Digest(digest) => {
                                     // Parse block
-                                    let block = Block::decode(value.as_ref()).expect("Failed to deserialize block");
+                                    let Ok(block) = Block::decode(value.as_ref()) else {
+                                        let _ = response.send(false);
+                                        continue;
+                                    };
 
                                     // Ensure the received payload is for the correct digest
                                     if block.digest() != digest {
