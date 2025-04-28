@@ -205,7 +205,7 @@ impl<E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics, I: Index
         let buffer_handle = self.buffer.start(broadcast_network);
 
         // Start the syncer
-        let syncer_handle = self.syncer.start(backfill_network, self.buffer_mailbox);
+        let syncer_handle = self.syncer.start(self.buffer_mailbox, backfill_network);
 
         // Start consensus
         //

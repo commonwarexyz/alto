@@ -206,23 +206,23 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
     pub fn start(
         mut self,
-        backfill_network: (
+        buffer: buffered::Mailbox<PublicKey, Digest, Block>,
+        backfill: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        buffer: buffered::Mailbox<PublicKey, Digest, Block>,
     ) -> Handle<()> {
-        self.context.spawn_ref()(self.run(backfill_network, buffer))
+        self.context.spawn_ref()(self.run(buffer, backfill))
     }
 
     /// Run the application actor.
     async fn run(
         mut self,
-        backfill_network: (
+        mut buffer: buffered::Mailbox<PublicKey, Digest, Block>,
+        backfill: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        mut buffer: buffered::Mailbox<PublicKey, Digest, Block>,
     ) {
         // Initialize resolver
         let coordinator = Coordinator::new(self.participants.clone());
@@ -246,7 +246,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                 priority_responses: false,
             },
         );
-        resolver_engine.start(backfill_network);
+        resolver_engine.start(backfill);
 
         // Process all finalized blocks in order (fetching any that are missing)
         let (mut syncer_sender, mut syncer_receiver) = mpsc::channel(2); // buffer to send processed while moving forward
