@@ -392,7 +392,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             let proposal = &notarization.proposal;
                             let mut block = None;
                             if let Some(buffered) = buffer.get(proposal.payload).await {
-                                block = Some(buffered.clone());
+                                block = Some(buffered);
                             }
 
                             // Check if in verified blocks
@@ -473,7 +473,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             let proposal = &finalization.proposal;
                             let mut block = None;
                             if let Some(buffered) = buffer.get(proposal.payload).await{
-                                block = Some(buffered.clone());
+                                block = Some(buffered);
                             }
 
                             // Check if in verified
@@ -556,7 +556,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             let buffered = buffer.get(payload).await;
                             if let Some(buffered) = buffered {
                                 debug!(height = buffered.height, "found block in buffer");
-                                let _ = response.send(buffered.clone());
+                                let _ = response.send(buffered);
                                 continue;
                             }
 
