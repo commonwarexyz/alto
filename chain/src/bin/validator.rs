@@ -1,7 +1,6 @@
 use alto_chain::{engine, Config};
 use alto_client::Client;
 use alto_types::NAMESPACE;
-use axum::{routing::get, serve, Extension, Router};
 use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt};
 use commonware_cryptography::{
@@ -11,18 +10,16 @@ use commonware_cryptography::{
 };
 use commonware_deployer::ec2::{Hosts, METRICS_PORT};
 use commonware_p2p::authenticated;
-use commonware_runtime::{tokio, Clock, Metrics, Network, Runner, Spawner};
+use commonware_runtime::{tokio, Metrics, Runner};
 use commonware_utils::{from_hex_formatted, quorum, union_unique};
 use futures::future::try_join_all;
 use governor::Quota;
-use prometheus_client::metrics::gauge::Gauge;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZeroU32,
     path::PathBuf,
     str::FromStr,
-    sync::atomic::{AtomicI64, AtomicU64},
     time::Duration,
 };
 use tracing::{error, info, Level};

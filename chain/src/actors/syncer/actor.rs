@@ -22,7 +22,7 @@ use commonware_resolver::{p2p, Resolver};
 use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
 use commonware_storage::{
     archive::{self, Archive, Identifier},
-    index::translator::{EightCap, TwoCap},
+    index::translator::{EightCap, OneCap},
     metadata::{self, Metadata},
 };
 use commonware_utils::array::FixedBytes;
@@ -64,9 +64,9 @@ pub struct Actor<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Index
     indexer: Option<I>,
 
     // Blocks verified stored by view<>digest
-    verified: Archive<TwoCap, R, Digest, (), Block>,
+    verified: Archive<OneCap, R, Digest, (), Block>,
     // Blocks notarized stored by view<>digest
-    notarized: Archive<TwoCap, R, Digest, (), Notarized>,
+    notarized: Archive<OneCap, R, Digest, (), Notarized>,
 
     // Finalizations stored by height
     finalized: Archive<EightCap, R, Digest, (), Finalization<Digest>>,
@@ -92,7 +92,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
             context.with_label("verified_archive"),
             archive::Config {
                 partition: format!("{}-verifications", config.partition_prefix),
-                translator: TwoCap,
+                translator: OneCap,
                 section_mask: 0xffff_ffff_ffff_f000u64,
                 pending_writes: 0,
                 replay_concurrency: 4,
@@ -108,7 +108,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
             context.with_label("notarized_archive"),
             archive::Config {
                 partition: format!("{}-notarizations", config.partition_prefix),
-                translator: TwoCap,
+                translator: OneCap,
                 section_mask: 0xffff_ffff_ffff_f000u64,
                 pending_writes: 0,
                 replay_concurrency: 4,
@@ -280,7 +280,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     if let Some(block) = block {
                         // Update metadata
                         self.finalizer
-                            .put(latest_key.clone(), next.to_be_bytes().to_vec().into());
+                            .put(latest_key.clone(), next.to_be_bytes().to_vec());
                         self.finalizer
                             .sync()
                             .await
@@ -352,13 +352,23 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     let message = mailbox_message.expect("Mailbox closed");
                     match message {
                         Message::Broadcast { payload } => {
-                            let _ = buffer.broadcast(payload).await;
+                            let ack = buffer.broadcast(payload).await;
+                            drop(ack);
                         }
                         Message::Verified { view, payload } => {
-                            self.verified
+                            match self.verified
                                 .put(view, payload.digest(), payload)
-                                .await
-                                .expect("Failed to insert verified block");
+                                .await {
+                                    Ok(_) => {
+                                        debug!(view, "verified block stored");
+                                    },
+                                    Err(archive::Error::AlreadyPrunedTo(_)) => {
+                                        debug!(view, "verified block already pruned");
+                                    }
+                                    Err(e) => {
+                                        panic!("Failed to insert verified block: {e}");
+                                    }
+                                };
                         }
                         Message::Notarization { notarization } => {
                             // Upload seed to indexer (if available)
@@ -417,11 +427,19 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 }
 
                                 // Persist the notarization
-                                self.notarized
+                                match self.notarized
                                     .put(view, digest, notarization)
-                                    .await
-                                    .expect("Failed to insert notarized block");
-                                debug!(view, height, "notarized block stored");
+                                    .await {
+                                    Ok(_) => {
+                                        debug!(view, height, "notarized block stored");
+                                    },
+                                    Err(archive::Error::AlreadyPrunedTo(_)) => {
+                                        debug!(view, "notarized already pruned");
+                                    },
+                                    Err(e) => {
+                                        panic!("Failed to insert notarized block: {e}");
+                                    }
+                                };
                                 continue;
                             }
 
@@ -742,12 +760,21 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                     }
 
                                     // Persist the notarization
-                                    debug!(view, "received notarization");
                                     let _ = response.send(true);
-                                    self.notarized
+                                    match self.notarized
                                         .put(view, notarization.block.digest(), notarization)
-                                        .await
-                                        .expect("Failed to insert notarized block");
+                                        .await {
+                                        Ok(_) => {
+                                            debug!(view, "notarized stored");
+                                        },
+                                        Err(archive::Error::AlreadyPrunedTo(_)) => {
+                                            debug!(view, "notarized already pruned");
+
+                                        }
+                                        Err(e) => {
+                                            panic!("Failed to insert notarized block: {e}");
+                                        }
+                                    };
                                 },
                                 key::Value::Finalized(height) => {
                                     // Parse finalization
@@ -787,7 +814,10 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 },
                                 key::Value::Digest(digest) => {
                                     // Parse block
-                                    let block = Block::decode(value.as_ref()).expect("Failed to deserialize block");
+                                    let Ok(block) = Block::decode(value.as_ref()) else {
+                                        let _ = response.send(false);
+                                        continue;
+                                    };
 
                                     // Ensure the received payload is for the correct digest
                                     if block.digest() != digest {

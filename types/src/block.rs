@@ -1,5 +1,5 @@
 use bytes::{Buf, BufMut};
-use commonware_codec::{Error, FixedSize, Read, ReadExt, Write};
+use commonware_codec::{varint::UInt, EncodeSize, Error, Read, ReadExt, Write};
 use commonware_consensus::threshold_simplex::types::{Finalization, Notarization};
 use commonware_cryptography::{
     bls12381::primitives::group::Public, sha256::Digest, Digestible, Hasher, Sha256,
@@ -43,16 +43,16 @@ impl Block {
 impl Write for Block {
     fn write(&self, writer: &mut impl BufMut) {
         self.parent.write(writer);
-        self.height.write(writer);
-        self.timestamp.write(writer);
+        UInt(self.height).write(writer);
+        UInt(self.timestamp).write(writer);
     }
 }
 
 impl Read for Block {
     fn read_cfg(reader: &mut impl Buf, _: &()) -> Result<Self, Error> {
         let parent = Digest::read(reader)?;
-        let height = u64::read(reader)?;
-        let timestamp = u64::read(reader)?;
+        let height = UInt::read(reader)?.into();
+        let timestamp = UInt::read(reader)?.into();
 
         // Pre-compute the digest
         let digest = Self::compute_digest(&parent, height, timestamp);
@@ -66,8 +66,12 @@ impl Read for Block {
     }
 }
 
-impl FixedSize for Block {
-    const SIZE: usize = Digest::SIZE + u64::SIZE + u64::SIZE;
+impl EncodeSize for Block {
+    fn encode_size(&self) -> usize {
+        self.parent.encode_size()
+            + UInt(self.height).encode_size()
+            + UInt(self.timestamp).encode_size()
+    }
 }
 
 impl Digestible<Digest> for Block {
@@ -115,8 +119,10 @@ impl Read for Notarized {
     }
 }
 
-impl FixedSize for Notarized {
-    const SIZE: usize = Notarization::<Digest>::SIZE + Block::SIZE;
+impl EncodeSize for Notarized {
+    fn encode_size(&self) -> usize {
+        self.proof.encode_size() + self.block.encode_size()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -158,6 +164,8 @@ impl Read for Finalized {
     }
 }
 
-impl FixedSize for Finalized {
-    const SIZE: usize = Finalization::<Digest>::SIZE + Block::SIZE;
+impl EncodeSize for Finalized {
+    fn encode_size(&self) -> usize {
+        self.proof.encode_size() + self.block.encode_size()
+    }
 }

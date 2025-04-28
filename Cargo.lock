@@ -42,7 +42,6 @@ version = "0.0.6"
 dependencies = [
  "alto-client",
  "alto-types",
- "axum",
  "bytes",
  "clap",
  "commonware-broadcast",
@@ -63,7 +62,6 @@ dependencies = [
  "rand",
  "serde",
  "serde_yaml",
- "sysinfo",
  "thiserror 2.0.12",
  "tracing",
  "tracing-subscriber",
@@ -959,7 +957,9 @@ checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 
 [[package]]
 name = "commonware-broadcast"
-version = "0.0.45"
+version = "0.0.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1ce74702cd9b9aba67e94bd9b3af8aa1bfe691784cd34fee768aa354afb763a"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -976,7 +976,9 @@ dependencies = [
 
 [[package]]
 name = "commonware-codec"
-version = "0.0.45"
+version = "0.0.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53039c2c91b0f094d96d540472af773e742b5b59480e0a8b0e1dbbfdc4389b68"
 dependencies = [
  "bytes",
  "paste",
@@ -985,7 +987,9 @@ dependencies = [
 
 [[package]]
 name = "commonware-consensus"
-version = "0.0.45"
+version = "0.0.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "404a849aa6af21595f0f788735284c9c5dee2812bdf1d5e2616ce2f6db8524bd"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -1007,7 +1011,9 @@ dependencies = [
 
 [[package]]
 name = "commonware-cryptography"
-version = "0.0.45"
+version = "0.0.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba3b2a21cfc97652930c7f0d96b51cf3f873e62e3ee886923413d3f9d181c259"
 dependencies = [
  "blst",
  "bytes",
@@ -1025,7 +1031,9 @@ dependencies = [
 
 [[package]]
 name = "commonware-deployer"
-version = "0.0.45"
+version = "0.0.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9de6acdb5967ea8651dff5e04d0de6c11553c2d6b52dc81265dad1ae7191a80a"
 dependencies = [
  "aws-config",
  "aws-sdk-ec2",
@@ -1044,7 +1052,9 @@ dependencies = [
 
 [[package]]
 name = "commonware-macros"
-version = "0.0.45"
+version = "0.0.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6fcb756980b13f80f1a0992ef4412d790e1125dde854fb66d46297d4bb16f8b"
 dependencies = [
  "futures",
  "proc-macro2",
@@ -1056,7 +1066,9 @@ dependencies = [
 
 [[package]]
 name = "commonware-p2p"
-version = "0.0.45"
+version = "0.0.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12a6d984c72ff7d08b12259044271cef74ded96217711cdbc2bbfd46cf106c2f"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -1078,7 +1090,9 @@ dependencies = [
 
 [[package]]
 name = "commonware-resolver"
-version = "0.0.45"
+version = "0.0.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68101e2807146e44dcad26705499d921781a6d4142e111e74166df2fe0a89178"
 dependencies = [
  "bimap",
  "bytes",
@@ -1099,7 +1113,9 @@ dependencies = [
 
 [[package]]
 name = "commonware-runtime"
-version = "0.0.45"
+version = "0.0.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11b77af194e370adf274d52bf7152cbf7308b77e155157e06c262528125f5b39"
 dependencies = [
  "async-lock",
  "axum",
@@ -1127,7 +1143,9 @@ dependencies = [
 
 [[package]]
 name = "commonware-storage"
-version = "0.0.45"
+version = "0.0.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a826cd05b772178f69c34180acc046271473abddab7dbf2f100f07708c463d14"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -1147,7 +1165,9 @@ dependencies = [
 
 [[package]]
 name = "commonware-stream"
-version = "0.0.45"
+version = "0.0.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19f84071e0494665fb60400c2e5d7081ccf5efd39cf159d36cc955c41514b17d"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -1164,7 +1184,9 @@ dependencies = [
 
 [[package]]
 name = "commonware-utils"
-version = "0.0.45"
+version = "0.0.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "abaaa964e8d7802d22b8da47ed1a9035dd2519a46197d48dcf83cfb0b3f5b56a"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -2443,15 +2465,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38bf9645c8b145698bb0b18a4637dcacbc421ea49bef2317e4fd8065a387cf21"
 
 [[package]]
-name = "ntapi"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8a3895c6391c39d7fe7ebc444a87eb2991b2a0bc718fdabd071eec617fc68e4"
-dependencies = [
- "winapi",
-]
-
-[[package]]
 name = "nu-ansi-term"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3633,20 +3646,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sysinfo"
-version = "0.33.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fc858248ea01b66f19d8e8a6d55f41deaf91e9d495246fd01368d99935c6c01"
-dependencies = [
- "core-foundation-sys",
- "libc",
- "memchr",
- "ntapi",
- "rayon",
- "windows",
-]
-
-[[package]]
 name = "system-configuration"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4332,66 +4331,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
-name = "windows"
-version = "0.57.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12342cb4d8e3b046f3d80effd474a7a02447231330ef77d71daa6fbc40681143"
-dependencies = [
- "windows-core",
- "windows-targets",
-]
-
-[[package]]
-name = "windows-core"
-version = "0.57.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2ed2439a290666cd67ecce2b0ffaad89c2a56b976b736e6ece670297897832d"
-dependencies = [
- "windows-implement",
- "windows-interface",
- "windows-result 0.1.2",
- "windows-targets",
-]
-
-[[package]]
-name = "windows-implement"
-version = "0.57.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9107ddc059d5b6fbfbffdfa7a7fe3e22a226def0b2608f72e9d552763d3e1ad7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.99",
-]
-
-[[package]]
-name = "windows-interface"
-version = "0.57.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29bee4b38ea3cde66011baa44dba677c432a78593e202392d1e9070cf2a7fca7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.99",
-]
-
-[[package]]
 name = "windows-registry"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e400001bb720a623c1c69032f8e3e4cf09984deec740f007dd2b03ec864804b0"
 dependencies = [
- "windows-result 0.2.0",
+ "windows-result",
  "windows-strings",
- "windows-targets",
-]
-
-[[package]]
-name = "windows-result"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e383302e8ec8515204254685643de10811af0ed97ea37210dc26fb0032647f8"
-dependencies = [
  "windows-targets",
 ]
 
@@ -4410,7 +4356,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cd9b125c486025df0eabcb585e62173c6c9eddcec5d117d3b6e8c30e2ee4d10"
 dependencies = [
- "windows-result 0.2.0",
+ "windows-result",
  "windows-targets",
 ]
 
