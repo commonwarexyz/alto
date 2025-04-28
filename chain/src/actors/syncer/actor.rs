@@ -356,10 +356,19 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                             drop(ack);
                         }
                         Message::Verified { view, payload } => {
-                            self.verified
+                            match self.verified
                                 .put(view, payload.digest(), payload)
-                                .await
-                                .expect("Failed to insert verified block");
+                                .await {
+                                    Ok(_) => {
+                                        debug!(view, "verified block stored");
+                                    },
+                                    Err(archive::Error::AlreadyPrunedTo(_)) => {
+                                        debug!(view, "verified block already pruned");
+                                    }
+                                    Err(e) => {
+                                        panic!("Failed to insert verified block: {e}");
+                                    }
+                                };
                         }
                         Message::Notarization { notarization } => {
                             // Upload seed to indexer (if available)
@@ -418,11 +427,19 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 }
 
                                 // Persist the notarization
-                                self.notarized
+                                match self.notarized
                                     .put(view, digest, notarization)
-                                    .await
-                                    .expect("Failed to insert notarized block");
-                                debug!(view, height, "notarized block stored");
+                                    .await {
+                                    Ok(_) => {
+                                        debug!(view, height, "notarized block stored");
+                                    },
+                                    Err(archive::Error::AlreadyPrunedTo(_)) => {
+                                        debug!(view, "notarized already pruned");
+                                    },
+                                    Err(e) => {
+                                        panic!("Failed to insert notarized block: {e}");
+                                    }
+                                };
                                 continue;
                             }
 
@@ -743,12 +760,21 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                     }
 
                                     // Persist the notarization
-                                    debug!(view, "received notarization");
                                     let _ = response.send(true);
-                                    self.notarized
+                                    match self.notarized
                                         .put(view, notarization.block.digest(), notarization)
-                                        .await
-                                        .expect("Failed to insert notarized block");
+                                        .await {
+                                        Ok(_) => {
+                                            debug!(view, "notarized stored");
+                                        },
+                                        Err(archive::Error::AlreadyPrunedTo(_)) => {
+                                            debug!(view, "notarized already pruned");
+
+                                        }
+                                        Err(e) => {
+                                            panic!("Failed to insert notarized block: {e}");
+                                        }
+                                    };
                                 },
                                 key::Value::Finalized(height) => {
                                     // Parse finalization
