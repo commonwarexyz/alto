@@ -347,7 +347,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
             // Select messages
             select! {
-                // Handle mailbox before resolver messages
+                // Handle consensus before finalizer or backfiller
                 mailbox_message = self.mailbox.next() => {
                     let message = mailbox_message.expect("Mailbox closed");
                     match message {
