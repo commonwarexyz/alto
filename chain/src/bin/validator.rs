@@ -44,7 +44,7 @@ fn main() {
     // Parse arguments
     let matches = Command::new("validator")
         .about("Validator for an alto chain.")
-        .arg(Arg::new("peers").long("peers").required(true))
+        .arg(Arg::new("hosts").long("hosts").required(true))
         .arg(Arg::new("config").long("config").required(true))
         .get_matches();
 
@@ -77,10 +77,10 @@ fn main() {
         );
 
         // Load peers
-        let peer_file = matches.get_one::<String>("peers").unwrap();
-        let peers_file = std::fs::read_to_string(peer_file).expect("Could not read peers file");
-        let peers: Hosts = serde_yaml::from_str(&peers_file).expect("Could not parse peers file");
-        let peers: HashMap<PublicKey, IpAddr> = peers
+        let hosts_file = matches.get_one::<String>("hosts").unwrap();
+        let hosts_file = std::fs::read_to_string(hosts_file).expect("Could not read hosts file");
+        let hosts: Hosts = serde_yaml::from_str(&hosts_file).expect("Could not parse peers file");
+        let peers: HashMap<PublicKey, IpAddr> = hosts
             .hosts
             .into_iter()
             .map(|peer| {
