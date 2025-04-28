@@ -1,6 +1,6 @@
 use alto_client::{IndexQuery, Query};
 use alto_types::{Finalized, Notarized};
-use commonware_codec::FixedSize;
+use commonware_codec::DecodeExt;
 use commonware_consensus::threshold_simplex::types::{Seed, Viewable};
 use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_utils::SystemTimeExt;
@@ -41,8 +41,8 @@ pub fn parse_query(query: &str) -> Option<QueryKind> {
         Some(QueryKind::Single(Query::Index(index)))
     } else {
         let bytes = commonware_utils::from_hex(query)?;
-        let digest: [u8; Digest::SIZE] = bytes.try_into().ok()?;
-        Some(QueryKind::Single(Query::Digest(digest.into())))
+        let digest = Digest::decode(bytes.as_ref()).ok()?;
+        Some(QueryKind::Single(Query::Digest(digest)))
     }
 }
 
