@@ -208,6 +208,9 @@ impl<E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics, I: Index
         let syncer_handle = self.syncer.start(backfill_network, self.buffer_mailbox);
 
         // Start consensus
+        //
+        // We start the application prior to consensus to ensure we can handle enqueued events from consensus (otherwise
+        // restart could block).
         let consensus_handle = self.consensus.start(voter_network, resolver_network);
 
         // Wait for any actor to finish
