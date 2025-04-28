@@ -51,8 +51,8 @@ impl Write for Block {
 impl Read for Block {
     fn read_cfg(reader: &mut impl Buf, _: &()) -> Result<Self, Error> {
         let parent = Digest::read(reader)?;
-        let height = u64::read(reader)?;
-        let timestamp = u64::read(reader)?;
+        let height = UInt::read(reader)?.into();
+        let timestamp = UInt::read(reader)?.into();
 
         // Pre-compute the digest
         let digest = Self::compute_digest(&parent, height, timestamp);
