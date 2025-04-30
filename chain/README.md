@@ -21,9 +21,30 @@ _To run this example, you must first install [Rust](https://www.rust-lang.org/to
 cargo run --bin setup -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --output test local --start-port 3000
 ```
 
-#### Run Validators
+_If setup succeeds, you should see the following output:_
 
+```
+2025-04-30T01:39:42.495691Z  INFO setup: generated network key identity=aaadf87ccd821dec083ada0cfaf494ef33c180458fc69e5804b523200d4ef90b469fda59a50504922942f71feffbd6bf
+2025-04-30T01:39:42.497013Z  INFO setup: wrote peer configuration file path="10cf8d03daca2332213981adee2a4bfffe4a1782bb5cce036c1d5689c6090997.yaml"
+2025-04-30T01:39:42.497236Z  INFO setup: wrote peer configuration file path="3ed17734da2f5f718f3386cd73d69b93f3d421da6dc216ef8064fc93161cc75a.yaml"
+2025-04-30T01:39:42.497455Z  INFO setup: wrote peer configuration file path="82f2bdca758f7ecae48ea21678d121938e1c9d98a3853ef402c4612548ce7141.yaml"
+2025-04-30T01:39:42.497684Z  INFO setup: wrote peer configuration file path="888ba06f969372f0471b9593b054bef8ad0dcdd8690257eee1424b67af2157f2.yaml"
+2025-04-30T01:39:42.497899Z  INFO setup: wrote peer configuration file path="a77b691b016ae389cf1b4765c2bdc12060548b525cae3986b5953d5da74593e0.yaml"
+2025-04-30T01:39:42.497907Z  INFO setup: emitting start commands bootstrappers=["888ba06f969372f0471b9593b054bef8ad0dcdd8690257eee1424b67af2157f2"]
+cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.yaml --config=<your-path-to-alto>/alto/chain/test/10cf8d03daca2332213981adee2a4bfffe4a1782bb5cce036c1d5689c6090997.yaml
+cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.yaml --config=<your-path-to-alto>/alto/chain/test/3ed17734da2f5f718f3386cd73d69b93f3d421da6dc216ef8064fc93161cc75a.yaml
+cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.yaml --config=<your-path-to-alto>/alto/chain/test/82f2bdca758f7ecae48ea21678d121938e1c9d98a3853ef402c4612548ce7141.yaml
+cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.yaml --config=<your-path-to-alto>/alto/chain/test/888ba06f969372f0471b9593b054bef8ad0dcdd8690257eee1424b67af2157f2.yaml
+cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.yaml --config=<your-path-to-alto>/alto/chain/test/a77b691b016ae389cf1b4765c2bdc12060548b525cae3986b5953d5da74593e0.yaml
+```
 
+#### Start Validator
+
+Run the emitted start commands in separate terminals:
+
+```bash
+cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.yaml --config=<your-path-to-alto>/alto/chain/test/10cf8d03daca2332213981adee2a4bfffe4a1782bb5cce036c1d5689c6090997.yaml
+```
 
 ### Remote
 
