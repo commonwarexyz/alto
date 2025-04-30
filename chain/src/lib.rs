@@ -2,11 +2,7 @@ use alto_types::{Finalized, Notarized};
 use commonware_consensus::threshold_simplex::types::Seed;
 use commonware_cryptography::bls12381;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    future::Future,
-    net::{IpAddr, SocketAddr},
-};
+use std::{collections::HashMap, future::Future, net::SocketAddr};
 
 pub mod actors;
 pub mod engine;
@@ -60,6 +56,7 @@ impl Indexer for alto_client::Client {
     }
 }
 
+/// Configuration for the engine.
 #[derive(Deserialize, Serialize)]
 pub struct Config {
     pub private_key: String,
@@ -82,6 +79,9 @@ pub struct Config {
     pub indexer: Option<String>,
 }
 
+/// A list of peers provided when a validator is run locally.
+///
+/// When run remotely, [commonware_deployer::ec2::Hosts] is used instead.
 #[derive(Deserialize, Serialize)]
 pub struct Peers {
     pub addresses: HashMap<String, SocketAddr>,

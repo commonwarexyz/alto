@@ -6,15 +6,14 @@ use commonware_cryptography::{
     ed25519::PublicKey,
     Ed25519, Signer,
 };
-use commonware_deployer::ec2::{self, Host, Hosts, METRICS_PORT};
+use commonware_deployer::ec2::{self, METRICS_PORT};
 use commonware_utils::{from_hex_formatted, hex, quorum};
 use rand::{rngs::OsRng, seq::IteratorRandom};
 use std::{
     collections::{BTreeMap, HashMap},
-    env, fs,
+    fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     ops::AddAssign,
-    path::PathBuf,
 };
 use tracing::{error, info};
 use uuid::Uuid;
@@ -176,14 +175,44 @@ fn main() {
 
     // Handle subcommands
     match matches.subcommand() {
-        Some(("generate", sub_matches)) => match sub_matches.subcommand() {
-            Some(("local", sub_matches)) => generate_local(sub_matches),
-            Some(("remote", sub_matches)) => generate_remote(sub_matches),
-            _ => {
-                eprintln!("Invalid subcommand. Use 'local' or 'remote'.");
-                std::process::exit(1);
+        Some(("generate", sub_matches)) => {
+            let peers = *sub_matches.get_one::<usize>("peers").unwrap();
+            let bootstrappers = *sub_matches.get_one::<usize>("bootstrappers").unwrap();
+            let worker_threads = *sub_matches.get_one::<usize>("worker_threads").unwrap();
+            let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
+            let message_backlog = *sub_matches.get_one::<usize>("message_backlog").unwrap();
+            let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
+            let deque_size = *sub_matches.get_one::<usize>("deque_size").unwrap();
+            let output = sub_matches.get_one::<String>("output").unwrap().clone();
+            match sub_matches.subcommand() {
+                Some(("local", sub_matches)) => generate_local(
+                    sub_matches,
+                    peers,
+                    bootstrappers,
+                    worker_threads,
+                    log_level,
+                    message_backlog,
+                    mailbox_size,
+                    deque_size,
+                    output,
+                ),
+                Some(("remote", sub_matches)) => generate_remote(
+                    sub_matches,
+                    peers,
+                    bootstrappers,
+                    worker_threads,
+                    log_level,
+                    message_backlog,
+                    mailbox_size,
+                    deque_size,
+                    output,
+                ),
+                _ => {
+                    eprintln!("Invalid subcommand. Use 'local' or 'remote'.");
+                    std::process::exit(1);
+                }
             }
-        },
+        }
         Some(("indexer", sub_matches)) => indexer(sub_matches),
         Some(("explorer", sub_matches)) => explorer(sub_matches),
         _ => {
@@ -193,16 +222,19 @@ fn main() {
     }
 }
 
-fn generate_local(sub_matches: &ArgMatches) {
+#[allow(clippy::too_many_arguments)]
+fn generate_local(
+    sub_matches: &ArgMatches,
+    peers: usize,
+    bootstrappers: usize,
+    worker_threads: usize,
+    log_level: String,
+    message_backlog: usize,
+    mailbox_size: usize,
+    deque_size: usize,
+    output: String,
+) {
     // Extract arguments
-    let peers = *sub_matches.get_one::<usize>("peers").unwrap();
-    let bootstrappers = *sub_matches.get_one::<usize>("bootstrappers").unwrap();
-    let worker_threads = *sub_matches.get_one::<usize>("worker_threads").unwrap();
-    let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
-    let message_backlog = *sub_matches.get_one::<usize>("message_backlog").unwrap();
-    let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
-    let deque_size = *sub_matches.get_one::<usize>("deque_size").unwrap();
-    let output = sub_matches.get_one::<String>("output").unwrap().clone();
     let start_port = *sub_matches.get_one::<u16>("start_port").unwrap();
 
     // Construct output path
@@ -309,10 +341,19 @@ fn generate_local(sub_matches: &ArgMatches) {
     }
 }
 
-fn generate_remote(sub_matches: &ArgMatches) {
+#[allow(clippy::too_many_arguments)]
+fn generate_remote(
+    sub_matches: &ArgMatches,
+    peers: usize,
+    bootstrappers: usize,
+    worker_threads: usize,
+    log_level: String,
+    message_backlog: usize,
+    mailbox_size: usize,
+    deque_size: usize,
+    output: String,
+) {
     // Extract arguments
-    let peers = *sub_matches.get_one::<usize>("peers").unwrap();
-    let bootstrappers = *sub_matches.get_one::<usize>("bootstrappers").unwrap();
     let regions = sub_matches
         .get_many::<String>("regions")
         .unwrap()
@@ -330,13 +371,7 @@ fn generate_remote(sub_matches: &ArgMatches) {
     let monitoring_storage_size = *sub_matches
         .get_one::<i32>("monitoring_storage_size")
         .unwrap();
-    let worker_threads = *sub_matches.get_one::<usize>("worker_threads").unwrap();
-    let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
-    let message_backlog = *sub_matches.get_one::<usize>("message_backlog").unwrap();
-    let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
-    let deque_size = *sub_matches.get_one::<usize>("deque_size").unwrap();
     let dashboard = sub_matches.get_one::<String>("dashboard").unwrap().clone();
-    let output = sub_matches.get_one::<String>("output").unwrap().clone();
 
     // Construct output path
     let raw_current_dir = std::env::current_dir().unwrap();
