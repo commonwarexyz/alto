@@ -48,6 +48,18 @@ cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.y
 
 _It is necessary to start at least one bootstrapper for any other peers to connect._
 
+#### Debugging
+
+##### Too Many Open Files
+
+If you see an error like `unable to append to journal: Runtime(BlobOpenFailed("engine-consensus", "00000000000000ee", Os { code: 24, kind: Uncategorized, message: "Too many open files" }))`, you may need to increase the maximum number of open files. You can do this by running:
+
+```bash
+ulimit -n 65536
+```
+
+_MacOS defaults to 256 open files, which is too low for the default settings (where 1 journal file is maintained per recent view)._
+
 ### Remote
 
 _To run this example, you must first install [Rust](https://www.rust-lang.org/tools/install) and [Docker](https://www.docker.com/get-started/)._
@@ -105,13 +117,13 @@ cd assets
 deployer ec2 create --config config.yaml
 ```
 
-### Monitor Performance on Grafana
+#### Monitor Performance on Grafana
 
 Visit `http://<monitoring-ip>:3000/d/chain`
 
 _This dashboard is only accessible from the IP used to deploy the infrastructure._
 
-### [Optional] Update Validator Binary
+#### [Optional] Update Validator Binary
 
 #### Re-Compile Binary for ARM64
 
@@ -125,15 +137,15 @@ docker run -it -v ${PWD}/..:/alto validator-builder
 deployer ec2 update --config config.yaml
 ```
 
-### Destroy Infrastructure
+#### Destroy Infrastructure
 
 ```bash
 deployer ec2 destroy --config config.yaml
 ```
 
-### Debugging
+#### Debugging
 
-#### Missing AWS Credentials
+##### Missing AWS Credentials
 
 If `commonware-deployer` can't detect your AWS credentials, you'll see a "Request has expired." error:
 
@@ -142,7 +154,7 @@ If `commonware-deployer` can't detect your AWS credentials, you'll see a "Reques
 2025-03-05T01:36:48.268330Z ERROR deployer: failed to create EC2 deployment error=AwsEc2(Unhandled(Unhandled { source: ErrorMetadata { code: Some("RequestExpired"), message: Some("Request has expired."), extras: Some({"aws_request_id": "006f6b92-4965-470d-8eac-7c9644744bdf"}) }, meta: ErrorMetadata { code: Some("RequestExpired"), message: Some("Request has expired."), extras: Some({"aws_request_id": "006f6b92-4965-470d-8eac-7c9644744bdf"}) } }))
 ```
 
-#### EC2 Throttling
+##### EC2 Throttling
 
 EC2 instances may throttle network traffic if a workload exceeds the allocation for a particular instance type. To check
 if an instance is throttled, SSH into the instance and run:
