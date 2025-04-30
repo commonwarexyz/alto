@@ -1,30 +1,41 @@
-FROM arm64v8/ubuntu
+# Stage 1: Build the binary
+FROM rust:latest AS builder
 
-# Install necessary tools and libraries
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libssl-dev \
-    curl \
-    protobuf-compiler \
-    git \
-    pkg-config
+# Install dependencies needed for linking (like openssl) and building (protoc)
+# Using bookworm-slim as a base, adjust if needed for specific dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends libssl-dev pkg-config protobuf-compiler && rm -rf /var/lib/apt/lists/*
 
-# Install Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+WORKDIR /usr/src/alto
 
-# Set PATH for rustup and Rust
-ENV PATH="/root/.cargo/bin:${PATH}"
+# Copy workspace dependencies first to leverage Docker cache
+COPY ../Cargo.toml ../Cargo.lock /usr/src/alto/
+# Copy project-specific dependencies' manifests
+COPY ./chain/Cargo.toml ./chain/
+COPY ../types/Cargo.toml ./types/
+COPY ../client/Cargo.toml ./client/
+COPY ../inspector/Cargo.toml ./inspector/
 
-# Set PKG_CONFIG_PATH for OpenSSL
-ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
+# Copy all source code
+COPY ./chain/src ./chain/src
+COPY ../types/src ./types/src
+COPY ../client/src ./client/src
+COPY ../inspector/src ./inspector/src
 
-# Install Rust target
-RUN rustup default stable
-RUN rustup target add aarch64-unknown-linux-gnu
+# Build the validator binary (no separate dependency caching step)
+RUN cargo build --release --bin validator
 
-# Set the working directory
-WORKDIR /alto
+# Stage 2: Create the runtime image
+FROM debian:bookworm-slim AS runtime
 
-# Build the binary
-ENTRYPOINT ["/bin/bash", "-c"]
-CMD ["cd chain && cargo build --release --bin validator --target aarch64-unknown-linux-gnu && cp ../target/aarch64-unknown-linux-gnu/release/validator assets"]
+# Install runtime dependencies (like OpenSSL)
+RUN apt-get update && apt-get install -y --no-install-recommends libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# Copy the built binary from the builder stage
+COPY --from=builder /usr/src/alto/target/release/validator /usr/local/bin/validator
+
+# Set the entrypoint to run the validator binary
+# Add any necessary runtime arguments here if needed
+ENTRYPOINT ["/usr/local/bin/validator"]
+
+# Optionally expose ports if the validator listens on any
+# EXPOSE <port_number>
