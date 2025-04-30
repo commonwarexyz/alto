@@ -2,7 +2,11 @@ use alto_types::{Finalized, Notarized};
 use commonware_consensus::threshold_simplex::types::Seed;
 use commonware_cryptography::bls12381;
 use serde::{Deserialize, Serialize};
-use std::future::Future;
+use std::{
+    collections::HashMap,
+    future::Future,
+    net::{IpAddr, SocketAddr},
+};
 
 pub mod actors;
 pub mod engine;
@@ -76,6 +80,11 @@ pub struct Config {
     pub deque_size: usize,
 
     pub indexer: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct Peers {
+    pub addresses: HashMap<String, SocketAddr>,
 }
 
 #[cfg(test)]

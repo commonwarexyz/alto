@@ -1,4 +1,4 @@
-use alto_chain::{engine, Config};
+use alto_chain::{engine, Config, Peers};
 use alto_client::Client;
 use alto_types::NAMESPACE;
 use clap::{Arg, Command};
@@ -61,6 +61,10 @@ fn main() {
     let config_file = matches.get_one::<String>("config").unwrap();
     let config_file = std::fs::read_to_string(config_file).expect("Could not read config file");
     let config: Config = serde_yaml::from_str(&config_file).expect("Could not parse config file");
+    let key = from_hex_formatted(&config.private_key).expect("Could not parse private key");
+    let key = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
+    let signer = <Ed25519 as Signer>::from(key).expect("Could not create signer");
+    let public_key = signer.public_key();
 
     // Initialize runtime
     let cfg = tokio::Config {
@@ -87,25 +91,67 @@ fn main() {
         );
 
         // Load peers
-        let hosts_file = matches.get_one::<String>("hosts").unwrap();
-        let hosts_file = std::fs::read_to_string(hosts_file).expect("Could not read hosts file");
-        let hosts: Hosts = serde_yaml::from_str(&hosts_file).expect("Could not parse peers file");
-        let peers: HashMap<PublicKey, IpAddr> = hosts
-            .hosts
-            .into_iter()
-            .map(|peer| {
-                let key = from_hex_formatted(&peer.name).expect("Could not parse peer key");
-                let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
-                (key, peer.ip)
-            })
-            .collect();
+        let (ip, peers, bootstrappers) = if let Some(hosts_file) = hosts_file {
+            let hosts_file = std::fs::read_to_string(hosts_file).unwrap();
+            let hosts: Hosts =
+                serde_yaml::from_str(&hosts_file).expect("Could not parse peers file");
+            let peers: HashMap<PublicKey, IpAddr> = hosts
+                .hosts
+                .into_iter()
+                .map(|peer| {
+                    let key = from_hex_formatted(&peer.name).expect("Could not parse peer key");
+                    let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
+                    (key, peer.ip)
+                })
+                .collect();
+
+            let peer_keys = peers.keys().cloned().collect::<Vec<_>>();
+            let mut bootstrappers = Vec::new();
+            for bootstrapper in &config.bootstrappers {
+                let key =
+                    from_hex_formatted(bootstrapper).expect("Could not parse bootstrapper key");
+                let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
+                let ip = peers.get(&key).expect("Could not find bootstrapper in IPs");
+                let bootstrapper_socket = format!("{}:{}", ip, config.port);
+                let bootstrapper_socket = SocketAddr::from_str(&bootstrapper_socket)
+                    .expect("Could not parse bootstrapper socket");
+                bootstrappers.push((key, bootstrapper_socket));
+            }
+            let ip = peers.get(&public_key).expect("Could not find self in IPs");
+            (*ip, peer_keys, bootstrappers)
+        } else {
+            let peers_file = std::fs::read_to_string(peers_file.unwrap()).unwrap();
+            let peers: Peers =
+                serde_yaml::from_str(&peers_file).expect("Could not parse peers file");
+            let peers: HashMap<PublicKey, SocketAddr> = peers
+                .addresses
+                .into_iter()
+                .map(|peer| {
+                    let key = from_hex_formatted(&peer.0).expect("Could not parse peer key");
+                    let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
+                    (key, peer.1)
+                })
+                .collect();
+
+            let peer_keys = peers.keys().cloned().collect::<Vec<_>>();
+            let mut bootstrappers = Vec::new();
+            for bootstrapper in &config.bootstrappers {
+                let key =
+                    from_hex_formatted(bootstrapper).expect("Could not parse bootstrapper key");
+                let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
+                let socket = peers.get(&key).expect("Could not find bootstrapper in IPs");
+                bootstrappers.push((key, *socket));
+            }
+            let ip = peers
+                .get(&public_key)
+                .expect("Could not find self in IPs")
+                .ip();
+            (ip, peer_keys, bootstrappers)
+        };
         info!(peers = peers.len(), "loaded peers");
         let peers_u32 = peers.len() as u32;
 
         // Parse config
-        let key = from_hex_formatted(&config.private_key).expect("Could not parse private key");
-        let key = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
-        let signer = <Ed25519 as Signer>::from(key).expect("Could not create signer");
         let share = from_hex_formatted(&config.share).expect("Could not parse share");
         let share = group::Share::decode(share.as_ref()).expect("Share is invalid");
         let threshold = quorum(peers_u32);
@@ -113,8 +159,6 @@ fn main() {
         let identity = poly::Public::decode_cfg(identity.as_ref(), &(threshold as usize))
             .expect("Identity is invalid");
         let identity_public = *poly::public(&identity);
-        let public_key = signer.public_key();
-        let ip = peers.get(&public_key).expect("Could not find self in IPs");
         info!(
             ?public_key,
             ?identity_public,
@@ -123,26 +167,13 @@ fn main() {
             "loaded config"
         );
 
-        // Configure peers and bootstrappers
-        let peer_keys = peers.keys().cloned().collect::<Vec<_>>();
-        let mut bootstrappers = Vec::new();
-        for bootstrapper in &config.bootstrappers {
-            let key = from_hex_formatted(bootstrapper).expect("Could not parse bootstrapper key");
-            let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
-            let ip = peers.get(&key).expect("Could not find bootstrapper in IPs");
-            let bootstrapper_socket = format!("{}:{}", ip, config.port);
-            let bootstrapper_socket = SocketAddr::from_str(&bootstrapper_socket)
-                .expect("Could not parse bootstrapper socket");
-            bootstrappers.push((key, bootstrapper_socket));
-        }
-
         // Configure network
         let p2p_namespace = union_unique(NAMESPACE, b"_P2P");
         let mut p2p_cfg = authenticated::Config::aggressive(
             signer.clone(),
             &p2p_namespace,
             SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
-            SocketAddr::new(*ip, config.port),
+            SocketAddr::new(ip, config.port),
             bootstrappers,
             MAX_MESSAGE_SIZE,
         );
@@ -153,7 +184,7 @@ fn main() {
             authenticated::Network::new(context.with_label("network"), p2p_cfg);
 
         // Provide authorized peers
-        oracle.register(0, peer_keys.clone()).await;
+        oracle.register(0, peers.clone()).await;
 
         // Register voter channel
         let voter_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
@@ -201,7 +232,7 @@ fn main() {
             signer,
             identity,
             share,
-            participants: peer_keys,
+            participants: peers,
             mailbox_size: config.mailbox_size,
             deque_size: config.deque_size,
             backfill_quota: backfiller_limit,

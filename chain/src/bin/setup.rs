@@ -1,4 +1,4 @@
-use alto_chain::Config;
+use alto_chain::{Config, Peers};
 use clap::{value_parser, Arg, ArgMatches, Command};
 use commonware_codec::{Decode, DecodeExt, Encode};
 use commonware_cryptography::{
@@ -10,9 +10,9 @@ use commonware_deployer::ec2::{self, Host, Hosts, METRICS_PORT};
 use commonware_utils::{from_hex_formatted, hex, quorum};
 use rand::{rngs::OsRng, seq::IteratorRandom};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     env, fs,
-    net::{IpAddr, Ipv4Addr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     ops::AddAssign,
     path::PathBuf,
 };
@@ -245,14 +245,15 @@ fn generate_local(sub_matches: &ArgMatches) {
 
     // Generate instance configurations
     let mut port = start_port;
-    let mut peers= Vec::new();
+    let mut addresses = HashMap::new();
     let mut configurations = Vec::new();
     for (scheme, share) in peer_schemes.iter().zip(shares.iter()) {
         // Create peer config
         let name = scheme.public_key().to_string();
-        hosts.push(Host{
-
-        })
+        addresses.insert(
+            name.clone(),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
+        );
         let peer_config_file = format!("{}.yaml", name);
         let directory = format!("{}/{}", storage_output, name);
         let peer_config = Config {
@@ -284,7 +285,9 @@ fn generate_local(sub_matches: &ArgMatches) {
     fs::create_dir_all(&storage_output).unwrap();
 
     // Write peers file
-    let peers_path= format!("{}/peers.yaml", output);
+    let peers_path = format!("{}/peers.yaml", output);
+    let file = fs::File::create(&peers_path).unwrap();
+    serde_yaml::to_writer(file, &Peers { addresses }).unwrap();
 
     // Write configuration files
     for (peer_config_file, peer_config) in &configurations {
@@ -299,8 +302,8 @@ fn generate_local(sub_matches: &ArgMatches) {
     for (peer_config_file, _) in configurations {
         let path = format!("{}/{}", output, peer_config_file);
         let command = format!(
-            "cargo run --bin {} -- --hosts={} --config={}",
-            BINARY_NAME, hosts_path, path
+            "cargo run --bin {} -- --peers={} --config={}",
+            BINARY_NAME, peers_path, path
         );
         info!(command, "start command");
     }
