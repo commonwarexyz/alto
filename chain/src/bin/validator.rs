@@ -58,6 +58,7 @@ fn main() {
         tcp_nodelay: Some(true),
         worker_threads: config.worker_threads,
         storage_directory: PathBuf::from(config.directory),
+        catch_panics: false,
         ..Default::default()
     };
     let executor = tokio::Runner::new(cfg);
