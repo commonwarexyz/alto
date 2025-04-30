@@ -6,7 +6,7 @@ use commonware_cryptography::{
     ed25519::PublicKey,
     Ed25519, Signer,
 };
-use commonware_deployer::ec2;
+use commonware_deployer::ec2::{self, METRICS_PORT};
 use commonware_utils::{from_hex_formatted, hex, quorum};
 use rand::{rngs::OsRng, seq::IteratorRandom};
 use std::{collections::BTreeMap, fs, ops::AddAssign};
@@ -255,6 +255,7 @@ fn generate(sub_matches: &ArgMatches) {
             identity: hex(&identity.encode()),
 
             port: PORT,
+            metrics_port: METRICS_PORT,
             directory: "/home/ubuntu/data".to_string(),
             worker_threads,
             log_level: log_level.clone(),

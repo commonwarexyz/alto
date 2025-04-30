@@ -8,7 +8,7 @@ use commonware_cryptography::{
     ed25519::{PrivateKey, PublicKey},
     Ed25519, Signer,
 };
-use commonware_deployer::ec2::{Hosts, METRICS_PORT};
+use commonware_deployer::ec2::Hosts;
 use commonware_p2p::authenticated;
 use commonware_runtime::{tokio, Metrics, Runner};
 use commonware_utils::{from_hex_formatted, quorum, union_unique};
@@ -72,7 +72,7 @@ fn main() {
             log_level,
             Some(SocketAddr::new(
                 IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                METRICS_PORT,
+                config.metrics_port,
             )),
             None,
         );
