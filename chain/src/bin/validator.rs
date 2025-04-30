@@ -94,7 +94,8 @@ fn main() {
                 None,
             );
         } else {
-            // TODO: add a dedicated CLI telemetry helper (https://github.com/commonwarexyz/monorepo/issues/864)
+            // TODO: add a dedicated CLI telemetry helper for CLI-optimized logging
+            // while still offering metrics (https://github.com/commonwarexyz/monorepo/issues/864)
             tracing_subscriber::fmt().with_max_level(log_level).init();
         }
 
