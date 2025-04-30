@@ -330,14 +330,14 @@ fn generate_local(
     }
 
     // Emit start commands
-    info!("start commands");
+    info!(?bootstrappers, "emitting start commands");
     for (peer_config_file, _) in configurations {
         let path = format!("{}/{}", output, peer_config_file);
         let command = format!(
             "cargo run --bin {} -- --peers={} --config={}",
             BINARY_NAME, peers_path, path
         );
-        info!(command, "start command");
+        println!("{}", command);
     }
 }
 
