@@ -79,16 +79,24 @@ fn main() {
     // Start runtime
     executor.start(|context| async move {
         // Configure telemetry
+        //
+        // If we are using a hosts file (e.g. on EC2), we want to use the telemetry
+        // server to send metrics to. Otherwise, we just want to log to stdout.
         let log_level = Level::from_str(&config.log_level).expect("Invalid log level");
-        let metrics_socket = config
-            .metrics_port
-            .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
-        tokio::telemetry::init(
-            context.with_label("telemetry"),
-            log_level,
-            metrics_socket,
-            None,
-        );
+        if hosts_file.is_some() {
+            let metrics_socket = config
+                .metrics_port
+                .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
+            tokio::telemetry::init(
+                context.with_label("telemetry"),
+                log_level,
+                metrics_socket,
+                None,
+            );
+        } else {
+            // TODO: add a dedicated CLI telemetry helper (https://github.com/commonwarexyz/monorepo/issues/864)
+            tracing_subscriber::fmt().with_max_level(log_level).init();
+        }
 
         // Load peers
         let (ip, peers, bootstrappers) = if let Some(hosts_file) = hosts_file {
