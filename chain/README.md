@@ -38,7 +38,7 @@ cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.y
 cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.yaml --config=<your-path-to-alto>/alto/chain/test/a77b691b016ae389cf1b4765c2bdc12060548b525cae3986b5953d5da74593e0.yaml
 ```
 
-#### Start Validator
+#### Start Validators
 
 Run the emitted start commands in separate terminals:
 
@@ -125,13 +125,13 @@ _This dashboard is only accessible from the IP used to deploy the infrastructure
 
 #### [Optional] Update Validator Binary
 
-#### Re-Compile Binary for ARM64
+##### Re-Compile Binary for ARM64
 
 ```bash
 docker run -it -v ${PWD}/..:/alto validator-builder
 ```
 
-#### Restart Validator Binary on EC2 Instances
+##### Restart Validator Binary on EC2 Instances
 
 ```bash
 deployer ec2 update --config config.yaml
