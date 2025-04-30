@@ -46,7 +46,7 @@ Run the emitted start commands in separate terminals:
 cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.yaml --config=<your-path-to-alto>/alto/chain/test/10cf8d03daca2332213981adee2a4bfffe4a1782bb5cce036c1d5689c6090997.yaml
 ```
 
-_It is necessary to start at least one bootstrapper for any other peers to connect._
+_It is necessary to start at least one bootstrapper for any other peers to connect (used to exchange IPs to dial, not as a relay)._
 
 #### Debugging
 
