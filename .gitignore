@@ -3,4 +3,5 @@
 /target
 *.vscode
 /chain/assets
+/chain/test
 /types/pkg
