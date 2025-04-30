@@ -6,10 +6,16 @@ use commonware_cryptography::{
     ed25519::PublicKey,
     Ed25519, Signer,
 };
-use commonware_deployer::ec2::{self, METRICS_PORT};
+use commonware_deployer::ec2::{self, Host, Hosts, METRICS_PORT};
 use commonware_utils::{from_hex_formatted, hex, quorum};
 use rand::{rngs::OsRng, seq::IteratorRandom};
-use std::{collections::BTreeMap, fs, ops::AddAssign};
+use std::{
+    collections::BTreeMap,
+    env, fs,
+    net::{IpAddr, Ipv4Addr},
+    ops::AddAssign,
+    path::PathBuf,
+};
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -27,7 +33,7 @@ fn main() {
         .about("Manage configuration files for an alto chain.")
         .subcommand(
             Command::new("generate")
-                .about("Generate configuration files for an alto chain")
+                .about("Generate configuration files for an alto chain deploy")
                 .arg(
                     Arg::new("peers")
                         .long("peers")
@@ -39,37 +45,6 @@ fn main() {
                         .long("bootstrappers")
                         .required(true)
                         .value_parser(value_parser!(usize)),
-                )
-                .arg(
-                    Arg::new("regions")
-                        .long("regions")
-                        .required(true)
-                        .value_delimiter(',')
-                        .value_parser(value_parser!(String)),
-                )
-                .arg(
-                    Arg::new("instance_type")
-                        .long("instance-type")
-                        .required(true)
-                        .value_parser(value_parser!(String)),
-                )
-                .arg(
-                    Arg::new("storage_size")
-                        .long("storage-size")
-                        .required(true)
-                        .value_parser(value_parser!(i32)),
-                )
-                .arg(
-                    Arg::new("monitoring_instance_type")
-                        .long("monitoring-instance-type")
-                        .required(true)
-                        .value_parser(value_parser!(String)),
-                )
-                .arg(
-                    Arg::new("monitoring_storage_size")
-                        .long("monitoring-storage-size")
-                        .required(true)
-                        .value_parser(value_parser!(i32)),
                 )
                 .arg(
                     Arg::new("worker_threads")
@@ -102,16 +77,59 @@ fn main() {
                         .value_parser(value_parser!(usize)),
                 )
                 .arg(
-                    Arg::new("dashboard")
-                        .long("dashboard")
-                        .required(true)
-                        .value_parser(value_parser!(String)),
-                )
-                .arg(
                     Arg::new("output")
                         .long("output")
                         .required(true)
                         .value_parser(value_parser!(String)),
+                )
+                .subcommand(Command::new("local").about("Generate configuration files for local deployment")
+                    .arg(
+                        Arg::new("start_port")
+                            .long("start-port")
+                            .required(true)
+                            .value_parser(value_parser!(u16)),
+                    )
+            )
+                .subcommand(
+                    Command::new("remote")
+                        .about("Generate configuration files for `commonware-deployer`-managed deployment")
+                        .arg(
+                            Arg::new("regions")
+                                .long("regions")
+                                .required(true)
+                                .value_delimiter(',')
+                                .value_parser(value_parser!(String)),
+                        )
+                        .arg(
+                            Arg::new("instance_type")
+                                .long("instance-type")
+                                .required(true)
+                                .value_parser(value_parser!(String)),
+                        )
+                        .arg(
+                            Arg::new("storage_size")
+                                .long("storage-size")
+                                .required(true)
+                                .value_parser(value_parser!(i32)),
+                        )
+                        .arg(
+                            Arg::new("monitoring_instance_type")
+                                .long("monitoring-instance-type")
+                                .required(true)
+                                .value_parser(value_parser!(String)),
+                        )
+                        .arg(
+                            Arg::new("monitoring_storage_size")
+                                .long("monitoring-storage-size")
+                                .required(true)
+                                .value_parser(value_parser!(i32)),
+                        )
+                        .arg(
+                            Arg::new("dashboard")
+                                .long("dashboard")
+                                .required(true)
+                                .value_parser(value_parser!(String)),
+                        ),
                 ),
         )
         .subcommand(
@@ -158,7 +176,14 @@ fn main() {
 
     // Handle subcommands
     match matches.subcommand() {
-        Some(("generate", sub_matches)) => generate(sub_matches),
+        Some(("generate", sub_matches)) => match sub_matches.subcommand() {
+            Some(("local", sub_matches)) => generate_local(sub_matches),
+            Some(("remote", sub_matches)) => generate_remote(sub_matches),
+            _ => {
+                eprintln!("Invalid subcommand. Use 'local' or 'remote'.");
+                std::process::exit(1);
+            }
+        },
         Some(("indexer", sub_matches)) => indexer(sub_matches),
         Some(("explorer", sub_matches)) => explorer(sub_matches),
         _ => {
@@ -168,7 +193,120 @@ fn main() {
     }
 }
 
-fn generate(sub_matches: &ArgMatches) {
+fn generate_local(sub_matches: &ArgMatches) {
+    // Extract arguments
+    let peers = *sub_matches.get_one::<usize>("peers").unwrap();
+    let bootstrappers = *sub_matches.get_one::<usize>("bootstrappers").unwrap();
+    let worker_threads = *sub_matches.get_one::<usize>("worker_threads").unwrap();
+    let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
+    let message_backlog = *sub_matches.get_one::<usize>("message_backlog").unwrap();
+    let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
+    let deque_size = *sub_matches.get_one::<usize>("deque_size").unwrap();
+    let output = sub_matches.get_one::<String>("output").unwrap().clone();
+    let start_port = *sub_matches.get_one::<u16>("start_port").unwrap();
+
+    // Construct output path
+    let raw_current_dir = std::env::current_dir().unwrap();
+    let current_dir = raw_current_dir.to_str().unwrap();
+    let output = format!("{}/{}", current_dir, output);
+    let storage_output = format!("{}/storage", output);
+
+    // Check if output directory exists
+    if fs::metadata(&output).is_ok() {
+        error!("output directory already exists: {}", output);
+        std::process::exit(1);
+    }
+
+    // Generate peers
+    assert!(
+        bootstrappers <= peers,
+        "bootstrappers must be less than or equal to peers"
+    );
+    let mut peer_schemes = (0..peers)
+        .map(|_| Ed25519::new(&mut OsRng))
+        .collect::<Vec<_>>();
+    peer_schemes.sort_by_key(|scheme| scheme.public_key());
+    let allowed_peers: Vec<String> = peer_schemes
+        .iter()
+        .map(|scheme| scheme.public_key().to_string())
+        .collect();
+    let bootstrappers = allowed_peers
+        .iter()
+        .choose_multiple(&mut OsRng, bootstrappers)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+
+    // Generate consensus key
+    let peers_u32 = peers as u32;
+    let threshold = quorum(peers_u32);
+    let (identity, shares) = ops::generate_shares(&mut OsRng, None, peers_u32, threshold);
+    info!(identity = ?poly::public(&identity), "generated network key");
+
+    // Generate instance configurations
+    let mut port = start_port;
+    let mut peers= Vec::new();
+    let mut configurations = Vec::new();
+    for (scheme, share) in peer_schemes.iter().zip(shares.iter()) {
+        // Create peer config
+        let name = scheme.public_key().to_string();
+        hosts.push(Host{
+
+        })
+        let peer_config_file = format!("{}.yaml", name);
+        let directory = format!("{}/{}", storage_output, name);
+        let peer_config = Config {
+            private_key: scheme.private_key().to_string(),
+            share: hex(&share.encode()),
+            identity: hex(&identity.encode()),
+
+            port,
+            metrics_port: None,
+            directory,
+            worker_threads,
+            log_level: log_level.clone(),
+
+            allowed_peers: allowed_peers.clone(),
+            bootstrappers: bootstrappers.clone(),
+
+            message_backlog,
+            mailbox_size,
+            deque_size,
+
+            indexer: None,
+        };
+        configurations.push((peer_config_file.clone(), peer_config));
+        port += 1;
+    }
+
+    // Create required output directories
+    fs::create_dir_all(&output).unwrap();
+    fs::create_dir_all(&storage_output).unwrap();
+
+    // Write peers file
+    let peers_path= format!("{}/peers.yaml", output);
+
+    // Write configuration files
+    for (peer_config_file, peer_config) in &configurations {
+        let path = format!("{}/{}", output, peer_config_file);
+        let file = fs::File::create(&path).unwrap();
+        serde_yaml::to_writer(file, peer_config).unwrap();
+        info!(path = peer_config_file, "wrote peer configuration file");
+    }
+
+    // Emit start commands
+    info!("start commands");
+    for (peer_config_file, _) in configurations {
+        let path = format!("{}/{}", output, peer_config_file);
+        let command = format!(
+            "cargo run --bin {} -- --hosts={} --config={}",
+            BINARY_NAME, hosts_path, path
+        );
+        info!(command, "start command");
+    }
+}
+
+fn generate_remote(sub_matches: &ArgMatches) {
     // Extract arguments
     let peers = *sub_matches.get_one::<usize>("peers").unwrap();
     let bootstrappers = *sub_matches.get_one::<usize>("bootstrappers").unwrap();
@@ -255,7 +393,7 @@ fn generate(sub_matches: &ArgMatches) {
             identity: hex(&identity.encode()),
 
             port: PORT,
-            metrics_port: METRICS_PORT,
+            metrics_port: Some(METRICS_PORT),
             directory: "/home/ubuntu/data".to_string(),
             worker_threads,
             log_level: log_level.clone(),

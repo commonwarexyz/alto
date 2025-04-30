@@ -63,7 +63,7 @@ pub struct Config {
     pub identity: String,
 
     pub port: u16,
-    pub metrics_port: u16,
+    pub metrics_port: Option<u16>,
     pub directory: String,
     pub worker_threads: usize,
     pub log_level: String,

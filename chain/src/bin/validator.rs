@@ -44,9 +44,18 @@ fn main() {
     // Parse arguments
     let matches = Command::new("validator")
         .about("Validator for an alto chain.")
-        .arg(Arg::new("hosts").long("hosts").required(true))
+        .arg(Arg::new("hosts").long("hosts").required(false))
+        .arg(Arg::new("peers").long("peers").required(false))
         .arg(Arg::new("config").long("config").required(true))
         .get_matches();
+
+    // Load ip file
+    let hosts_file = matches.get_one::<String>("hosts");
+    let peers_file = matches.get_one::<String>("peers");
+    assert!(
+        hosts_file.is_some() || peers_file.is_some(),
+        "Either --hosts or --peers must be provided"
+    );
 
     // Load config
     let config_file = matches.get_one::<String>("config").unwrap();
@@ -67,13 +76,13 @@ fn main() {
     executor.start(|context| async move {
         // Configure telemetry
         let log_level = Level::from_str(&config.log_level).expect("Invalid log level");
+        let metrics_socket = config
+            .metrics_port
+            .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
         tokio::telemetry::init(
             context.with_label("telemetry"),
             log_level,
-            Some(SocketAddr::new(
-                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                config.metrics_port,
-            )),
+            metrics_socket,
             None,
         );
 
