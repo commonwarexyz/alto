@@ -51,8 +51,8 @@ pub struct Engine<E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metr
     context: E,
 
     application: application::Actor<E>,
-    buffer: buffered::Engine<E, ed25519::PublicKey, Digest, (), Block>,
-    buffer_mailbox: buffered::Mailbox<ed25519::PublicKey, Digest, Block>,
+    buffer: buffered::Engine<E, ed25519::PublicKey, Digest, Digest, Block>,
+    buffer_mailbox: buffered::Mailbox<ed25519::PublicKey, Digest, Digest, Block>,
     syncer: syncer::Actor<E, I>,
     syncer_mailbox: syncer::Mailbox,
     consensus: Consensus<

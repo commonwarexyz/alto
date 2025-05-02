@@ -224,11 +224,9 @@ mod tests {
         let n = 5;
         let threshold = quorum(n);
         let required_container = 10;
-        let cfg = deterministic::Config {
-            seed,
-            timeout: Some(Duration::from_secs(30)),
-            ..Default::default()
-        };
+        let cfg = deterministic::Config::default()
+            .with_seed(seed)
+            .with_timeout(Some(Duration::from_secs(30)));
         let executor = Runner::from(cfg);
         executor.start(|mut context| async move {
             // Create simulated network
