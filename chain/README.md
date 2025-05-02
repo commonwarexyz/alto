@@ -24,18 +24,25 @@ cargo run --bin setup -- generate --peers 5 --bootstrappers 1 --worker-threads 3
 _If setup succeeds, you should see the following output:_
 
 ```
-2025-04-30T01:39:42.495691Z  INFO setup: generated network key identity=aaadf87ccd821dec083ada0cfaf494ef33c180458fc69e5804b523200d4ef90b469fda59a50504922942f71feffbd6bf
-2025-04-30T01:39:42.497013Z  INFO setup: wrote peer configuration file path="10cf8d03daca2332213981adee2a4bfffe4a1782bb5cce036c1d5689c6090997.yaml"
-2025-04-30T01:39:42.497236Z  INFO setup: wrote peer configuration file path="3ed17734da2f5f718f3386cd73d69b93f3d421da6dc216ef8064fc93161cc75a.yaml"
-2025-04-30T01:39:42.497455Z  INFO setup: wrote peer configuration file path="82f2bdca758f7ecae48ea21678d121938e1c9d98a3853ef402c4612548ce7141.yaml"
-2025-04-30T01:39:42.497684Z  INFO setup: wrote peer configuration file path="888ba06f969372f0471b9593b054bef8ad0dcdd8690257eee1424b67af2157f2.yaml"
-2025-04-30T01:39:42.497899Z  INFO setup: wrote peer configuration file path="a77b691b016ae389cf1b4765c2bdc12060548b525cae3986b5953d5da74593e0.yaml"
-2025-04-30T01:39:42.497907Z  INFO setup: emitting start commands bootstrappers=["888ba06f969372f0471b9593b054bef8ad0dcdd8690257eee1424b67af2157f2"]
-cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.yaml --config=<your-path-to-alto>/alto/chain/test/10cf8d03daca2332213981adee2a4bfffe4a1782bb5cce036c1d5689c6090997.yaml
-cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.yaml --config=<your-path-to-alto>/alto/chain/test/3ed17734da2f5f718f3386cd73d69b93f3d421da6dc216ef8064fc93161cc75a.yaml
-cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.yaml --config=<your-path-to-alto>/alto/chain/test/82f2bdca758f7ecae48ea21678d121938e1c9d98a3853ef402c4612548ce7141.yaml
-cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.yaml --config=<your-path-to-alto>/alto/chain/test/888ba06f969372f0471b9593b054bef8ad0dcdd8690257eee1424b67af2157f2.yaml
-cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.yaml --config=<your-path-to-alto>/alto/chain/test/a77b691b016ae389cf1b4765c2bdc12060548b525cae3986b5953d5da74593e0.yaml
+2025-05-02T14:47:55.906379Z  INFO setup: generated network key identity=ab6284904e71efb665c42f7ab1f713bfc2c87e2bd937c4027514cea74ef588c05803a4592ddd1970def6bd261210b83b
+2025-05-02T14:47:55.907805Z  INFO setup: wrote peer configuration file path="4cf00f5c66ed27ba3e753f6a8b989b306eae5ce2d3f3c2db105aae2123a012c8.yaml"
+2025-05-02T14:47:55.908022Z  INFO setup: wrote peer configuration file path="95ce6a717dfc7b7dc8dcded623c4bc5ce7a6b4e9c986e923baa3acc5078d7a0f.yaml"
+2025-05-02T14:47:55.908239Z  INFO setup: wrote peer configuration file path="f79141801d52e8a1a7f16b639038032f1a402707ad51f6d7aa94098c8f07e068.yaml"
+2025-05-02T14:47:55.908458Z  INFO setup: wrote peer configuration file path="f79a65c60ac706e67dd964cf4cde9b804c89c15c330f00c9b0adc2ef51d6616c.yaml"
+2025-05-02T14:47:55.908669Z  INFO setup: wrote peer configuration file path="fa6fffb46bb3aceecde1324ac31d8cfddda6c0857a63567796ff8507fef1a965.yaml"
+2025-05-02T14:47:55.908677Z  INFO setup: setup complete bootstrappers=["fa6fffb46bb3aceecde1324ac31d8cfddda6c0857a63567796ff8507fef1a965"]
+To start validators, run:
+4cf00f5c66ed27ba3e753f6a8b989b306eae5ce2d3f3c2db105aae2123a012c8: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/4cf00f5c66ed27ba3e753f6a8b989b306eae5ce2d3f3c2db105aae2123a012c8.yaml
+95ce6a717dfc7b7dc8dcded623c4bc5ce7a6b4e9c986e923baa3acc5078d7a0f: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/95ce6a717dfc7b7dc8dcded623c4bc5ce7a6b4e9c986e923baa3acc5078d7a0f.yaml
+f79141801d52e8a1a7f16b639038032f1a402707ad51f6d7aa94098c8f07e068: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/f79141801d52e8a1a7f16b639038032f1a402707ad51f6d7aa94098c8f07e068.yaml
+f79a65c60ac706e67dd964cf4cde9b804c89c15c330f00c9b0adc2ef51d6616c: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/f79a65c60ac706e67dd964cf4cde9b804c89c15c330f00c9b0adc2ef51d6616c.yaml
+fa6fffb46bb3aceecde1324ac31d8cfddda6c0857a63567796ff8507fef1a965: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/fa6fffb46bb3aceecde1324ac31d8cfddda6c0857a63567796ff8507fef1a965.yaml
+To view metrics, run:
+4cf00f5c66ed27ba3e753f6a8b989b306eae5ce2d3f3c2db105aae2123a012c8: curl http://localhost:3001/metrics
+95ce6a717dfc7b7dc8dcded623c4bc5ce7a6b4e9c986e923baa3acc5078d7a0f: curl http://localhost:3003/metrics
+f79141801d52e8a1a7f16b639038032f1a402707ad51f6d7aa94098c8f07e068: curl http://localhost:3005/metrics
+f79a65c60ac706e67dd964cf4cde9b804c89c15c330f00c9b0adc2ef51d6616c: curl http://localhost:3007/metrics
+fa6fffb46bb3aceecde1324ac31d8cfddda6c0857a63567796ff8507fef1a965: curl http://localhost:3009/metrics
 ```
 
 #### Start Validators
