@@ -2,7 +2,7 @@ use bytes::{Buf, BufMut};
 use commonware_codec::{varint::UInt, EncodeSize, Error, Read, ReadExt, Write};
 use commonware_consensus::threshold_simplex::types::{Finalization, Notarization};
 use commonware_cryptography::{
-    bls12381::primitives::group::Public, sha256::Digest, Digestible, Hasher, Sha256,
+    bls12381::primitives::group::Public, sha256::Digest, Committable, Digestible, Hasher, Sha256,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,6 +78,12 @@ impl EncodeSize for Block {
 
 impl Digestible<Digest> for Block {
     fn digest(&self) -> Digest {
+        self.digest
+    }
+}
+
+impl Committable<Digest> for Block {
+    fn commitment(&self) -> Digest {
         self.digest
     }
 }

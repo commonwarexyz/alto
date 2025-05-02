@@ -17,7 +17,7 @@ use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::threshold_simplex::types::{Finalization, Seedable, Viewable};
 use commonware_cryptography::{bls12381, ed25519::PublicKey, sha256::Digest, Digestible};
 use commonware_macros::select;
-use commonware_p2p::{utils::requester, Receiver, Sender};
+use commonware_p2p::{utils::requester, Receiver, Recipients, Sender};
 use commonware_resolver::{p2p, Resolver};
 use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
 use commonware_storage::{
@@ -46,16 +46,16 @@ pub struct Actor<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Index
     indexer: Option<I>,
 
     // Blocks verified stored by view<>digest
-    verified: Archive<OneCap, R, Digest, (), Block>,
+    verified: Archive<OneCap, R, Digest, Block>,
     // Blocks notarized stored by view<>digest
-    notarized: Archive<OneCap, R, Digest, (), Notarized>,
+    notarized: Archive<OneCap, R, Digest, Notarized>,
 
     // Finalizations stored by height
-    finalized: Archive<EightCap, R, Digest, (), Finalization<Digest>>,
+    finalized: Archive<EightCap, R, Digest, Finalization<Digest>>,
     // Blocks finalized stored by height
     //
     // We store this separately because we may not have the finalization for a block
-    blocks: Archive<EightCap, R, Digest, (), Block>,
+    blocks: Archive<EightCap, R, Digest, Block>,
 
     // Finalizer storage
     finalizer_metadata: Metadata<R, FixedBytes<1>>,
@@ -188,7 +188,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
     pub fn start(
         mut self,
-        buffer: buffered::Mailbox<PublicKey, Digest, Block>,
+        buffer: buffered::Mailbox<PublicKey, Digest, Digest, Block>,
         backfill: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
@@ -200,7 +200,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
     /// Run the application actor.
     async fn run(
         mut self,
-        mut buffer: buffered::Mailbox<PublicKey, Digest, Block>,
+        mut buffer: buffered::Mailbox<PublicKey, Digest, Digest, Block>,
         backfill: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
@@ -311,7 +311,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     let message = mailbox_message.expect("Mailbox closed");
                     match message {
                         Message::Broadcast { payload } => {
-                            let ack = buffer.broadcast(payload).await;
+                            let ack = buffer.broadcast(Recipients::All, payload).await;
                             drop(ack);
                         }
                         Message::Verified { view, payload } => {
@@ -349,16 +349,11 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
                             // Check if in buffer
                             let proposal = &notarization.proposal;
-                            let mut block = None;
-                            if let Some(buffered) = buffer.get(proposal.payload).await {
-                                block = Some(buffered);
-                            }
+                            let mut block =  buffer.get(None, proposal.payload, Some(proposal.payload)).await.into_iter().next();
 
                             // Check if in verified blocks
                             if block.is_none() {
-                                if let Some(verified) = self.verified.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get verified block") {
-                                    block = Some(verified);
-                                }
+                                block = self.verified.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get verified block");
                             }
 
                             // If found, store notarization
@@ -430,23 +425,16 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
                             // Check if in buffer
                             let proposal = &finalization.proposal;
-                            let mut block = None;
-                            if let Some(buffered) = buffer.get(proposal.payload).await{
-                                block = Some(buffered);
-                            }
+                            let mut block = buffer.get(None, proposal.payload, Some(proposal.payload)).await.into_iter().next();
 
                             // Check if in verified
                             if block.is_none() {
-                                if let Some(verified) = self.verified.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get verified block") {
-                                    block = Some(verified);
-                                }
+                                block = self.verified.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get verified block");
                             }
 
                             // Check if in notarized
                             if block.is_none() {
-                                if let Some(notarized) = self.notarized.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get notarized block") {
-                                    block = Some(notarized.block);
-                                }
+                                block = self.notarized.get(Identifier::Key(&proposal.payload)).await.expect("Failed to get notarized block").map(|notarized| notarized.block);
                             }
 
                             // If found, store finalization
@@ -512,7 +500,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                         }
                         Message::Get { view, payload, response } => {
                             // Check if in buffer
-                            let buffered = buffer.get(payload).await;
+                            let buffered = buffer.get(None, payload, Some(payload)).await.into_iter().next();
                             if let Some(buffered) = buffered {
                                 debug!(height = buffered.height, "found block in buffer");
                                 let _ = response.send(buffered);
@@ -552,7 +540,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
                             // Register waiter
                             debug!(view, ?payload, "registering waiter");
-                            buffer.subscribe_prepared(payload, response).await;
+                            buffer.subscribe_prepared(None, payload, Some(payload), response).await;
                         }
                     }
                 },
@@ -668,7 +656,8 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 },
                                 key::Value::Digest(digest) => {
                                     // Check buffer
-                                    if let Some(block) = buffer.get(digest).await {
+                                    let block = buffer.get(None, digest, Some(digest)).await.into_iter().next();
+                                    if let Some(block) = block {
                                         let _ = response.send(block.encode().into());
                                         continue;
                                     }

@@ -72,7 +72,9 @@ impl Write for MultiIndex {
 }
 
 impl Read for MultiIndex {
-    fn read_cfg(reader: &mut impl Buf, _: &()) -> Result<Self, Error> {
+    type Cfg = ();
+
+    fn read_cfg(reader: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
         let bytes = <[u8; SIZE]>::read(reader)?;
         Ok(Self(bytes))
     }
