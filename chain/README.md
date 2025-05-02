@@ -50,7 +50,7 @@ fa6fffb46bb3aceecde1324ac31d8cfddda6c0857a63567796ff8507fef1a965: curl http://lo
 Run the emitted start commands in separate terminals:
 
 ```bash
-cargo run --bin validator -- --peers=<your-path-to-alto>/alto/chain/test/peers.yaml --config=<your-path-to-alto>/alto/chain/test/10cf8d03daca2332213981adee2a4bfffe4a1782bb5cce036c1d5689c6090997.yaml
+cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/10cf8d03daca2332213981adee2a4bfffe4a1782bb5cce036c1d5689c6090997.yaml
 ```
 
 _It is necessary to start at least one bootstrapper for any other peers to connect (used to exchange IPs to dial, not as a relay)._
