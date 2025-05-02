@@ -77,20 +77,18 @@ fn main() {
     // Start runtime
     executor.start(|context| async move {
         // Configure telemetry
-        //
-        // If we are using a hosts file (e.g. on EC2), we want to use the telemetry
-        // server to send metrics to. Otherwise, we just want to log to stdout.
         let log_level = Level::from_str(&config.log_level).expect("Invalid log level");
-        let metrics_socket = config
-            .metrics_port
-            .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
         tokio::telemetry::init(
             context.with_label("telemetry"),
             tokio::telemetry::Logging {
                 level: log_level,
+                // If we are using `commonware-deployer`, we should use structured logging.
                 json: hosts_file.is_some(),
             },
-            metrics_socket,
+            Some(SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                config.metrics_port,
+            )),
             None,
         );
 

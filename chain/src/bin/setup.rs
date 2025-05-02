@@ -294,7 +294,7 @@ fn generate_local(
             identity: hex(&identity.encode()),
 
             port,
-            metrics_port: None,
+            metrics_port: port + 1,
             directory,
             worker_threads,
             log_level: log_level.clone(),
@@ -308,8 +308,8 @@ fn generate_local(
 
             indexer: None,
         };
-        configurations.push((peer_config_file.clone(), peer_config));
-        port += 1;
+        configurations.push((name, peer_config_file.clone(), peer_config));
+        port += 2;
     }
 
     // Create required output directories
@@ -322,7 +322,7 @@ fn generate_local(
     serde_yaml::to_writer(file, &Peers { addresses }).unwrap();
 
     // Write configuration files
-    for (peer_config_file, peer_config) in &configurations {
+    for (_, peer_config_file, peer_config) in &configurations {
         let path = format!("{}/{}", output, peer_config_file);
         let file = fs::File::create(&path).unwrap();
         serde_yaml::to_writer(file, peer_config).unwrap();
@@ -330,14 +330,22 @@ fn generate_local(
     }
 
     // Emit start commands
-    info!(?bootstrappers, "emitting start commands");
-    for (peer_config_file, _) in configurations {
+    info!(?bootstrappers, "setup complete");
+    println!("To start validators, run:");
+    for (name, peer_config_file, _) in &configurations {
         let path = format!("{}/{}", output, peer_config_file);
         let command = format!(
             "cargo run --bin {} -- --peers={} --config={}",
             BINARY_NAME, peers_path, path
         );
-        println!("{}", command);
+        println!("{}: {}", name, command);
+    }
+    println!("To view metrics, run:");
+    for (name, _, peer_config) in configurations {
+        println!(
+            "{}: curl http://localhost:{}/metrics",
+            name, peer_config.metrics_port
+        );
     }
 }
 
@@ -431,7 +439,7 @@ fn generate_remote(
             identity: hex(&identity.encode()),
 
             port: PORT,
-            metrics_port: Some(METRICS_PORT),
+            metrics_port: METRICS_PORT,
             directory: "/home/ubuntu/data".to_string(),
             worker_threads,
             log_level: log_level.clone(),
