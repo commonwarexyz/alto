@@ -219,14 +219,10 @@ mod tests {
         }
     }
 
-    fn all_online(seed: u64, link: Link) -> String {
+    fn all_online(n: u32, seed: u64, link: Link, required: u64) -> String {
         // Create context
-        let n = 5;
         let threshold = quorum(n);
-        let required_container = 10;
-        let cfg = deterministic::Config::default()
-            .with_seed(seed)
-            .with_timeout(Some(Duration::from_secs(30)));
+        let cfg = deterministic::Config::default().with_seed(seed);
         let executor = Runner::from(cfg);
         executor.start(|mut context| async move {
             // Create simulated network
@@ -325,13 +321,13 @@ mod tests {
                     // If ends with contiguous_height, ensure it is at least required_container
                     if metric.ends_with("_syncer_contiguous_height") {
                         let value = value.parse::<u64>().unwrap();
-                        if value >= required_container {
+                        if value >= required {
                             success = true;
                             break;
                         }
                     }
                 }
-                if !success {
+                if success {
                     break;
                 }
 
@@ -350,8 +346,8 @@ mod tests {
             success_rate: 1.0,
         };
         for seed in 0..5 {
-            let state = all_online(seed, link.clone());
-            assert_eq!(state, all_online(seed, link.clone()));
+            let state = all_online(5, seed, link.clone(), 25);
+            assert_eq!(state, all_online(5, seed, link.clone(), 25));
         }
     }
 
@@ -363,9 +359,19 @@ mod tests {
             success_rate: 0.75,
         };
         for seed in 0..5 {
-            let state = all_online(seed, link.clone());
-            assert_eq!(state, all_online(seed, link.clone()));
+            let state = all_online(5, seed, link.clone(), 25);
+            assert_eq!(state, all_online(5, seed, link.clone(), 25));
         }
+    }
+
+    #[test_traced]
+    fn test_1k() {
+        let link = Link {
+            latency: 80.0,
+            jitter: 10.0,
+            success_rate: 0.98,
+        };
+        all_online(10, 0, link.clone(), 1000);
     }
 
     #[test_traced]
