@@ -49,7 +49,9 @@ impl Write for Block {
 }
 
 impl Read for Block {
-    fn read_cfg(reader: &mut impl Buf, _: &()) -> Result<Self, Error> {
+    type Cfg = ();
+
+    fn read_cfg(reader: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
         let parent = Digest::read(reader)?;
         let height = UInt::read(reader)?.into();
         let timestamp = UInt::read(reader)?.into();
@@ -104,7 +106,9 @@ impl Write for Notarized {
 }
 
 impl Read for Notarized {
-    fn read_cfg(buf: &mut impl Buf, _: &()) -> Result<Self, Error> {
+    type Cfg = ();
+
+    fn read_cfg(buf: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
         let proof = Notarization::<Digest>::read(buf)?;
         let block = Block::read(buf)?;
 
@@ -149,7 +153,9 @@ impl Write for Finalized {
 }
 
 impl Read for Finalized {
-    fn read_cfg(buf: &mut impl Buf, _: &()) -> Result<Self, Error> {
+    type Cfg = ();
+
+    fn read_cfg(buf: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
         let proof = Finalization::<Digest>::read(buf)?;
         let block = Block::read(buf)?;
 
