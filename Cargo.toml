@@ -10,18 +10,18 @@ resolver = "2"
 [workspace.dependencies]
 alto-client = { version = "0.0.6", path = "client" }
 alto-types = { version = "0.0.6", path = "types" }
-commonware-broadcast = { version = "0.0.48" }
-commonware-codec = { version = "0.0.48" }
-commonware-consensus = { version = "0.0.48" }
-commonware-cryptography = { version = "0.0.48" }
-commonware-deployer = { version = "0.0.48", default-features = false }
-commonware-macros = { version = "0.0.48" }
-commonware-p2p = { version = "0.0.48" }
-commonware-resolver = { version = "0.0.48" }
-commonware-runtime = { version = "0.0.48" }
-commonware-storage = { version = "0.0.48" }
-commonware-stream = { version = "0.0.48" }
-commonware-utils = { version = "0.0.48" }
+commonware-broadcast = { version = "0.0.49" }
+commonware-codec = { version = "0.0.49" }
+commonware-consensus = { version = "0.0.49" }
+commonware-cryptography = { version = "0.0.49" }
+commonware-deployer = { version = "0.0.49", default-features = false }
+commonware-macros = { version = "0.0.49" }
+commonware-p2p = { version = "0.0.49" }
+commonware-resolver = { version = "0.0.49" }
+commonware-runtime = { version = "0.0.49" }
+commonware-storage = { version = "0.0.49" }
+commonware-stream = { version = "0.0.49" }
+commonware-utils = { version = "0.0.49" }
 thiserror = "2.0.12"
 bytes = "1.7.1"
 rand = "0.8.5"

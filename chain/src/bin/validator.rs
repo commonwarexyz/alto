@@ -67,13 +67,11 @@ fn main() {
     let public_key = signer.public_key();
 
     // Initialize runtime
-    let cfg = tokio::Config {
-        tcp_nodelay: Some(true),
-        worker_threads: config.worker_threads,
-        storage_directory: PathBuf::from(config.directory),
-        catch_panics: false,
-        ..Default::default()
-    };
+    let cfg = tokio::Config::default()
+        .with_tcp_nodelay(Some(true))
+        .with_worker_threads(config.worker_threads)
+        .with_storage_directory(PathBuf::from(config.directory))
+        .with_catch_panics(false);
     let executor = tokio::Runner::new(cfg);
 
     // Start runtime
@@ -83,21 +81,18 @@ fn main() {
         // If we are using a hosts file (e.g. on EC2), we want to use the telemetry
         // server to send metrics to. Otherwise, we just want to log to stdout.
         let log_level = Level::from_str(&config.log_level).expect("Invalid log level");
-        if hosts_file.is_some() {
-            let metrics_socket = config
-                .metrics_port
-                .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
-            tokio::telemetry::init(
-                context.with_label("telemetry"),
-                log_level,
-                metrics_socket,
-                None,
-            );
-        } else {
-            // TODO: add a dedicated CLI telemetry helper for CLI-optimized logging
-            // while still offering metrics (https://github.com/commonwarexyz/monorepo/issues/864)
-            tracing_subscriber::fmt().with_max_level(log_level).init();
-        }
+        let metrics_socket = config
+            .metrics_port
+            .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
+        tokio::telemetry::init(
+            context.with_label("telemetry"),
+            tokio::telemetry::Logging {
+                level: log_level,
+                json: hosts_file.is_some(),
+            },
+            metrics_socket,
+            None,
+        );
 
         // Load peers
         let (ip, peers, bootstrappers) = if let Some(hosts_file) = hosts_file {
