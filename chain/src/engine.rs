@@ -23,6 +23,10 @@ use rand::{CryptoRng, Rng};
 use std::time::Duration;
 use tracing::{error, warn};
 
+/// To better support peers near tip during network instability, we multiply
+/// the consensus activity timeout by this factor.
+const SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER: u64 = 10;
+
 pub struct Config<I: Indexer> {
     pub partition_prefix: String,
     pub signer: Ed25519,
@@ -102,7 +106,9 @@ impl<E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics, I: Index
                 participants: cfg.participants,
                 mailbox_size: cfg.mailbox_size,
                 backfill_quota: cfg.backfill_quota,
-                activity_timeout: cfg.activity_timeout,
+                activity_timeout: cfg
+                    .activity_timeout
+                    .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
                 indexer: cfg.indexer,
             },
         )
