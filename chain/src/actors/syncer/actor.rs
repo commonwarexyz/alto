@@ -22,7 +22,7 @@ use commonware_resolver::{p2p, Resolver};
 use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
 use commonware_storage::{
     archive::{self, Archive, Identifier},
-    index::translator::{EightCap, OneCap},
+    index::translator::{EightCap, TwoCap},
     metadata::{self, Metadata},
 };
 use commonware_utils::array::FixedBytes;
@@ -46,9 +46,9 @@ pub struct Actor<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Index
     indexer: Option<I>,
 
     // Blocks verified stored by view<>digest
-    verified: Archive<OneCap, R, Digest, Block>,
+    verified: Archive<TwoCap, R, Digest, Block>,
     // Blocks notarized stored by view<>digest
-    notarized: Archive<OneCap, R, Digest, Notarized>,
+    notarized: Archive<TwoCap, R, Digest, Notarized>,
 
     // Finalizations stored by height
     finalized: Archive<EightCap, R, Digest, Finalization<Digest>>,
@@ -74,7 +74,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
             context.with_label("verified_archive"),
             archive::Config {
                 partition: format!("{}-verifications", config.partition_prefix),
-                translator: OneCap,
+                translator: TwoCap,
                 section_mask: 0xffff_ffff_ffff_f000u64,
                 pending_writes: 0,
                 replay_concurrency: 4,
@@ -90,9 +90,9 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
             context.with_label("notarized_archive"),
             archive::Config {
                 partition: format!("{}-notarizations", config.partition_prefix),
-                translator: OneCap,
+                translator: TwoCap,
                 section_mask: 0xffff_ffff_ffff_f000u64,
-                pending_writes: 0,
+                pending_writes: 16,
                 replay_concurrency: 4,
                 compression: Some(3),
                 codec_config: (),
@@ -108,7 +108,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                 partition: format!("{}-finalizations", config.partition_prefix),
                 translator: EightCap,
                 section_mask: 0xffff_ffff_fff0_0000u64,
-                pending_writes: 0,
+                pending_writes: 16,
                 replay_concurrency: 4,
                 compression: Some(3),
                 codec_config: (),
