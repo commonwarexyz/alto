@@ -11,11 +11,11 @@ use crate::{
     },
     Indexer,
 };
-use alto_types::{Block, Finalized, Notarized, NAMESPACE};
+use alto_types::{Block, Finalization, Finalized, Notarized, Public, NAMESPACE};
 use commonware_broadcast::{buffered, Broadcaster};
 use commonware_codec::{DecodeExt, Encode};
-use commonware_consensus::threshold_simplex::types::{Finalization, Seedable, Viewable};
-use commonware_cryptography::{bls12381, ed25519::PublicKey, sha256::Digest, Digestible};
+use commonware_consensus::threshold_simplex::types::{Seedable, Viewable};
+use commonware_cryptography::{ed25519::PublicKey, sha256::Digest, Digestible};
 use commonware_macros::select;
 use commonware_p2p::{utils::requester, Receiver, Recipients, Sender};
 use commonware_resolver::{p2p, Resolver};
@@ -33,11 +33,15 @@ use rand::Rng;
 use std::{collections::BTreeSet, time::Duration};
 use tracing::{debug, info, warn};
 
+const REPLAY_BUFFER: usize = 8 * 1024 * 1024;
+const REPLAY_CONCURRENCY: usize = 4;
+const WRITE_BUFFER: usize = 1024 * 1024;
+
 /// Application actor.
 pub struct Actor<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> {
     context: R,
     public_key: PublicKey,
-    public: bls12381::PublicKey,
+    identity: Public,
     participants: Vec<PublicKey>,
     mailbox: mpsc::Receiver<Message>,
     mailbox_size: usize,
@@ -51,7 +55,7 @@ pub struct Actor<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Index
     notarized: Archive<TwoCap, R, Digest, Notarized>,
 
     // Finalizations stored by height
-    finalized: Archive<EightCap, R, Digest, Finalization<Digest>>,
+    finalized: Archive<EightCap, R, Digest, Finalization>,
     // Blocks finalized stored by height
     //
     // We store this separately because we may not have the finalization for a block
@@ -77,9 +81,11 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                 translator: TwoCap,
                 section_mask: 0xffff_ffff_ffff_f000u64,
                 pending_writes: 0,
-                replay_concurrency: 4,
+                replay_concurrency: REPLAY_CONCURRENCY,
                 compression: Some(3),
                 codec_config: (),
+                replay_buffer: REPLAY_BUFFER,
+                write_buffer: WRITE_BUFFER,
             },
         )
         .await
@@ -93,9 +99,11 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                 translator: TwoCap,
                 section_mask: 0xffff_ffff_ffff_f000u64,
                 pending_writes: 0,
-                replay_concurrency: 4,
+                replay_concurrency: REPLAY_CONCURRENCY,
                 compression: Some(3),
                 codec_config: (),
+                replay_buffer: REPLAY_BUFFER,
+                write_buffer: WRITE_BUFFER,
             },
         )
         .await
@@ -109,9 +117,11 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                 translator: EightCap,
                 section_mask: 0xffff_ffff_fff0_0000u64,
                 pending_writes: 0,
-                replay_concurrency: 4,
+                replay_concurrency: REPLAY_CONCURRENCY,
                 compression: Some(3),
                 codec_config: (),
+                replay_buffer: REPLAY_BUFFER,
+                write_buffer: WRITE_BUFFER,
             },
         )
         .await
@@ -125,9 +135,11 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                 translator: EightCap,
                 section_mask: 0xffff_ffff_fff0_0000u64,
                 pending_writes: 0,
-                replay_concurrency: 4,
+                replay_concurrency: REPLAY_CONCURRENCY,
                 compression: Some(3),
                 codec_config: (),
+                replay_buffer: REPLAY_BUFFER,
+                write_buffer: WRITE_BUFFER,
             },
         )
         .await
@@ -163,7 +175,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
             Self {
                 context,
                 public_key: config.public_key,
-                public: config.identity.into(),
+                identity: config.identity,
                 participants: config.participants,
                 mailbox,
                 mailbox_size: config.mailbox_size,
@@ -697,7 +709,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                         let _ = response.send(false);
                                         continue;
                                     };
-                                    if !notarization.verify(NAMESPACE, self.public.as_ref()) {
+                                    if !notarization.verify(NAMESPACE, &self.identity) {
                                         let _ = response.send(false);
                                         continue;
                                     }
@@ -731,7 +743,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                         let _ = response.send(false);
                                         continue;
                                     };
-                                    if !finalization.verify(NAMESPACE, self.public.as_ref()) {
+                                    if !finalization.verify(NAMESPACE, &self.identity) {
                                         let _ = response.send(false);
                                         continue;
                                     }

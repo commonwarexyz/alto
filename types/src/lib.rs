@@ -4,7 +4,7 @@ mod block;
 pub use block::{Block, Finalized, Notarized, Public, Seed, Signature};
 mod consensus;
 use commonware_utils::hex;
-pub use consensus::leader_index;
+pub use consensus::{leader_index, Finalization};
 pub mod wasm;
 
 pub const NAMESPACE: &[u8] = b"_ALTO";
