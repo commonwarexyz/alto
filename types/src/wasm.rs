@@ -3,10 +3,7 @@ use crate::{
 };
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::threshold_simplex::types::Viewable;
-use commonware_cryptography::{
-    bls12381::primitives::variant::{MinSig, Variant},
-    Digestible,
-};
+use commonware_cryptography::Digestible;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
