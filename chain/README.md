@@ -115,6 +115,12 @@ docker build -t validator-builder .
 docker run -it -v ${PWD}/..:/alto validator-builder
 ```
 
+###### Local Compilation
+
+```bash
+docker run -it -v ${PWD}/..:/alto -v ${PWD}/../../monorepo:/monorepo validator-builder
+```
+
 _Emitted binary `validator` is placed in `assets`._
 
 #### Deploy Validator Binary
