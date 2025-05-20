@@ -1,11 +1,13 @@
 use bytes::{Buf, BufMut};
 use commonware_codec::{varint::UInt, EncodeSize, Error, Read, ReadExt, Write};
-use commonware_consensus::threshold_simplex::types::{Finalization, Notarization};
+use commonware_consensus::threshold_simplex::types::{Finalization, Notarization, Seed as CSeed};
 use commonware_cryptography::{
     bls12381::primitives::variant::{MinSig, Variant},
     sha256::Digest,
     Committable, Digestible, Hasher, Sha256,
 };
+
+pub type Seed = CSeed<MinSig>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {

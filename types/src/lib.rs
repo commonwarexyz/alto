@@ -1,7 +1,7 @@
 //! Common types used throughout `alto`.
 
 mod block;
-pub use block::{Block, Finalized, Notarized};
+pub use block::{Block, Finalized, Notarized, Seed};
 mod consensus;
 use commonware_utils::hex;
 pub use consensus::leader_index;

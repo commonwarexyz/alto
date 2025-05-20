@@ -1,5 +1,5 @@
 use crate::{Client, Error, IndexQuery, Query};
-use alto_types::{Block, Finalized, Kind, Notarized, NAMESPACE};
+use alto_types::{Block, Finalized, Kind, Notarized, Seed, NAMESPACE};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::threshold_simplex::types::{Seed, Viewable};
 use commonware_cryptography::{bls12381::primitives::variant::MinSig, Digestible};
@@ -46,13 +46,13 @@ pub enum Payload {
 }
 
 pub enum Message {
-    Seed(Seed<MinSig>),
+    Seed(Seed),
     Notarization(Notarized),
     Finalization(Finalized),
 }
 
 impl Client {
-    pub async fn seed_upload(&self, seed: Seed<MinSig>) -> Result<(), Error> {
+    pub async fn seed_upload(&self, seed: Seed) -> Result<(), Error> {
         let result = self
             .client
             .post(seed_upload_path(self.uri.clone()))
@@ -66,7 +66,7 @@ impl Client {
         Ok(())
     }
 
-    pub async fn seed_get(&self, query: IndexQuery) -> Result<Seed<MinSig>, Error> {
+    pub async fn seed_get(&self, query: IndexQuery) -> Result<Seed, Error> {
         // Get the seed
         let result = self
             .client
@@ -78,7 +78,7 @@ impl Client {
             return Err(Error::Failed(result.status()));
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let seed = Seed::<MinSig>::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+        let seed = Seed::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
         if !seed.verify(NAMESPACE, &self.identity) {
             return Err(Error::InvalidSignature);
         }
