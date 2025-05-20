@@ -80,9 +80,9 @@ use alto_client::{
     consensus::{Message, Payload},
     Client, IndexQuery, Query,
 };
+use alto_types::Public;
 use clap::{value_parser, Arg, Command};
 use commonware_codec::DecodeExt;
-use commonware_cryptography::bls12381::PublicKey;
 use commonware_utils::from_hex_formatted;
 use futures::StreamExt;
 use tracing::{info, warn, Level};
@@ -176,7 +176,7 @@ async fn main() {
         let indexer = matches.get_one::<String>("indexer").unwrap();
         let identity = matches.get_one::<String>("identity").unwrap();
         let identity = from_hex_formatted(identity).expect("Failed to decode identity");
-        let identity = PublicKey::decode(identity.as_ref()).expect("Invalid identity");
+        let identity = Public::decode(identity.as_ref()).expect("Invalid identity");
         let client = Client::new(indexer, identity);
 
         let mut stream = client.listen().await.expect("Failed to connect to indexer");
@@ -195,7 +195,7 @@ async fn main() {
         let indexer = matches.get_one::<String>("indexer").unwrap();
         let identity = matches.get_one::<String>("identity").unwrap();
         let identity = from_hex_formatted(identity).expect("Failed to decode identity");
-        let identity = PublicKey::decode(identity.as_ref()).expect("Invalid identity");
+        let identity = Public::decode(identity.as_ref()).expect("Invalid identity");
         let client = Client::new(indexer, identity);
         let prepare_flag = matches.get_flag("prepare");
 

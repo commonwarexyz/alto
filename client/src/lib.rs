@@ -1,9 +1,7 @@
 //! Client for interacting with `alto`.
 
-use commonware_cryptography::{
-    bls12381::primitives::variant::{MinSig, Variant},
-    sha256::Digest,
-};
+use alto_types::Public;
+use commonware_cryptography::sha256::Digest;
 use commonware_utils::hex;
 use thiserror::Error;
 
@@ -62,13 +60,13 @@ pub enum Error {
 pub struct Client {
     uri: String,
     ws_uri: String,
-    identity: <MinSig as Variant>::Public,
+    identity: Public,
 
     client: reqwest::Client,
 }
 
 impl Client {
-    pub fn new(uri: &str, identity: <MinSig as Variant>::Public) -> Self {
+    pub fn new(uri: &str, identity: Public) -> Self {
         let uri = uri.to_string();
         let ws_uri = uri.replace("http", "ws");
         Self {

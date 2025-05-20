@@ -1,7 +1,7 @@
 use alto_client::{IndexQuery, Query};
-use alto_types::{Finalized, Notarized};
+use alto_types::{Finalized, Notarized, Seed};
 use commonware_codec::DecodeExt;
-use commonware_consensus::threshold_simplex::types::{Seed, Viewable};
+use commonware_consensus::threshold_simplex::types::Viewable;
 use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_utils::SystemTimeExt;
 use std::time;

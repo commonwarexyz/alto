@@ -1,8 +1,8 @@
 use crate::{Client, Error, IndexQuery, Query};
 use alto_types::{Block, Finalized, Kind, Notarized, Seed, NAMESPACE};
 use commonware_codec::{DecodeExt, Encode};
-use commonware_consensus::threshold_simplex::types::{Seed, Viewable};
-use commonware_cryptography::{bls12381::primitives::variant::MinSig, Digestible};
+use commonware_consensus::threshold_simplex::types::Viewable;
+use commonware_cryptography::Digestible;
 use futures::{channel::mpsc::unbounded, Stream, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::Message as TMessage};
 

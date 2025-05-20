@@ -8,6 +8,8 @@ use commonware_cryptography::{
 };
 
 pub type Seed = CSeed<MinSig>;
+pub type Public = <MinSig as Variant>::Public;
+pub type Signature = <MinSig as Variant>::Signature;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {

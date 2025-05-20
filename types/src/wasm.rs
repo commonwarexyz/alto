@@ -1,6 +1,8 @@
-use crate::{leader_index as compute_leader_index, Block, Finalized, Notarized, NAMESPACE};
+use crate::{
+    leader_index as compute_leader_index, Block, Finalized, Notarized, Public, Seed, NAMESPACE,
+};
 use commonware_codec::{DecodeExt, Encode};
-use commonware_consensus::threshold_simplex::types::{Seed, Viewable};
+use commonware_consensus::threshold_simplex::types::Viewable;
 use commonware_cryptography::{
     bls12381::primitives::variant::{MinSig, Variant},
     Digestible,
@@ -44,9 +46,8 @@ pub struct FinalizedJs {
 
 #[wasm_bindgen]
 pub fn parse_seed(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
-    let public_key =
-        <MinSig as Variant>::Public::decode(public_key.as_ref()).expect("invalid public key");
-    let Ok(seed) = Seed::<MinSig>::decode(bytes.as_ref()) else {
+    let public_key = Public::decode(public_key.as_ref()).expect("invalid public key");
+    let Ok(seed) = Seed::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
     if !seed.verify(NAMESPACE, &public_key) {
@@ -61,8 +62,7 @@ pub fn parse_seed(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 
 #[wasm_bindgen]
 pub fn parse_notarized(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
-    let public_key =
-        <MinSig as Variant>::Public::decode(public_key.as_ref()).expect("invalid public key");
+    let public_key = Public::decode(public_key.as_ref()).expect("invalid public key");
     let Ok(notarized) = Notarized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
@@ -88,8 +88,7 @@ pub fn parse_notarized(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 
 #[wasm_bindgen]
 pub fn parse_finalized(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
-    let public =
-        <MinSig as Variant>::Public::decode(public_key.as_ref()).expect("invalid public key");
+    let public = Public::decode(public_key.as_ref()).expect("invalid public key");
     let Ok(finalized) = Finalized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
