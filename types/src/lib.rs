@@ -45,7 +45,7 @@ mod tests {
     use commonware_cryptography::{
         bls12381::{
             dkg::ops,
-            primitives::{ops::threshold_signature_recover, poly},
+            primitives::{ops::threshold_signature_recover, poly, variant::MinSig},
         },
         hash, Digestible,
     };
@@ -55,7 +55,7 @@ mod tests {
     fn test_notarized() {
         // Create network key
         let mut rng = StdRng::seed_from_u64(0);
-        let (public, shares) = ops::generate_shares(&mut rng, None, 4, 3);
+        let (polynomial, shares) = ops::generate_shares::<_, MinSig>(&mut rng, None, 4, 3);
 
         // Create a block
         let digest = hash(b"hello world");
@@ -65,18 +65,19 @@ mod tests {
         // Create a notarization
         let partials = shares
             .iter()
-            .map(|share| Notarize::sign(NAMESPACE, share, proposal.clone()))
+            .map(|share| Notarize::<MinSig, _>::sign(NAMESPACE, share, proposal.clone()))
             .collect::<Vec<_>>();
         let proposal_partials = partials
             .iter()
             .map(|partial| partial.proposal_signature.clone())
             .collect::<Vec<_>>();
-        let proposal_recovered = threshold_signature_recover(3, &proposal_partials).unwrap();
+        let proposal_recovered =
+            threshold_signature_recover::<MinSig, _>(3, &proposal_partials).unwrap();
         let seed_partials = partials
             .into_iter()
             .map(|partial| partial.seed_signature)
             .collect::<Vec<_>>();
-        let seed_recovered = threshold_signature_recover(3, &seed_partials).unwrap();
+        let seed_recovered = threshold_signature_recover::<MinSig, _>(3, &seed_partials).unwrap();
         let notarization = Notarization::new(proposal, proposal_recovered, seed_recovered);
         let notarized = Notarized::new(notarization, block.clone());
 
@@ -86,7 +87,7 @@ mod tests {
         assert_eq!(notarized, decoded);
 
         // Verify notarized
-        let public_key = poly::public(&public);
+        let public_key = poly::public::<MinSig>(&polynomial);
         assert!(notarized.verify(NAMESPACE, public_key));
     }
 
@@ -94,7 +95,7 @@ mod tests {
     fn test_finalized() {
         // Create network key
         let mut rng = StdRng::seed_from_u64(0);
-        let (public, shares) = ops::generate_shares(&mut rng, None, 4, 3);
+        let (polynomial, shares) = ops::generate_shares::<_, MinSig>(&mut rng, None, 4, 3);
 
         // Create a block
         let digest = hash(b"hello world");
@@ -104,22 +105,23 @@ mod tests {
         // Create a finalization
         let partials = shares
             .iter()
-            .map(|share| Notarize::sign(NAMESPACE, share, proposal.clone()))
+            .map(|share| Notarize::<MinSig, _>::sign(NAMESPACE, share, proposal.clone()))
             .collect::<Vec<_>>();
         let seed_partials = partials
             .into_iter()
             .map(|partial| partial.seed_signature)
             .collect::<Vec<_>>();
-        let seed_recovered = threshold_signature_recover(3, &seed_partials).unwrap();
+        let seed_recovered = threshold_signature_recover::<MinSig, _>(3, &seed_partials).unwrap();
         let finalize_partials = shares
             .iter()
-            .map(|share| Finalize::sign(NAMESPACE, share, proposal.clone()))
+            .map(|share| Finalize::<MinSig, _>::sign(NAMESPACE, share, proposal.clone()))
             .collect::<Vec<_>>();
         let finalize_partials = finalize_partials
             .into_iter()
             .map(|partial| partial.proposal_signature)
             .collect::<Vec<_>>();
-        let finalize_recovered = threshold_signature_recover(3, &finalize_partials).unwrap();
+        let finalize_recovered =
+            threshold_signature_recover::<MinSig, _>(3, &finalize_partials).unwrap();
         let finalized = Finalization::new(proposal, finalize_recovered, seed_recovered);
         let finalized = Finalized::new(finalized, block.clone());
 
@@ -129,7 +131,7 @@ mod tests {
         assert_eq!(finalized, decoded);
 
         // Verify finalized
-        let public_key = poly::public(&public);
+        let public_key = poly::public::<MinSig>(&polynomial);
         assert!(finalized.verify(NAMESPACE, public_key));
     }
 }
