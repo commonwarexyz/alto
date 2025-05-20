@@ -2,7 +2,9 @@ use bytes::{Buf, BufMut};
 use commonware_codec::{varint::UInt, EncodeSize, Error, Read, ReadExt, Write};
 use commonware_consensus::threshold_simplex::types::{Finalization, Notarization};
 use commonware_cryptography::{
-    bls12381::primitives::group::Public, sha256::Digest, Committable, Digestible, Hasher, Sha256,
+    bls12381::primitives::variant::{MinSig, Variant},
+    sha256::Digest,
+    Committable, Digestible, Hasher, Sha256,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,17 +92,17 @@ impl Committable<Digest> for Block {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notarized {
-    pub proof: Notarization<Digest>,
+    pub proof: Notarization<MinSig, Digest>,
     pub block: Block,
 }
 
 impl Notarized {
-    pub fn new(proof: Notarization<Digest>, block: Block) -> Self {
+    pub fn new(proof: Notarization<MinSig, Digest>, block: Block) -> Self {
         Self { proof, block }
     }
 
-    pub fn verify(&self, namespace: &[u8], public_key: &Public) -> bool {
-        self.proof.verify(namespace, public_key)
+    pub fn verify(&self, namespace: &[u8], identity: &<MinSig as Variant>::Public) -> bool {
+        self.proof.verify(namespace, identity)
     }
 }
 
@@ -115,7 +117,7 @@ impl Read for Notarized {
     type Cfg = ();
 
     fn read_cfg(buf: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
-        let proof = Notarization::<Digest>::read(buf)?;
+        let proof = Notarization::<MinSig, Digest>::read(buf)?;
         let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
@@ -137,17 +139,17 @@ impl EncodeSize for Notarized {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Finalized {
-    pub proof: Finalization<Digest>,
+    pub proof: Finalization<MinSig, Digest>,
     pub block: Block,
 }
 
 impl Finalized {
-    pub fn new(proof: Finalization<Digest>, block: Block) -> Self {
+    pub fn new(proof: Finalization<MinSig, Digest>, block: Block) -> Self {
         Self { proof, block }
     }
 
-    pub fn verify(&self, namespace: &[u8], public_key: &Public) -> bool {
-        self.proof.verify(namespace, public_key)
+    pub fn verify(&self, namespace: &[u8], identity: &<MinSig as Variant>::Public) -> bool {
+        self.proof.verify(namespace, identity)
     }
 }
 
@@ -162,7 +164,7 @@ impl Read for Finalized {
     type Cfg = ();
 
     fn read_cfg(buf: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
-        let proof = Finalization::<Digest>::read(buf)?;
+        let proof = Finalization::<MinSig, Digest>::read(buf)?;
         let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
