@@ -1,6 +1,6 @@
 //! Client for interacting with `alto`.
 
-use alto_types::Public;
+use alto_types::Identity;
 use commonware_cryptography::sha256::Digest;
 use commonware_utils::hex;
 use thiserror::Error;
@@ -60,13 +60,13 @@ pub enum Error {
 pub struct Client {
     uri: String,
     ws_uri: String,
-    identity: Public,
+    identity: Identity,
 
     client: reqwest::Client,
 }
 
 impl Client {
-    pub fn new(uri: &str, identity: Public) -> Self {
+    pub fn new(uri: &str, identity: Identity) -> Self {
         let uri = uri.to_string();
         let ws_uri = uri.replace("http", "ws");
         Self {

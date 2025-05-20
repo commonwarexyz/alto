@@ -1,10 +1,12 @@
 //! Common types used throughout `alto`.
 
 mod block;
-pub use block::{Block, Finalized, Notarized, Public, Seed, Signature};
+pub use block::{Block, Finalized, Notarized};
 mod consensus;
 use commonware_utils::hex;
-pub use consensus::{leader_index, Finalization};
+pub use consensus::{
+    leader_index, Activity, Finalization, Identity, Notarization, Seed, Signature,
+};
 pub mod wasm;
 
 pub const NAMESPACE: &[u8] = b"_ALTO";

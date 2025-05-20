@@ -1,8 +1,5 @@
-use alto_types::Block;
-use commonware_consensus::{
-    threshold_simplex::types::{Activity, Finalization, Notarization},
-    Reporter,
-};
+use alto_types::{Activity, Block, Finalization, Notarization};
+use commonware_consensus::Reporter;
 use commonware_cryptography::sha256::Digest;
 use futures::{
     channel::{mpsc, oneshot},
@@ -24,10 +21,10 @@ pub enum Message {
         payload: Block,
     },
     Notarization {
-        notarization: Notarization<Digest>,
+        notarization: Notarization,
     },
     Finalization {
-        finalization: Finalization<Digest>,
+        finalization: Finalization,
     },
 }
 
@@ -74,7 +71,7 @@ impl Mailbox {
 }
 
 impl Reporter for Mailbox {
-    type Activity = Activity<Digest>;
+    type Activity = Activity;
 
     async fn report(&mut self, activity: Self::Activity) {
         match activity {

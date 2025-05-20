@@ -1,5 +1,5 @@
 use crate::{
-    leader_index as compute_leader_index, Block, Finalized, Notarized, Public, Seed, NAMESPACE,
+    leader_index as compute_leader_index, Block, Finalized, Identity, Notarized, Seed, NAMESPACE,
 };
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::threshold_simplex::types::Viewable;
@@ -42,12 +42,12 @@ pub struct FinalizedJs {
 }
 
 #[wasm_bindgen]
-pub fn parse_seed(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
-    let public_key = Public::decode(public_key.as_ref()).expect("invalid public key");
+pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
+    let identity = Identity::decode(identity.as_ref()).expect("invalid public key");
     let Ok(seed) = Seed::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
-    if !seed.verify(NAMESPACE, &public_key) {
+    if !seed.verify(NAMESPACE, &identity) {
         return JsValue::NULL;
     }
     let seed_js = SeedJs {
@@ -58,12 +58,12 @@ pub fn parse_seed(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 }
 
 #[wasm_bindgen]
-pub fn parse_notarized(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
-    let public_key = Public::decode(public_key.as_ref()).expect("invalid public key");
+pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
+    let identity = Identity::decode(identity.as_ref()).expect("invalid public key");
     let Ok(notarized) = Notarized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
-    if !notarized.verify(NAMESPACE, &public_key) {
+    if !notarized.verify(NAMESPACE, &identity) {
         return JsValue::NULL;
     }
     let notarized_js = NotarizedJs {
@@ -84,12 +84,12 @@ pub fn parse_notarized(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 }
 
 #[wasm_bindgen]
-pub fn parse_finalized(public_key: Vec<u8>, bytes: Vec<u8>) -> JsValue {
-    let public = Public::decode(public_key.as_ref()).expect("invalid public key");
+pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
+    let identity = Identity::decode(identity.as_ref()).expect("invalid public key");
     let Ok(finalized) = Finalized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
-    if !finalized.verify(NAMESPACE, &public) {
+    if !finalized.verify(NAMESPACE, &identity) {
         return JsValue::NULL;
     }
     let finalized_js = FinalizedJs {

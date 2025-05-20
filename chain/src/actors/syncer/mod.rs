@@ -1,4 +1,5 @@
-use commonware_cryptography::{bls12381::primitives::group, ed25519::PublicKey};
+use alto_types::Public;
+use commonware_cryptography::ed25519::PublicKey;
 use governor::Quota;
 
 mod actor;
@@ -18,7 +19,7 @@ pub struct Config<I: Indexer> {
     pub public_key: PublicKey,
 
     /// Network identity
-    pub identity: group::Public,
+    pub identity: Public,
 
     pub participants: Vec<PublicKey>,
 
