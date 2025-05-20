@@ -1,4 +1,4 @@
-use alto_types::Public;
+use alto_types::Identity;
 use commonware_cryptography::ed25519::PublicKey;
 use governor::Quota;
 
@@ -19,7 +19,7 @@ pub struct Config<I: Indexer> {
     pub public_key: PublicKey,
 
     /// Network identity
-    pub identity: Public,
+    pub identity: Identity,
 
     pub participants: Vec<PublicKey>,
 

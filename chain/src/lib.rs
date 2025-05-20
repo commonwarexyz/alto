@@ -1,6 +1,4 @@
-use alto_types::{Finalized, Notarized};
-use commonware_consensus::threshold_simplex::types::Seed;
-use commonware_cryptography::bls12381;
+use alto_types::{Finalized, Identity, Notarized, Seed};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, future::Future, net::SocketAddr};
 
@@ -12,7 +10,7 @@ pub trait Indexer: Clone + Send + Sync + 'static {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Create a new indexer with the given URI and public key.
-    fn new(uri: &str, public: bls12381::PublicKey) -> Self;
+    fn new(uri: &str, public: Identity) -> Self;
 
     /// Upload a seed to the indexer.
     fn seed_upload(&self, seed: Seed) -> impl Future<Output = Result<(), Self::Error>> + Send;
@@ -33,8 +31,8 @@ pub trait Indexer: Clone + Send + Sync + 'static {
 impl Indexer for alto_client::Client {
     type Error = alto_client::Error;
 
-    fn new(uri: &str, public: bls12381::PublicKey) -> Self {
-        Self::new(uri, public)
+    fn new(uri: &str, identity: Identity) -> Self {
+        Self::new(uri, identity)
     }
 
     fn seed_upload(&self, seed: Seed) -> impl Future<Output = Result<(), Self::Error>> + Send {
@@ -91,8 +89,11 @@ pub struct Peers {
 mod tests {
     use super::*;
     use alto_types::{Finalized, Notarized};
-    use bls12381::primitives::poly;
-    use commonware_cryptography::{bls12381::dkg::ops, ed25519::PublicKey, Ed25519, Signer};
+    use commonware_cryptography::{
+        bls12381::{dkg::ops, primitives::variant::MinSig},
+        ed25519::PublicKey,
+        Ed25519, Signer,
+    };
     use commonware_macros::{select, test_traced};
     use commonware_p2p::simulated::{self, Link, Network, Oracle, Receiver, Sender};
     use commonware_runtime::{
@@ -122,7 +123,7 @@ mod tests {
     impl Indexer for MockIndexer {
         type Error = std::io::Error;
 
-        fn new(_: &str, _: bls12381::PublicKey) -> Self {
+        fn new(_: &str, _: Identity) -> Self {
             MockIndexer {
                 seed_seen: Arc::new(AtomicBool::new(false)),
                 notarization_seen: Arc::new(AtomicBool::new(false)),
@@ -160,22 +161,26 @@ mod tests {
             (Sender<PublicKey>, Receiver<PublicKey>),
             (Sender<PublicKey>, Receiver<PublicKey>),
             (Sender<PublicKey>, Receiver<PublicKey>),
+            (Sender<PublicKey>, Receiver<PublicKey>),
         ),
     > {
         let mut registrations = HashMap::new();
         for validator in validators.iter() {
-            let (voter_sender, voter_receiver) =
+            let (pending_sender, pending_receiver) =
                 oracle.register(validator.clone(), 0).await.unwrap();
-            let (resolver_sender, resolver_receiver) =
+            let (recovered_sender, recovered_receiver) =
                 oracle.register(validator.clone(), 1).await.unwrap();
-            let (broadcast_sender, broadcast_receiver) =
+            let (resolver_sender, resolver_receiver) =
                 oracle.register(validator.clone(), 2).await.unwrap();
-            let (backfill_sender, backfill_receiver) =
+            let (broadcast_sender, broadcast_receiver) =
                 oracle.register(validator.clone(), 3).await.unwrap();
+            let (backfill_sender, backfill_receiver) =
+                oracle.register(validator.clone(), 4).await.unwrap();
             registrations.insert(
                 validator.clone(),
                 (
-                    (voter_sender, voter_receiver),
+                    (pending_sender, pending_receiver),
+                    (recovered_sender, recovered_receiver),
                     (resolver_sender, resolver_receiver),
                     (broadcast_sender, broadcast_receiver),
                     (backfill_sender, backfill_receiver),
@@ -253,7 +258,8 @@ mod tests {
             link_validators(&mut oracle, &validators, link, None).await;
 
             // Derive threshold
-            let (public, shares) = ops::generate_shares(&mut context, None, n, threshold);
+            let (polynomial, shares) =
+                ops::generate_shares::<_, MinSig>(&mut context, None, n, threshold);
 
             // Create instances
             let mut public_keys = HashSet::new();
@@ -264,10 +270,11 @@ mod tests {
 
                 // Configure engine
                 let uid = format!("validator-{}", public_key);
-                let config: Config<MockIndexer> = engine::Config {
+                let config: Config<_, MockIndexer> = engine::Config {
+                    blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
                     signer: scheme,
-                    identity: public.clone(),
+                    polynomial: polynomial.clone(),
                     share: shares[idx].clone(),
                     participants: validators.clone(),
                     mailbox_size: 1024,
@@ -288,11 +295,11 @@ mod tests {
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
                 // Get networking
-                let (voter, resolver, broadcast, backfill) =
+                let (pending, recovered, resolver, broadcast, backfill) =
                     registrations.remove(&public_key).unwrap();
 
                 // Start engine
-                engine.start(voter, resolver, broadcast, backfill);
+                engine.start(pending, recovered, resolver, broadcast, backfill);
             }
 
             // Poll metrics

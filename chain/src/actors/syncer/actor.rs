@@ -11,7 +11,7 @@ use crate::{
     },
     Indexer,
 };
-use alto_types::{Block, Finalization, Finalized, Notarized, Public, NAMESPACE};
+use alto_types::{Block, Finalization, Finalized, Identity, Notarized, NAMESPACE};
 use commonware_broadcast::{buffered, Broadcaster};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::threshold_simplex::types::{Seedable, Viewable};
@@ -41,7 +41,7 @@ const WRITE_BUFFER: usize = 1024 * 1024;
 pub struct Actor<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> {
     context: R,
     public_key: PublicKey,
-    identity: Public,
+    identity: Identity,
     participants: Vec<PublicKey>,
     mailbox: mpsc::Receiver<Message>,
     mailbox_size: usize,

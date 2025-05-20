@@ -1,3 +1,4 @@
+use alto_types::Identity;
 use commonware_cryptography::{
     bls12381::primitives::{group, poly::Poly},
     ed25519::PublicKey,
@@ -15,7 +16,7 @@ pub struct Config {
     /// Participants active in consensus.
     pub participants: Vec<PublicKey>,
 
-    pub identity: Poly<group::Public>,
+    pub polynomial: Poly<Identity>,
 
     pub share: group::Share,
 

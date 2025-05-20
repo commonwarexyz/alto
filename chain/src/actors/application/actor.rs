@@ -68,7 +68,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                 hasher: Sha256::new(),
                 mailbox,
             },
-            Supervisor::new(config.identity, config.participants, config.share),
+            Supervisor::new(config.polynomial, config.participants, config.share),
             Mailbox::new(sender),
         )
     }

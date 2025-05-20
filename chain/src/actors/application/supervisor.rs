@@ -1,4 +1,4 @@
-use alto_types::leader_index;
+use alto_types::{leader_index, Identity, Signature};
 use commonware_consensus::{
     threshold_simplex::types::{Seed, View},
     Supervisor as Su, ThresholdSupervisor as TSu,
@@ -7,6 +7,7 @@ use commonware_cryptography::{
     bls12381::primitives::{
         group,
         poly::{self, Poly},
+        variant::MinSig,
     },
     ed25519::PublicKey,
 };
@@ -15,7 +16,7 @@ use std::collections::HashMap;
 /// Implementation of `commonware-consensus::Supervisor`.
 #[derive(Clone)]
 pub struct Supervisor {
-    identity: Poly<group::Public>,
+    polynomial: Poly<Identity>,
     participants: Vec<PublicKey>,
     participants_map: HashMap<PublicKey, u32>,
 
@@ -24,7 +25,7 @@ pub struct Supervisor {
 
 impl Supervisor {
     pub fn new(
-        identity: Poly<group::Public>,
+        polynomial: Poly<Identity>,
         mut participants: Vec<PublicKey>,
         share: group::Share,
     ) -> Self {
@@ -37,7 +38,7 @@ impl Supervisor {
 
         // Return supervisor
         Self {
-            identity,
+            polynomial,
             participants,
             participants_map,
             share,
@@ -63,8 +64,9 @@ impl Su for Supervisor {
 }
 
 impl TSu for Supervisor {
-    type Seed = group::Signature;
-    type Identity = poly::Public;
+    type Seed = Signature;
+    type Identity = Identity;
+    type Polynomial = Poly<Identity>;
     type Share = group::Share;
 
     fn leader(&self, view: Self::Index, seed: Self::Seed) -> Option<Self::PublicKey> {
@@ -73,8 +75,12 @@ impl TSu for Supervisor {
         Some(self.participants[index].clone())
     }
 
-    fn identity(&self, _: Self::Index) -> Option<&Self::Identity> {
-        Some(&self.identity)
+    fn identity(&self) -> &Self::Identity {
+        poly::public::<MinSig>(&self.polynomial)
+    }
+
+    fn polynomial(&self, _: Self::Index) -> Option<&Self::Polynomial> {
+        Some(&self.polynomial)
     }
 
     fn share(&self, _: Self::Index) -> Option<&Self::Share> {
