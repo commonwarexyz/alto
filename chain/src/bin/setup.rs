@@ -2,7 +2,10 @@ use alto_chain::{Config, Peers};
 use clap::{value_parser, Arg, ArgMatches, Command};
 use commonware_codec::{Decode, DecodeExt, Encode};
 use commonware_cryptography::{
-    bls12381::{dkg::ops, primitives::poly},
+    bls12381::{
+        dkg::ops,
+        primitives::{poly, variant::MinSig},
+    },
     ed25519::PublicKey,
     Ed25519, Signer,
 };
@@ -272,8 +275,9 @@ fn generate_local(
     // Generate consensus key
     let peers_u32 = peers as u32;
     let threshold = quorum(peers_u32);
-    let (identity, shares) = ops::generate_shares(&mut OsRng, None, peers_u32, threshold);
-    info!(identity = ?poly::public(&identity), "generated network key");
+    let (polynomial, shares) =
+        ops::generate_shares::<_, MinSig>(&mut OsRng, None, peers_u32, threshold);
+    info!(identity = ?poly::public::<MinSig>(&polynomial), "generated network key");
 
     // Generate instance configurations
     let mut port = start_port;
@@ -291,7 +295,7 @@ fn generate_local(
         let peer_config = Config {
             private_key: scheme.private_key().to_string(),
             share: hex(&share.encode()),
-            identity: hex(&identity.encode()),
+            polynomial: hex(&polynomial.encode()),
 
             port,
             metrics_port: port + 1,
@@ -419,8 +423,9 @@ fn generate_remote(
     // Generate consensus key
     let peers_u32 = peers as u32;
     let threshold = quorum(peers_u32);
-    let (identity, shares) = ops::generate_shares(&mut OsRng, None, peers_u32, threshold);
-    info!(identity = ?poly::public(&identity), "generated network key");
+    let (polynomial, shares) =
+        ops::generate_shares::<_, MinSig>(&mut OsRng, None, peers_u32, threshold);
+    info!(identity = ?poly::public::<MinSig>(&polynomial), "generated network key");
 
     // Generate instance configurations
     assert!(
@@ -436,7 +441,7 @@ fn generate_remote(
         let peer_config = Config {
             private_key: scheme.private_key().to_string(),
             share: hex(&shares[index].encode()),
-            identity: hex(&identity.encode()),
+            polynomial: hex(&polynomial.encode()),
 
             port: PORT,
             metrics_port: METRICS_PORT,
@@ -680,17 +685,17 @@ fn explorer(sub_matches: &ArgMatches) {
         std::fs::read_to_string(&peer_config_path).expect("failed to read peer config");
     let peer_config: Config =
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
-    let identity_hex = peer_config.identity;
-    let identity = from_hex_formatted(&identity_hex).expect("invalid identity");
-    let identity = poly::Public::decode_cfg(identity.as_ref(), &(threshold as usize))
-        .expect("identity is invalid");
-    let identity_public = poly::public(&identity);
+    let polynomial_hex = peer_config.polynomial;
+    let polynomial = from_hex_formatted(&polynomial_hex).expect("invalid polynomial");
+    let polynomial = poly::Public::<MinSig>::decode_cfg(polynomial.as_ref(), &(threshold as usize))
+        .expect("polynomial is invalid");
+    let identity = poly::public::<MinSig>(&polynomial);
     let config_ts = format!(
         "export const BACKEND_URL = \"{}/consensus/ws\";\n\
         export const PUBLIC_KEY_HEX = \"{}\";\n\
         export const LOCATIONS: [[number, number], string][] = [\n{}\n];",
         backend_url,
-        hex(&identity_public.encode()),
+        hex(&identity.encode()),
         locations_str
     );
 

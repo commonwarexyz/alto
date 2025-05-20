@@ -59,7 +59,7 @@ impl Indexer for alto_client::Client {
 pub struct Config {
     pub private_key: String,
     pub share: String,
-    pub identity: String,
+    pub polynomial: String,
 
     pub port: u16,
     pub metrics_port: u16,

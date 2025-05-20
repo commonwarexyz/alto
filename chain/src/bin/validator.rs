@@ -4,7 +4,7 @@ use alto_types::NAMESPACE;
 use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt};
 use commonware_cryptography::{
-    bls12381::primitives::{group, poly},
+    bls12381::primitives::{group, poly, variant::MinSig},
     ed25519::{PrivateKey, PublicKey},
     Ed25519, Signer,
 };
@@ -24,10 +24,11 @@ use std::{
 };
 use tracing::{error, info, Level};
 
-const VOTER_CHANNEL: u32 = 0;
-const RESOLVER_CHANNEL: u32 = 1;
-const BROADCASTER_CHANNEL: u32 = 2;
-const BACKFILLER_CHANNEL: u32 = 3;
+const PENDING_CHANNEL: u32 = 0;
+const RECOVERED_CHANNEL: u32 = 1;
+const RESOLVER_CHANNEL: u32 = 2;
+const BROADCASTER_CHANNEL: u32 = 3;
+const BACKFILLER_CHANNEL: u32 = 4;
 
 const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 const NOTARIZATION_TIMEOUT: Duration = Duration::from_secs(2);
@@ -157,13 +158,15 @@ fn main() {
         let share = from_hex_formatted(&config.share).expect("Could not parse share");
         let share = group::Share::decode(share.as_ref()).expect("Share is invalid");
         let threshold = quorum(peers_u32);
-        let identity = from_hex_formatted(&config.identity).expect("Could not parse identity");
-        let identity = poly::Public::decode_cfg(identity.as_ref(), &(threshold as usize))
-            .expect("Identity is invalid");
-        let identity_public = *poly::public(&identity);
+        let polynomial =
+            from_hex_formatted(&config.polynomial).expect("Could not parse polynomial");
+        let polynomial =
+            poly::Public::<MinSig>::decode_cfg(polynomial.as_ref(), &(threshold as usize))
+                .expect("polynomial is invalid");
+        let identity = *poly::public::<MinSig>(&polynomial);
         info!(
             ?public_key,
-            ?identity_public,
+            ?identity,
             ?ip,
             port = config.port,
             "loaded config"
@@ -188,9 +191,19 @@ fn main() {
         // Provide authorized peers
         oracle.register(0, peers.clone()).await;
 
-        // Register voter channel
-        let voter_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
-        let voter = network.register(VOTER_CHANNEL, voter_limit, config.message_backlog, None);
+        // Register pending channel
+        let pending_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
+        let pending =
+            network.register(PENDING_CHANNEL, pending_limit, config.message_backlog, None);
+
+        // Register recovered channel
+        let recovered_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
+        let recovered = network.register(
+            RECOVERED_CHANNEL,
+            recovered_limit,
+            config.message_backlog,
+            None,
+        );
 
         // Register resolver channel
         let resolver_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
@@ -225,14 +238,15 @@ fn main() {
         // Create indexer
         let mut indexer = None;
         if let Some(uri) = config.indexer {
-            indexer = Some(Client::new(&uri, identity_public.into()));
+            indexer = Some(Client::new(&uri, identity));
         }
 
         // Create engine
         let config = engine::Config {
+            blocker: oracle,
             partition_prefix: "engine".to_string(),
             signer,
-            identity,
+            polynomial,
             share,
             participants: peers,
             mailbox_size: config.mailbox_size,
@@ -253,7 +267,7 @@ fn main() {
         let engine = engine::Engine::new(context.with_label("engine"), config).await;
 
         // Start engine
-        let engine = engine.start(voter, resolver, broadcaster, backfiller);
+        let engine = engine.start(pending, recovered, resolver, broadcaster, backfiller);
 
         // Wait for any task to error
         if let Err(e) = try_join_all(vec![p2p, engine]).await {
