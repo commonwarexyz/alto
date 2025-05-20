@@ -90,7 +90,10 @@ mod tests {
     use super::*;
     use alto_types::{Finalized, Notarized};
     use commonware_cryptography::{
-        bls12381::{dkg::ops, primitives::variant::MinSig},
+        bls12381::{
+            dkg::ops,
+            primitives::{poly, variant::MinSig},
+        },
         ed25519::PublicKey,
         Ed25519, Signer,
     };
@@ -429,7 +432,8 @@ mod tests {
             .await;
 
             // Derive threshold
-            let (public, shares) = ops::generate_shares(&mut context, None, n, threshold);
+            let (polynomial, shares) =
+                ops::generate_shares::<_, MinSig>(&mut context, None, n, threshold);
 
             // Create instances
             for (idx, scheme) in schemes.iter().enumerate() {
@@ -441,10 +445,11 @@ mod tests {
                 // Configure engine
                 let public_key = scheme.public_key();
                 let uid = format!("validator-{}", public_key);
-                let config: Config<MockIndexer> = engine::Config {
+                let config: Config<_, MockIndexer> = engine::Config {
+                    blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
                     signer: scheme.clone(),
-                    identity: public.clone(),
+                    polynomial: polynomial.clone(),
                     share: shares[idx].clone(),
                     participants: validators.clone(),
                     mailbox_size: 1024,
@@ -465,11 +470,11 @@ mod tests {
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
                 // Get networking
-                let (voter, resolver, broadcast, backfill) =
+                let (pending, recovered, resolver, broadcast, backfill) =
                     registrations.remove(&public_key).unwrap();
 
                 // Start engine
-                engine.start(voter, resolver, broadcast, backfill);
+                engine.start(pending, recovered, resolver, broadcast, backfill);
             }
 
             // Poll metrics
@@ -526,10 +531,11 @@ mod tests {
             let share = shares[0].clone();
             let public_key = scheme.public_key();
             let uid = format!("validator-{}", public_key);
-            let config: Config<MockIndexer> = engine::Config {
+            let config: Config<_, MockIndexer> = engine::Config {
+                blocker: oracle.control(public_key.clone()),
                 partition_prefix: uid.clone(),
                 signer: scheme.clone(),
-                identity: public.clone(),
+                polynomial: polynomial.clone(),
                 share,
                 participants: validators.clone(),
                 mailbox_size: 1024,
@@ -550,10 +556,11 @@ mod tests {
             let engine = Engine::new(context.with_label(&uid), config).await;
 
             // Get networking
-            let (voter, resolver, broadcast, backfill) = registrations.remove(&public_key).unwrap();
+            let (pending, recovered, resolver, broadcast, backfill) =
+                registrations.remove(&public_key).unwrap();
 
             // Start engine
-            engine.start(voter, resolver, broadcast, backfill);
+            engine.start(pending, recovered, resolver, broadcast, backfill);
 
             // Poll metrics
             loop {
@@ -606,14 +613,14 @@ mod tests {
 
         // Derive threshold
         let mut rng = StdRng::seed_from_u64(0);
-        let (public, shares) = ops::generate_shares(&mut rng, None, n, threshold);
+        let (polynomial, shares) = ops::generate_shares::<_, MinSig>(&mut rng, None, n, threshold);
 
         // Random restarts every x seconds
         let mut runs = 0;
         let mut prev_ctx = None;
         loop {
             // Setup run
-            let public = public.clone();
+            let polynomial = polynomial.clone();
             let shares = shares.clone();
             let f = |mut context: deterministic::Context| async move {
                 // Create simulated network
@@ -657,10 +664,11 @@ mod tests {
 
                     // Configure engine
                     let uid = format!("validator-{}", public_key);
-                    let config: Config<MockIndexer> = engine::Config {
+                    let config: Config<_, MockIndexer> = engine::Config {
+                        blocker: oracle.control(public_key.clone()),
                         partition_prefix: uid.clone(),
                         signer: scheme,
-                        identity: public.clone(),
+                        polynomial: polynomial.clone(),
                         share: shares[idx].clone(),
                         participants: validators.clone(),
                         mailbox_size: 1024,
@@ -681,11 +689,11 @@ mod tests {
                     let engine = Engine::new(context.with_label(&uid), config).await;
 
                     // Get networking
-                    let (voter, resolver, broadcast, backfill) =
+                    let (pending, recovered, resolver, broadcast, backfill) =
                         registrations.remove(&public_key).unwrap();
 
                     // Start engine
-                    engine.start(voter, resolver, broadcast, backfill);
+                    engine.start(pending, recovered, resolver, broadcast, backfill);
                 }
 
                 // Poll metrics
@@ -809,11 +817,12 @@ mod tests {
             link_validators(&mut oracle, &validators, link, None).await;
 
             // Derive threshold
-            let (public, shares) = ops::generate_shares(&mut context, None, n, threshold);
-            let public_key = *poly::public(&public);
+            let (polynomial, shares) =
+                ops::generate_shares::<_, MinSig>(&mut context, None, n, threshold);
+            let identity = *poly::public::<MinSig>(&polynomial);
 
             // Define mock indexer
-            let indexer = MockIndexer::new("", public_key.into());
+            let indexer = MockIndexer::new("", identity);
 
             // Create instances
             let mut public_keys = HashSet::new();
@@ -824,10 +833,11 @@ mod tests {
 
                 // Configure engine
                 let uid = format!("validator-{}", public_key);
-                let config: Config<MockIndexer> = engine::Config {
+                let config: Config<_, MockIndexer> = engine::Config {
+                    blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
                     signer: scheme,
-                    identity: public.clone(),
+                    polynomial: polynomial.clone(),
                     share: shares[idx].clone(),
                     participants: validators.clone(),
                     mailbox_size: 1024,
@@ -848,11 +858,11 @@ mod tests {
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
                 // Get networking
-                let (voter, resolver, broadcast, backfill) =
+                let (pending, recovered, resolver, broadcast, backfill) =
                     registrations.remove(&public_key).unwrap();
 
                 // Start engine
-                engine.start(voter, resolver, broadcast, backfill);
+                engine.start(pending, recovered, resolver, broadcast, backfill);
             }
 
             // Poll metrics
