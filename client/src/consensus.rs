@@ -2,7 +2,7 @@ use crate::{Client, Error, IndexQuery, Query};
 use alto_types::{Block, Finalized, Kind, Notarized, NAMESPACE};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::threshold_simplex::types::{Seed, Viewable};
-use commonware_cryptography::Digestible;
+use commonware_cryptography::{bls12381::primitives::variant::MinSig, Digestible};
 use futures::{channel::mpsc::unbounded, Stream, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::Message as TMessage};
 
@@ -46,13 +46,13 @@ pub enum Payload {
 }
 
 pub enum Message {
-    Seed(Seed),
+    Seed(Seed<MinSig>),
     Notarization(Notarized),
     Finalization(Finalized),
 }
 
 impl Client {
-    pub async fn seed_upload(&self, seed: Seed) -> Result<(), Error> {
+    pub async fn seed_upload(&self, seed: Seed<MinSig>) -> Result<(), Error> {
         let result = self
             .client
             .post(seed_upload_path(self.uri.clone()))
@@ -66,7 +66,7 @@ impl Client {
         Ok(())
     }
 
-    pub async fn seed_get(&self, query: IndexQuery) -> Result<Seed, Error> {
+    pub async fn seed_get(&self, query: IndexQuery) -> Result<Seed<MinSig>, Error> {
         // Get the seed
         let result = self
             .client
@@ -78,8 +78,8 @@ impl Client {
             return Err(Error::Failed(result.status()));
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let seed = Seed::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !seed.verify(NAMESPACE, self.public.as_ref()) {
+        let seed = Seed::<MinSig>::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+        if !seed.verify(NAMESPACE, &self.identity) {
             return Err(Error::InvalidSignature);
         }
 
@@ -122,7 +122,7 @@ impl Client {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let notarized = Notarized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !notarized.verify(NAMESPACE, self.public.as_ref()) {
+        if !notarized.verify(NAMESPACE, &self.identity) {
             return Err(Error::InvalidSignature);
         }
 
@@ -165,7 +165,7 @@ impl Client {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let finalized = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !finalized.verify(NAMESPACE, self.public.as_ref()) {
+        if !finalized.verify(NAMESPACE, &self.identity) {
             return Err(Error::InvalidSignature);
         }
 
@@ -198,14 +198,14 @@ impl Client {
         let result = match query {
             Query::Latest => {
                 let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-                if !result.verify(NAMESPACE, self.public.as_ref()) {
+                if !result.verify(NAMESPACE, &self.identity) {
                     return Err(Error::InvalidSignature);
                 }
                 Payload::Finalized(Box::new(result))
             }
             Query::Index(index) => {
                 let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-                if !result.verify(NAMESPACE, self.public.as_ref()) {
+                if !result.verify(NAMESPACE, &self.identity) {
                     return Err(Error::InvalidSignature);
                 }
                 if result.block.height != index {
@@ -232,81 +232,88 @@ impl Client {
         let (_, read) = stream.split();
 
         // Create an unbounded channel for streaming consensus messages
-        let public = self.public.clone();
         let (sender, receiver) = unbounded();
-        tokio::spawn(async move {
-            read.for_each(|message| async {
-                match message {
-                    Ok(TMessage::Binary(data)) => {
-                        // Get kind
-                        let kind = data[0];
-                        let Some(kind) = Kind::from_u8(kind) else {
-                            let _ = sender.unbounded_send(Err(Error::UnexpectedResponse));
-                            return;
-                        };
-                        let data = &data[1..];
+        tokio::spawn({
+            let identity = self.identity;
+            async move {
+                read.for_each(|message| async {
+                    match message {
+                        Ok(TMessage::Binary(data)) => {
+                            // Get kind
+                            let kind = data[0];
+                            let Some(kind) = Kind::from_u8(kind) else {
+                                let _ = sender.unbounded_send(Err(Error::UnexpectedResponse));
+                                return;
+                            };
+                            let data = &data[1..];
 
-                        // Deserialize the message
-                        match kind {
-                            Kind::Seed => {
-                                let result = Seed::decode(data);
-                                match result {
-                                    Ok(seed) => {
-                                        if !seed.verify(NAMESPACE, public.as_ref()) {
-                                            let _ =
-                                                sender.unbounded_send(Err(Error::InvalidSignature));
-                                            return;
+                            // Deserialize the message
+                            match kind {
+                                Kind::Seed => {
+                                    let result = Seed::decode(data);
+                                    match result {
+                                        Ok(seed) => {
+                                            if !seed.verify(NAMESPACE, &identity) {
+                                                let _ = sender
+                                                    .unbounded_send(Err(Error::InvalidSignature));
+                                                return;
+                                            }
+                                            let _ = sender.unbounded_send(Ok(Message::Seed(seed)));
                                         }
-                                        let _ = sender.unbounded_send(Ok(Message::Seed(seed)));
-                                    }
-                                    Err(e) => {
-                                        let _ = sender.unbounded_send(Err(Error::InvalidData(e)));
+                                        Err(e) => {
+                                            let _ =
+                                                sender.unbounded_send(Err(Error::InvalidData(e)));
+                                        }
                                     }
                                 }
-                            }
-                            Kind::Notarization => {
-                                let result = Notarized::decode(data);
-                                match result {
-                                    Ok(notarized) => {
-                                        if !notarized.verify(NAMESPACE, public.as_ref()) {
-                                            let _ =
-                                                sender.unbounded_send(Err(Error::InvalidSignature));
-                                            return;
+                                Kind::Notarization => {
+                                    let result = Notarized::decode(data);
+                                    match result {
+                                        Ok(notarized) => {
+                                            if !notarized.verify(NAMESPACE, &identity) {
+                                                let _ = sender
+                                                    .unbounded_send(Err(Error::InvalidSignature));
+                                                return;
+                                            }
+                                            let _ = sender.unbounded_send(Ok(
+                                                Message::Notarization(notarized),
+                                            ));
                                         }
-                                        let _ = sender
-                                            .unbounded_send(Ok(Message::Notarization(notarized)));
-                                    }
-                                    Err(e) => {
-                                        let _ = sender.unbounded_send(Err(Error::InvalidData(e)));
+                                        Err(e) => {
+                                            let _ =
+                                                sender.unbounded_send(Err(Error::InvalidData(e)));
+                                        }
                                     }
                                 }
-                            }
-                            Kind::Finalization => {
-                                let result = Finalized::decode(data);
-                                match result {
-                                    Ok(finalized) => {
-                                        if !finalized.verify(NAMESPACE, public.as_ref()) {
-                                            let _ =
-                                                sender.unbounded_send(Err(Error::InvalidSignature));
-                                            return;
+                                Kind::Finalization => {
+                                    let result = Finalized::decode(data);
+                                    match result {
+                                        Ok(finalized) => {
+                                            if !finalized.verify(NAMESPACE, &identity) {
+                                                let _ = sender
+                                                    .unbounded_send(Err(Error::InvalidSignature));
+                                                return;
+                                            }
+                                            let _ = sender.unbounded_send(Ok(
+                                                Message::Finalization(finalized),
+                                            ));
                                         }
-                                        let _ = sender
-                                            .unbounded_send(Ok(Message::Finalization(finalized)));
-                                    }
-                                    Err(e) => {
-                                        let _ = sender.unbounded_send(Err(Error::InvalidData(e)));
+                                        Err(e) => {
+                                            let _ =
+                                                sender.unbounded_send(Err(Error::InvalidData(e)));
+                                        }
                                     }
                                 }
                             }
                         }
+                        Ok(_) => {} // Ignore non-binary messages.
+                        Err(e) => {
+                            let _ = sender.unbounded_send(Err(Error::from(e)));
+                        }
                     }
-                    Ok(_) => {} // Ignore non-binary messages.
-                    Err(e) => {
-                        let _ = sender.unbounded_send(Err(Error::from(e)));
-                    }
-                }
-            })
-            .await;
+                })
+                .await;
+            }
         });
         Ok(receiver)
     }
