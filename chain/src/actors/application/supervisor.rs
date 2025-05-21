@@ -40,7 +40,7 @@ impl Supervisor {
             participants_map.insert(validator.clone(), index as u32);
         }
         let identity = *poly::public::<MinSig>(&polynomial);
-        let polynomial = evaluate_all::<MinSig>(&polynomial);
+        let polynomial = evaluate_all::<MinSig>(&polynomial, participants.len() as u32);
 
         // Return supervisor
         Self {
