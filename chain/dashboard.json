@@ -83,7 +83,7 @@
             },
             "gridPos": {
                 "h": 10,
-                "w": 8,
+                "w": 6,
                 "x": 0,
                 "y": 0
             },
@@ -184,8 +184,8 @@
             },
             "gridPos": {
                 "h": 10,
-                "w": 8,
-                "x": 8,
+                "w": 6,
+                "x": 6,
                 "y": 0
             },
             "id": 3,
@@ -279,14 +279,128 @@
                                 "value": 80
                             }
                         ]
+                    },
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 10,
+                "w": 6,
+                "x": 12,
+                "y": 0
+            },
+            "id": 32,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": false
+                },
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "11.5.2",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "disableTextWrap": false,
+                    "editorMode": "builder",
+                    "expr": "avg(irate(engine_consensus_voter_current_view{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[1m]))",
+                    "fullMetaSearch": false,
+                    "hide": true,
+                    "includeNullMetadata": true,
+                    "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
+                    "range": true,
+                    "refId": "A",
+                    "useBackend": false
+                },
+                {
+                    "datasource": {
+                        "name": "Expression",
+                        "type": "__expr__",
+                        "uid": "__expr__"
+                    },
+                    "expression": "1/$A",
+                    "hide": false,
+                    "refId": "Latency",
+                    "type": "math"
+                }
+            ],
+            "title": "View Latency",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 0,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
                     }
                 },
                 "overrides": []
             },
             "gridPos": {
                 "h": 10,
-                "w": 8,
-                "x": 16,
+                "w": 6,
+                "x": 18,
                 "y": 0
             },
             "id": 2,
@@ -584,120 +698,6 @@
                                 "value": 80
                             }
                         ]
-                    },
-                    "unit": "s"
-                },
-                "overrides": []
-            },
-            "gridPos": {
-                "h": 9,
-                "w": 6,
-                "x": 12,
-                "y": 10
-            },
-            "id": 32,
-            "options": {
-                "legend": {
-                    "calcs": [],
-                    "displayMode": "list",
-                    "placement": "bottom",
-                    "showLegend": false
-                },
-                "tooltip": {
-                    "hideZeros": false,
-                    "mode": "single",
-                    "sort": "none"
-                }
-            },
-            "pluginVersion": "11.5.2",
-            "targets": [
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "PBFA97CFB590B2093"
-                    },
-                    "disableTextWrap": false,
-                    "editorMode": "builder",
-                    "expr": "avg by(deployer_name, deployer_ip) (irate(engine_consensus_voter_current_view{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[1m]))",
-                    "fullMetaSearch": false,
-                    "hide": true,
-                    "includeNullMetadata": true,
-                    "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
-                    "range": true,
-                    "refId": "A",
-                    "useBackend": false
-                },
-                {
-                    "datasource": {
-                        "name": "Expression",
-                        "type": "__expr__",
-                        "uid": "__expr__"
-                    },
-                    "expression": "1/$A",
-                    "hide": false,
-                    "refId": "Latency",
-                    "type": "math"
-                }
-            ],
-            "title": "View Latency",
-            "type": "timeseries"
-        },
-        {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "PBFA97CFB590B2093"
-            },
-            "fieldConfig": {
-                "defaults": {
-                    "color": {
-                        "mode": "palette-classic"
-                    },
-                    "custom": {
-                        "axisBorderShow": false,
-                        "axisCenteredZero": false,
-                        "axisColorMode": "text",
-                        "axisLabel": "",
-                        "axisPlacement": "auto",
-                        "barAlignment": 0,
-                        "barWidthFactor": 0.6,
-                        "drawStyle": "line",
-                        "fillOpacity": 0,
-                        "gradientMode": "none",
-                        "hideFrom": {
-                            "legend": false,
-                            "tooltip": false,
-                            "viz": false
-                        },
-                        "insertNulls": false,
-                        "lineInterpolation": "linear",
-                        "lineWidth": 1,
-                        "pointSize": 5,
-                        "scaleDistribution": {
-                            "type": "linear"
-                        },
-                        "showPoints": "auto",
-                        "spanNulls": false,
-                        "stacking": {
-                            "group": "A",
-                            "mode": "none"
-                        },
-                        "thresholdsStyle": {
-                            "mode": "off"
-                        }
-                    },
-                    "mappings": [],
-                    "thresholds": {
-                        "mode": "absolute",
-                        "steps": [
-                            {
-                                "color": "green",
-                                "value": null
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
-                            }
-                        ]
                     }
                 },
                 "overrides": []
@@ -705,7 +705,7 @@
             "gridPos": {
                 "h": 9,
                 "w": 6,
-                "x": 18,
+                "x": 12,
                 "y": 10
             },
             "id": 31,
@@ -799,18 +799,17 @@
                                 "value": 80
                             }
                         ]
-                    },
-                    "unit": "s"
+                    }
                 },
                 "overrides": []
             },
             "gridPos": {
                 "h": 9,
                 "w": 6,
-                "x": 0,
-                "y": 19
+                "x": 18,
+                "y": 10
             },
-            "id": 25,
+            "id": 35,
             "options": {
                 "legend": {
                     "calcs": [],
@@ -833,17 +832,16 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "histogram_quantile(0.95, rate(engine_consensus_batcher_verify_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval]))",
+                    "expr": "network_tracker_blocked{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
                     "fullMetaSearch": false,
-                    "hide": false,
                     "includeNullMetadata": true,
                     "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
                     "range": true,
-                    "refId": "B",
+                    "refId": "A",
                     "useBackend": false
                 }
             ],
-            "title": "Batcher Verify Latency (p95)",
+            "title": "Peers Blocked",
             "type": "timeseries"
         },
         {
@@ -902,18 +900,17 @@
                                 "value": 80
                             }
                         ]
-                    },
-                    "unit": "s"
+                    }
                 },
                 "overrides": []
             },
             "gridPos": {
                 "h": 9,
                 "w": 6,
-                "x": 6,
+                "x": 0,
                 "y": 19
             },
-            "id": 30,
+            "id": 27,
             "options": {
                 "legend": {
                     "calcs": [],
@@ -936,7 +933,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "histogram_quantile(0.95, rate(engine_consensus_batcher_notify_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval]))",
+                    "expr": "irate(engine_consensus_batcher_added_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[1m])",
                     "fullMetaSearch": false,
                     "hide": false,
                     "includeNullMetadata": true,
@@ -946,7 +943,109 @@
                     "useBackend": false
                 }
             ],
-            "title": "Notify Voter Latency (p95)",
+            "title": "Batchable Messages Seen",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 0,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 9,
+                "w": 6,
+                "x": 6,
+                "y": 19
+            },
+            "id": 36,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": false
+                },
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "11.5.2",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "disableTextWrap": false,
+                    "editorMode": "builder",
+                    "expr": "irate(engine_consensus_batcher_batch_size_count{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[1m])",
+                    "fullMetaSearch": false,
+                    "hide": false,
+                    "includeNullMetadata": true,
+                    "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
+                    "range": true,
+                    "refId": "B",
+                    "useBackend": false
+                }
+            ],
+            "title": "Batch Verifications",
             "type": "timeseries"
         },
         {
@@ -1014,6 +1113,109 @@
                 "h": 9,
                 "w": 6,
                 "x": 12,
+                "y": 19
+            },
+            "id": 25,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": false
+                },
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "11.5.2",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "disableTextWrap": false,
+                    "editorMode": "builder",
+                    "expr": "histogram_quantile(0.95, rate(engine_consensus_batcher_verify_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval]))",
+                    "fullMetaSearch": false,
+                    "hide": false,
+                    "includeNullMetadata": true,
+                    "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
+                    "range": true,
+                    "refId": "B",
+                    "useBackend": false
+                }
+            ],
+            "title": "Batch Verify Latency (p95)",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 0,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    },
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 9,
+                "w": 6,
+                "x": 18,
                 "y": 19
             },
             "id": 29,
@@ -1108,135 +1310,6 @@
                                 "value": 80
                             }
                         ]
-                    }
-                },
-                "overrides": []
-            },
-            "gridPos": {
-                "h": 9,
-                "w": 6,
-                "x": 18,
-                "y": 19
-            },
-            "id": 27,
-            "options": {
-                "legend": {
-                    "calcs": [],
-                    "displayMode": "list",
-                    "placement": "bottom",
-                    "showLegend": false
-                },
-                "tooltip": {
-                    "hideZeros": false,
-                    "mode": "single",
-                    "sort": "none"
-                }
-            },
-            "pluginVersion": "11.5.2",
-            "targets": [
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "PBFA97CFB590B2093"
-                    },
-                    "disableTextWrap": false,
-                    "editorMode": "builder",
-                    "expr": "sum by(deployer_name, deployer_ip) (rate(engine_consensus_batcher_added_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval]))",
-                    "fullMetaSearch": false,
-                    "hide": true,
-                    "includeNullMetadata": true,
-                    "legendFormat": "__auto",
-                    "range": true,
-                    "refId": "B",
-                    "useBackend": false
-                },
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "PBFA97CFB590B2093"
-                    },
-                    "disableTextWrap": false,
-                    "editorMode": "builder",
-                    "expr": "sum by(deployer_name, deployer_ip) (rate(engine_consensus_batcher_batch_size_count{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval]))",
-                    "fullMetaSearch": false,
-                    "hide": true,
-                    "includeNullMetadata": true,
-                    "legendFormat": "{{deployer_region}}",
-                    "range": true,
-                    "refId": "A",
-                    "useBackend": false
-                },
-                {
-                    "datasource": {
-                        "name": "Expression",
-                        "type": "__expr__",
-                        "uid": "__expr__"
-                    },
-                    "expression": "$A/$B",
-                    "hide": false,
-                    "refId": "Ops",
-                    "type": "math"
-                }
-            ],
-            "title": "Verify Operations per Signature",
-            "type": "timeseries"
-        },
-        {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "PBFA97CFB590B2093"
-            },
-            "fieldConfig": {
-                "defaults": {
-                    "color": {
-                        "mode": "palette-classic"
-                    },
-                    "custom": {
-                        "axisBorderShow": false,
-                        "axisCenteredZero": false,
-                        "axisColorMode": "text",
-                        "axisLabel": "",
-                        "axisPlacement": "auto",
-                        "barAlignment": 0,
-                        "barWidthFactor": 0.6,
-                        "drawStyle": "line",
-                        "fillOpacity": 0,
-                        "gradientMode": "none",
-                        "hideFrom": {
-                            "legend": false,
-                            "tooltip": false,
-                            "viz": false
-                        },
-                        "insertNulls": false,
-                        "lineInterpolation": "linear",
-                        "lineWidth": 1,
-                        "pointSize": 5,
-                        "scaleDistribution": {
-                            "type": "linear"
-                        },
-                        "showPoints": "auto",
-                        "spanNulls": false,
-                        "stacking": {
-                            "group": "A",
-                            "mode": "none"
-                        },
-                        "thresholdsStyle": {
-                            "mode": "off"
-                        }
-                    },
-                    "mappings": [],
-                    "thresholds": {
-                        "mode": "absolute",
-                        "steps": [
-                            {
-                                "color": "green",
-                                "value": null
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
-                            }
-                        ]
                     },
                     "unit": "s"
                 },
@@ -1244,7 +1317,7 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
+                "w": 6,
                 "x": 0,
                 "y": 28
             },
@@ -1347,8 +1420,8 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
-                "x": 8,
+                "w": 6,
+                "x": 6,
                 "y": 28
             },
             "id": 21,
@@ -1450,8 +1523,8 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
-                "x": 16,
+                "w": 6,
+                "x": 12,
                 "y": 28
             },
             "id": 22,
@@ -1518,6 +1591,9 @@
                         },
                         "insertNulls": false,
                         "lineInterpolation": "linear",
+                        "lineStyle": {
+                            "fill": "solid"
+                        },
                         "lineWidth": 1,
                         "pointSize": 5,
                         "scaleDistribution": {
@@ -1553,7 +1629,110 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
+                "w": 6,
+                "x": 18,
+                "y": 28
+            },
+            "id": 33,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": false
+                },
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "11.5.2",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "disableTextWrap": false,
+                    "editorMode": "builder",
+                    "expr": "avg(histogram_quantile(0.75, rate(engine_consensus_voter_notarization_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])))",
+                    "fullMetaSearch": false,
+                    "hide": false,
+                    "includeNullMetadata": true,
+                    "legendFormat": "__auto",
+                    "range": true,
+                    "refId": "B",
+                    "useBackend": false
+                }
+            ],
+            "title": "Notarization Latency (p75)",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 0,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    },
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 9,
+                "w": 6,
                 "x": 0,
                 "y": 37
             },
@@ -1656,8 +1835,8 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
-                "x": 8,
+                "w": 6,
+                "x": 6,
                 "y": 37
             },
             "id": 20,
@@ -1759,8 +1938,8 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
-                "x": 16,
+                "w": 6,
+                "x": 12,
                 "y": 37
             },
             "id": 24,
@@ -1797,6 +1976,112 @@
                 }
             ],
             "title": "Finalization Latency (p99) by Region",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 0,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "linear",
+                        "lineStyle": {
+                            "fill": "solid"
+                        },
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    },
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 9,
+                "w": 6,
+                "x": 18,
+                "y": 37
+            },
+            "id": 34,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": false
+                },
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "11.5.2",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "disableTextWrap": false,
+                    "editorMode": "builder",
+                    "expr": "avg(histogram_quantile(0.75, rate(engine_consensus_voter_finalization_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])))",
+                    "fullMetaSearch": false,
+                    "hide": false,
+                    "includeNullMetadata": true,
+                    "legendFormat": "__auto",
+                    "range": true,
+                    "refId": "B",
+                    "useBackend": false
+                }
+            ],
+            "title": "Finalization Latency (p75)",
             "type": "timeseries"
         },
         {
