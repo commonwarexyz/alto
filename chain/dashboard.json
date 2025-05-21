@@ -1488,109 +1488,6 @@
                         },
                         "insertNulls": false,
                         "lineInterpolation": "linear",
-                        "lineWidth": 1,
-                        "pointSize": 5,
-                        "scaleDistribution": {
-                            "type": "linear"
-                        },
-                        "showPoints": "auto",
-                        "spanNulls": false,
-                        "stacking": {
-                            "group": "A",
-                            "mode": "none"
-                        },
-                        "thresholdsStyle": {
-                            "mode": "off"
-                        }
-                    },
-                    "mappings": [],
-                    "thresholds": {
-                        "mode": "absolute",
-                        "steps": [
-                            {
-                                "color": "green",
-                                "value": null
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
-                            }
-                        ]
-                    },
-                    "unit": "s"
-                },
-                "overrides": []
-            },
-            "gridPos": {
-                "h": 9,
-                "w": 6,
-                "x": 12,
-                "y": 28
-            },
-            "id": 22,
-            "options": {
-                "legend": {
-                    "calcs": [],
-                    "displayMode": "list",
-                    "placement": "bottom",
-                    "showLegend": false
-                },
-                "tooltip": {
-                    "hideZeros": false,
-                    "mode": "single",
-                    "sort": "none"
-                }
-            },
-            "pluginVersion": "11.5.2",
-            "targets": [
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "PBFA97CFB590B2093"
-                    },
-                    "disableTextWrap": false,
-                    "editorMode": "builder",
-                    "expr": "avg by(deployer_region) (histogram_quantile(0.99, rate(engine_consensus_voter_notarization_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])))",
-                    "fullMetaSearch": false,
-                    "hide": false,
-                    "includeNullMetadata": true,
-                    "legendFormat": "{{deployer_region}}",
-                    "range": true,
-                    "refId": "B",
-                    "useBackend": false
-                }
-            ],
-            "title": "Notarization Latency (p99) by Region",
-            "type": "timeseries"
-        },
-        {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "PBFA97CFB590B2093"
-            },
-            "fieldConfig": {
-                "defaults": {
-                    "color": {
-                        "mode": "palette-classic"
-                    },
-                    "custom": {
-                        "axisBorderShow": false,
-                        "axisCenteredZero": false,
-                        "axisColorMode": "text",
-                        "axisLabel": "",
-                        "axisPlacement": "auto",
-                        "barAlignment": 0,
-                        "barWidthFactor": 0.6,
-                        "drawStyle": "line",
-                        "fillOpacity": 0,
-                        "gradientMode": "none",
-                        "hideFrom": {
-                            "legend": false,
-                            "tooltip": false,
-                            "viz": false
-                        },
-                        "insertNulls": false,
-                        "lineInterpolation": "linear",
                         "lineStyle": {
                             "fill": "solid"
                         },
@@ -1630,7 +1527,7 @@
             "gridPos": {
                 "h": 9,
                 "w": 6,
-                "x": 18,
+                "x": 12,
                 "y": 28
             },
             "id": 33,
@@ -1656,17 +1553,120 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "avg(histogram_quantile(0.75, rate(engine_consensus_voter_notarization_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])))",
+                    "expr": "avg(histogram_quantile(0.75, avg_over_time(engine_consensus_voter_notarization_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__interval])))",
                     "fullMetaSearch": false,
                     "hide": false,
                     "includeNullMetadata": true,
-                    "legendFormat": "__auto",
+                    "legendFormat": "Average",
                     "range": true,
                     "refId": "B",
                     "useBackend": false
                 }
             ],
             "title": "Notarization Latency (p75)",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 0,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    },
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 9,
+                "w": 6,
+                "x": 18,
+                "y": 28
+            },
+            "id": 22,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": false
+                },
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "11.5.2",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "disableTextWrap": false,
+                    "editorMode": "builder",
+                    "expr": "avg by(deployer_region) (histogram_quantile(0.99, rate(engine_consensus_voter_notarization_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])))",
+                    "fullMetaSearch": false,
+                    "hide": false,
+                    "includeNullMetadata": true,
+                    "legendFormat": "{{deployer_region}}",
+                    "range": true,
+                    "refId": "B",
+                    "useBackend": false
+                }
+            ],
+            "title": "Notarization Latency (p99) by Region",
             "type": "timeseries"
         },
         {
@@ -1903,109 +1903,6 @@
                         },
                         "insertNulls": false,
                         "lineInterpolation": "linear",
-                        "lineWidth": 1,
-                        "pointSize": 5,
-                        "scaleDistribution": {
-                            "type": "linear"
-                        },
-                        "showPoints": "auto",
-                        "spanNulls": false,
-                        "stacking": {
-                            "group": "A",
-                            "mode": "none"
-                        },
-                        "thresholdsStyle": {
-                            "mode": "off"
-                        }
-                    },
-                    "mappings": [],
-                    "thresholds": {
-                        "mode": "absolute",
-                        "steps": [
-                            {
-                                "color": "green",
-                                "value": null
-                            },
-                            {
-                                "color": "red",
-                                "value": 80
-                            }
-                        ]
-                    },
-                    "unit": "s"
-                },
-                "overrides": []
-            },
-            "gridPos": {
-                "h": 9,
-                "w": 6,
-                "x": 12,
-                "y": 37
-            },
-            "id": 24,
-            "options": {
-                "legend": {
-                    "calcs": [],
-                    "displayMode": "list",
-                    "placement": "bottom",
-                    "showLegend": false
-                },
-                "tooltip": {
-                    "hideZeros": false,
-                    "mode": "single",
-                    "sort": "none"
-                }
-            },
-            "pluginVersion": "11.5.2",
-            "targets": [
-                {
-                    "datasource": {
-                        "type": "prometheus",
-                        "uid": "PBFA97CFB590B2093"
-                    },
-                    "disableTextWrap": false,
-                    "editorMode": "builder",
-                    "expr": "avg by(deployer_region) (histogram_quantile(0.99, rate(engine_consensus_voter_finalization_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])))",
-                    "fullMetaSearch": false,
-                    "hide": false,
-                    "includeNullMetadata": true,
-                    "legendFormat": "{{deployer_region}}",
-                    "range": true,
-                    "refId": "B",
-                    "useBackend": false
-                }
-            ],
-            "title": "Finalization Latency (p99) by Region",
-            "type": "timeseries"
-        },
-        {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "PBFA97CFB590B2093"
-            },
-            "fieldConfig": {
-                "defaults": {
-                    "color": {
-                        "mode": "palette-classic"
-                    },
-                    "custom": {
-                        "axisBorderShow": false,
-                        "axisCenteredZero": false,
-                        "axisColorMode": "text",
-                        "axisLabel": "",
-                        "axisPlacement": "auto",
-                        "barAlignment": 0,
-                        "barWidthFactor": 0.6,
-                        "drawStyle": "line",
-                        "fillOpacity": 0,
-                        "gradientMode": "none",
-                        "hideFrom": {
-                            "legend": false,
-                            "tooltip": false,
-                            "viz": false
-                        },
-                        "insertNulls": false,
-                        "lineInterpolation": "linear",
                         "lineStyle": {
                             "fill": "solid"
                         },
@@ -2045,7 +1942,7 @@
             "gridPos": {
                 "h": 9,
                 "w": 6,
-                "x": 18,
+                "x": 12,
                 "y": 37
             },
             "id": 34,
@@ -2071,17 +1968,120 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "avg(histogram_quantile(0.75, rate(engine_consensus_voter_finalization_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])))",
+                    "expr": "avg(histogram_quantile(0.75, avg_over_time(engine_consensus_voter_finalization_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__interval])))",
                     "fullMetaSearch": false,
                     "hide": false,
                     "includeNullMetadata": true,
-                    "legendFormat": "__auto",
+                    "legendFormat": "Average",
                     "range": true,
                     "refId": "B",
                     "useBackend": false
                 }
             ],
             "title": "Finalization Latency (p75)",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 0,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    },
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 9,
+                "w": 6,
+                "x": 18,
+                "y": 37
+            },
+            "id": 24,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": false
+                },
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "11.5.2",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "disableTextWrap": false,
+                    "editorMode": "builder",
+                    "expr": "avg by(deployer_region) (histogram_quantile(0.99, rate(engine_consensus_voter_finalization_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])))",
+                    "fullMetaSearch": false,
+                    "hide": false,
+                    "includeNullMetadata": true,
+                    "legendFormat": "{{deployer_region}}",
+                    "range": true,
+                    "refId": "B",
+                    "useBackend": false
+                }
+            ],
+            "title": "Finalization Latency (p99) by Region",
             "type": "timeseries"
         },
         {
