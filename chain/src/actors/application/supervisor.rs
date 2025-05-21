@@ -4,10 +4,13 @@ use commonware_consensus::{
     Supervisor as Su, ThresholdSupervisor as TSu,
 };
 use commonware_cryptography::{
-    bls12381::primitives::{
-        group,
-        poly::{self, Poly},
-        variant::MinSig,
+    bls12381::{
+        dkg::ops::evaluate_all,
+        primitives::{
+            group,
+            poly::{self, Poly},
+            variant::MinSig,
+        },
     },
     ed25519::PublicKey,
 };
@@ -16,7 +19,8 @@ use std::collections::HashMap;
 /// Implementation of `commonware-consensus::Supervisor`.
 #[derive(Clone)]
 pub struct Supervisor {
-    polynomial: Poly<Identity>,
+    identity: Identity,
+    polynomial: Vec<Identity>,
     participants: Vec<PublicKey>,
     participants_map: HashMap<PublicKey, u32>,
 
@@ -35,9 +39,12 @@ impl Supervisor {
         for (index, validator) in participants.iter().enumerate() {
             participants_map.insert(validator.clone(), index as u32);
         }
+        let identity = *poly::public::<MinSig>(&polynomial);
+        let polynomial = evaluate_all::<MinSig>(&polynomial);
 
         // Return supervisor
         Self {
+            identity,
             polynomial,
             participants,
             participants_map,
@@ -66,7 +73,7 @@ impl Su for Supervisor {
 impl TSu for Supervisor {
     type Seed = Signature;
     type Identity = Identity;
-    type Polynomial = Poly<Identity>;
+    type Polynomial = Vec<Identity>;
     type Share = group::Share;
 
     fn leader(&self, view: Self::Index, seed: Self::Seed) -> Option<Self::PublicKey> {
@@ -76,7 +83,7 @@ impl TSu for Supervisor {
     }
 
     fn identity(&self) -> &Self::Identity {
-        poly::public::<MinSig>(&self.polynomial)
+        &self.identity
     }
 
     fn polynomial(&self, _: Self::Index) -> Option<&Self::Polynomial> {
