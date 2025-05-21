@@ -618,7 +618,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "irate(engine_consensus_voter_current_view{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[1m])",
+                    "expr": "avg by(deployer_name, deployer_ip) (irate(engine_consensus_voter_current_view{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[1m]))",
                     "fullMetaSearch": false,
                     "hide": true,
                     "includeNullMetadata": true,
@@ -635,7 +635,7 @@
                     },
                     "expression": "1/$A",
                     "hide": false,
-                    "refId": "B",
+                    "refId": "Latency",
                     "type": "math"
                 }
             ],
