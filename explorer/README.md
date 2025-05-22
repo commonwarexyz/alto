@@ -7,7 +7,7 @@
 export const INDEXER_URL = "ws://localhost:4000/consensus/ws";
 
 // TODO: Replace this with the consensus threshold key
-export const PUBLIC_KEY_HEX = "976ab7efaef8a73690b9067690ac7541bc34f74b2543e8db16b5bf63aec487758ca98efdf5c9fcf1154941d8a8a1ec3d";
+export const PUBLIC_KEY_HEX = "92b050b6fbe80695b5d56835e978918e37c8707a7fad09a01ae782d4c3170c9baa4c2c196b36eac6b78ceb210b287aeb0727ef1c60e48042142f7bcc8b6382305cd50c5a4542c44ec72a4de6640c194f8ef36bea1dbed168ab6fd8681d910d55";
 
 // TODO: Replace this with an ordered list of validator locations (sorted by validator public key)
 export const LOCATIONS: [[number, number], string][] = [
