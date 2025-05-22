@@ -584,7 +584,7 @@ const App: React.FC = () => {
             const notarized = parse_notarized(PUBLIC_KEY, payload);
             if (notarized) handleNotarizedRef.current(notarized);
             break;
-          case 3: // Finalization
+          case 2: // Finalization
             const finalized = parse_finalized(PUBLIC_KEY, payload);
             if (finalized) handleFinalizedRef.current(finalized);
             break;
