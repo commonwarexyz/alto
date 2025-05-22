@@ -124,7 +124,6 @@ pub fn parse_block(bytes: Vec<u8>) -> JsValue {
 }
 
 #[wasm_bindgen]
-pub fn leader_index(seed: Vec<u8>, participants: usize) -> usize {
-    let seed = Seed::decode(seed.as_ref()).unwrap();
-    compute_leader_index(&seed, participants)
+pub fn leader_index(signature: Vec<u8>, participants: usize) -> usize {
+    compute_leader_index(&signature, participants)
 }

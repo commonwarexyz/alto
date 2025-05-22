@@ -1,4 +1,3 @@
-use commonware_codec::Encode;
 use commonware_consensus::threshold_simplex::types::{
     Activity as CActivity, Finalization as CFinalization, Notarization as CNotarization,
     Seed as CSeed,
@@ -19,7 +18,6 @@ pub type Evaluation = Identity;
 pub type Signature = <MinSig as Variant>::Signature;
 
 /// The leader for a given seed is determined by the modulo of the seed with the number of participants.
-pub fn leader_index(seed: &Seed, participants: usize) -> usize {
-    let signature = seed.signature.encode().freeze();
-    modulo(&signature, participants as u64) as usize
+pub fn leader_index(seed: &[u8], participants: usize) -> usize {
+    modulo(seed, participants as u64) as usize
 }
