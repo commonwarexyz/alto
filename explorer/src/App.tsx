@@ -99,7 +99,7 @@ const App: React.FC = () => {
   // Health check function
   const checkHealth = useCallback(async () => {
     try {
-      const response = await fetch(`https://${BACKEND_URL}/health`, {
+      const response = await fetch(`http://${BACKEND_URL}/health`, {
         method: "GET",
         headers: {
           "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -559,7 +559,7 @@ const App: React.FC = () => {
 
       // Create new WebSocket connection
       const wsCreationTime = Date.now();
-      const ws = new WebSocket(`wss://${BACKEND_URL}/consensus/ws`);
+      const ws = new WebSocket(`ws://${BACKEND_URL}/consensus/ws`);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
