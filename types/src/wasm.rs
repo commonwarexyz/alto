@@ -43,7 +43,7 @@ pub struct FinalizedJs {
 
 #[wasm_bindgen]
 pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
-    let identity = Identity::decode(identity.as_ref()).expect("invalid public key");
+    let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
     let Ok(seed) = Seed::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
@@ -59,7 +59,7 @@ pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 
 #[wasm_bindgen]
 pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
-    let identity = Identity::decode(identity.as_ref()).expect("invalid public key");
+    let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
     let Ok(notarized) = Notarized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
@@ -85,7 +85,7 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 
 #[wasm_bindgen]
 pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
-    let identity = Identity::decode(identity.as_ref()).expect("invalid public key");
+    let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
     let Ok(finalized) = Finalized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
