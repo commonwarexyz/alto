@@ -492,9 +492,7 @@ checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 
 [[package]]
 name = "commonware-broadcast"
-version = "0.0.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f61f7ac28bc433e3aca973682626ebaa23a3af255a2a6f5c041d637a9ba7f865"
+version = "0.0.52"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -511,9 +509,7 @@ dependencies = [
 
 [[package]]
 name = "commonware-codec"
-version = "0.0.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a6a2598209fec2fe0265afff514d85ccfb2d83c126a96fc46a79b59b422710d"
+version = "0.0.52"
 dependencies = [
  "bytes",
  "paste",
@@ -522,9 +518,7 @@ dependencies = [
 
 [[package]]
 name = "commonware-consensus"
-version = "0.0.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4b569417602232a494de16bb436efa23c3495c4bd564c71fc4c233eb7158909"
+version = "0.0.52"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -546,9 +540,7 @@ dependencies = [
 
 [[package]]
 name = "commonware-cryptography"
-version = "0.0.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77bd58e51af124b3b1e2175d3e7fd640512c18446d5e0a6c7033bc541acfde46"
+version = "0.0.52"
 dependencies = [
  "blst",
  "bytes",
@@ -566,9 +558,7 @@ dependencies = [
 
 [[package]]
 name = "commonware-deployer"
-version = "0.0.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3de11b4af49f0f2fedeb38298b6b0e974c593e9795c91a34d7d27cc21bc5204"
+version = "0.0.52"
 dependencies = [
  "cfg-if",
  "serde",
@@ -577,9 +567,7 @@ dependencies = [
 
 [[package]]
 name = "commonware-macros"
-version = "0.0.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02af2b1a577a0c04e190dd68060a8e80af484da5e23a017903f11108494fde92"
+version = "0.0.52"
 dependencies = [
  "futures",
  "proc-macro2",
@@ -591,9 +579,7 @@ dependencies = [
 
 [[package]]
 name = "commonware-p2p"
-version = "0.0.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69191e779c56bce63adf09e9dfe537c7e3097d5fb14cde943ab49cb416aeb5de"
+version = "0.0.52"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -615,9 +601,7 @@ dependencies = [
 
 [[package]]
 name = "commonware-resolver"
-version = "0.0.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5573aed9708548101258862d0a0d6dc8431f500b1ca1cfa13ab15e6158753dff"
+version = "0.0.52"
 dependencies = [
  "bimap",
  "bytes",
@@ -638,9 +622,7 @@ dependencies = [
 
 [[package]]
 name = "commonware-runtime"
-version = "0.0.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a190de78aec3255644416ac15fe5986f5662a7687c55aab5221fdb39f480c1b"
+version = "0.0.52"
 dependencies = [
  "async-lock",
  "axum",
@@ -669,9 +651,7 @@ dependencies = [
 
 [[package]]
 name = "commonware-storage"
-version = "0.0.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28835c1dfe69a5b9c9230c7a4a3b64b6f9991261e0e5c350b1634c9627cbe4e5"
+version = "0.0.52"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -691,9 +671,7 @@ dependencies = [
 
 [[package]]
 name = "commonware-stream"
-version = "0.0.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e856bdc52ed009e11b6d2de9793458bef0372e56882a2fa1641306d663c7a803"
+version = "0.0.52"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -710,9 +688,7 @@ dependencies = [
 
 [[package]]
 name = "commonware-utils"
-version = "0.0.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bfc0f713752992742532a0bf558438974ec8b9c67dd9a1db32ab72a3e85ff63"
+version = "0.0.52"
 dependencies = [
  "bytes",
  "commonware-codec",
