@@ -26,18 +26,14 @@ function passArray8ToWasm0(arg, malloc) {
     WASM_VECTOR_LEN = arg.length;
     return ptr;
 }
-
-function isLikeNone(x) {
-    return x === undefined || x === null;
-}
 /**
- * @param {Uint8Array | null | undefined} public_key
+ * @param {Uint8Array} identity
  * @param {Uint8Array} bytes
  * @returns {any}
  */
-export function parse_seed(public_key, bytes) {
-    var ptr0 = isLikeNone(public_key) ? 0 : passArray8ToWasm0(public_key, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
+export function parse_seed(identity, bytes) {
+    const ptr0 = passArray8ToWasm0(identity, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
     const ret = wasm.parse_seed(ptr0, len0, ptr1, len1);
@@ -45,13 +41,13 @@ export function parse_seed(public_key, bytes) {
 }
 
 /**
- * @param {Uint8Array | null | undefined} public_key
+ * @param {Uint8Array} identity
  * @param {Uint8Array} bytes
  * @returns {any}
  */
-export function parse_notarized(public_key, bytes) {
-    var ptr0 = isLikeNone(public_key) ? 0 : passArray8ToWasm0(public_key, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
+export function parse_notarized(identity, bytes) {
+    const ptr0 = passArray8ToWasm0(identity, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
     const ret = wasm.parse_notarized(ptr0, len0, ptr1, len1);
@@ -59,13 +55,13 @@ export function parse_notarized(public_key, bytes) {
 }
 
 /**
- * @param {Uint8Array | null | undefined} public_key
+ * @param {Uint8Array} identity
  * @param {Uint8Array} bytes
  * @returns {any}
  */
-export function parse_finalized(public_key, bytes) {
-    var ptr0 = isLikeNone(public_key) ? 0 : passArray8ToWasm0(public_key, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
+export function parse_finalized(identity, bytes) {
+    const ptr0 = passArray8ToWasm0(identity, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
     const ret = wasm.parse_finalized(ptr0, len0, ptr1, len1);
