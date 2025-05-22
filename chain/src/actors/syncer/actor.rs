@@ -30,7 +30,10 @@ use futures::{channel::mpsc, StreamExt};
 use governor::{clock::Clock as GClock, Quota};
 use prometheus_client::metrics::gauge::Gauge;
 use rand::Rng;
-use std::{collections::BTreeSet, time::Duration};
+use std::{
+    collections::BTreeSet,
+    time::{Duration, Instant},
+};
 use tracing::{debug, info, warn};
 
 const REPLAY_BUFFER: usize = 8 * 1024 * 1024;
@@ -74,6 +77,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
     /// Create a new application actor.
     pub async fn init(context: R, config: Config<I>) -> (Self, Mailbox) {
         // Initialize verified blocks
+        let start = Instant::now();
         let verified_archive = Archive::init(
             context.with_label("verified_archive"),
             archive::Config {
@@ -90,8 +94,10 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         )
         .await
         .expect("Failed to initialize verified archive");
+        info!(elapsed = ?start.elapsed(), "restored verified archive");
 
         // Initialize notarized blocks
+        let start = Instant::now();
         let notarized_archive = Archive::init(
             context.with_label("notarized_archive"),
             archive::Config {
@@ -108,8 +114,10 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         )
         .await
         .expect("Failed to initialize notarized archive");
+        info!(elapsed = ?start.elapsed(), "restored notarized archive");
 
         // Initialize finalizations
+        let start = Instant::now();
         let finalized_archive = Archive::init(
             context.with_label("finalized_archive"),
             archive::Config {
@@ -126,8 +134,10 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         )
         .await
         .expect("Failed to initialize finalized archive");
+        info!(elapsed = ?start.elapsed(), "restored finalized archive");
 
         // Initialize blocks
+        let start = Instant::now();
         let block_archive = Archive::init(
             context.with_label("block_archive"),
             archive::Config {
@@ -144,6 +154,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         )
         .await
         .expect("Failed to initialize finalized archive");
+        info!(elapsed = ?start.elapsed(), "restored block archive");
 
         // Initialize finalizer metadata
         let finalizer_metadata = Metadata::init(
