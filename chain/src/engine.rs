@@ -2,7 +2,7 @@ use crate::{
     actors::{application, syncer},
     Indexer,
 };
-use alto_types::{Block, Identity, NAMESPACE};
+use alto_types::{Block, Evaluation, NAMESPACE};
 use commonware_broadcast::buffered;
 use commonware_consensus::threshold_simplex::{self, Engine as Consensus};
 use commonware_cryptography::{
@@ -34,7 +34,7 @@ pub struct Config<B: Blocker<PublicKey = ed25519::PublicKey>, I: Indexer> {
     pub blocker: B,
     pub partition_prefix: String,
     pub signer: Ed25519,
-    pub polynomial: Poly<Identity>,
+    pub polynomial: Poly<Evaluation>,
     pub share: group::Share,
     pub participants: Vec<PublicKey>,
     pub mailbox_size: usize,
