@@ -1,19 +1,54 @@
-// TODO: Replace this with the backend URL
-export const BACKEND_URL = "localhost:4000";
-
-// TODO: Replace this with the consensus threshold key
-export const PUBLIC_KEY_HEX = "92b050b6fbe80695b5d56835e978918e37c8707a7fad09a01ae782d4c3170c9baa4c2c196b36eac6b78ceb210b287aeb0727ef1c60e48042142f7bcc8b6382305cd50c5a4542c44ec72a4de6640c194f8ef36bea1dbed168ab6fd8681d910d55";
-
-// TODO: Replace this with an ordered list of validator locations (sorted by validator public key)
+export const BACKEND_URL = "alto.exoware.xyz";
+export const PUBLIC_KEY_HEX = "89c52d8766fb88c83b177c382b3af6579a41d45dc3540cd7a1f40b9b38a136468d1d9f2a3d8e9b24c5626eabc2c8a65e";
 export const LOCATIONS: [[number, number], string][] = [
     [[37.7749, -122.4194], "San Francisco"],
-    [[51.5074, -0.1278], "London"],
+    [[38.8339, -77.3074], "Ashburn"],
+    [[53.3498, -6.2603], "Dublin"],
     [[35.6895, 139.6917], "Tokyo"],
-    [[-33.8688, 151.2093], "Sydney"],
-    [[55.7558, 37.6173], "Moscow"],
+    [[59.3293, 18.0686], "Stockholm"],
+    [[19.076, 72.8777], "Mumbai"],
     [[-23.5505, -46.6333], "Sao Paulo"],
-    [[28.6139, 77.2090], "New Delhi"],
-    [[40.7128, -74.0060], "New York"],
-    [[19.4326, -99.1332], "Mexico City"],
-    [[31.2304, 121.4737], "Shanghai"],
+    [[50.1109, 8.6821], "Frankfurt"],
+    [[37.5665, 126.978], "Seoul"],
+    [[-33.8688, 151.2093], "Sydney"],
+    [[37.7749, -122.4194], "San Francisco"],
+    [[38.8339, -77.3074], "Ashburn"],
+    [[53.3498, -6.2603], "Dublin"],
+    [[35.6895, 139.6917], "Tokyo"],
+    [[59.3293, 18.0686], "Stockholm"],
+    [[19.076, 72.8777], "Mumbai"],
+    [[-23.5505, -46.6333], "Sao Paulo"],
+    [[50.1109, 8.6821], "Frankfurt"],
+    [[37.5665, 126.978], "Seoul"],
+    [[-33.8688, 151.2093], "Sydney"],
+    [[37.7749, -122.4194], "San Francisco"],
+    [[38.8339, -77.3074], "Ashburn"],
+    [[53.3498, -6.2603], "Dublin"],
+    [[35.6895, 139.6917], "Tokyo"],
+    [[59.3293, 18.0686], "Stockholm"],
+    [[19.076, 72.8777], "Mumbai"],
+    [[-23.5505, -46.6333], "Sao Paulo"],
+    [[50.1109, 8.6821], "Frankfurt"],
+    [[37.5665, 126.978], "Seoul"],
+    [[-33.8688, 151.2093], "Sydney"],
+    [[37.7749, -122.4194], "San Francisco"],
+    [[38.8339, -77.3074], "Ashburn"],
+    [[53.3498, -6.2603], "Dublin"],
+    [[35.6895, 139.6917], "Tokyo"],
+    [[59.3293, 18.0686], "Stockholm"],
+    [[19.076, 72.8777], "Mumbai"],
+    [[-23.5505, -46.6333], "Sao Paulo"],
+    [[50.1109, 8.6821], "Frankfurt"],
+    [[37.5665, 126.978], "Seoul"],
+    [[-33.8688, 151.2093], "Sydney"],
+    [[37.7749, -122.4194], "San Francisco"],
+    [[38.8339, -77.3074], "Ashburn"],
+    [[53.3498, -6.2603], "Dublin"],
+    [[35.6895, 139.6917], "Tokyo"],
+    [[59.3293, 18.0686], "Stockholm"],
+    [[19.076, 72.8777], "Mumbai"],
+    [[-23.5505, -46.6333], "Sao Paulo"],
+    [[50.1109, 8.6821], "Frankfurt"],
+    [[37.5665, 126.978], "Seoul"],
+    [[-33.8688, 151.2093], "Sydney"]
 ];
