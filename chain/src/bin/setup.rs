@@ -691,7 +691,7 @@ fn explorer(sub_matches: &ArgMatches) {
         .expect("polynomial is invalid");
     let identity = poly::public::<MinSig>(&polynomial);
     let config_ts = format!(
-        "export const BACKEND_URL = \"{}/consensus/ws\";\n\
+        "export const BACKEND_URL = \"{}\";\n\
         export const PUBLIC_KEY_HEX = \"{}\";\n\
         export const LOCATIONS: [[number, number], string][] = [\n{}\n];",
         backend_url,
