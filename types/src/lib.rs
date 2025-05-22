@@ -5,7 +5,7 @@ pub use block::{Block, Finalized, Notarized};
 mod consensus;
 use commonware_utils::hex;
 pub use consensus::{
-    leader_index, Activity, Finalization, Identity, Notarization, Seed, Signature,
+    leader_index, Activity, Evaluation, Finalization, Identity, Notarization, Seed, Signature,
 };
 pub mod wasm;
 

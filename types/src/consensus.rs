@@ -15,6 +15,7 @@ pub type Finalization = CFinalization<MinSig, Digest>;
 pub type Activity = CActivity<MinSig, Digest>;
 
 pub type Identity = <MinSig as Variant>::Public;
+pub type Evaluation = Identity;
 pub type Signature = <MinSig as Variant>::Signature;
 
 /// The leader for a given seed is determined by the modulo of the seed with the number of participants.

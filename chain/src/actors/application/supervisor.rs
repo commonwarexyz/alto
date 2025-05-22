@@ -1,4 +1,4 @@
-use alto_types::{leader_index, Identity, Signature};
+use alto_types::{leader_index, Evaluation, Identity, Signature};
 use commonware_consensus::{
     threshold_simplex::types::{Seed, View},
     Supervisor as Su, ThresholdSupervisor as TSu,
@@ -20,7 +20,7 @@ use std::collections::HashMap;
 #[derive(Clone)]
 pub struct Supervisor {
     identity: Identity,
-    polynomial: Vec<Identity>,
+    polynomial: Vec<Evaluation>,
     participants: Vec<PublicKey>,
     participants_map: HashMap<PublicKey, u32>,
 
@@ -29,7 +29,7 @@ pub struct Supervisor {
 
 impl Supervisor {
     pub fn new(
-        polynomial: Poly<Identity>,
+        polynomial: Poly<Evaluation>,
         mut participants: Vec<PublicKey>,
         share: group::Share,
     ) -> Self {
@@ -73,7 +73,7 @@ impl Su for Supervisor {
 impl TSu for Supervisor {
     type Seed = Signature;
     type Identity = Identity;
-    type Polynomial = Vec<Identity>;
+    type Polynomial = Vec<Evaluation>;
     type Share = group::Share;
 
     fn leader(&self, view: Self::Index, seed: Self::Seed) -> Option<Self::PublicKey> {
