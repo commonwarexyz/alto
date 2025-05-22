@@ -117,6 +117,8 @@ docker run -it -v ${PWD}/..:/alto validator-builder
 
 ###### Local Compilation
 
+_Before running this command, ensure you change any `version` dependencies you'd like to compile locally to `path` dependencies in `Cargo.toml`._
+
 ```bash
 docker run -it -v ${PWD}/..:/alto -v ${PWD}/../../monorepo:/monorepo validator-builder
 ```
