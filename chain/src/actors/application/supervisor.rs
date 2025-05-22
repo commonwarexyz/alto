@@ -1,7 +1,7 @@
 use alto_types::{leader_index, Evaluation, Identity, Signature};
+use commonware_codec::Encode;
 use commonware_consensus::{
-    threshold_simplex::types::{Seed, View},
-    Supervisor as Su, ThresholdSupervisor as TSu,
+    threshold_simplex::types::View, Supervisor as Su, ThresholdSupervisor as TSu,
 };
 use commonware_cryptography::{
     bls12381::{
@@ -76,9 +76,8 @@ impl TSu for Supervisor {
     type Polynomial = Vec<Evaluation>;
     type Share = group::Share;
 
-    fn leader(&self, view: Self::Index, seed: Self::Seed) -> Option<Self::PublicKey> {
-        let seed = Seed::new(view, seed);
-        let index = leader_index(&seed, self.participants.len());
+    fn leader(&self, _: Self::Index, seed: Self::Seed) -> Option<Self::PublicKey> {
+        let index = leader_index(seed.encode().as_ref(), self.participants.len());
         Some(self.participants[index].clone())
     }
 
