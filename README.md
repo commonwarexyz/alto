@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE-MIT)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE-APACHE)
 [![codecov](https://codecov.io/gh/commonwarexyz/alto/graph/badge.svg?token=Y2A6Q5G25W)](https://codecov.io/gh/commonwarexyz/alto)
+[![Security Policy](https://img.shields.io/badge/Security-Policy-brightgreen.svg)](https://github.com/commonwarexyz/alto/blob/main/SECURITY.md)
 
 ## Components
 
