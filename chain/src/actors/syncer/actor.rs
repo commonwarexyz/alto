@@ -36,8 +36,8 @@ use std::{
 };
 use tracing::{debug, info, warn};
 
-const REPLAY_BUFFER: usize = 8 * 1024 * 1024;
-const REPLAY_CONCURRENCY: usize = 4;
+const REPLAY_BUFFER: usize = 64 * 1024 * 1024;
+const REPLAY_CONCURRENCY: usize = 1;
 const WRITE_BUFFER: usize = 1024 * 1024;
 
 /// Application actor.
