@@ -77,84 +77,126 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
     /// Create a new application actor.
     pub async fn init(context: R, config: Config<I>) -> (Self, Mailbox) {
         // Initialize verified blocks
-        let start = Instant::now();
-        let verified_archive = Archive::init(
-            context.with_label("verified_archive"),
-            archive::Config {
-                partition: format!("{}-verifications", config.partition_prefix),
-                translator: TwoCap,
-                section_mask: 0xffff_ffff_ffff_f000u64,
-                pending_writes: 0,
-                replay_concurrency: REPLAY_CONCURRENCY,
-                compression: Some(3),
-                codec_config: (),
-                replay_buffer: REPLAY_BUFFER,
-                write_buffer: WRITE_BUFFER,
-            },
-        )
-        .await
-        .expect("Failed to initialize verified archive");
-        info!(elapsed = ?start.elapsed(), "restored verified archive");
+        let verified_archive = context.clone().spawn({
+            let partition_prefix = config.partition_prefix.clone();
+            move |context| async move {
+                let start = Instant::now();
+                let verified_archive = Archive::init(
+                    context.with_label("verified_archive"),
+                    archive::Config {
+                        partition: format!("{}-verifications", partition_prefix),
+                        translator: TwoCap,
+                        section_mask: 0xffff_ffff_ffff_f000u64,
+                        pending_writes: 0,
+                        replay_concurrency: REPLAY_CONCURRENCY,
+                        compression: Some(3),
+                        codec_config: (),
+                        replay_buffer: REPLAY_BUFFER,
+                        write_buffer: WRITE_BUFFER,
+                    },
+                )
+                .await
+                .expect("Failed to initialize verified archive");
+                info!(elapsed = ?start.elapsed(), "restored verified archive");
+
+                verified_archive
+            }
+        });
 
         // Initialize notarized blocks
-        let start = Instant::now();
-        let notarized_archive = Archive::init(
-            context.with_label("notarized_archive"),
-            archive::Config {
-                partition: format!("{}-notarizations", config.partition_prefix),
-                translator: TwoCap,
-                section_mask: 0xffff_ffff_ffff_f000u64,
-                pending_writes: 0,
-                replay_concurrency: REPLAY_CONCURRENCY,
-                compression: Some(3),
-                codec_config: (),
-                replay_buffer: REPLAY_BUFFER,
-                write_buffer: WRITE_BUFFER,
-            },
-        )
-        .await
-        .expect("Failed to initialize notarized archive");
-        info!(elapsed = ?start.elapsed(), "restored notarized archive");
+        let notarized_archive = context.clone().spawn({
+            let partition_prefix = config.partition_prefix.clone();
+            move |context| async move {
+                let start = Instant::now();
+                let notarized_archive = Archive::init(
+                    context.with_label("notarized_archive"),
+                    archive::Config {
+                        partition: format!("{}-notarizations", partition_prefix),
+                        translator: TwoCap,
+                        section_mask: 0xffff_ffff_ffff_f000u64,
+                        pending_writes: 0,
+                        replay_concurrency: REPLAY_CONCURRENCY,
+                        compression: Some(3),
+                        codec_config: (),
+                        replay_buffer: REPLAY_BUFFER,
+                        write_buffer: WRITE_BUFFER,
+                    },
+                )
+                .await
+                .expect("Failed to initialize notarized archive");
+                info!(elapsed = ?start.elapsed(), "restored notarized archive");
+
+                notarized_archive
+            }
+        });
 
         // Initialize finalizations
-        let start = Instant::now();
-        let finalized_archive = Archive::init(
-            context.with_label("finalized_archive"),
-            archive::Config {
-                partition: format!("{}-finalizations", config.partition_prefix),
-                translator: EightCap,
-                section_mask: 0xffff_ffff_fff0_0000u64,
-                pending_writes: 0,
-                replay_concurrency: REPLAY_CONCURRENCY,
-                compression: Some(3),
-                codec_config: (),
-                replay_buffer: REPLAY_BUFFER,
-                write_buffer: WRITE_BUFFER,
-            },
-        )
-        .await
-        .expect("Failed to initialize finalized archive");
-        info!(elapsed = ?start.elapsed(), "restored finalized archive");
+        let finalized_archive = context.clone().spawn({
+            let partition_prefix = config.partition_prefix.clone();
+            move |context| async move {
+                let start = Instant::now();
+                let finalized_archive = Archive::init(
+                    context.with_label("finalized_archive"),
+                    archive::Config {
+                        partition: format!("{}-finalizations", partition_prefix),
+                        translator: EightCap,
+                        section_mask: 0xffff_ffff_fff0_0000u64,
+                        pending_writes: 0,
+                        replay_concurrency: REPLAY_CONCURRENCY,
+                        compression: Some(3),
+                        codec_config: (),
+                        replay_buffer: REPLAY_BUFFER,
+                        write_buffer: WRITE_BUFFER,
+                    },
+                )
+                .await
+                .expect("Failed to initialize finalized archive");
+                info!(elapsed = ?start.elapsed(), "restored finalized archive");
+
+                finalized_archive
+            }
+        });
 
         // Initialize blocks
-        let start = Instant::now();
-        let block_archive = Archive::init(
-            context.with_label("block_archive"),
-            archive::Config {
-                partition: format!("{}-blocks", config.partition_prefix),
-                translator: EightCap,
-                section_mask: 0xffff_ffff_fff0_0000u64,
-                pending_writes: 0,
-                replay_concurrency: REPLAY_CONCURRENCY,
-                compression: Some(3),
-                codec_config: (),
-                replay_buffer: REPLAY_BUFFER,
-                write_buffer: WRITE_BUFFER,
-            },
-        )
-        .await
-        .expect("Failed to initialize finalized archive");
-        info!(elapsed = ?start.elapsed(), "restored block archive");
+        let block_archive = context.clone().spawn({
+            let partition_prefix = config.partition_prefix.clone();
+            move |context| async move {
+                let start = Instant::now();
+                let block_archive = Archive::init(
+                    context.with_label("block_archive"),
+                    archive::Config {
+                        partition: format!("{}-blocks", partition_prefix),
+                        translator: EightCap,
+                        section_mask: 0xffff_ffff_fff0_0000u64,
+                        pending_writes: 0,
+                        replay_concurrency: REPLAY_CONCURRENCY,
+                        compression: Some(3),
+                        codec_config: (),
+                        replay_buffer: REPLAY_BUFFER,
+                        write_buffer: WRITE_BUFFER,
+                    },
+                )
+                .await
+                .expect("Failed to initialize finalized archive");
+                info!(elapsed = ?start.elapsed(), "restored block archive");
+
+                block_archive
+            }
+        });
+
+        // Wait for archives to be initialized
+        let verified_archive = verified_archive
+            .await
+            .expect("Failed to initialize verified archive");
+        let notarized_archive = notarized_archive
+            .await
+            .expect("Failed to initialize notarized archive");
+        let finalized_archive = finalized_archive
+            .await
+            .expect("Failed to initialize finalized archive");
+        let block_archive = block_archive
+            .await
+            .expect("Failed to initialize block archive");
 
         // Initialize finalizer metadata
         let finalizer_metadata = Metadata::init(
