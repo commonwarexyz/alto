@@ -426,7 +426,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "engine_syncer_finalized_height{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
+                    "expr": "engine_syncer_contiguous_height{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
                     "fullMetaSearch": false,
                     "includeNullMetadata": true,
                     "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
@@ -435,7 +435,7 @@
                     "useBackend": false
                 }
             ],
-            "title": "Finalized Height",
+            "title": "Finalized Height (Contiguous)",
             "type": "timeseries"
         },
         {
@@ -3037,7 +3037,9 @@
             {
                 "allowCustomValue": false,
                 "current": {
-                    "text": "All",
+                    "text": [
+                        "All"
+                    ],
                     "value": [
                         "$__all"
                     ]
