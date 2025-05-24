@@ -504,7 +504,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                     .prune(min_view)
                                     .await
                                     .expect("Failed to prune notarized block");
-                                info!(min_view, "pruned verified and notarized archives");
+                                debug!(min_view, "pruned verified and notarized archives");
 
                                 // Notify finalizer
                                 let _ = finalizer_sender.try_send(());
