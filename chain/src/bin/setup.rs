@@ -545,7 +545,7 @@ fn indexer(sub_matches: &ArgMatches) {
     for instance in &config.instances {
         let peer_name = instance.name.clone();
         let region = instance.region.clone();
-        let area = region.split('-').next().unwrap().to_string();
+        let area = region.split('-').take(2).collect::<Vec<&str>>().join("-");
         region_to_peers.entry(area).or_default().push(peer_name);
     }
 
