@@ -64,7 +64,7 @@ fn main() {
     let config: Config = serde_yaml::from_str(&config_file).expect("Could not parse config file");
     let key = from_hex_formatted(&config.private_key).expect("Could not parse private key");
     let key = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
-    let signer = <Ed25519 as Signer>::from(key).expect("Could not create signer");
+    let signer = Ed25519::from(key);
     let public_key = signer.public_key();
 
     // Initialize runtime
