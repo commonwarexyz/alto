@@ -540,13 +540,12 @@ fn indexer(sub_matches: &ArgMatches) {
         "count exceeds number of peers"
     );
 
-    // Group peers by area (prefix of region)
+    // Group peers by region
     let mut region_to_peers: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for instance in &config.instances {
         let peer_name = instance.name.clone();
         let region = instance.region.clone();
-        let area = region.split('-').take(2).collect::<Vec<&str>>().join("-");
-        region_to_peers.entry(area).or_default().push(peer_name);
+        region_to_peers.entry(region).or_default().push(peer_name);
     }
 
     // Sort peers within each region for deterministic selection
