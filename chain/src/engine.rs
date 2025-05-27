@@ -140,7 +140,7 @@ impl<
                 reporter: syncer_mailbox.clone(),
                 supervisor,
                 partition: format!("{}-consensus", cfg.partition_prefix),
-                compression: Some(3),
+                compression: None,
                 mailbox_size: cfg.mailbox_size,
                 replay_concurrency: 1,
                 leader_timeout: cfg.leader_timeout,
