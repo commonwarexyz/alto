@@ -10,18 +10,18 @@ resolver = "2"
 [workspace.dependencies]
 alto-client = { version = "0.0.8", path = "client" }
 alto-types = { version = "0.0.8", path = "types" }
-commonware-broadcast = { version = "0.0.52", path = "../monorepo/broadcast" }
-commonware-codec = { version = "0.0.52", path = "../monorepo/codec" }
-commonware-consensus = { version = "0.0.52", path = "../monorepo/consensus" }
-commonware-cryptography = { version = "0.0.52", path = "../monorepo/cryptography" }
-commonware-deployer = { version = "0.0.52", default-features = false, path = "../monorepo/deployer" }
-commonware-macros = { version = "0.0.52", path = "../monorepo/macros" }
-commonware-p2p = { version = "0.0.52", path = "../monorepo/p2p" }
-commonware-resolver = { version = "0.0.52", path = "../monorepo/resolver" }
-commonware-runtime = { version = "0.0.52", path = "../monorepo/runtime" }
-commonware-storage = { version = "0.0.52", path = "../monorepo/storage" }
-commonware-stream = { version = "0.0.52", path = "../monorepo/stream" }
-commonware-utils = { version = "0.0.52", path = "../monorepo/utils" }
+commonware-broadcast = { version = "0.0.53" }
+commonware-codec = { version = "0.0.53" }
+commonware-consensus = { version = "0.0.53" }
+commonware-cryptography = { version = "0.0.53" }
+commonware-deployer = { version = "0.0.53", default-features = false }
+commonware-macros = { version = "0.0.53" }
+commonware-p2p = { version = "0.0.53" }
+commonware-resolver = { version = "0.0.53" }
+commonware-runtime = { version = "0.0.53" }
+commonware-storage = { version = "0.0.53" }
+commonware-stream = { version = "0.0.53" }
+commonware-utils = { version = "0.0.53" }
 thiserror = "2.0.12"
 bytes = "1.7.1"
 rand = "0.8.5"
