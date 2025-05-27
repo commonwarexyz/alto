@@ -8,8 +8,8 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-alto-client = { version = "0.0.9", path = "client" }
-alto-types = { version = "0.0.9", path = "types" }
+alto-client = { version = "0.0.10", path = "client" }
+alto-types = { version = "0.0.10", path = "types" }
 commonware-broadcast = { version = "0.0.53" }
 commonware-codec = { version = "0.0.53" }
 commonware-consensus = { version = "0.0.53" }
