@@ -245,16 +245,16 @@ mod tests {
             network.start();
 
             // Register participants
-            let mut schemes = Vec::new();
+            let mut signers = Vec::new();
             let mut validators = Vec::new();
             for i in 0..n {
-                let scheme = PrivateKey::from_seed(i as u64);
-                let pk = scheme.public_key();
-                schemes.push(scheme);
+                let signer = PrivateKey::from_seed(i as u64);
+                let pk = signer.public_key();
+                signers.push(signer);
                 validators.push(pk);
             }
             validators.sort();
-            schemes.sort_by_key(|s| s.public_key());
+            signers.sort_by_key(|s| s.public_key());
             let mut registrations = register_validators(&mut oracle, &validators).await;
 
             // Link all validators
@@ -266,9 +266,9 @@ mod tests {
 
             // Create instances
             let mut public_keys = HashSet::new();
-            for (idx, scheme) in schemes.into_iter().enumerate() {
-                // Create scheme context
-                let public_key = scheme.public_key();
+            for (idx, signer) in signers.into_iter().enumerate() {
+                // Create signer context
+                let public_key = signer.public_key();
                 public_keys.insert(public_key.clone());
 
                 // Configure engine
@@ -276,7 +276,7 @@ mod tests {
                 let config: Config<_, MockIndexer> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
-                    signer: scheme,
+                    signer,
                     polynomial: polynomial.clone(),
                     share: shares[idx].clone(),
                     participants: validators.clone(),
@@ -405,16 +405,16 @@ mod tests {
             network.start();
 
             // Register participants
-            let mut schemes = Vec::new();
+            let mut signers = Vec::new();
             let mut validators = Vec::new();
             for i in 0..n {
-                let scheme = PrivateKey::from_seed(i as u64);
-                let pk = scheme.public_key();
-                schemes.push(scheme);
+                let signer = PrivateKey::from_seed(i as u64);
+                let pk = signer.public_key();
+                signers.push(signer);
                 validators.push(pk);
             }
             validators.sort();
-            schemes.sort_by_key(|s| s.public_key());
+            signers.sort_by_key(|s| s.public_key());
             let mut registrations = register_validators(&mut oracle, &validators).await;
 
             // Link all validators (except 0)
@@ -436,19 +436,19 @@ mod tests {
                 ops::generate_shares::<_, MinSig>(&mut context, None, n, threshold);
 
             // Create instances
-            for (idx, scheme) in schemes.iter().enumerate() {
+            for (idx, signer) in signers.iter().enumerate() {
                 // Skip first
                 if idx == 0 {
                     continue;
                 }
 
                 // Configure engine
-                let public_key = scheme.public_key();
+                let public_key = signer.public_key();
                 let uid = format!("validator-{}", public_key);
                 let config: Config<_, MockIndexer> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
-                    signer: scheme.clone(),
+                    signer: signer.clone(),
                     polynomial: polynomial.clone(),
                     share: shares[idx].clone(),
                     participants: validators.clone(),
@@ -527,14 +527,14 @@ mod tests {
             .await;
 
             // Configure engine
-            let scheme = schemes[0].clone();
+            let signer = signers[0].clone();
             let share = shares[0].clone();
-            let public_key = scheme.public_key();
+            let public_key = signer.public_key();
             let uid = format!("validator-{}", public_key);
             let config: Config<_, MockIndexer> = engine::Config {
                 blocker: oracle.control(public_key.clone()),
                 partition_prefix: uid.clone(),
-                signer: scheme.clone(),
+                signer: signer.clone(),
                 polynomial: polynomial.clone(),
                 share,
                 participants: validators.clone(),
@@ -635,16 +635,16 @@ mod tests {
                 network.start();
 
                 // Register participants
-                let mut schemes = Vec::new();
+                let mut signers = Vec::new();
                 let mut validators = Vec::new();
                 for i in 0..n {
-                    let scheme = PrivateKey::from_seed(i as u64);
-                    let pk = scheme.public_key();
-                    schemes.push(scheme);
+                    let signer = PrivateKey::from_seed(i as u64);
+                    let pk = signer.public_key();
+                    signers.push(signer);
                     validators.push(pk);
                 }
                 validators.sort();
-                schemes.sort_by_key(|s| s.public_key());
+                signers.sort_by_key(|s| s.public_key());
                 let mut registrations = register_validators(&mut oracle, &validators).await;
 
                 // Link all validators
@@ -657,9 +657,9 @@ mod tests {
 
                 // Create instances
                 let mut public_keys = HashSet::new();
-                for (idx, scheme) in schemes.into_iter().enumerate() {
-                    // Create scheme context
-                    let public_key = scheme.public_key();
+                for (idx, signer) in signers.into_iter().enumerate() {
+                    // Create signer context
+                    let public_key = signer.public_key();
                     public_keys.insert(public_key.clone());
 
                     // Configure engine
@@ -667,7 +667,7 @@ mod tests {
                     let config: Config<_, MockIndexer> = engine::Config {
                         blocker: oracle.control(public_key.clone()),
                         partition_prefix: uid.clone(),
-                        signer: scheme,
+                        signer,
                         polynomial: polynomial.clone(),
                         share: shares[idx].clone(),
                         participants: validators.clone(),
@@ -796,16 +796,16 @@ mod tests {
             network.start();
 
             // Register participants
-            let mut schemes = Vec::new();
+            let mut signers = Vec::new();
             let mut validators = Vec::new();
             for i in 0..n {
-                let scheme = PrivateKey::from_seed(i as u64);
-                let pk = scheme.public_key();
-                schemes.push(scheme);
+                let signer = PrivateKey::from_seed(i as u64);
+                let pk = signer.public_key();
+                signers.push(signer);
                 validators.push(pk);
             }
             validators.sort();
-            schemes.sort_by_key(|s| s.public_key());
+            signers.sort_by_key(|s| s.public_key());
             let mut registrations = register_validators(&mut oracle, &validators).await;
 
             // Link all validators
@@ -826,9 +826,9 @@ mod tests {
 
             // Create instances
             let mut public_keys = HashSet::new();
-            for (idx, scheme) in schemes.into_iter().enumerate() {
-                // Create scheme context
-                let public_key = scheme.public_key();
+            for (idx, signer) in signers.into_iter().enumerate() {
+                // Create signer context
+                let public_key = signer.public_key();
                 public_keys.insert(public_key.clone());
 
                 // Configure engine
@@ -836,7 +836,7 @@ mod tests {
                 let config: Config<_, MockIndexer> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
-                    signer: scheme,
+                    signer,
                     polynomial: polynomial.clone(),
                     share: shares[idx].clone(),
                     participants: validators.clone(),

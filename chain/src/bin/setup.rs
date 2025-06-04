@@ -257,13 +257,13 @@ fn generate_local(
         bootstrappers <= peers,
         "bootstrappers must be less than or equal to peers"
     );
-    let mut peer_schemes = (0..peers)
+    let mut peer_signers = (0..peers)
         .map(|_| PrivateKey::from_rng(&mut OsRng))
         .collect::<Vec<_>>();
-    peer_schemes.sort_by_key(|scheme| scheme.public_key());
-    let allowed_peers: Vec<String> = peer_schemes
+    peer_signers.sort_by_key(|signer| signer.public_key());
+    let allowed_peers: Vec<String> = peer_signers
         .iter()
-        .map(|scheme| scheme.public_key().to_string())
+        .map(|signer| signer.public_key().to_string())
         .collect();
     let bootstrappers = allowed_peers
         .iter()
@@ -283,9 +283,9 @@ fn generate_local(
     let mut port = start_port;
     let mut addresses = HashMap::new();
     let mut configurations = Vec::new();
-    for (scheme, share) in peer_schemes.iter().zip(shares.iter()) {
+    for (signer, share) in peer_signers.iter().zip(shares.iter()) {
         // Create peer config
-        let name = scheme.public_key().to_string();
+        let name = signer.public_key().to_string();
         addresses.insert(
             name.clone(),
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
@@ -293,7 +293,7 @@ fn generate_local(
         let peer_config_file = format!("{}.yaml", name);
         let directory = format!("{}/{}", storage_output, name);
         let peer_config = Config {
-            private_key: scheme.to_string(),
+            private_key: signer.to_string(),
             share: hex(&share.encode()),
             polynomial: hex(&polynomial.encode()),
 
@@ -405,13 +405,13 @@ fn generate_remote(
         bootstrappers <= peers,
         "bootstrappers must be less than or equal to peers"
     );
-    let mut peer_schemes = (0..peers)
+    let mut peer_signers = (0..peers)
         .map(|_| PrivateKey::from_rng(&mut OsRng))
         .collect::<Vec<_>>();
-    peer_schemes.sort_by_key(|scheme| scheme.public_key());
-    let allowed_peers: Vec<String> = peer_schemes
+    peer_signers.sort_by_key(|signer| signer.public_key());
+    let allowed_peers: Vec<String> = peer_signers
         .iter()
-        .map(|scheme| scheme.public_key().to_string())
+        .map(|signer| signer.public_key().to_string())
         .collect();
     let bootstrappers = allowed_peers
         .iter()
@@ -434,12 +434,12 @@ fn generate_remote(
     );
     let mut instance_configs = Vec::new();
     let mut peer_configs = Vec::new();
-    for (index, scheme) in peer_schemes.iter().enumerate() {
+    for (index, signer) in peer_signers.iter().enumerate() {
         // Create peer config
-        let name = scheme.public_key().to_string();
+        let name = signer.public_key().to_string();
         let peer_config_file = format!("{}.yaml", name);
         let peer_config = Config {
-            private_key: scheme.to_string(),
+            private_key: signer.to_string(),
             share: hex(&shares[index].encode()),
             polynomial: hex(&polynomial.encode()),
 
