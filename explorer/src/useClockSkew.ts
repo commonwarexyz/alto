@@ -9,6 +9,9 @@ const timeout = 3000;
 // Interval to fetch server time (in milliseconds)
 const interval = 30000;
 
+// Uncertainty bound for clock skew (in milliseconds)
+const uncertaintyBound = 35;
+
 /**
  * Custom hook to detect clock skew between client and server
  * Runs once on mount and then every 30 seconds, using the latest successful measurement as the skew
@@ -71,7 +74,7 @@ export const useClockSkew = () => {
 
                 // If the clockSkew has an absolute value less than 35ms, make no adjustment
                 // This is within the range of uncertainty on measurement
-                const adjustedSkew = Math.abs(skew) < 35 ? 0 : skew;
+                const adjustedSkew = Math.abs(skew) < uncertaintyBound ? 0 : skew;
                 console.log(`Measured clock skew: ${skew}ms (Applied clock skew: ${adjustedSkew}ms)`);
 
                 // Update state with the new skew
