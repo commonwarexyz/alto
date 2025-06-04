@@ -125,14 +125,43 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = fa
         .sort((a, b) => a.block.height - b.block.height);
 
     const blockTimes: number[] = [];
+
+    // Group consecutive blocks to ensure we're only comparing truly adjacent blocks
+    const consecutiveGroups: typeof viewsWithBlocks[] = [];
+    let currentGroup: typeof viewsWithBlocks = [viewsWithBlocks[0]];
+
     for (let i = 1; i < viewsWithBlocks.length; i++) {
         const currentBlock = viewsWithBlocks[i].block;
-        const prevBlock = viewsWithBlocks[i - 1].block;
-        if (currentBlock && prevBlock &&
-            currentBlock.timestamp && prevBlock.timestamp &&
-            currentBlock.height === prevBlock.height + 1) {
-            const timeDiff = currentBlock.timestamp - prevBlock.timestamp;
-            if (timeDiff > 0 && timeDiff < 10000) { // Filter out unreasonable values (>10s)
+        const prevBlock = currentGroup[currentGroup.length - 1].block;
+
+        // If this block is consecutive to the last one in current group, add it
+        if (currentBlock.height === prevBlock.height + 1) {
+            currentGroup.push(viewsWithBlocks[i]);
+        } else {
+            // Start a new group if we have a gap
+            if (currentGroup.length >= 2) {
+                consecutiveGroups.push(currentGroup);
+            }
+            currentGroup = [viewsWithBlocks[i]];
+        }
+    }
+
+    // Don't forget the last group
+    if (currentGroup.length >= 2) {
+        consecutiveGroups.push(currentGroup);
+    }
+
+    // Calculate block times only within consecutive groups
+    for (const group of consecutiveGroups) {
+        // Only process groups with at least 3 blocks for more reliable measurements
+        if (group.length >= 3) {
+            for (let i = 1; i < group.length; i++) {
+                const currentBlock = group[i].block;
+                const prevBlock = group[i - 1].block;
+
+                // Use raw block timestamps directly - DO NOT apply clock skew correction
+                // Block timestamps come from the network itself, not browser time
+                const timeDiff = currentBlock.timestamp - prevBlock.timestamp;
                 blockTimes.push(timeDiff);
             }
         }
