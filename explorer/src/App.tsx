@@ -311,7 +311,7 @@ const App: React.FC = () => {
     });
   }, [lastObservedView, adjustTime]);
 
-  const handleNotarization = useCallback((notarized: NotarizedJs) => {
+  const handleNotarization = useCallback((notarized: NotarizedJs, messageReceivedTime?: number) => {
     const view = notarized.proof.view;
     setViews((prevViews) => {
       const index = prevViews.findIndex((v) => v.view === view);
@@ -320,9 +320,10 @@ const App: React.FC = () => {
       if (index !== -1 && prevViews[index].status === "finalized") {
         return prevViews; // No changes needed, preserve finalized state
       }
-
       let newViews = [...prevViews];
-      const currentTime = adjustTime(Date.now());
+
+      // If messageReceivedTime is not provided, use the current time
+      const currentTime = messageReceivedTime || adjustTime(Date.now());
 
       // Calculate a reasonable start time using the block timestamp if available
       let calculatedStartTime = currentTime;
@@ -401,12 +402,14 @@ const App: React.FC = () => {
     });
   }, [adjustTime]);
 
-  const handleFinalization = useCallback((finalized: FinalizedJs) => {
+  const handleFinalization = useCallback((finalized: FinalizedJs, messageReceivedTime?: number) => {
     const view = finalized.proof.view;
     setViews((prevViews) => {
       const index = prevViews.findIndex((v) => v.view === view);
       let newViews = [...prevViews];
-      const currentTime = adjustTime(Date.now());
+
+      // If messageReceivedTime is not provided, use the current time
+      const currentTime = messageReceivedTime || adjustTime(Date.now());
 
       // Calculate a reasonable start time using the block timestamp if available
       let calculatedStartTime = currentTime;
@@ -573,6 +576,8 @@ const App: React.FC = () => {
       };
 
       ws.onmessage = (event) => {
+        // Capture timestamp as soon as we receive the message (not when it is verified)
+        const messageReceivedTime = adjustTime(Date.now());
         const data = new Uint8Array(event.data);
         const kind = data[0];
         const payload = data.slice(1);
@@ -584,11 +589,11 @@ const App: React.FC = () => {
             break;
           case 1: // Notarization
             const notarized = parse_notarized(PUBLIC_KEY, payload);
-            if (notarized) handleNotarizedRef.current(notarized);
+            if (notarized) handleNotarizedRef.current(notarized, messageReceivedTime);
             break;
           case 2: // Finalization
             const finalized = parse_finalized(PUBLIC_KEY, payload);
-            if (finalized) handleFinalizedRef.current(finalized);
+            if (finalized) handleFinalizedRef.current(finalized, messageReceivedTime);
             break;
         }
       };
