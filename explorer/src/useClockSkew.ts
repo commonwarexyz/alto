@@ -68,10 +68,14 @@ export const useClockSkew = () => {
                 // Calculate skew
                 const adjustedLocalTime = localStartTime + networkLatency;
                 const skew = adjustedLocalTime - serverTime;
-                console.log('Local clock skew:', skew);
+
+                // If the clockSkew has an absolute value less than 35ms, make no adjustment
+                // This is within the range of uncertainty on measurement
+                const adjustedSkew = Math.abs(skew) < 35 ? 0 : skew;
+                console.log(`Measured clock skew: ${skew}ms (Applied: ${adjustedSkew}ms)`);
 
                 // Update state with the new skew
-                setClockSkew(skew);
+                setClockSkew(adjustedSkew);
             } catch (err) {
                 console.error('Failed to fetch skew:', err);
                 // Keep the previous skew if the request fails
