@@ -658,7 +658,7 @@ const App: React.FC = () => {
         }
       }
     };
-  }, [isLoading, isInMaintenance, adjustTime]);
+  }, [isLoading, isInMaintenance]);
 
   // Loading state - show nothing until we get the result of the health check
   if (isLoading) {
