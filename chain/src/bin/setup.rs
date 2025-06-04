@@ -6,8 +6,8 @@ use commonware_cryptography::{
         dkg::ops,
         primitives::{poly, variant::MinSig},
     },
-    ed25519::PublicKey,
-    Ed25519, Signer,
+    ed25519::{PrivateKey, PublicKey},
+    PrivateKeyExt, Signer,
 };
 use commonware_deployer::ec2::{self, METRICS_PORT};
 use commonware_utils::{from_hex_formatted, hex, quorum};
@@ -258,7 +258,7 @@ fn generate_local(
         "bootstrappers must be less than or equal to peers"
     );
     let mut peer_schemes = (0..peers)
-        .map(|_| Ed25519::new(&mut OsRng))
+        .map(|_| PrivateKey::from_rng(&mut OsRng))
         .collect::<Vec<_>>();
     peer_schemes.sort_by_key(|scheme| scheme.public_key());
     let allowed_peers: Vec<String> = peer_schemes
@@ -293,7 +293,7 @@ fn generate_local(
         let peer_config_file = format!("{}.yaml", name);
         let directory = format!("{}/{}", storage_output, name);
         let peer_config = Config {
-            private_key: scheme.private_key().to_string(),
+            private_key: scheme.to_string(),
             share: hex(&share.encode()),
             polynomial: hex(&polynomial.encode()),
 
@@ -406,7 +406,7 @@ fn generate_remote(
         "bootstrappers must be less than or equal to peers"
     );
     let mut peer_schemes = (0..peers)
-        .map(|_| Ed25519::new(&mut OsRng))
+        .map(|_| PrivateKey::from_rng(&mut OsRng))
         .collect::<Vec<_>>();
     peer_schemes.sort_by_key(|scheme| scheme.public_key());
     let allowed_peers: Vec<String> = peer_schemes
@@ -439,7 +439,7 @@ fn generate_remote(
         let name = scheme.public_key().to_string();
         let peer_config_file = format!("{}.yaml", name);
         let peer_config = Config {
-            private_key: scheme.private_key().to_string(),
+            private_key: scheme.to_string(),
             share: hex(&shares[index].encode()),
             polynomial: hex(&polynomial.encode()),
 

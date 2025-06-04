@@ -6,7 +6,7 @@ use commonware_codec::{Decode, DecodeExt};
 use commonware_cryptography::{
     bls12381::primitives::{group, poly, variant::MinSig},
     ed25519::{PrivateKey, PublicKey},
-    Ed25519, Signer,
+    Signer,
 };
 use commonware_deployer::ec2::Hosts;
 use commonware_p2p::authenticated;
@@ -63,8 +63,7 @@ fn main() {
     let config_file = std::fs::read_to_string(config_file).expect("Could not read config file");
     let config: Config = serde_yaml::from_str(&config_file).expect("Could not parse config file");
     let key = from_hex_formatted(&config.private_key).expect("Could not parse private key");
-    let key = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
-    let signer = Ed25519::from(key);
+    let signer = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
     let public_key = signer.public_key();
 
     // Initialize runtime
