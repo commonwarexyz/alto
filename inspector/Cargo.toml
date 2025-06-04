@@ -1,6 +1,6 @@
 [package]
 name = "alto-inspector"
-version = "0.0.10"
+version = "0.0.11"
 publish = true
 edition = "2021"
 license = "MIT OR Apache-2.0"
