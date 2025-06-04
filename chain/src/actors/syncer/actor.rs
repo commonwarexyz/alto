@@ -211,7 +211,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
     pub fn start(
         mut self,
-        buffer: buffered::Mailbox<PublicKey, Digest, Digest, Block>,
+        buffer: buffered::Mailbox<PublicKey, Block>,
         backfill: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
@@ -223,7 +223,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
     /// Run the application actor.
     async fn run(
         mut self,
-        mut buffer: buffered::Mailbox<PublicKey, Digest, Digest, Block>,
+        mut buffer: buffered::Mailbox<PublicKey, Block>,
         backfill: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,

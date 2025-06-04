@@ -94,8 +94,8 @@ mod tests {
             dkg::ops,
             primitives::{poly, variant::MinSig},
         },
-        ed25519::PublicKey,
-        Ed25519, Signer,
+        ed25519::{PrivateKey, PublicKey},
+        PrivateKeyExt, Signer,
     };
     use commonware_macros::{select, test_traced};
     use commonware_p2p::simulated::{self, Link, Network, Oracle, Receiver, Sender};
@@ -248,7 +248,7 @@ mod tests {
             let mut schemes = Vec::new();
             let mut validators = Vec::new();
             for i in 0..n {
-                let scheme = Ed25519::from_seed(i as u64);
+                let scheme = PrivateKey::from_seed(i as u64);
                 let pk = scheme.public_key();
                 schemes.push(scheme);
                 validators.push(pk);
@@ -408,7 +408,7 @@ mod tests {
             let mut schemes = Vec::new();
             let mut validators = Vec::new();
             for i in 0..n {
-                let scheme = Ed25519::from_seed(i as u64);
+                let scheme = PrivateKey::from_seed(i as u64);
                 let pk = scheme.public_key();
                 schemes.push(scheme);
                 validators.push(pk);
@@ -638,7 +638,7 @@ mod tests {
                 let mut schemes = Vec::new();
                 let mut validators = Vec::new();
                 for i in 0..n {
-                    let scheme = Ed25519::from_seed(i as u64);
+                    let scheme = PrivateKey::from_seed(i as u64);
                     let pk = scheme.public_key();
                     schemes.push(scheme);
                     validators.push(pk);
@@ -799,7 +799,7 @@ mod tests {
             let mut schemes = Vec::new();
             let mut validators = Vec::new();
             for i in 0..n {
-                let scheme = Ed25519::from_seed(i as u64);
+                let scheme = PrivateKey::from_seed(i as u64);
                 let pk = scheme.public_key();
                 schemes.push(scheme);
                 validators.push(pk);

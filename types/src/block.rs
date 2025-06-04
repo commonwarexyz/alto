@@ -78,13 +78,17 @@ impl EncodeSize for Block {
     }
 }
 
-impl Digestible<Digest> for Block {
+impl Digestible for Block {
+    type Digest = Digest;
+
     fn digest(&self) -> Digest {
         self.digest
     }
 }
 
-impl Committable<Digest> for Block {
+impl Committable for Block {
+    type Commitment = Digest;
+
     fn commitment(&self) -> Digest {
         self.digest
     }

@@ -45,17 +45,17 @@ dependencies = [
  "bytes",
  "clap",
  "commonware-broadcast",
- "commonware-codec 0.0.54",
+ "commonware-codec",
  "commonware-consensus",
- "commonware-cryptography 0.0.54",
+ "commonware-cryptography",
  "commonware-deployer",
- "commonware-macros 0.0.54",
- "commonware-p2p 0.0.54",
+ "commonware-macros",
+ "commonware-p2p",
  "commonware-resolver",
- "commonware-runtime 0.0.54",
+ "commonware-runtime",
  "commonware-storage",
- "commonware-stream 0.0.54",
- "commonware-utils 0.0.54",
+ "commonware-stream",
+ "commonware-utils",
  "futures",
  "governor",
  "prometheus-client",
@@ -74,10 +74,10 @@ version = "0.0.10"
 dependencies = [
  "alto-types",
  "bytes",
- "commonware-codec 0.0.54",
+ "commonware-codec",
  "commonware-consensus",
- "commonware-cryptography 0.0.54",
- "commonware-utils 0.0.54",
+ "commonware-cryptography",
+ "commonware-utils",
  "futures",
  "rand",
  "reqwest",
@@ -94,10 +94,10 @@ dependencies = [
  "alto-types",
  "bytes",
  "clap",
- "commonware-codec 0.0.54",
+ "commonware-codec",
  "commonware-consensus",
- "commonware-cryptography 0.0.54",
- "commonware-utils 0.0.54",
+ "commonware-cryptography",
+ "commonware-utils",
  "futures",
  "rand",
  "thiserror 2.0.12",
@@ -111,10 +111,10 @@ name = "alto-types"
 version = "0.0.10"
 dependencies = [
  "bytes",
- "commonware-codec 0.0.54",
+ "commonware-codec",
  "commonware-consensus",
- "commonware-cryptography 0.0.54",
- "commonware-utils 0.0.54",
+ "commonware-cryptography",
+ "commonware-utils",
  "getrandom 0.2.15",
  "rand",
  "serde",
@@ -492,32 +492,21 @@ checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 
 [[package]]
 name = "commonware-broadcast"
-version = "0.0.53"
+version = "0.0.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c99415a237f64145ecb856a5663f364f46468048e318dfe4043268148caf30f0"
+checksum = "86d600f2afedcf617a3d6ed0290a86a055390c9fa3096d9c46838ff4cf396f2f"
 dependencies = [
  "bytes",
- "commonware-codec 0.0.53",
- "commonware-cryptography 0.0.53",
- "commonware-macros 0.0.53",
- "commonware-p2p 0.0.53",
- "commonware-runtime 0.0.53",
- "commonware-utils 0.0.53",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-macros",
+ "commonware-p2p",
+ "commonware-runtime",
+ "commonware-utils",
  "futures",
  "prometheus-client",
  "thiserror 2.0.12",
  "tracing",
-]
-
-[[package]]
-name = "commonware-codec"
-version = "0.0.53"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a7357366e3eb3e251de1c51572189d8fd20100bc3fdbbe0b4af13d1fec8b4d2"
-dependencies = [
- "bytes",
- "paste",
- "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -539,13 +528,13 @@ checksum = "863190bac2a16969179e4788ad983048f8d73e32ab62031e575dde7233eae1a4"
 dependencies = [
  "bytes",
  "cfg-if",
- "commonware-codec 0.0.54",
- "commonware-cryptography 0.0.54",
- "commonware-macros 0.0.54",
- "commonware-p2p 0.0.54",
- "commonware-runtime 0.0.54",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-macros",
+ "commonware-p2p",
+ "commonware-runtime",
  "commonware-storage",
- "commonware-utils 0.0.54",
+ "commonware-utils",
  "futures",
  "governor",
  "prometheus-client",
@@ -557,34 +546,14 @@ dependencies = [
 
 [[package]]
 name = "commonware-cryptography"
-version = "0.0.53"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8ede7366f134b41d76624ee169c9eea696a8ff9649c67f8fd33051ff5667389"
-dependencies = [
- "blst",
- "bytes",
- "commonware-codec 0.0.53",
- "commonware-utils 0.0.53",
- "ed25519-consensus",
- "getrandom 0.2.15",
- "p256",
- "rand",
- "rayon",
- "sha2 0.10.8",
- "thiserror 2.0.12",
- "zeroize",
-]
-
-[[package]]
-name = "commonware-cryptography"
 version = "0.0.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2638fcf324b596e9144e99d55bec8a2d9b993d76c0c8ae56e86e2cae8824652e"
 dependencies = [
  "blst",
  "bytes",
- "commonware-codec 0.0.54",
- "commonware-utils 0.0.54",
+ "commonware-codec",
+ "commonware-utils",
  "ed25519-consensus",
  "getrandom 0.2.15",
  "p256",
@@ -608,20 +577,6 @@ dependencies = [
 
 [[package]]
 name = "commonware-macros"
-version = "0.0.53"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d33096d787bda16504f96880d2a07ed40caaebea842828c8ed8ece2186e9bf84"
-dependencies = [
- "futures",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "commonware-macros"
 version = "0.0.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edb0e57ab2b98863aa900a7b5a1911ae2c64ee2ce54fb2c5d8bf863799c77769"
@@ -636,41 +591,17 @@ dependencies = [
 
 [[package]]
 name = "commonware-p2p"
-version = "0.0.53"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe9626cbadfbe9306443c11fae7c65ae8ff02e3899afd2609aa92d606b41ee4f"
-dependencies = [
- "bytes",
- "commonware-codec 0.0.53",
- "commonware-cryptography 0.0.53",
- "commonware-macros 0.0.53",
- "commonware-runtime 0.0.53",
- "commonware-stream 0.0.53",
- "commonware-utils 0.0.53",
- "either",
- "futures",
- "governor",
- "prometheus-client",
- "rand",
- "rand_distr",
- "thiserror 2.0.12",
- "tracing",
- "zstd",
-]
-
-[[package]]
-name = "commonware-p2p"
 version = "0.0.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c84fefd72b838dcaf38a843c382bf2fafa1de3479944f23c0a177e1e9bdc17f4"
 dependencies = [
  "bytes",
- "commonware-codec 0.0.54",
- "commonware-cryptography 0.0.54",
- "commonware-macros 0.0.54",
- "commonware-runtime 0.0.54",
- "commonware-stream 0.0.54",
- "commonware-utils 0.0.54",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-macros",
+ "commonware-runtime",
+ "commonware-stream",
+ "commonware-utils",
  "either",
  "futures",
  "governor",
@@ -690,50 +621,19 @@ checksum = "4cbc47b201012e0e1b6af768a859c4e6679385555f39efdd05fa53b8299fdd62"
 dependencies = [
  "bimap",
  "bytes",
- "commonware-codec 0.0.54",
- "commonware-cryptography 0.0.54",
- "commonware-macros 0.0.54",
- "commonware-p2p 0.0.54",
- "commonware-runtime 0.0.54",
- "commonware-stream 0.0.54",
- "commonware-utils 0.0.54",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-macros",
+ "commonware-p2p",
+ "commonware-runtime",
+ "commonware-stream",
+ "commonware-utils",
  "futures",
  "governor",
  "prometheus-client",
  "rand",
  "thiserror 2.0.12",
  "tracing",
-]
-
-[[package]]
-name = "commonware-runtime"
-version = "0.0.53"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccec49c3cf289e88d85436a1b1fa43c69e2ebe118f134af8e6df86578a699326"
-dependencies = [
- "async-lock",
- "axum",
- "bytes",
- "cfg-if",
- "commonware-macros 0.0.53",
- "commonware-utils 0.0.53",
- "criterion",
- "futures",
- "getrandom 0.2.15",
- "governor",
- "libc",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "prometheus-client",
- "rand",
- "rayon",
- "sha2 0.10.8",
- "thiserror 2.0.12",
- "tokio",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -746,8 +646,8 @@ dependencies = [
  "axum",
  "bytes",
  "cfg-if",
- "commonware-macros 0.0.54",
- "commonware-utils 0.0.54",
+ "commonware-macros",
+ "commonware-utils",
  "criterion",
  "futures",
  "getrandom 0.2.15",
@@ -774,11 +674,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "003503d77a2f34928b5dcd2c5d80d954c8c82b22979760e46aaeefe598660d79"
 dependencies = [
  "bytes",
- "commonware-codec 0.0.54",
- "commonware-cryptography 0.0.54",
- "commonware-macros 0.0.54",
- "commonware-runtime 0.0.54",
- "commonware-utils 0.0.54",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-macros",
+ "commonware-runtime",
+ "commonware-utils",
  "crc32fast",
  "futures",
  "futures-util",
@@ -790,36 +690,17 @@ dependencies = [
 
 [[package]]
 name = "commonware-stream"
-version = "0.0.53"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32b740958301ad5e258e8f49f2121ec968bf9f7aabaeb22fe4d90465cfdce88e"
-dependencies = [
- "bytes",
- "chacha20poly1305",
- "commonware-codec 0.0.53",
- "commonware-cryptography 0.0.53",
- "commonware-macros 0.0.53",
- "commonware-runtime 0.0.53",
- "commonware-utils 0.0.53",
- "futures",
- "rand",
- "thiserror 2.0.12",
- "x25519-dalek",
-]
-
-[[package]]
-name = "commonware-stream"
 version = "0.0.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "15cbadfb418f3d7b3182ab72cfe2f4d786397ed620ce4e5624aedf1fb7bb9a94"
 dependencies = [
  "bytes",
  "chacha20poly1305",
- "commonware-codec 0.0.54",
- "commonware-cryptography 0.0.54",
- "commonware-macros 0.0.54",
- "commonware-runtime 0.0.54",
- "commonware-utils 0.0.54",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-macros",
+ "commonware-runtime",
+ "commonware-utils",
  "futures",
  "hkdf",
  "rand",
@@ -830,26 +711,12 @@ dependencies = [
 
 [[package]]
 name = "commonware-utils"
-version = "0.0.53"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cba8245085eddc9f688305b5559131e523a2c7b712b3cafded3125abefd940b4"
-dependencies = [
- "bytes",
- "commonware-codec 0.0.53",
- "futures",
- "getrandom 0.2.15",
- "rand",
- "thiserror 2.0.12",
-]
-
-[[package]]
-name = "commonware-utils"
 version = "0.0.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ec013242a9c28f1d5abf932ae920acd167d723e4745d6794b3edbc05641055b"
 dependencies = [
  "bytes",
- "commonware-codec 0.0.54",
+ "commonware-codec",
  "futures",
  "getrandom 0.2.15",
  "rand",

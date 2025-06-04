@@ -10,7 +10,7 @@ resolver = "2"
 [workspace.dependencies]
 alto-client = { version = "0.0.10", path = "client" }
 alto-types = { version = "0.0.10", path = "types" }
-commonware-broadcast = { version = "0.0.53" }
+commonware-broadcast = { version = "0.0.54" }
 commonware-codec = { version = "0.0.54" }
 commonware-consensus = { version = "0.0.54" }
 commonware-cryptography = { version = "0.0.54" }

@@ -11,9 +11,9 @@ use commonware_cryptography::{
         poly::{public, Poly},
         variant::MinSig,
     },
-    ed25519::{self, PublicKey},
+    ed25519::{PrivateKey, PublicKey},
     sha256::Digest,
-    Ed25519, Signer,
+    Signer,
 };
 use commonware_p2p::{Blocker, Receiver, Sender};
 use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
@@ -30,10 +30,10 @@ const SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER: u64 = 10;
 const REPLAY_BUFFER: usize = 8 * 1024 * 1024;
 const WRITE_BUFFER: usize = 1024 * 1024;
 
-pub struct Config<B: Blocker<PublicKey = ed25519::PublicKey>, I: Indexer> {
+pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub blocker: B,
     pub partition_prefix: String,
-    pub signer: Ed25519,
+    pub signer: PrivateKey,
     pub polynomial: Poly<Evaluation>,
     pub share: group::Share,
     pub participants: Vec<PublicKey>,
@@ -57,19 +57,19 @@ pub struct Config<B: Blocker<PublicKey = ed25519::PublicKey>, I: Indexer> {
 
 pub struct Engine<
     E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
-    B: Blocker<PublicKey = ed25519::PublicKey>,
+    B: Blocker<PublicKey = PublicKey>,
     I: Indexer,
 > {
     context: E,
 
     application: application::Actor<E>,
-    buffer: buffered::Engine<E, ed25519::PublicKey, Digest, Digest, Block>,
-    buffer_mailbox: buffered::Mailbox<ed25519::PublicKey, Digest, Digest, Block>,
+    buffer: buffered::Engine<E, PublicKey, Block>,
+    buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
     syncer: syncer::Actor<E, I>,
     syncer_mailbox: syncer::Mailbox,
     consensus: Consensus<
         E,
-        Ed25519,
+        PrivateKey,
         B,
         MinSig,
         Digest,
@@ -82,7 +82,7 @@ pub struct Engine<
 
 impl<
         E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
-        B: Blocker<PublicKey = ed25519::PublicKey>,
+        B: Blocker<PublicKey = PublicKey>,
         I: Indexer,
     > Engine<E, B, I>
 {
