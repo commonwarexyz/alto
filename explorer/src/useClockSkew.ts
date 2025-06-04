@@ -72,7 +72,7 @@ export const useClockSkew = () => {
                 // If the clockSkew has an absolute value less than 35ms, make no adjustment
                 // This is within the range of uncertainty on measurement
                 const adjustedSkew = Math.abs(skew) < 35 ? 0 : skew;
-                console.log(`Measured clock skew: ${skew}ms (Applied: ${adjustedSkew}ms)`);
+                console.log(`Measured clock skew: ${skew}ms (Applied clock skew: ${adjustedSkew}ms)`);
 
                 // Update state with the new skew
                 setClockSkew(adjustedSkew);
