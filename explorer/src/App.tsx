@@ -93,6 +93,7 @@ const App: React.FC = () => {
   const handleSeedRef = useRef<typeof handleSeed>(null!);
   const handleNotarizedRef = useRef<typeof handleNotarization>(null!);
   const handleFinalizedRef = useRef<typeof handleFinalization>(null!);
+  const adjustTimeRef = useRef(adjustTime);
   const isInitializedRef = useRef(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -519,6 +520,10 @@ const App: React.FC = () => {
     handleFinalizedRef.current = handleFinalization;
   }, [handleFinalization]);
 
+  useEffect(() => {
+    adjustTimeRef.current = adjustTime;
+  }, [adjustTime]);
+
   // WebSocket connection management with fixed single-connection approach
   useEffect(() => {
     // If loading, don't start
@@ -577,7 +582,7 @@ const App: React.FC = () => {
 
       ws.onmessage = (event) => {
         // Capture timestamp as soon as we receive the message (not when it is verified)
-        const messageReceivedTime = adjustTime(Date.now());
+        const messageReceivedTime = adjustTimeRef.current(Date.now());
         const data = new Uint8Array(event.data);
         const kind = data[0];
         const payload = data.slice(1);
