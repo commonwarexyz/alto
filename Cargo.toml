@@ -11,17 +11,17 @@ resolver = "2"
 alto-client = { version = "0.0.10", path = "client" }
 alto-types = { version = "0.0.10", path = "types" }
 commonware-broadcast = { version = "0.0.53" }
-commonware-codec = { version = "0.0.53" }
-commonware-consensus = { version = "0.0.53" }
-commonware-cryptography = { version = "0.0.53" }
-commonware-deployer = { version = "0.0.53", default-features = false }
-commonware-macros = { version = "0.0.53" }
-commonware-p2p = { version = "0.0.53" }
-commonware-resolver = { version = "0.0.53" }
-commonware-runtime = { version = "0.0.53" }
-commonware-storage = { version = "0.0.53" }
-commonware-stream = { version = "0.0.53" }
-commonware-utils = { version = "0.0.53" }
+commonware-codec = { version = "0.0.54" }
+commonware-consensus = { version = "0.0.54" }
+commonware-cryptography = { version = "0.0.54" }
+commonware-deployer = { version = "0.0.54", default-features = false }
+commonware-macros = { version = "0.0.54" }
+commonware-p2p = { version = "0.0.54" }
+commonware-resolver = { version = "0.0.54" }
+commonware-runtime = { version = "0.0.54" }
+commonware-storage = { version = "0.0.54" }
+commonware-stream = { version = "0.0.54" }
+commonware-utils = { version = "0.0.54" }
 thiserror = "2.0.12"
 bytes = "1.7.1"
 rand = "0.8.5"
