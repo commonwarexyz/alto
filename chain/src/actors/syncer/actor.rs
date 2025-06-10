@@ -278,14 +278,15 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     if let Some(block) = orchestor.get(next).await {
                         // In an application that maintains state, you would compute the state transition function here.
                         //
-                        // If there is an unclean shutdown, it is possible that the application may be ahead of the first
-                        // block processed after restart.
+                        // After an unclean shutdown (where the indexer metadata is not synced after the height is processed), it is
+                        // possible that the application may see a block it already processed after restart (which it can simply ignore).
 
-                        // Update last indexed metadata after application (if exists) has applied state transition function.
+                        // Update last indexed metadata (after application has applied state transition function).
                         //
-                        // If we updated metadata before the application applied the state transition function, an unclean
-                        // shutdown could put the application in an unrecoverable state where the last indexed height is ahead
-                        // of the application's last processed height.
+                        // If we updated metadata before the application applied its state transition function, an unclean
+                        // shutdown could put the application in an unrecoverable state where the last indexed height (the height we
+                        // start processing at after restart) is ahead of the application's last processed height (requiring the application
+                        // to process a non-contiguous log).
                         self.finalizer_metadata
                             .put(latest_key.clone(), next.to_be_bytes().to_vec());
                         self.finalizer_metadata
