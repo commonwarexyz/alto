@@ -276,15 +276,22 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     // Check if the next block is available
                     let next = last_indexed + 1;
                     if let Some(block) = orchestor.get(next).await {
-                        // Update metadata
+                        // In an application that maintains state, you would compute the state transition function here.
+                        //
+                        // If there is an unclean shutdown, it is possible that the application may be ahead of the first
+                        // block processed after restart.
+
+                        // Update last indexed metadata after application (if exists) has applied state transition function.
+                        //
+                        // If we updated metadata before the application applied the state transition function, an unclean
+                        // shutdown could put the application in an unrecoverable state where the last indexed height is ahead
+                        // of the application's last processed height.
                         self.finalizer_metadata
                             .put(latest_key.clone(), next.to_be_bytes().to_vec());
                         self.finalizer_metadata
                             .sync()
                             .await
                             .expect("Failed to sync finalizer");
-
-                        // In an application that maintains state, you would compute the state transition function here.
 
                         // Update the latest indexed
                         self.contiguous_height.set(next as i64);
