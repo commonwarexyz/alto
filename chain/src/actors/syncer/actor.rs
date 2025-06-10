@@ -269,7 +269,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     0
                 };
 
-                // Index all finalized blocks
+                // Index all finalized blocks.
                 //
                 // If using state sync, this is not necessary.
                 loop {
@@ -278,10 +278,10 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     if let Some(block) = orchestor.get(next).await {
                         // In an application that maintains state, you would compute the state transition function here.
                         //
-                        // After an unclean shutdown (where the indexer metadata is not synced after the height is processed), it is
-                        // possible that the application may see a block it already processed after restart (which it can simply ignore).
+                        // After an unclean shutdown (where the finalizer metadata is not synced after some height is processed by the application),
+                        // it is possible that the application may be asked to process a block it has already seen (which it can simply ignore).
 
-                        // Update last indexed metadata (after application has applied state transition function).
+                        // Update last indexed metadata.
                         //
                         // If we updated metadata before the application applied its state transition function, an unclean
                         // shutdown could put the application in an unrecoverable state where the last indexed height (the height we
