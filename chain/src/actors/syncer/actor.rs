@@ -286,7 +286,9 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                         // If we updated the finalizer metadata before the application applied its state transition function, an unclean
                         // shutdown could put the application in an unrecoverable state where the last indexed height (the height we
                         // start processing at after restart) is ahead of the application's last processed height (requiring the application
-                        // to process a non-contiguous log).
+                        // to process a non-contiguous log). For the same reason, the application should sync any cached disk changes after processing
+                        // its state transition function to ensure that the application can continue processing from the the last synced indexed height
+                        // (on restart).
                         self.finalizer_metadata
                             .put(latest_key.clone(), next.to_be_bytes().to_vec());
                         self.finalizer_metadata
