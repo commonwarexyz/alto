@@ -281,9 +281,9 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                         // After an unclean shutdown (where the finalizer metadata is not synced after some height is processed by the application),
                         // it is possible that the application may be asked to process a block it has already seen (which it can simply ignore).
 
-                        // Update last indexed metadata.
+                        // Update finalizer metadata.
                         //
-                        // If we updated metadata before the application applied its state transition function, an unclean
+                        // If we updated the finalizer metadata before the application applied its state transition function, an unclean
                         // shutdown could put the application in an unrecoverable state where the last indexed height (the height we
                         // start processing at after restart) is ahead of the application's last processed height (requiring the application
                         // to process a non-contiguous log).
