@@ -26,7 +26,7 @@ use commonware_storage::{
     translator::TwoCap,
 };
 use commonware_utils::array::{FixedBytes, U64};
-use futures::{channel::mpsc, StreamExt};
+use futures::{channel::mpsc, try_join, StreamExt};
 use governor::{clock::Clock as GClock, Quota};
 use prometheus_client::metrics::gauge::Gauge;
 use rand::Rng;
@@ -36,8 +36,14 @@ use std::{
 };
 use tracing::{debug, info, warn};
 
-const REPLAY_BUFFER: usize = 8 * 1024 * 1024;
-const WRITE_BUFFER: usize = 1024 * 1024;
+const PRUNABLE_ITEMS_PER_SECTION: u64 = 4_096;
+const IMMUTABLE_ITEMS_PER_SECTION: u64 = 262_144;
+const FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
+const FREEZER_TABLE_RESIZE_FREQUENCY: u8 = 4;
+const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // 3MB
+const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
+const REPLAY_BUFFER: usize = 8 * 1024 * 1024; // 8MB
+const WRITE_BUFFER: usize = 1024 * 1024; // 1MB
 
 /// Application actor.
 pub struct Actor<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> {
@@ -80,9 +86,9 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         let verified = prunable::Archive::init(
             context.with_label("verified_archive"),
             prunable::Config {
-                partition: format!("{}-verifications", config.partition_prefix),
+                partition: format!("{}-verified", config.partition_prefix),
                 translator: TwoCap,
-                items_per_section: 1024,
+                items_per_section: PRUNABLE_ITEMS_PER_SECTION,
                 compression: None,
                 codec_config: (),
                 replay_buffer: REPLAY_BUFFER,
@@ -98,9 +104,9 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         let notarized = prunable::Archive::init(
             context.with_label("notarized_archive"),
             prunable::Config {
-                partition: format!("{}-notarizations", config.partition_prefix),
+                partition: format!("{}-notarized", config.partition_prefix),
                 translator: TwoCap,
-                items_per_section: 1024,
+                items_per_section: PRUNABLE_ITEMS_PER_SECTION,
                 compression: None,
                 codec_config: (),
                 replay_buffer: REPLAY_BUFFER,
@@ -116,22 +122,22 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         let finalized = immutable::Archive::init(
             context.with_label("finalized_archive"),
             immutable::Config {
-                metadata_partition: format!("{}-finalizations", config.partition_prefix),
+                metadata_partition: format!("{}-finalized-metadata", config.partition_prefix),
                 freezer_table_partition: format!(
-                    "{}-finalizations-freezer",
+                    "{}-finalized-freezer-table",
                     config.partition_prefix
                 ),
-                freezer_table_initial_size: 1024,
-                freezer_table_resize_frequency: 4,
-                freezer_table_resize_chunk_size: 1024,
+                freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
+                freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
                 freezer_journal_partition: format!(
-                    "{}-finalizations-journal",
+                    "{}-finalized-freezer-journal",
                     config.partition_prefix
                 ),
-                freezer_journal_target_size: 1024,
+                freezer_journal_target_size: FREEZER_JOURNAL_TARGET_SIZE,
                 freezer_journal_compression: None,
-                ordinal_partition: format!("{}-finalizations-ordinals", config.partition_prefix),
-                items_per_section: 1024,
+                ordinal_partition: format!("{}-finalized-ordinal", config.partition_prefix),
+                items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
                 codec_config: (),
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
@@ -146,16 +152,22 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         let blocks = immutable::Archive::init(
             context.with_label("block_archive"),
             immutable::Config {
-                metadata_partition: format!("{}-blocks", config.partition_prefix),
-                freezer_table_partition: format!("{}-blocks-freezer", config.partition_prefix),
-                freezer_table_initial_size: 1024,
-                freezer_table_resize_frequency: 4,
-                freezer_table_resize_chunk_size: 1024,
-                freezer_journal_partition: format!("{}-blocks-journal", config.partition_prefix),
-                freezer_journal_target_size: 1024,
+                metadata_partition: format!("{}-blocks-metadata", config.partition_prefix),
+                freezer_table_partition: format!(
+                    "{}-blocks-freezer-table",
+                    config.partition_prefix
+                ),
+                freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
+                freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
+                freezer_journal_partition: format!(
+                    "{}-blocks-freezer-journal",
+                    config.partition_prefix
+                ),
+                freezer_journal_target_size: FREEZER_JOURNAL_TARGET_SIZE,
                 freezer_journal_compression: None,
-                ordinal_partition: format!("{}-blocks-ordinals", config.partition_prefix),
-                items_per_section: 1024,
+                ordinal_partition: format!("{}-blocks-ordinal", config.partition_prefix),
+                items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
                 codec_config: (),
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
@@ -354,7 +366,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                         }
                         Message::Verified { view, payload } => {
                             match self.verified
-                                .put(view, payload.digest(), payload)
+                                .put_sync(view, payload.digest(), payload)
                                 .await {
                                     Ok(_) => {
                                         debug!(view, "verified block stored");
@@ -498,27 +510,19 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                     });
                                 }
 
-                                // Persist the finalization
-                                self.finalized
-                                    .put_sync(height, proposal.payload, finalization)
-                                    .await
-                                    .expect("Failed to insert finalization");
-                                self.blocks
-                                    .put_sync(height, digest, block)
-                                    .await
-                                    .expect("Failed to insert finalized block");
+                                // Persist the finalization and block
+                                let finalized = self.finalized
+                                    .put_sync(height, proposal.payload, finalization);
+                                let blocks = self.blocks
+                                    .put_sync(height, digest, block);
+                                try_join!(finalized, blocks).expect("Failed to persist finalization and block");
                                 debug!(view, height, "finalized block stored");
 
                                 // Prune blocks
                                 let min_view = last_view_processed.saturating_sub(self.activity_timeout);
-                                self.verified
-                                    .prune(min_view)
-                                    .await
-                                    .expect("Failed to prune verified block");
-                                self.notarized
-                                    .prune(min_view)
-                                    .await
-                                    .expect("Failed to prune notarized block");
+                                let verified = self.verified.prune(min_view);
+                                let notarized = self.notarized.prune(min_view);
+                                try_join!(verified, notarized).expect("Failed to prune verified and notarized blocks");
                                 debug!(min_view, "pruned verified and notarized archives");
 
                                 // Notify finalizer
@@ -624,7 +628,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 let verified = self.verified.get(Identifier::Key(&target_block)).await.expect("Failed to get verified block");
                                 if let Some(verified) = verified {
                                     let height = verified.height;
-                                    self.blocks.put(height, target_block, verified).await.expect("Failed to insert finalized block");
+                                    self.blocks.put_sync(height, target_block, verified).await.expect("Failed to insert finalized block");
                                     debug!(height, "repaired block from verified");
                                     result.send(true).expect("Failed to send repair result");
                                     continue;
@@ -632,7 +636,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                 let notarization = self.notarized.get(Identifier::Key(&target_block)).await.expect("Failed to get notarized block");
                                 if let Some(notarization) = notarization {
                                     let height = notarization.block.height;
-                                    self.blocks.put(height, target_block, notarization.block).await.expect("Failed to insert finalized block");
+                                    self.blocks.put_sync(height, target_block, notarization.block).await.expect("Failed to insert finalized block");
                                     debug!(height, "repaired block from notarizations");
                                     result.send(true).expect("Failed to send repair result");
                                     continue;
@@ -749,7 +753,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                     // Persist the notarization
                                     let _ = response.send(true);
                                     match self.notarized
-                                        .put(view, notarization.block.digest(), notarization)
+                                        .put_sync(view, notarization.block.digest(), notarization)
                                         .await {
                                         Ok(_) => {
                                             debug!(view, "notarized stored");
@@ -784,17 +788,12 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                     debug!(height, "received finalization");
                                     let _ = response.send(true);
 
-                                    // Persist the finalization
-                                    self.finalized
-                                        .put(height, finalization.block.digest(), finalization.proof)
-                                        .await
-                                        .expect("Failed to insert finalization");
-
-                                    // Persist the block
-                                    self.blocks
-                                        .put(height, finalization.block.digest(), finalization.block)
-                                        .await
-                                        .expect("Failed to insert finalized block");
+                                    // Persist the finalization and block
+                                    let finalized = self.finalized
+                                        .put_sync(height, finalization.block.digest(), finalization.proof);
+                                    let blocks = self.blocks
+                                        .put_sync(height, finalization.block.digest(), finalization.block);
+                                    try_join!(finalized, blocks).expect("Failed to persist finalization and block");
 
                                     // Notify finalizer
                                     let _ = finalizer_sender.try_send(());
@@ -816,7 +815,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                                     debug!(?digest, height = block.height, "received block");
                                     let _ = response.send(true);
                                     self.blocks
-                                        .put(block.height, digest, block)
+                                        .put_sync(block.height, digest, block)
                                         .await
                                         .expect("Failed to insert finalized block");
 

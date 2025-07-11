@@ -5,6 +5,7 @@ use super::{
 };
 use crate::actors::syncer;
 use alto_types::Block;
+use commonware_consensus::threshold_simplex::types::View;
 use commonware_cryptography::{Digestible, Hasher, Sha256};
 use commonware_macros::select;
 use commonware_runtime::{Clock, Handle, Metrics, Spawner};
@@ -84,7 +85,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
         let genesis_parent = self.hasher.finalize();
         let genesis = Block::new(genesis_parent, 0, 0);
         let genesis_digest = genesis.digest();
-        let built: Option<Block> = None;
+        let built: Option<(View, Block)> = None;
         let built = Arc::new(Mutex::new(built));
         while let Some(message) = self.mailbox.next().await {
             match message {
@@ -125,7 +126,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                     let digest = block.digest();
                                     {
                                         let mut built = built.lock().unwrap();
-                                        *built = Some(block);
+                                        *built = Some((view, block));
                                     }
 
                                     // Send the digest to the consensus
@@ -148,8 +149,13 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     };
 
                     // Send the block to the syncer
-                    info!(?payload, "broadcast requested");
-                    syncer.broadcast(built.clone()).await;
+                    info!(
+                        ?payload,
+                        view = built.0,
+                        height = built.1.height,
+                        "broadcast requested"
+                    );
+                    syncer.broadcast(built.1.clone()).await;
                 }
                 Message::Verify {
                     view,
