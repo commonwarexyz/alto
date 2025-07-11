@@ -84,7 +84,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         // Initialize verified blocks
         let start = Instant::now();
         let verified = prunable::Archive::init(
-            context.with_label("verified_archive"),
+            context.with_label("verified"),
             prunable::Config {
                 partition: format!("{}-verified", config.partition_prefix),
                 translator: TwoCap,
@@ -102,7 +102,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         // Initialize notarized blocks
         let start = Instant::now();
         let notarized = prunable::Archive::init(
-            context.with_label("notarized_archive"),
+            context.with_label("notarized"),
             prunable::Config {
                 partition: format!("{}-notarized", config.partition_prefix),
                 translator: TwoCap,
@@ -120,7 +120,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         // Initialize finalizations
         let start = Instant::now();
         let finalized = immutable::Archive::init(
-            context.with_label("finalized_archive"),
+            context.with_label("finalized"),
             immutable::Config {
                 metadata_partition: format!("{}-finalized-metadata", config.partition_prefix),
                 freezer_table_partition: format!(
@@ -150,7 +150,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         // Initialize blocks
         let start = Instant::now();
         let blocks = immutable::Archive::init(
-            context.with_label("block_archive"),
+            context.with_label("blocks"),
             immutable::Config {
                 metadata_partition: format!("{}-blocks-metadata", config.partition_prefix),
                 freezer_table_partition: format!(
