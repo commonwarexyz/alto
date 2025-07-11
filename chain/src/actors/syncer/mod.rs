@@ -29,7 +29,7 @@ pub struct Config<I: Indexer> {
     /// The initial size of the freezer table for blocks.
     pub blocks_freezer_table_initial_size: u32,
 
-    /// The initial size of the freezer table for finalized blocks.
+    /// The initial size of the freezer table for finalizations.
     pub finalized_freezer_table_initial_size: u32,
 
     /// Number of messages from consensus to hold in our backlog
