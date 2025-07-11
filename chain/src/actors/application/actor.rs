@@ -22,7 +22,7 @@ use std::{
     pin::Pin,
     sync::{Arc, Mutex},
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 // Define a future that checks if the oneshot channel is closed using a mutable reference
 struct ChannelClosedFuture<'a, T> {
@@ -149,7 +149,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     };
 
                     // Send the block to the syncer
-                    info!(
+                    debug!(
                         ?payload,
                         view = built.0,
                         height = built.1.height,

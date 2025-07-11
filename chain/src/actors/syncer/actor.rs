@@ -317,7 +317,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                         // Update the latest indexed
                         self.contiguous_height.set(next as i64);
                         last_indexed = next;
-                        debug!(height = next, "indexed finalized block");
+                        info!(height = next, "indexed finalized block");
 
                         // Update last view processed (if we have a finalization for this block)
                         orchestor.processed(next, block.digest()).await;
