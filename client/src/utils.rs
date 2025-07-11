@@ -1,7 +1,7 @@
 use crate::{Client, Error};
 
 fn healthy_path(base: String) -> String {
-    format!("{}/health", base)
+    format!("{base}/health")
 }
 
 impl Client {

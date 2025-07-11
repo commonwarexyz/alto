@@ -7,37 +7,37 @@ use futures::{channel::mpsc::unbounded, Stream, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::Message as TMessage};
 
 fn seed_upload_path(base: String) -> String {
-    format!("{}/seed", base)
+    format!("{base}/seed")
 }
 
 fn seed_get_path(base: String, query: &IndexQuery) -> String {
-    format!("{}/seed/{}", base, query.serialize())
+    format!("{base}/seed/{}", query.serialize())
 }
 
 fn notarization_upload_path(base: String) -> String {
-    format!("{}/notarization", base)
+    format!("{base}/notarization")
 }
 
 fn notarization_get_path(base: String, query: &IndexQuery) -> String {
-    format!("{}/notarization/{}", base, query.serialize())
+    format!("{base}/notarization/{}", query.serialize())
 }
 
 fn finalization_upload_path(base: String) -> String {
-    format!("{}/finalization", base)
+    format!("{base}/finalization")
 }
 
 fn finalization_get_path(base: String, query: &IndexQuery) -> String {
-    format!("{}/finalization/{}", base, query.serialize())
+    format!("{base}/finalization/{}", query.serialize())
 }
 
 /// There is no block upload path. Blocks are uploaded as a byproduct of notarization
 /// and finalization uploads.
 fn block_get_path(base: String, query: &Query) -> String {
-    format!("{}/block/{}", base, query.serialize())
+    format!("{base}/block/{}", query.serialize())
 }
 
 fn listen_path(base: String) -> String {
-    format!("{}/consensus/ws", base)
+    format!("{base}/consensus/ws")
 }
 
 pub enum Payload {
