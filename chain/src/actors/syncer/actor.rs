@@ -21,11 +21,11 @@ use commonware_p2p::{utils::requester, Receiver, Recipients, Sender};
 use commonware_resolver::{p2p, Resolver};
 use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
 use commonware_storage::{
-    archive::{self, Archive, Identifier},
-    index::translator::{EightCap, TwoCap},
+    archive::{immutable, prunable, Archive as _, Identifier},
     metadata::{self, Metadata},
+    translator::{EightCap, TwoCap},
 };
-use commonware_utils::array::FixedBytes;
+use commonware_utils::array::{FixedBytes, U64};
 use futures::{channel::mpsc, StreamExt};
 use governor::{clock::Clock as GClock, Quota};
 use prometheus_client::metrics::gauge::Gauge;
@@ -37,7 +37,6 @@ use std::{
 use tracing::{debug, info, warn};
 
 const REPLAY_BUFFER: usize = 8 * 1024 * 1024;
-const REPLAY_CONCURRENCY: usize = 4;
 const WRITE_BUFFER: usize = 1024 * 1024;
 
 /// Application actor.
@@ -53,19 +52,19 @@ pub struct Actor<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Index
     indexer: Option<I>,
 
     // Blocks verified stored by view<>digest
-    verified: Archive<TwoCap, R, Digest, Block>,
+    verified: prunable::Archive<TwoCap, R, Digest, Block>,
     // Blocks notarized stored by view<>digest
-    notarized: Archive<TwoCap, R, Digest, Notarized>,
+    notarized: prunable::Archive<TwoCap, R, Digest, Notarized>,
 
     // Finalizations stored by height
-    finalized: Archive<EightCap, R, Digest, Finalization>,
+    finalized: immutable::Archive<R, Digest, Finalization>,
     // Blocks finalized stored by height
     //
     // We store this separately because we may not have the finalization for a block
-    blocks: Archive<EightCap, R, Digest, Block>,
+    blocks: immutable::Archive<R, Digest, Block>,
 
     // Finalizer storage
-    finalizer_metadata: Metadata<R, FixedBytes<1>>,
+    metadata: Metadata<R, FixedBytes<1>, U64>,
 
     // Latest height metric
     finalized_height: Gauge,
@@ -78,14 +77,12 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
     pub async fn init(context: R, config: Config<I>) -> (Self, Mailbox) {
         // Initialize verified blocks
         let start = Instant::now();
-        let verified_archive = Archive::init(
+        let verified = prunable::Archive::init(
             context.with_label("verified_archive"),
-            archive::Config {
+            prunable::Config {
                 partition: format!("{}-verifications", config.partition_prefix),
                 translator: TwoCap,
-                section_mask: 0xffff_ffff_ffff_f000u64,
-                pending_writes: 0,
-                replay_concurrency: REPLAY_CONCURRENCY,
+                items_per_section: 1024,
                 compression: None,
                 codec_config: (),
                 replay_buffer: REPLAY_BUFFER,
@@ -98,14 +95,12 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
         // Initialize notarized blocks
         let start = Instant::now();
-        let notarized_archive = Archive::init(
+        let notarized = prunable::Archive::init(
             context.with_label("notarized_archive"),
-            archive::Config {
+            prunable::Config {
                 partition: format!("{}-notarizations", config.partition_prefix),
                 translator: TwoCap,
-                section_mask: 0xffff_ffff_ffff_f000u64,
-                pending_writes: 0,
-                replay_concurrency: REPLAY_CONCURRENCY,
+                items_per_section: 1024,
                 compression: None,
                 codec_config: (),
                 replay_buffer: REPLAY_BUFFER,
@@ -118,15 +113,25 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
         // Initialize finalizations
         let start = Instant::now();
-        let finalized_archive = Archive::init(
+        let finalized = immutable::Archive::init(
             context.with_label("finalized_archive"),
-            archive::Config {
-                partition: format!("{}-finalizations", config.partition_prefix),
-                translator: EightCap,
-                section_mask: 0xffff_ffff_fff0_0000u64,
-                pending_writes: 0,
-                replay_concurrency: REPLAY_CONCURRENCY,
-                compression: None,
+            immutable::Config {
+                metadata_partition: format!("{}-finalizations", config.partition_prefix),
+                freezer_table_partition: format!(
+                    "{}-finalizations-freezer",
+                    config.partition_prefix
+                ),
+                freezer_table_initial_size: 1024,
+                freezer_table_resize_frequency: 1024,
+                freezer_table_resize_chunk_size: 1024,
+                freezer_journal_partition: format!(
+                    "{}-finalizations-journal",
+                    config.partition_prefix
+                ),
+                freezer_journal_target_size: 1024,
+                freezer_journal_compression: None,
+                ordinal_partition: format!("{}-finalizations-ordinals", config.partition_prefix),
+                items_per_section: 1024,
                 codec_config: (),
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
@@ -138,15 +143,19 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
 
         // Initialize blocks
         let start = Instant::now();
-        let block_archive = Archive::init(
+        let blocks = immutable::Archive::init(
             context.with_label("block_archive"),
-            archive::Config {
-                partition: format!("{}-blocks", config.partition_prefix),
-                translator: EightCap,
-                section_mask: 0xffff_ffff_fff0_0000u64,
-                pending_writes: 0,
-                replay_concurrency: REPLAY_CONCURRENCY,
-                compression: None,
+            immutable::Config {
+                metadata_partition: format!("{}-blocks", config.partition_prefix),
+                freezer_table_partition: format!("{}-blocks-freezer", config.partition_prefix),
+                freezer_table_initial_size: 1024,
+                freezer_table_resize_frequency: 1024,
+                freezer_table_resize_chunk_size: 1024,
+                freezer_journal_partition: format!("{}-blocks-journal", config.partition_prefix),
+                freezer_journal_target_size: 1024,
+                freezer_journal_compression: None,
+                ordinal_partition: format!("{}-blocks-ordinals", config.partition_prefix),
+                items_per_section: 1024,
                 codec_config: (),
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
@@ -157,14 +166,15 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
         info!(elapsed = ?start.elapsed(), "restored block archive");
 
         // Initialize finalizer metadata
-        let finalizer_metadata = Metadata::init(
-            context.with_label("finalizer_metadata"),
+        let metadata = Metadata::init(
+            context.with_label("metadata"),
             metadata::Config {
-                partition: format!("{}-finalizer_metadata", config.partition_prefix),
+                partition: format!("{}-metadata", config.partition_prefix),
+                codec_config: (),
             },
         )
         .await
-        .expect("Failed to initialize finalizer metadata");
+        .expect("Failed to initialize metadata");
 
         // Create metrics
         let finalized_height = Gauge::default();
@@ -194,13 +204,11 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                 activity_timeout: config.activity_timeout,
                 indexer: config.indexer,
 
-                verified: verified_archive,
-                notarized: notarized_archive,
-
-                finalized: finalized_archive,
-                blocks: block_archive,
-
-                finalizer_metadata,
+                verified,
+                notarized,
+                finalized,
+                blocks,
+                metadata,
 
                 finalized_height,
                 contiguous_height,
