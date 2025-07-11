@@ -42,6 +42,7 @@ const FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FREEZER_TABLE_RESIZE_FREQUENCY: u8 = 4;
 const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // 3MB
 const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
+const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: usize = 8 * 1024 * 1024; // 8MB
 const WRITE_BUFFER: usize = 1024 * 1024; // 1MB
 
@@ -135,7 +136,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     config.partition_prefix
                 ),
                 freezer_journal_target_size: FREEZER_JOURNAL_TARGET_SIZE,
-                freezer_journal_compression: None,
+                freezer_journal_compression: FREEZER_JOURNAL_COMPRESSION,
                 ordinal_partition: format!("{}-finalized-ordinal", config.partition_prefix),
                 items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
                 codec_config: (),
@@ -165,7 +166,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     config.partition_prefix
                 ),
                 freezer_journal_target_size: FREEZER_JOURNAL_TARGET_SIZE,
-                freezer_journal_compression: None,
+                freezer_journal_compression: FREEZER_JOURNAL_COMPRESSION,
                 ordinal_partition: format!("{}-blocks-ordinal", config.partition_prefix),
                 items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
                 codec_config: (),
