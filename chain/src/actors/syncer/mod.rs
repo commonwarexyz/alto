@@ -42,6 +42,6 @@ pub struct Config<I: Indexer> {
     /// The timeout for pruning consensus activity.
     pub activity_timeout: u64,
 
-    /// The indexer to use for storing blocks and finalizations.
+    /// The indexer to invoke when storing blocks and finalizations.
     pub indexer: Option<I>,
 }
