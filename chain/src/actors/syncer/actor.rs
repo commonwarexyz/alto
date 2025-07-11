@@ -38,7 +38,6 @@ use tracing::{debug, info, warn};
 
 const PRUNABLE_ITEMS_PER_SECTION: u64 = 4_096;
 const IMMUTABLE_ITEMS_PER_SECTION: u64 = 262_144;
-const FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FREEZER_TABLE_RESIZE_FREQUENCY: u8 = 4;
 const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // 3MB
 const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
@@ -128,7 +127,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     "{}-finalized-freezer-table",
                     config.partition_prefix
                 ),
-                freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                freezer_table_initial_size: config.finalized_freezer_table_initial_size,
                 freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
                 freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
                 freezer_journal_partition: format!(
@@ -158,7 +157,7 @@ impl<R: Rng + Spawner + Metrics + Clock + GClock + Storage, I: Indexer> Actor<R,
                     "{}-blocks-freezer-table",
                     config.partition_prefix
                 ),
-                freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                freezer_table_initial_size: config.blocks_freezer_table_initial_size,
                 freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
                 freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
                 freezer_journal_partition: format!(

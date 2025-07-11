@@ -40,6 +40,8 @@ const FETCH_CONCURRENT: usize = 4;
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 const MAX_FETCH_COUNT: usize = 16;
 const MAX_FETCH_SIZE: usize = 512 * 1024;
+const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
+const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
 fn main() {
     // Parse arguments
@@ -229,6 +231,8 @@ fn main() {
         let config = engine::Config {
             blocker: oracle,
             partition_prefix: "engine".to_string(),
+            blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
+            finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
             signer,
             polynomial,
             share,

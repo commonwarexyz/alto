@@ -115,6 +115,10 @@ mod tests {
     use std::{sync::atomic::AtomicBool, time::Duration};
     use tracing::info;
 
+    /// Limit the freezer table size to 1MB because the deterministic runtime stores
+    /// everything in RAM.
+    const FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(14); // 1MB
+
     /// MockIndexer is a simple indexer implementation for testing.
     #[derive(Clone)]
     struct MockIndexer {
@@ -276,6 +280,8 @@ mod tests {
                 let config: Config<_, MockIndexer> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
+                    blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                    finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     signer,
                     polynomial: polynomial.clone(),
                     share: shares[idx].clone(),
@@ -448,6 +454,8 @@ mod tests {
                 let config: Config<_, MockIndexer> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
+                    blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                    finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     signer: signer.clone(),
                     polynomial: polynomial.clone(),
                     share: shares[idx].clone(),
@@ -534,6 +542,8 @@ mod tests {
             let config: Config<_, MockIndexer> = engine::Config {
                 blocker: oracle.control(public_key.clone()),
                 partition_prefix: uid.clone(),
+                blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                 signer: signer.clone(),
                 polynomial: polynomial.clone(),
                 share,
@@ -667,6 +677,8 @@ mod tests {
                     let config: Config<_, MockIndexer> = engine::Config {
                         blocker: oracle.control(public_key.clone()),
                         partition_prefix: uid.clone(),
+                        blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                        finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                         signer,
                         polynomial: polynomial.clone(),
                         share: shares[idx].clone(),
@@ -836,6 +848,8 @@ mod tests {
                 let config: Config<_, MockIndexer> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
+                    blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                    finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     signer,
                     polynomial: polynomial.clone(),
                     share: shares[idx].clone(),
