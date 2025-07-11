@@ -243,8 +243,8 @@ fn generate_local(
     // Construct output path
     let raw_current_dir = std::env::current_dir().unwrap();
     let current_dir = raw_current_dir.to_str().unwrap();
-    let output = format!("{}/{}", current_dir, output);
-    let storage_output = format!("{}/storage", output);
+    let output = format!("{current_dir}/{output}");
+    let storage_output = format!("{output}/storage");
 
     // Check if output directory exists
     if fs::metadata(&output).is_ok() {
@@ -290,8 +290,8 @@ fn generate_local(
             name.clone(),
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
         );
-        let peer_config_file = format!("{}.yaml", name);
-        let directory = format!("{}/{}", storage_output, name);
+        let peer_config_file = format!("{name}.yaml");
+        let directory = format!("{storage_output}/{name}");
         let peer_config = Config {
             private_key: signer.to_string(),
             share: hex(&share.encode()),
@@ -321,13 +321,13 @@ fn generate_local(
     fs::create_dir_all(&storage_output).unwrap();
 
     // Write peers file
-    let peers_path = format!("{}/peers.yaml", output);
+    let peers_path = format!("{output}/peers.yaml");
     let file = fs::File::create(&peers_path).unwrap();
     serde_yaml::to_writer(file, &Peers { addresses }).unwrap();
 
     // Write configuration files
     for (_, peer_config_file, peer_config) in &configurations {
-        let path = format!("{}/{}", output, peer_config_file);
+        let path = format!("{output}/{peer_config_file}");
         let file = fs::File::create(&path).unwrap();
         serde_yaml::to_writer(file, peer_config).unwrap();
         info!(path = peer_config_file, "wrote peer configuration file");
@@ -337,12 +337,10 @@ fn generate_local(
     info!(?bootstrappers, "setup complete");
     println!("To start validators, run:");
     for (name, peer_config_file, _) in &configurations {
-        let path = format!("{}/{}", output, peer_config_file);
-        let command = format!(
-            "cargo run --bin {} -- --peers={} --config={}",
-            BINARY_NAME, peers_path, path
-        );
-        println!("{}: {}", name, command);
+        let path = format!("{output}/{peer_config_file}");
+        let command =
+            format!("cargo run --bin {BINARY_NAME} -- --peers={peers_path} --config={path}");
+        println!("{name}: {command}");
     }
     println!("To view metrics, run:");
     for (name, _, peer_config) in configurations {
@@ -388,7 +386,7 @@ fn generate_remote(
     // Construct output path
     let raw_current_dir = std::env::current_dir().unwrap();
     let current_dir = raw_current_dir.to_str().unwrap();
-    let output = format!("{}/{}", current_dir, output);
+    let output = format!("{current_dir}/{output}");
 
     // Check if output directory exists
     if fs::metadata(&output).is_ok() {
@@ -437,7 +435,7 @@ fn generate_remote(
     for (index, signer) in peer_signers.iter().enumerate() {
         // Create peer config
         let name = signer.public_key().to_string();
-        let peer_config_file = format!("{}.yaml", name);
+        let peer_config_file = format!("{name}.yaml");
         let peer_config = Config {
             private_key: signer.to_string(),
             share: hex(&shares[index].encode()),
@@ -496,17 +494,17 @@ fn generate_remote(
     // Write configuration files
     fs::create_dir_all(&output).unwrap();
     fs::copy(
-        format!("{}/{}", current_dir, dashboard),
-        format!("{}/{}", output, DASHBOARD_FILE),
+        format!("{current_dir}/{dashboard}"),
+        format!("{output}/{DASHBOARD_FILE}"),
     )
     .unwrap();
     for (peer_config_file, peer_config) in peer_configs {
-        let path = format!("{}/{}", output, peer_config_file);
+        let path = format!("{output}/{peer_config_file}");
         let file = fs::File::create(&path).unwrap();
         serde_yaml::to_writer(file, &peer_config).unwrap();
         info!(path = peer_config_file, "wrote peer configuration file");
     }
-    let path = format!("{}/config.yaml", output);
+    let path = format!("{output}/config.yaml");
     let file = fs::File::create(&path).unwrap();
     serde_yaml::to_writer(file, &config).unwrap();
     info!(path = "config.yaml", "wrote configuration file");
@@ -522,7 +520,7 @@ fn indexer(sub_matches: &ArgMatches) {
     // Construct directory path
     let raw_current_dir = std::env::current_dir().unwrap();
     let current_dir = raw_current_dir.to_str().unwrap();
-    let dir = format!("{}/{}", current_dir, dir);
+    let dir = format!("{current_dir}/{dir}");
 
     // Check if directory exists
     if fs::metadata(&dir).is_err() {
@@ -531,7 +529,7 @@ fn indexer(sub_matches: &ArgMatches) {
     }
 
     // Read config.yaml to get peer-to-region mappings
-    let config_path = format!("{}/config.yaml", dir);
+    let config_path = format!("{dir}/config.yaml");
     let config_content = fs::read_to_string(&config_path).expect("failed to read config.yaml");
     let config: ec2::Config =
         serde_yaml::from_str(&config_content).expect("failed to parse config.yaml");
@@ -577,8 +575,8 @@ fn indexer(sub_matches: &ArgMatches) {
 
     // Update configuration files for selected peers
     for peer_name in &selected {
-        let config_file = format!("{}/{}.yaml", dir, peer_name);
-        let relative_path = format!("{}.yaml", peer_name);
+        let config_file = format!("{dir}/{peer_name}.yaml");
+        let relative_path = format!("{peer_name}.yaml");
         match fs::read_to_string(&config_file) {
             Ok(content) => match serde_yaml::from_str::<Config>(&content) {
                 Ok(mut config) => {
@@ -653,7 +651,7 @@ fn explorer(sub_matches: &ArgMatches) {
         .clone();
 
     // Collect all locations
-    let config_path = format!("{}/config.yaml", dir);
+    let config_path = format!("{dir}/config.yaml");
     let config_content = std::fs::read_to_string(&config_path).expect("failed to read config.yaml");
     let config: ec2::Config =
         serde_yaml::from_str(&config_content).expect("failed to parse config.yaml");
@@ -699,7 +697,7 @@ fn explorer(sub_matches: &ArgMatches) {
     );
 
     // Write config.ts
-    let config_ts_path = format!("{}/config.ts", dir);
+    let config_ts_path = format!("{dir}/config.ts");
     std::fs::write(&config_ts_path, config_ts).expect("failed to write config.ts");
     info!(path = "config.ts", "wrote explorer configuration file");
 }

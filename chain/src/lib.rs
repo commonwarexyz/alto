@@ -272,7 +272,7 @@ mod tests {
                 public_keys.insert(public_key.clone());
 
                 // Configure engine
-                let uid = format!("validator-{}", public_key);
+                let uid = format!("validator-{public_key}");
                 let config: Config<_, MockIndexer> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
@@ -444,7 +444,7 @@ mod tests {
 
                 // Configure engine
                 let public_key = signer.public_key();
-                let uid = format!("validator-{}", public_key);
+                let uid = format!("validator-{public_key}");
                 let config: Config<_, MockIndexer> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
@@ -530,7 +530,7 @@ mod tests {
             let signer = signers[0].clone();
             let share = shares[0].clone();
             let public_key = signer.public_key();
-            let uid = format!("validator-{}", public_key);
+            let uid = format!("validator-{public_key}");
             let config: Config<_, MockIndexer> = engine::Config {
                 blocker: oracle.control(public_key.clone()),
                 partition_prefix: uid.clone(),
@@ -663,7 +663,7 @@ mod tests {
                     public_keys.insert(public_key.clone());
 
                     // Configure engine
-                    let uid = format!("validator-{}", public_key);
+                    let uid = format!("validator-{public_key}");
                     let config: Config<_, MockIndexer> = engine::Config {
                         blocker: oracle.control(public_key.clone()),
                         partition_prefix: uid.clone(),
@@ -832,7 +832,7 @@ mod tests {
                 public_keys.insert(public_key.clone());
 
                 // Configure engine
-                let uid = format!("validator-{}", public_key);
+                let uid = format!("validator-{public_key}");
                 let config: Config<_, MockIndexer> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
