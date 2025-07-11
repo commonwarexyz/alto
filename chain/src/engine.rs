@@ -142,7 +142,6 @@ impl<
                 partition: format!("{}-consensus", cfg.partition_prefix),
                 compression: None,
                 mailbox_size: cfg.mailbox_size,
-                replay_concurrency: 1,
                 leader_timeout: cfg.leader_timeout,
                 notarization_timeout: cfg.notarization_timeout,
                 nullify_retry: cfg.nullify_retry,
