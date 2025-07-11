@@ -69,18 +69,18 @@ const MS_PER_DAY: u64 = 86_400_000;
 
 pub fn format_age(age: u64) -> String {
     if age < MS_PER_SECOND {
-        format!("{}ms", age)
+        format!("{age}ms")
     } else if age < MS_PER_HOUR {
         let seconds = age as f64 / MS_PER_SECOND as f64;
-        format!("{:.1}s", seconds)
+        format!("{seconds:.1}s")
     } else if age < MS_PER_DAY {
         let hours = age as f64 / MS_PER_HOUR as f64;
-        format!("{:.1}h", hours)
+        format!("{hours:.1}h")
     } else {
         let days = age / MS_PER_DAY;
         let remaining_ms = age % MS_PER_DAY;
         let hours = remaining_ms / MS_PER_HOUR;
-        format!("{}d {}h", days, hours)
+        format!("{days}d {hours}h")
     }
 }
 
