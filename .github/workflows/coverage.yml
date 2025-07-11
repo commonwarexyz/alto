@@ -19,8 +19,6 @@ jobs:
       run: echo "rust_version=$(rustc --version)" >> "$GITHUB_OUTPUT"
     - name: Run setup
       uses: ./.github/actions/setup
-      with:
-        rust-version: ${{ steps.rust-version.outputs.rust_version}}
     - name: Install cargo-llvm-cov
       uses: taiki-e/install-action@cargo-llvm-cov
     - name: Generate coverage report
