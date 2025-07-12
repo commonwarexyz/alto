@@ -2750,7 +2750,7 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
+                "w": 6,
                 "x": 0,
                 "y": 64
             },
@@ -2777,7 +2777,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "engine_syncer_block_archive_freezer_resizes_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
+                    "expr": "engine_syncer_blocks_freezer_resizes_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
                     "fullMetaSearch": false,
                     "includeNullMetadata": true,
                     "legendFormat": "Blocks: {{deployer_name}} ({{deployer_ip}})",
@@ -2792,7 +2792,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "engine_syncer_finalized_archive_freezer_resizes_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
+                    "expr": "engine_syncer_finalized_freezer_resizes_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
                     "fullMetaSearch": false,
                     "hide": false,
                     "includeNullMetadata": true,
@@ -2867,8 +2867,8 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
-                "x": 8,
+                "w": 6,
+                "x": 6,
                 "y": 64
             },
             "id": 39,
@@ -2965,8 +2965,8 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
-                "x": 16,
+                "w": 6,
+                "x": 12,
                 "y": 64
             },
             "id": 40,
@@ -2999,6 +2999,104 @@
                 }
             ],
             "title": "Disk Writes per Second",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 0,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    },
+                    "unit": "bytes"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 9,
+                "w": 6,
+                "x": 18,
+                "y": 64
+            },
+            "id": 41,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": false
+                },
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "11.5.2",
+            "targets": [
+                {
+                    "disableTextWrap": false,
+                    "editorMode": "code",
+                    "expr": "node_memory_Cached_bytes{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
+                    "fullMetaSearch": false,
+                    "includeNullMetadata": true,
+                    "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
+                    "range": true,
+                    "refId": "A",
+                    "useBackend": false
+                }
+            ],
+            "title": "Cached Bytes",
             "type": "timeseries"
         },
         {
