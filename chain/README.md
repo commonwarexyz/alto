@@ -90,10 +90,10 @@ _This configuration consumes ~10MB of disk space per hour per validator (~5 view
 ##### USA
 
 ```bash
-cargo run --bin setup -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c7g.4xlarge --monitoring-storage-size 100 --instance-type c7g.large --storage-size 65 --dashboard dashboard.json
+cargo run --bin setup -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c7g.4xlarge --monitoring-storage-size 100 --instance-type c7g.large --storage-size 75 --dashboard dashboard.json
 ```
 
-_This configuration consumes ~26MB of disk space per hour per validator (~13 views per second). With 65GB of storage allocated, validators will exhaust available storage in ~3 months._
+_This configuration consumes ~30MB of disk space per hour per validator (~13 views per second). With 75GB of storage allocated, validators will exhaust available storage in ~3 months._
 
 #### [Optional] Configure Indexer Upload
 
