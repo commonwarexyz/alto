@@ -76,8 +76,8 @@
 .dropdown-menu {
     position: absolute;
     top: 100%;
-    left: 0;
     right: 0;
+    width: 320px;
     background-color: white;
     border: 1px solid #ccc;
     border-top: none;
@@ -304,6 +304,10 @@
         padding: 6px 12px;
     }
 
+    .dropdown-menu {
+        width: 280px;
+    }
+
     .dropdown-option {
         padding: 10px 12px;
     }
@@ -370,6 +374,10 @@
         font-size: 10px;
         min-width: 120px;
         padding: 4px 8px;
+    }
+
+    .dropdown-menu {
+        width: 250px;
     }
 
     .dropdown-option {
