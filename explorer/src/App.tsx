@@ -86,6 +86,7 @@ const App: React.FC = () => {
   const handleSeedRef = useRef<typeof handleSeed>(null!);
   const handleNotarizedRef = useRef<typeof handleNotarization>(null!);
   const handleFinalizedRef = useRef<typeof handleFinalization>(null!);
+  const isInitializedRef = useRef(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const markerIcon = new DivIcon({
@@ -106,6 +107,7 @@ const App: React.FC = () => {
 
       // When switching, we close the old socket. The `onclose` handler for that socket
       // should not trigger a reconnect or error message.
+      isInitializedRef.current = false;
       if (wsRef.current) {
         // Temporarily disable the onclose handler to prevent side-effects.
         wsRef.current.onclose = null;
@@ -563,6 +565,10 @@ const App: React.FC = () => {
       return;
     }
 
+    // Skip if already initialized to prevent duplicate connections during development mode's double-invocation
+    if (isInitializedRef.current) return;
+    isInitializedRef.current = true;
+
     const connectWebSocket = () => {
       // Clear any existing reconnection timers
       if (reconnectTimeoutRef.current) {
@@ -752,7 +758,7 @@ const App: React.FC = () => {
             className="about-header-button"
             onClick={() => setIsAboutModalOpen(true)}
           >
-            ?︎
+            🌐
           </button>
         </div>
       </header>
