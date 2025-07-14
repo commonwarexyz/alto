@@ -24,6 +24,64 @@ interface StatsSectionProps {
     configs: Record<Cluster, ClusterConfig>;
 }
 
+interface CustomDropdownProps {
+    selectedCluster: Cluster;
+    onClusterChange: (cluster: Cluster) => void;
+    configs: Record<Cluster, ClusterConfig>;
+}
+
+const CustomDropdown: React.FC<CustomDropdownProps> = ({ selectedCluster, onClusterChange, configs }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, []);
+
+    const handleSelect = (cluster: Cluster) => {
+        onClusterChange(cluster);
+        setIsOpen(false);
+    };
+
+    return (
+        <div className="custom-dropdown" ref={dropdownRef}>
+            <button
+                className="dropdown-trigger"
+                onClick={() => setIsOpen(!isOpen)}
+                aria-expanded={isOpen}
+                aria-haspopup="listbox"
+            >
+                <span className="dropdown-label">{configs[selectedCluster].name}</span>
+                <span className="dropdown-arrow">{isOpen ? '▲' : '▼'}</span>
+            </button>
+
+            {isOpen && (
+                <div className="dropdown-menu">
+                    {Object.entries(configs).map(([clusterId, config]) => (
+                        <button
+                            key={clusterId}
+                            className={`dropdown-option ${selectedCluster === clusterId ? 'selected' : ''}`}
+                            onClick={() => handleSelect(clusterId as Cluster)}
+                        >
+                            <div className="option-name">{config.name}</div>
+                            <div className="option-description" dangerouslySetInnerHTML={{ __html: config.description }} />
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
 const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onClusterChange, configs }) => {
     // Calculation logic (unchanged from original)
     const notarizationTimes = views
@@ -147,17 +205,11 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onC
             <div className="stats-header">
                 <h2 className="stats-title">Latency</h2>
                 <div className="cluster-toggle">
-                    <select
-                        value={selectedCluster}
-                        onChange={(e) => onClusterChange(e.target.value as Cluster)}
-                        className="cluster-select"
-                    >
-                        {Object.entries(configs).map(([clusterId, config]) => (
-                            <option key={clusterId} value={clusterId}>
-                                {config.name}
-                            </option>
-                        ))}
-                    </select>
+                    <CustomDropdown
+                        selectedCluster={selectedCluster}
+                        onClusterChange={onClusterChange}
+                        configs={configs}
+                    />
                 </div>
             </div>
 
