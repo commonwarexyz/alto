@@ -61,7 +61,7 @@ const initializeLogoAnimations = () => {
 };
 
 const App: React.FC = () => {
-  const [selectedCluster, setSelectedCluster] = useState<Cluster>('usa');
+  const [selectedCluster, setSelectedCluster] = useState<Cluster>('global');
   const clusterConfig = getClusterConfig(selectedCluster);
   const allConfigs = getClusters();
   const PUBLIC_KEY = hexToUint8Array(clusterConfig.PUBLIC_KEY_HEX);
