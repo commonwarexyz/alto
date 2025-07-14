@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './SearchModal.css';
-import { BACKEND_URL, PUBLIC_KEY_HEX } from './global_config';
+import { ClusterConfig } from './config';
 import { FinalizedJs, NotarizedJs, BlockJs, SearchType, SearchResult } from './types';
 import { hexToUint8Array, hexUint8Array, formatAge } from './utils';
 import init, { parse_seed, parse_notarized, parse_finalized, parse_block } from "./alto_types/alto_types.js";
@@ -8,6 +8,7 @@ import init, { parse_seed, parse_notarized, parse_finalized, parse_block } from 
 interface SearchModalProps {
     isOpen: boolean;
     onClose: () => void;
+    clusterConfig: ClusterConfig;
 }
 
 interface SearchResultWithLatency {
@@ -15,9 +16,9 @@ interface SearchResultWithLatency {
     latency: number;
 }
 
-const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
+const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfig }) => {
     const [searchType, setSearchType] = useState<SearchType>('finalization');
-    const [searchQuery, setSearchQuery] = useState<string>('42645..42664');
+    const [searchQuery, setSearchQuery] = useState<string>('latest');
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const [results, setResults] = useState<SearchResultWithLatency[]>([]);
@@ -139,6 +140,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
             throw new Error("Search functionality is still initializing. Please try again in a moment.");
         }
 
+        const { BACKEND_URL, PUBLIC_KEY_HEX } = clusterConfig;
         const baseUrl = `https://${BACKEND_URL}`;
         const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
 
@@ -351,7 +353,9 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose }) => {
                                     type="text"
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    placeholder="Enter number, range, or 'latest'"
+                                    placeholder={
+                                        searchType === 'block' ? "Enter height, digest, or 'latest'" : "Enter view number, range, or 'latest'"
+                                    }
                                 />
                             </div>
 

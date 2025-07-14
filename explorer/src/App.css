@@ -591,3 +591,57 @@ body {
   font-feature-settings: "liga" 0;
   font-variant-emoji: text;
 }
+
+/* USA theme */
+.usa-theme {
+  background-color: #f0f4f8;
+  /* Light blue-gray background */
+}
+
+.usa-theme .app-header,
+.usa-theme .bars-container,
+.usa-theme .stats-card,
+.usa-theme .map-container,
+.usa-theme .cluster-selector-card,
+.usa-theme .about-modal,
+.usa-theme .key-modal,
+.usa-theme .search-modal {
+  border-color: #a0aec0;
+  /* Muted blue-gray border */
+}
+
+.usa-theme .bar-segment.finalized {
+  background-color: rgba(213, 6, 6, 0.1);
+  /* Light red for finalized */
+  border-right-color: #d50606;
+}
+
+.usa-theme .finalization-marker {
+  background-color: #d50606;
+  /* Red for finalization marker */
+}
+
+.usa-theme .latency-text.finalized-latency {
+  color: #d50606;
+}
+
+.usa-theme .notarization-marker {
+  background-color: #002868;
+  /* Blue for notarization marker */
+}
+
+.usa-theme .latency-text.notarized-latency {
+  color: #002868;
+}
+
+.usa-theme .legend-color:nth-child(3) {
+  background-color: #d50606 !important;
+}
+
+.usa-theme .legend-color:nth-child(2) {
+  background-color: #002868 !important;
+}
+
+.usa-theme .stats-card .browser-metrics {
+  border-left: 4px solid #002868;
+}

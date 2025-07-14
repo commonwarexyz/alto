@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { LatLng, DivIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
-import { BACKEND_URL, LOCATIONS, PUBLIC_KEY_HEX } from "./global_config.js";
+import { getClusterConfig, getClusters, Cluster } from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, ViewData } from "./types";
 import { hexToUint8Array, hexUint8Array } from "./utils";
 import "./App.css";
@@ -20,9 +20,9 @@ import './ErrorNotification.css';
 import MaintenancePage from './MaintenancePage';
 import SearchModal from './SearchModal';
 import './SearchModal.css';
+import ClusterSelector from "./ClusterSelector";
+import "./ClusterSelector.css";
 
-// Export PUBLIC_KEY as a Uint8Array for use in the application
-const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
 
 const SCALE_DURATION = 750; // 750ms
 const TIMEOUT_DURATION = 5000; // 5s
@@ -73,6 +73,13 @@ const initializeLogoAnimations = () => {
 };
 
 const App: React.FC = () => {
+  const [selectedCluster, setSelectedCluster] = useState<Cluster>('global');
+  const clusterConfig = getClusterConfig(selectedCluster);
+  const allConfigs = getClusters();
+  const PUBLIC_KEY = hexToUint8Array(clusterConfig.PUBLIC_KEY_HEX);
+  const LOCATIONS = clusterConfig.LOCATIONS;
+  const BACKEND_URL = clusterConfig.BACKEND_URL;
+
   const [views, setViews] = useState<ViewData[]>([]);
   const [lastObservedView, setLastObservedView] = useState<number | null>(null);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
@@ -95,6 +102,40 @@ const App: React.FC = () => {
   const handleFinalizedRef = useRef<typeof handleFinalization>(null!);
   const isInitializedRef = useRef(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const markerIcon = new DivIcon({
+    className: "custom-div-icon",
+    html: `<div style="
+        background-color: ${selectedCluster === 'usa' ? '#002868' : '#0000eeff'};
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        "></div>`,
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+  });
+
+  const appContainerClass = `app-container ${selectedCluster === 'usa' ? 'usa-theme' : ''}`;
+
+  const handleClusterChange = (cluster: Cluster) => {
+    if (cluster !== selectedCluster) {
+      console.log(`Switching to ${cluster} cluster`);
+      setSelectedCluster(cluster);
+
+      // Reset all state
+      setViews([]);
+      setLastObservedView(null);
+      setErrorMessage("");
+      setShowError(false);
+      setConnectionStatusKnown(false);
+      isInitializedRef.current = false;
+
+      // The useEffect for websocket will handle reconnection
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    }
+  };
 
   // Health check function
   const checkHealth = useCallback(async () => {
@@ -125,7 +166,7 @@ const App: React.FC = () => {
       // Mark loading as complete regardless of result
       setIsLoading(false);
     }
-  }, []);
+  }, [BACKEND_URL]);
 
   // Run health check on initial load and periodically
   useEffect(() => {
@@ -309,7 +350,7 @@ const App: React.FC = () => {
 
       return newViews;
     });
-  }, [lastObservedView, adjustTime]);
+  }, [lastObservedView, adjustTime, LOCATIONS]);
 
   const handleNotarization = useCallback((notarized: NotarizedJs) => {
     const view = notarized.proof.view;
@@ -651,7 +692,7 @@ const App: React.FC = () => {
         }
       }
     };
-  }, [isLoading, isInMaintenance]);
+  }, [isLoading, isInMaintenance, BACKEND_URL, PUBLIC_KEY]);
 
   // Loading state - show nothing until we get the result of the health check
   if (isLoading) {
@@ -663,11 +704,8 @@ const App: React.FC = () => {
     return <MaintenancePage />;
   }
 
-  // Define center using LatLng
-  const center = new LatLng(0, 0);
-
   return (
-    <div className="app-container">
+    <div className={appContainerClass}>
       <ErrorNotification
         message={errorMessage}
         isVisible={showError}
@@ -737,9 +775,15 @@ const App: React.FC = () => {
       </header>
 
       <main className="app-main">
+        <ClusterSelector
+          selectedCluster={selectedCluster}
+          onClusterChange={handleClusterChange}
+          configs={allConfigs}
+        />
+
         {/* Map */}
         <div className="map-container">
-          <MapContainer center={center} zoom={1} style={{ height: "100%", width: "100%" }} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false} dragging={false}>
+          <MapContainer key={selectedCluster} center={clusterConfig.mapCenter} zoom={clusterConfig.mapZoom} style={{ height: "100%", width: "100%" }} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false} dragging={false}>
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
               attribution='&copy; OSM | &copy; CARTO</a>'
@@ -781,8 +825,8 @@ const App: React.FC = () => {
           <div className="bars-header">
             <h2 className="bars-title">Timeline</h2>
             <div className="legend-container">
-              <LegendItem color="#0000eeff" label="Seeded" />
-              <LegendItem color="#000" label="Locked" />
+              <LegendItem color={selectedCluster === 'usa' ? '#002868' : "#0000eeff"} label="Seeded" />
+              <LegendItem color={selectedCluster === 'usa' ? '#d50606' : "#000"} label="Locked" />
               <LegendItem color="#228B22ff" label="Finalized" />
             </div>
           </div>
@@ -794,6 +838,7 @@ const App: React.FC = () => {
                 viewData={viewData}
                 currentTime={currentTimeRef.current}
                 isMobile={isMobile}
+                selectedCluster={selectedCluster}
               />
             ))}
           </div>
@@ -813,11 +858,12 @@ const App: React.FC = () => {
       <KeyInfoModal
         isOpen={isKeyInfoModalOpen}
         onClose={() => setIsKeyInfoModalOpen(false)}
-        publicKeyHex={PUBLIC_KEY_HEX}
+        publicKeyHex={clusterConfig.PUBLIC_KEY_HEX}
       />
       <SearchModal
         isOpen={isSearchModalOpen}
         onClose={() => setIsSearchModalOpen(false)}
+        clusterConfig={clusterConfig}
       />
     </div >
   );
@@ -842,11 +888,12 @@ interface BarProps {
   currentTime: number;
   isMobile: boolean;
   maxContainerWidth?: number;
+  selectedCluster: Cluster;
 }
 
 // Replace the existing Bar component with this updated version
 
-const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
+const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, selectedCluster }) => {
   const { view, status, startTime, notarizationTime, finalizationTime, signature, block, actualNotarizationLatency, actualFinalizationLatency } = viewData;
   const [measuredWidth, setMeasuredWidth] = useState(isMobile ? 200 : 500); // Reasonable default
   const barContainerRef = useRef<HTMLDivElement>(null);
@@ -1141,7 +1188,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
                     className="latency-text notarized-latency"
                     style={{
                       left: `${notarizedLabelPosition}px`,
-                      color: "#000",
+                      color: selectedCluster === 'usa' ? '#002868' : "#000",
                     }}
                   >
                     {notarizedLatencyText}
@@ -1154,7 +1201,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
                   className="latency-text finalized-latency"
                   style={{
                     left: `${finalizedLabelPosition}px`,
-                    color: "#228B22ff",
+                    color: selectedCluster === 'usa' ? '#d50606' : "#228B22ff",
                   }}
                 >
                   {finalizedLatencyText}
