@@ -20,15 +20,15 @@ const configs: Record<Cluster, ClusterConfig> = {
         ...globalConfig,
         name: 'Global Cluster',
         description: `A cluster of <strong>50 validators</strong> running on AWS in <strong>10 regions</strong> (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2).`,
-        mapCenter: [20, 0],
-        mapZoom: 2,
+        mapCenter: [0, 0],
+        mapZoom: 1,
     },
     usa: {
         ...usaConfig,
         name: 'USA Cluster',
         description: `A cluster of <strong>50 validators</strong> running on AWS in <strong>4 regions</strong> (Ashburn, Columbus, San Francisco, Boardman).`,
-        mapCenter: [39.8283, -98.5795],
-        mapZoom: 4,
+        mapCenter: [0, 0],
+        mapZoom: 1,
     }
 };
 
