@@ -24,7 +24,7 @@ import ClusterSelector from "./ClusterSelector";
 import "./ClusterSelector.css";
 
 
-const SCALE_DURATION = 750; // 750ms
+const SCALE_DURATION = 500; // 500ms
 const TIMEOUT_DURATION = 5000; // 5s
 const HEALTH_CHECK_INTERVAL = 60000; // Check health every minute
 
