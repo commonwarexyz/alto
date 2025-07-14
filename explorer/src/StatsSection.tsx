@@ -55,7 +55,7 @@ const CustomDropdown: React.FC<CustomDropdownProps> = ({ selectedCluster, onClus
     return (
         <div className="custom-dropdown" ref={dropdownRef}>
             <button
-                className="dropdown-trigger"
+                className={`dropdown-trigger ${selectedCluster === 'global' ? 'global-cluster' : 'usa-cluster'}`}
                 onClick={() => setIsOpen(!isOpen)}
                 aria-expanded={isOpen}
                 aria-haspopup="listbox"
@@ -69,7 +69,7 @@ const CustomDropdown: React.FC<CustomDropdownProps> = ({ selectedCluster, onClus
                     {Object.entries(configs).map(([clusterId, config]) => (
                         <button
                             key={clusterId}
-                            className={`dropdown-option ${selectedCluster === clusterId ? 'selected' : ''}`}
+                            className={`dropdown-option ${selectedCluster === clusterId ? 'selected' : ''} ${clusterId === 'global' ? 'global-option' : 'usa-option'}`}
                             onClick={() => handleSelect(clusterId as Cluster)}
                         >
                             <div className="option-name">{config.name}</div>

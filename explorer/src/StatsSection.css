@@ -37,12 +37,9 @@
     align-items: center;
     justify-content: space-between;
     padding: 8px 16px;
-    background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
-    border: 1px solid #2c3e50;
     border-radius: 0;
     font-family: 'Consolas', monospace;
     font-size: 12px;
-    color: white;
     cursor: pointer;
     min-width: 160px;
     transition: all 0.2s ease;
@@ -51,14 +48,36 @@
     -webkit-tap-highlight-color: transparent;
 }
 
-.dropdown-trigger:hover {
-    background: linear-gradient(135deg, #34495e 0%, #5dade2 100%);
+.dropdown-trigger:active {
+    transform: translateY(0);
+}
+
+/* Global Cluster - Black/White theme */
+.dropdown-trigger.global-cluster {
+    background: black;
+    border: 1px solid black;
+    color: white;
+}
+
+.dropdown-trigger.global-cluster:hover {
+    background-color: #f0f0f0;
+    color: black;
     transform: translateY(-1px);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-.dropdown-trigger:active {
-    transform: translateY(0);
+/* USA Cluster - Red/White/Blue theme */
+.dropdown-trigger.usa-cluster {
+    background: linear-gradient(90deg, #dc143c 0%, #ffffff 50%, #0052cc 100%);
+    border: 1px solid #dc143c;
+    color: black;
+    font-weight: bold;
+}
+
+.dropdown-trigger.usa-cluster:hover {
+    background: linear-gradient(90deg, #b91c3c 0%, #f8f9fa 50%, #003d99 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .dropdown-label {
@@ -105,9 +124,25 @@
     background-color: #f8f9fa;
 }
 
-.dropdown-option.selected {
-    background-color: #e3f2fd;
-    border-left: 3px solid #2196f3;
+/* Global Cluster selected option - Grey theme */
+.dropdown-option.global-option.selected {
+    background-color: #f5f5f5;
+    border-left: 3px solid #666;
+}
+
+/* USA Cluster selected option - Patriotic theme */
+.dropdown-option.usa-option.selected {
+    background: linear-gradient(90deg, #dc143c 0%, #ffffff 50%, #0052cc 100%);
+    border-left: 3px solid #dc143c;
+}
+
+.dropdown-option.usa-option.selected .option-name {
+    color: #000;
+    font-weight: bold;
+}
+
+.dropdown-option.usa-option.selected .option-description {
+    color: #000;
 }
 
 .option-name {
