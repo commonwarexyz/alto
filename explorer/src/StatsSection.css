@@ -73,7 +73,7 @@
 }
 
 .dropdown-trigger.usa-cluster:hover {
-    background-color: #f0f0f0;
+    background-color: #ffebee;
     color: #dc143c;
     transform: translateY(-1px);
 }

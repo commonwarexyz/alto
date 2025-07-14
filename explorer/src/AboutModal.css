@@ -115,7 +115,7 @@ ol {
 
 .cluster-option.global-cluster:hover {
     border-color: #000;
-    background-color: #f8f8f8;
+    background-color: #f0f0f0;
 }
 
 .cluster-option.global-cluster.selected {
@@ -128,13 +128,13 @@ ol {
 .cluster-option.usa-cluster {
     background: white;
     border: 2px solid #dc143c;
-    color: black;
+    color: #dc143c;
 }
 
 .cluster-option.usa-cluster:hover {
     border-color: #dc143c;
-    background-color: #f8f8f8;
-    color: black;
+    background-color: #ffebee;
+    color: #dc143c;
 }
 
 .cluster-option.usa-cluster.selected {
