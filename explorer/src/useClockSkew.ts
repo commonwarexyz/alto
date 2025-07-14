@@ -84,7 +84,7 @@ export const useClockSkew = () => {
             fetchSkew();
         }
 
-        // Set up an interval to run every 30 seconds
+        // Set up an interval to run every 5 seconds
         const intervalId = setInterval(fetchSkew, interval);
 
         // Cleanup interval on unmount
