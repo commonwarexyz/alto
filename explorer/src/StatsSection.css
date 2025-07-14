@@ -78,10 +78,6 @@
     transform: translateY(-1px);
 }
 
-.dropdown-trigger.usa-cluster .dropdown-label {
-    /* No special styling needed */
-}
-
 .dropdown-label {
     font-weight: 500;
     flex: 1;
