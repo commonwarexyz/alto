@@ -108,6 +108,14 @@ const App: React.FC = () => {
   const handleClusterChange = (cluster: Cluster) => {
     if (cluster !== selectedCluster) {
       console.log(`Switching to ${cluster} cluster`);
+
+      // When switching, we close the old socket. The `onclose` handler for that socket
+      // should not trigger a reconnect or error message.
+      if (wsRef.current) {
+        // Temporarily disable the onclose handler to prevent side-effects.
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+      }
       setSelectedCluster(cluster);
     }
   };
