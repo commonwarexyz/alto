@@ -593,7 +593,7 @@ const App: React.FC = () => {
       ws.binaryType = "arraybuffer";
 
       ws.onopen = () => {
-        console.log("WebSocket connected");
+        console.log(`WebSocket connected: ${BACKEND_URL}`);
         setErrorMessage("");
         setShowError(false);
         setConnectionStatusKnown(true);
