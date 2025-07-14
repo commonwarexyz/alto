@@ -129,6 +129,7 @@ ol {
     background: white;
     border: 2px solid #dc143c;
     color: black;
+    position: relative;
 }
 
 .cluster-option.usa-cluster:hover {
@@ -142,6 +143,7 @@ ol {
     background: linear-gradient(90deg, #dc143c 0%, #ffffff 50%, #0052cc 100%);
     color: black;
     font-weight: bold;
+    text-shadow: 0 0 1px rgba(0, 0, 0, 0.2);
 }
 
 .cluster-option-name {
