@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import { DivIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
-import { getClusterConfig, getClusters, Cluster } from "./config";
+import { getClusterConfig, getClusters, Cluster, ClusterConfig } from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, ViewData } from "./types";
 import { hexToUint8Array, hexUint8Array } from "./utils";
 import "./App.css";
@@ -20,8 +20,6 @@ import './ErrorNotification.css';
 import MaintenancePage from './MaintenancePage';
 import SearchModal from './SearchModal';
 import './SearchModal.css';
-import ClusterSelector from "./ClusterSelector";
-import "./ClusterSelector.css";
 
 
 const SCALE_DURATION = 500; // 500ms
@@ -93,7 +91,7 @@ const App: React.FC = () => {
   const markerIcon = new DivIcon({
     className: "custom-div-icon",
     html: `<div style="
-        background-color: ${selectedCluster === 'usa' ? '#002868' : '#0000eeff'};
+        background-color: #0000eeff;
         width: 16px;
         height: 16px;
         border-radius: 50%;
@@ -101,8 +99,6 @@ const App: React.FC = () => {
     iconSize: [12, 12],
     iconAnchor: [6, 6],
   });
-
-  const appContainerClass = `app-container ${selectedCluster === 'usa' ? 'usa-theme' : ''}`;
 
   const handleClusterChange = (cluster: Cluster) => {
     if (cluster !== selectedCluster) {
@@ -692,7 +688,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className={appContainerClass}>
+    <div className="app-container">
       <ErrorNotification
         message={errorMessage}
         isVisible={showError}
@@ -762,15 +758,14 @@ const App: React.FC = () => {
       </header>
 
       <main className="app-main">
-        <ClusterSelector
-          selectedCluster={selectedCluster}
-          onClusterChange={handleClusterChange}
-          configs={allConfigs}
-        />
-
         {/* Map */}
         <div className="map-container">
           <MapContainer key={selectedCluster} center={clusterConfig.mapCenter} zoom={clusterConfig.mapZoom} style={{ height: "100%", width: "100%" }} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false} dragging={false}>
+            <MapClusterSelector
+              selectedCluster={selectedCluster}
+              onClusterChange={handleClusterChange}
+              configs={allConfigs}
+            />
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
               attribution='&copy; OSM | &copy; CARTO</a>'
@@ -812,9 +807,9 @@ const App: React.FC = () => {
           <div className="bars-header">
             <h2 className="bars-title">Timeline</h2>
             <div className="legend-container">
-              <LegendItem color={selectedCluster === 'usa' ? '#002868' : "#0000eeff"} label="Seeded" />
-              <LegendItem color={selectedCluster === 'usa' ? '#d50606' : "#000"} label="Locked" />
-              <LegendItem color="#228B22ff" label="Finalized" />
+              <LegendItem color={"#0000eeff"} label="Seeded" />
+              <LegendItem color={"#000"} label="Locked" />
+              <LegendItem color={"#228B22ff"} label="Finalized" />
             </div>
           </div>
 
@@ -825,7 +820,6 @@ const App: React.FC = () => {
                 viewData={viewData}
                 currentTime={currentTimeRef.current}
                 isMobile={isMobile}
-                selectedCluster={selectedCluster}
               />
             ))}
           </div>
@@ -875,12 +869,11 @@ interface BarProps {
   currentTime: number;
   isMobile: boolean;
   maxContainerWidth?: number;
-  selectedCluster: Cluster;
 }
 
 // Replace the existing Bar component with this updated version
 
-const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, selectedCluster }) => {
+const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   const { view, status, startTime, notarizationTime, finalizationTime, signature, block, actualNotarizationLatency, actualFinalizationLatency } = viewData;
   const [measuredWidth, setMeasuredWidth] = useState(isMobile ? 200 : 500); // Reasonable default
   const barContainerRef = useRef<HTMLDivElement>(null);
@@ -1175,7 +1168,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, selectedClus
                     className="latency-text notarized-latency"
                     style={{
                       left: `${notarizedLabelPosition}px`,
-                      color: selectedCluster === 'usa' ? '#002868' : "#000",
+                      color: "#000",
                     }}
                   >
                     {notarizedLatencyText}
@@ -1188,7 +1181,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, selectedClus
                   className="latency-text finalized-latency"
                   style={{
                     left: `${finalizedLabelPosition}px`,
-                    color: selectedCluster === 'usa' ? '#d50606' : "#228B22ff",
+                    color: "#228B22ff",
                   }}
                 >
                   {finalizedLatencyText}
@@ -1209,6 +1202,101 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, selectedClus
             </>
           )}
         </div>
+      </div>
+    </div>
+  );
+};
+
+interface TooltipProps {
+  content: string;
+  children: React.ReactNode;
+}
+
+const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
+  const [isVisible, setIsVisible] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Handle clicks outside the tooltip to close it
+  useEffect(() => {
+    if (!isVisible) return;
+    const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
+        setIsVisible(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, [isVisible]);
+
+  // Separate handlers for desktop and mobile
+  const handleDesktopInteraction = () => {
+    if (window.matchMedia('(hover: hover)').matches) {
+      return {
+        onMouseEnter: () => setIsVisible(true),
+        onMouseLeave: () => setIsVisible(false)
+      };
+    }
+    return {};
+  };
+
+  const handleClick = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    setIsVisible(!isVisible);
+  };
+
+  return (
+    <div
+      className="tooltip-container"
+      ref={containerRef}
+      onClick={handleClick}
+      onTouchEnd={(e) => {
+        e.preventDefault();
+        handleClick(e);
+      }}
+      {...handleDesktopInteraction()}
+    >
+      {children}
+      {isVisible && (
+        <div
+          className="tooltip-content"
+          onClick={(e) => e.stopPropagation()}
+          dangerouslySetInnerHTML={{ __html: content }}>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface MapClusterSelectorProps {
+  selectedCluster: Cluster;
+  onClusterChange: (cluster: Cluster) => void;
+  configs: Record<Cluster, ClusterConfig>;
+}
+
+const MapClusterSelector: React.FC<MapClusterSelectorProps> = ({ selectedCluster, onClusterChange, configs }) => {
+  useMap(); // This hook is important for components inside MapContainer
+
+  return (
+    <div className="leaflet-top leaflet-left">
+      <div className="leaflet-control map-cluster-selector">
+        {Object.keys(configs).map((clusterId) => (
+          <Tooltip key={clusterId} content={configs[clusterId as Cluster].description}>
+            <button
+              className={`map-cluster-option ${selectedCluster === clusterId ? 'selected' : ''}`}
+              onClick={() => onClusterChange(clusterId as Cluster)}
+            >
+              {configs[clusterId as Cluster].name.split(' ')[0].toUpperCase()}
+            </button>
+          </Tooltip>
+        ))}
       </div>
     </div>
   );

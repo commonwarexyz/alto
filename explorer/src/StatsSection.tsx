@@ -22,76 +22,6 @@ interface StatsSectionProps {
     connectionStatusKnown?: boolean;
 }
 
-interface TooltipProps {
-    content: string;
-    children: React.ReactNode;
-}
-
-const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
-    const [isVisible, setIsVisible] = useState(false);
-    const tooltipRef = useRef<HTMLDivElement>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
-
-    // Handle clicks outside the tooltip to close it
-    useEffect(() => {
-        if (!isVisible) return;
-        const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
-            if (
-                containerRef.current &&
-                !containerRef.current.contains(event.target as Node)
-            ) {
-                setIsVisible(false);
-            }
-        };
-
-        document.addEventListener('mousedown', handleOutsideClick);
-        document.addEventListener('touchstart', handleOutsideClick);
-        return () => {
-            document.removeEventListener('mousedown', handleOutsideClick);
-            document.removeEventListener('touchstart', handleOutsideClick);
-        };
-    }, [isVisible]);
-
-    // Separate handlers for desktop and mobile
-    const handleDesktopInteraction = () => {
-        if (window.matchMedia('(hover: hover)').matches) {
-            return {
-                onMouseEnter: () => setIsVisible(true),
-                onMouseLeave: () => setIsVisible(false)
-            };
-        }
-        return {};
-    };
-
-    const handleClick = (e: React.MouseEvent | React.TouchEvent) => {
-        e.stopPropagation();
-        setIsVisible(!isVisible);
-    };
-
-    return (
-        <div
-            className="tooltip-container"
-            ref={containerRef}
-            onClick={handleClick}
-            onTouchEnd={(e) => {
-                e.preventDefault();
-                handleClick(e);
-            }}
-            {...handleDesktopInteraction()}
-        >
-            {children}
-            {isVisible && (
-                <div
-                    className="tooltip-content"
-                    ref={tooltipRef}
-                    onClick={(e) => e.stopPropagation()}
-                    dangerouslySetInnerHTML={{ __html: content }}>
-                </div>
-            )}
-        </div>
-    );
-};
-
 const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = false, connectionStatusKnown = false }) => {
     // Calculation logic (unchanged from original)
     const notarizationTimes = views
@@ -225,36 +155,30 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = fa
             <div className="stats-grid">
                 <div className="stat-box validator-metrics">
                     <div className="source-label">CLUSTER</div>
-                    <Tooltip content={tooltips.blockTime}>
-                        <div className="metric-container">
-                            <div className="stat-label">Block Time</div>
-                            <div className="stat-value">
-                                {medianBlockTime > 0 ? `${medianBlockTime}ms` : "N/A"}
-                            </div>
+                    <div className="metric-container">
+                        <div className="stat-label">Block Time</div>
+                        <div className="stat-value">
+                            {medianBlockTime > 0 ? `${medianBlockTime}ms` : "N/A"}
                         </div>
-                    </Tooltip>
+                    </div>
                 </div>
 
                 <div className="stat-box browser-metrics">
                     <div className="source-label">BROWSER</div>
                     <div className="browser-metrics-container">
-                        <Tooltip content={tooltips.timeToLock}>
-                            <div className="metric-container">
-                                <div className="stat-label">Locked</div>
-                                <div className="stat-value">
-                                    {medianTimeToLock > 0 ? `${medianTimeToLock}ms` : "N/A"}
-                                </div>
+                        <div className="metric-container">
+                            <div className="stat-label">Locked</div>
+                            <div className="stat-value">
+                                {medianTimeToLock > 0 ? `${medianTimeToLock}ms` : "N/A"}
                             </div>
-                        </Tooltip>
+                        </div>
 
-                        <Tooltip content={tooltips.timeToFinalize}>
-                            <div className="metric-container">
-                                <div className="stat-label">Finalized</div>
-                                <div className="stat-value">
-                                    {medianTimeToFinalize > 0 ? `${medianTimeToFinalize}ms` : "N/A"}
-                                </div>
+                        <div className="metric-container">
+                            <div className="stat-label">Finalized</div>
+                            <div className="stat-value">
+                                {medianTimeToFinalize > 0 ? `${medianTimeToFinalize}ms` : "N/A"}
                             </div>
-                        </Tooltip>
+                        </div>
                     </div>
                 </div>
             </div>
