@@ -790,24 +790,6 @@ const App: React.FC = () => {
           </MapContainer>
         </div>
 
-        {/* Cluster Selection */}
-        <div className="cluster-selection-card">
-          <h2 className="cluster-selection-title">Cluster</h2>
-          <div className="cluster-options">
-            {Object.entries(allConfigs).map(([clusterId, config]) => (
-              <button
-                key={clusterId}
-                className={`cluster-option ${selectedCluster === clusterId ? 'selected' : ''}`}
-                onClick={() => handleClusterChange(clusterId as Cluster)}
-              >
-                <div className="cluster-option-name">{config.name}</div>
-                <div className="cluster-option-summary">{config.name === 'Global Cluster' ? 'Multi-region deployment' : 'US-only deployment'}</div>
-              </button>
-            ))}
-          </div>
-          <div className="cluster-description" dangerouslySetInnerHTML={{ __html: clusterConfig.description }} />
-        </div>
-
         {/* Stats Section */}
         <StatsSection
           views={views}
@@ -848,7 +830,13 @@ const App: React.FC = () => {
         &copy; {new Date().getFullYear()} Commonware, Inc. All rights reserved.
       </footer>
 
-      <AboutModal isOpen={isAboutModalOpen} onClose={() => setIsAboutModalOpen(false)} />
+      <AboutModal
+        isOpen={isAboutModalOpen}
+        onClose={() => setIsAboutModalOpen(false)}
+        selectedCluster={selectedCluster}
+        onClusterChange={handleClusterChange}
+        configs={allConfigs}
+      />
       <KeyInfoModal
         isOpen={isKeyInfoModalOpen}
         onClose={() => setIsKeyInfoModalOpen(false)}
@@ -1219,5 +1207,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     </div>
   );
 };
+
+
 
 export default App;

@@ -1,11 +1,15 @@
 import React, { useEffect } from 'react';
+import { Cluster, ClusterConfig } from './config';
 
 interface AboutModalProps {
     isOpen: boolean;
     onClose: () => void;
+    selectedCluster: Cluster;
+    onClusterChange: (cluster: Cluster) => void;
+    configs: Record<Cluster, ClusterConfig>;
 }
 
-const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
+const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, selectedCluster, onClusterChange, configs }) => {
     // Add effect to handle link targets
     useEffect(() => {
         if (isOpen) {
@@ -28,6 +32,24 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <h2>Welcome to the <a href="https://github.com/commonwarexyz/alto">alto</a> Explorer!</h2>
                 </div>
                 <div className="about-modal-content">
+                    <section>
+                        <h3>Select Cluster</h3>
+                        <div className="cluster-selection">
+                            <div className="cluster-options">
+                                {Object.entries(configs).map(([clusterId, config]) => (
+                                    <button
+                                        key={clusterId}
+                                        className={`cluster-option ${selectedCluster === clusterId ? 'selected' : ''}`}
+                                        onClick={() => onClusterChange(clusterId as Cluster)}
+                                    >
+                                        <div className="cluster-option-name">{config.name}</div>
+                                        <div className="cluster-option-summary">{config.name === 'Global Cluster' ? 'Multi-region deployment' : 'US-only deployment'}</div>
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="cluster-description" dangerouslySetInnerHTML={{ __html: configs[selectedCluster].description }} />
+                        </div>
+                    </section>
                     <section>
                         <h3>About</h3>
                         <p>

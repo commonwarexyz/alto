@@ -308,68 +308,7 @@ body {
   filter: grayscale(100%) !important;
 }
 
-/* Cluster Selection Card */
-.cluster-selection-card {
-  background-color: white;
-  border: 1px solid #ccc;
-  padding: 16px;
-  margin-bottom: 16px;
-  font-family: 'Consolas', monospace;
-}
 
-.cluster-selection-title {
-  margin: 0 0 16px 0;
-  font-size: 18px;
-  font-weight: normal;
-}
-
-.cluster-description {
-  background-color: #f8f8f8;
-  padding: 8px 12px;
-  margin-top: 16px;
-  border-left: 3px solid #2c3e50;
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-.cluster-options {
-  display: flex;
-  gap: 12px;
-}
-
-.cluster-option {
-  flex: 1;
-  background: white;
-  border: 2px solid #ccc;
-  padding: 16px;
-  cursor: pointer;
-  font-family: 'Consolas', monospace;
-  text-align: left;
-  transition: all 0.2s ease;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.cluster-option:hover {
-  border-color: #2c3e50;
-  background-color: #f8f8f8;
-}
-
-.cluster-option.selected {
-  border-color: #2c3e50;
-  background-color: #2c3e50;
-  color: white;
-}
-
-.cluster-option-name {
-  font-size: 16px;
-  font-weight: bold;
-  margin-bottom: 6px;
-}
-
-.cluster-option-summary {
-  font-size: 13px;
-  opacity: 0.8;
-}
 
 .about-button-container {
   display: flex;
@@ -449,31 +388,7 @@ body {
     padding: 20px;
   }
 
-  .cluster-selection-card {
-    padding: 20px;
-  }
 
-  .cluster-selection-title {
-    font-size: 20px;
-  }
-
-  .cluster-description {
-    font-size: 14px;
-    padding: 10px 16px;
-    margin-top: 20px;
-  }
-
-  .cluster-option {
-    padding: 20px;
-  }
-
-  .cluster-option-name {
-    font-size: 18px;
-  }
-
-  .cluster-option-summary {
-    font-size: 14px;
-  }
 
   .map-container {
     height: 400px;
@@ -672,36 +587,7 @@ body {
     font-size: 0.8rem;
   }
 
-  .cluster-selection-card {
-    padding: 12px;
-  }
 
-  .cluster-selection-title {
-    font-size: 16px;
-  }
-
-  .cluster-description {
-    font-size: 11px;
-    padding: 6px 8px;
-    margin-top: 12px;
-  }
-
-  .cluster-options {
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .cluster-option {
-    padding: 12px;
-  }
-
-  .cluster-option-name {
-    font-size: 14px;
-  }
-
-  .cluster-option-summary {
-    font-size: 12px;
-  }
 }
 
 .search-header-button,
