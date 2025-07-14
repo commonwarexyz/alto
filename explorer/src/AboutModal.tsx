@@ -51,7 +51,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, selectedCluste
                                 {Object.entries(configs).map(([clusterId, config]) => (
                                     <button
                                         key={clusterId}
-                                        className={`cluster-option ${selectedCluster === clusterId ? 'selected' : ''}`}
+                                        className={`cluster-option ${selectedCluster === clusterId ? 'selected' : ''} ${clusterId === 'global' ? 'global-cluster' : 'usa-cluster'}`}
                                         onClick={() => onClusterChange(clusterId as Cluster)}
                                     >
                                         <div className="cluster-option-name">{config.name}</div>

@@ -98,8 +98,6 @@ ol {
 
 .cluster-option {
     flex: 1;
-    background: white;
-    border: 2px solid #ccc;
     padding: 12px;
     cursor: pointer;
     font-family: 'Consolas', monospace;
@@ -108,15 +106,42 @@ ol {
     -webkit-tap-highlight-color: transparent;
 }
 
-.cluster-option:hover {
-    border-color: #2c3e50;
+/* Global Cluster - Black/White theme */
+.cluster-option.global-cluster {
+    background: white;
+    border: 2px solid #ccc;
+    color: black;
+}
+
+.cluster-option.global-cluster:hover {
+    border-color: #000;
     background-color: #f8f8f8;
 }
 
-.cluster-option.selected {
-    border-color: #2c3e50;
-    background-color: #2c3e50;
+.cluster-option.global-cluster.selected {
+    border-color: #000;
+    background-color: #000;
     color: white;
+}
+
+/* USA Cluster - Red/White/Blue theme */
+.cluster-option.usa-cluster {
+    background: white;
+    border: 2px solid #dc143c;
+    color: black;
+}
+
+.cluster-option.usa-cluster:hover {
+    border-color: #dc143c;
+    background: linear-gradient(90deg, #dc143c 0%, #ffffff 50%, #0052cc 100%);
+    color: black;
+}
+
+.cluster-option.usa-cluster.selected {
+    border-color: #dc143c;
+    background: linear-gradient(90deg, #dc143c 0%, #ffffff 50%, #0052cc 100%);
+    color: black;
+    font-weight: bold;
 }
 
 .cluster-option-name {
