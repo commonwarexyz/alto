@@ -308,37 +308,67 @@ body {
   filter: grayscale(100%) !important;
 }
 
-.cluster-selector-container {
-  margin-right: 6px;
+/* Cluster Selection Card */
+.cluster-selection-card {
+  background-color: white;
+  border: 1px solid #ccc;
+  padding: 16px;
+  margin-bottom: 16px;
+  font-family: 'Consolas', monospace;
 }
 
-.cluster-selector {
-  background: #2c3e50;
-  border: 1px solid #2c3e50;
-  color: white;
-  font-family: 'Consolas', monospace;
-  font-size: 0.9rem;
+.cluster-selection-title {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  font-weight: normal;
+}
+
+.cluster-description {
+  background-color: #f8f8f8;
   padding: 8px 12px;
-  cursor: pointer;
-  -webkit-appearance: none;
-  appearance: none;
-  -webkit-tap-highlight-color: transparent;
-  -webkit-text-fill-color: white;
-  border-radius: 0;
-  min-width: 120px;
+  margin-bottom: 16px;
+  border-left: 3px solid #2c3e50;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
-.cluster-selector:hover,
-.cluster-selector:focus {
-  background-color: #f0f0f0;
-  color: #2c3e50;
-  -webkit-text-fill-color: #2c3e50;
+.cluster-options {
+  display: flex;
+  gap: 12px;
 }
 
-.cluster-selector option {
+.cluster-option {
+  flex: 1;
   background: white;
-  color: #2c3e50;
+  border: 2px solid #ccc;
+  padding: 16px;
+  cursor: pointer;
   font-family: 'Consolas', monospace;
+  text-align: left;
+  transition: all 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cluster-option:hover {
+  border-color: #2c3e50;
+  background-color: #f8f8f8;
+}
+
+.cluster-option.selected {
+  border-color: #2c3e50;
+  background-color: #2c3e50;
+  color: white;
+}
+
+.cluster-option-name {
+  font-size: 16px;
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+.cluster-option-summary {
+  font-size: 13px;
+  opacity: 0.8;
 }
 
 .about-button-container {
@@ -417,6 +447,31 @@ body {
 
   .app-main {
     padding: 20px;
+  }
+
+  .cluster-selection-card {
+    padding: 20px;
+  }
+
+  .cluster-selection-title {
+    font-size: 20px;
+  }
+
+  .cluster-description {
+    font-size: 14px;
+    padding: 10px 16px;
+  }
+
+  .cluster-option {
+    padding: 20px;
+  }
+
+  .cluster-option-name {
+    font-size: 18px;
+  }
+
+  .cluster-option-summary {
+    font-size: 14px;
   }
 
   .map-container {
@@ -616,10 +671,34 @@ body {
     font-size: 0.8rem;
   }
 
-  .cluster-selector {
-    font-size: 0.8rem;
+  .cluster-selection-card {
+    padding: 12px;
+  }
+
+  .cluster-selection-title {
+    font-size: 16px;
+  }
+
+  .cluster-description {
+    font-size: 11px;
     padding: 6px 8px;
-    min-width: 100px;
+  }
+
+  .cluster-options {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .cluster-option {
+    padding: 12px;
+  }
+
+  .cluster-option-name {
+    font-size: 14px;
+  }
+
+  .cluster-option-summary {
+    font-size: 12px;
   }
 }
 

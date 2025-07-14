@@ -21,10 +21,9 @@ interface StatsSectionProps {
     connectionError?: boolean;
     connectionStatusKnown?: boolean;
     clusterName?: string;
-    clusterDescription?: string;
 }
 
-const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = false, connectionStatusKnown = false, clusterName, clusterDescription }) => {
+const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = false, connectionStatusKnown = false, clusterName }) => {
     // Calculation logic (unchanged from original)
     const notarizationTimes = views
         .filter(view => (view.status === "notarized" || view.status === "finalized"))
@@ -160,10 +159,6 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = fa
                     </div>
                 )}
             </div>
-
-            {clusterDescription && (
-                <div className="cluster-description" dangerouslySetInnerHTML={{ __html: clusterDescription }} />
-            )}
 
             <div className="stats-grid">
                 <div className="stat-box validator-metrics">

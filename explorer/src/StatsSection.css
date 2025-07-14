@@ -30,14 +30,7 @@
     font-weight: normal;
 }
 
-.cluster-description {
-    background-color: #f8f8f8;
-    padding: 8px 12px;
-    margin-bottom: 16px;
-    border-left: 3px solid #2c3e50;
-    font-size: 13px;
-    line-height: 1.4;
-}
+
 
 .connection-status-badge {
     display: flex;
@@ -227,10 +220,7 @@
         padding: 3px 10px;
     }
 
-    .cluster-description {
-        font-size: 14px;
-        padding: 10px 16px;
-    }
+
 
     .stat-label {
         font-size: 14px;
@@ -266,11 +256,7 @@
         padding: 2px 6px;
     }
 
-    .cluster-description {
-        font-size: 11px;
-        padding: 6px 8px;
-        margin-bottom: 12px;
-    }
+
 
     .stat-label {
         font-size: 10px;

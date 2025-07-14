@@ -736,19 +736,6 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="about-button-container">
-          <div className="cluster-selector-container">
-            <select
-              className="cluster-selector"
-              value={selectedCluster}
-              onChange={(e) => handleClusterChange(e.target.value as Cluster)}
-            >
-              {Object.entries(allConfigs).map(([clusterId, config]) => (
-                <option key={clusterId} value={clusterId}>
-                  {config.name}
-                </option>
-              ))}
-            </select>
-          </div>
           <button
             className="search-header-button"
             onClick={() => setIsSearchModalOpen(true)}
@@ -803,13 +790,30 @@ const App: React.FC = () => {
           </MapContainer>
         </div>
 
+        {/* Cluster Selection */}
+        <div className="cluster-selection-card">
+          <h2 className="cluster-selection-title">Choose Cluster</h2>
+          <div className="cluster-description" dangerouslySetInnerHTML={{ __html: clusterConfig.description }} />
+          <div className="cluster-options">
+            {Object.entries(allConfigs).map(([clusterId, config]) => (
+              <button
+                key={clusterId}
+                className={`cluster-option ${selectedCluster === clusterId ? 'selected' : ''}`}
+                onClick={() => handleClusterChange(clusterId as Cluster)}
+              >
+                <div className="cluster-option-name">{config.name}</div>
+                <div className="cluster-option-summary">{config.name === 'Global Cluster' ? 'Multi-region deployment' : 'US-only deployment'}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Stats Section */}
         <StatsSection
           views={views}
           connectionError={errorMessage.length > 0}
           connectionStatusKnown={connectionStatusKnown}
           clusterName={clusterConfig.name}
-          clusterDescription={clusterConfig.description}
         />
 
         {/* Bars with integrated legend */}
