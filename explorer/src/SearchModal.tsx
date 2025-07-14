@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './SearchModal.css';
-import { BACKEND_URL, PUBLIC_KEY_HEX } from './config';
+import { BACKEND_URL, PUBLIC_KEY_HEX } from './global_config';
 import { FinalizedJs, NotarizedJs, BlockJs, SearchType, SearchResult } from './types';
 import { hexToUint8Array, hexUint8Array, formatAge } from './utils';
 import init, { parse_seed, parse_notarized, parse_finalized, parse_block } from "./alto_types/alto_types.js";
