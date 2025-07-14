@@ -33,6 +33,18 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, selectedCluste
                 </div>
                 <div className="about-modal-content">
                     <section>
+                        <h3>About</h3>
+                        <p>
+                            This explorer visualizes the performance of <a href="https://github.com/commonwarexyz/alto">alto</a>'s consensus, <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html">threshold-simplex</a>,
+                            deployed on a cluster of globally distributed nodes.
+                        </p>
+                        <p>
+                            <i>You can replicate this devnet in your own AWS account with <a href="https://docs.rs/commonware-deployer/0.0.41/commonware_deployer/">deployer::ec2</a> by following the
+                                instructions <a href="https://github.com/commonwarexyz/alto/blob/main/chain/README.md">here</a>.</i>
+                        </p>
+                    </section>
+
+                    <section>
                         <h3>Select Cluster</h3>
                         <div className="cluster-selection">
                             <div className="cluster-options">
@@ -49,17 +61,6 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, selectedCluste
                             </div>
                             <div className="cluster-description" dangerouslySetInnerHTML={{ __html: configs[selectedCluster].description }} />
                         </div>
-                    </section>
-                    <section>
-                        <h3>About</h3>
-                        <p>
-                            This explorer visualizes the performance of <a href="https://github.com/commonwarexyz/alto">alto</a>'s consensus, <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html">threshold-simplex</a>,
-                            deployed on a cluster of globally distributed nodes.
-                        </p>
-                        <p>
-                            <i>You can replicate this devnet in your own AWS account with <a href="https://docs.rs/commonware-deployer/0.0.41/commonware_deployer/">deployer::ec2</a> by following the
-                                instructions <a href="https://github.com/commonwarexyz/alto/blob/main/chain/README.md">here</a>.</i>
-                        </p>
                     </section>
 
                     <section>
