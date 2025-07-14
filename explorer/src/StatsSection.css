@@ -16,6 +16,27 @@
     margin: 0;
     font-size: 18px;
     font-weight: normal;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.cluster-indicator {
+    background-color: #2c3e50;
+    color: white;
+    padding: 2px 8px;
+    font-size: 12px;
+    border-radius: 0;
+    font-weight: normal;
+}
+
+.cluster-description {
+    background-color: #f8f8f8;
+    padding: 8px 12px;
+    margin-bottom: 16px;
+    border-left: 3px solid #2c3e50;
+    font-size: 13px;
+    line-height: 1.4;
 }
 
 .connection-status-badge {
@@ -201,6 +222,16 @@
         font-size: 20px;
     }
 
+    .cluster-indicator {
+        font-size: 13px;
+        padding: 3px 10px;
+    }
+
+    .cluster-description {
+        font-size: 14px;
+        padding: 10px 16px;
+    }
+
     .stat-label {
         font-size: 14px;
     }
@@ -225,6 +256,20 @@
 
     .stats-title {
         font-size: 16px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .cluster-indicator {
+        font-size: 10px;
+        padding: 2px 6px;
+    }
+
+    .cluster-description {
+        font-size: 11px;
+        padding: 6px 8px;
+        margin-bottom: 12px;
     }
 
     .stat-label {

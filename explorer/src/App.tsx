@@ -736,6 +736,19 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="about-button-container">
+          <div className="cluster-selector-container">
+            <select
+              className="cluster-selector"
+              value={selectedCluster}
+              onChange={(e) => handleClusterChange(e.target.value as Cluster)}
+            >
+              {Object.entries(allConfigs).map(([clusterId, config]) => (
+                <option key={clusterId} value={clusterId}>
+                  {config.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <button
             className="search-header-button"
             onClick={() => setIsSearchModalOpen(true)}
@@ -761,11 +774,6 @@ const App: React.FC = () => {
         {/* Map */}
         <div className="map-container">
           <MapContainer key={selectedCluster} center={clusterConfig.mapCenter} zoom={clusterConfig.mapZoom} style={{ height: "100%", width: "100%" }} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false} dragging={false}>
-            <MapClusterSelector
-              selectedCluster={selectedCluster}
-              onClusterChange={handleClusterChange}
-              configs={allConfigs}
-            />
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
               attribution='&copy; OSM | &copy; CARTO</a>'
@@ -800,6 +808,8 @@ const App: React.FC = () => {
           views={views}
           connectionError={errorMessage.length > 0}
           connectionStatusKnown={connectionStatusKnown}
+          clusterName={clusterConfig.name}
+          clusterDescription={clusterConfig.description}
         />
 
         {/* Bars with integrated legend */}
@@ -1202,101 +1212,6 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
             </>
           )}
         </div>
-      </div>
-    </div>
-  );
-};
-
-interface TooltipProps {
-  content: string;
-  children: React.ReactNode;
-}
-
-const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
-  const [isVisible, setIsVisible] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Handle clicks outside the tooltip to close it
-  useEffect(() => {
-    if (!isVisible) return;
-    const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(event.target as Node)
-      ) {
-        setIsVisible(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleOutsideClick);
-    document.addEventListener('touchstart', handleOutsideClick);
-    return () => {
-      document.removeEventListener('mousedown', handleOutsideClick);
-      document.removeEventListener('touchstart', handleOutsideClick);
-    };
-  }, [isVisible]);
-
-  // Separate handlers for desktop and mobile
-  const handleDesktopInteraction = () => {
-    if (window.matchMedia('(hover: hover)').matches) {
-      return {
-        onMouseEnter: () => setIsVisible(true),
-        onMouseLeave: () => setIsVisible(false)
-      };
-    }
-    return {};
-  };
-
-  const handleClick = (e: React.MouseEvent | React.TouchEvent) => {
-    e.stopPropagation();
-    setIsVisible(!isVisible);
-  };
-
-  return (
-    <div
-      className="tooltip-container"
-      ref={containerRef}
-      onClick={handleClick}
-      onTouchEnd={(e) => {
-        e.preventDefault();
-        handleClick(e);
-      }}
-      {...handleDesktopInteraction()}
-    >
-      {children}
-      {isVisible && (
-        <div
-          className="tooltip-content"
-          onClick={(e) => e.stopPropagation()}
-          dangerouslySetInnerHTML={{ __html: content }}>
-        </div>
-      )}
-    </div>
-  );
-};
-
-interface MapClusterSelectorProps {
-  selectedCluster: Cluster;
-  onClusterChange: (cluster: Cluster) => void;
-  configs: Record<Cluster, ClusterConfig>;
-}
-
-const MapClusterSelector: React.FC<MapClusterSelectorProps> = ({ selectedCluster, onClusterChange, configs }) => {
-  useMap(); // This hook is important for components inside MapContainer
-
-  return (
-    <div className="leaflet-top leaflet-left">
-      <div className="leaflet-control map-cluster-selector">
-        {Object.keys(configs).map((clusterId) => (
-          <Tooltip key={clusterId} content={configs[clusterId as Cluster].description}>
-            <button
-              className={`map-cluster-option ${selectedCluster === clusterId ? 'selected' : ''}`}
-              onClick={() => onClusterChange(clusterId as Cluster)}
-            >
-              {configs[clusterId as Cluster].name.split(' ')[0].toUpperCase()}
-            </button>
-          </Tooltip>
-        ))}
       </div>
     </div>
   );

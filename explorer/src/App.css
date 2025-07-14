@@ -308,9 +308,43 @@ body {
   filter: grayscale(100%) !important;
 }
 
+.cluster-selector-container {
+  margin-right: 6px;
+}
+
+.cluster-selector {
+  background: #2c3e50;
+  border: 1px solid #2c3e50;
+  color: white;
+  font-family: 'Consolas', monospace;
+  font-size: 0.9rem;
+  padding: 8px 12px;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-fill-color: white;
+  border-radius: 0;
+  min-width: 120px;
+}
+
+.cluster-selector:hover,
+.cluster-selector:focus {
+  background-color: #f0f0f0;
+  color: #2c3e50;
+  -webkit-text-fill-color: #2c3e50;
+}
+
+.cluster-selector option {
+  background: white;
+  color: #2c3e50;
+  font-family: 'Consolas', monospace;
+}
+
 .about-button-container {
   display: flex;
   align-items: center;
+  gap: 6px;
 }
 
 .key-header-button {
@@ -581,6 +615,12 @@ body {
   .search-header-button {
     font-size: 0.8rem;
   }
+
+  .cluster-selector {
+    font-size: 0.8rem;
+    padding: 6px 8px;
+    min-width: 100px;
+  }
 }
 
 .search-header-button,
@@ -590,69 +630,4 @@ body {
   -webkit-font-feature-settings: "liga" 0;
   font-feature-settings: "liga" 0;
   font-variant-emoji: text;
-}
-
-.map-cluster-selector {
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid #ccc;
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.map-cluster-option {
-  background-color: transparent;
-  border: 1px solid #aaa;
-  cursor: pointer;
-  font-family: 'Consolas', monospace;
-  font-size: 0.9rem;
-  padding: 4px 10px;
-  color: #333;
-  width: 100%;
-  text-align: center;
-}
-
-.map-cluster-option.selected {
-  background-color: #333;
-  color: white;
-  font-weight: bold;
-  border-color: #333;
-}
-
-.map-cluster-option:hover:not(.selected) {
-  background-color: #f0f0f0;
-}
-
-.tooltip-container {
-  position: relative;
-  display: inline-block;
-}
-
-.tooltip-content {
-  position: absolute;
-  bottom: 110%;
-  left: 50%;
-  transform: translateX(-50%);
-  background-color: #333;
-  color: white;
-  text-align: center;
-  padding: 8px 12px;
-  z-index: 1000;
-  width: 250px;
-  max-width: 100%;
-  font-size: 12px;
-  line-height: 1.4;
-  margin-bottom: 8px;
-}
-
-.tooltip-content::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  margin-left: -5px;
-  border-width: 5px;
-  border-style: solid;
-  border-color: #333 transparent transparent transparent;
 }
