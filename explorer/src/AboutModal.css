@@ -124,26 +124,24 @@ ol {
     color: white;
 }
 
-/* USA Cluster - Red/White/Blue theme */
+/* USA Cluster - Red theme */
 .cluster-option.usa-cluster {
     background: white;
     border: 2px solid #dc143c;
     color: black;
-    position: relative;
 }
 
 .cluster-option.usa-cluster:hover {
     border-color: #dc143c;
-    background: linear-gradient(90deg, #dc143c 0%, #ffffff 50%, #0052cc 100%);
+    background-color: #f8f8f8;
     color: black;
 }
 
 .cluster-option.usa-cluster.selected {
     border-color: #dc143c;
-    background: linear-gradient(90deg, #dc143c 0%, #ffffff 50%, #0052cc 100%);
-    color: black;
+    background-color: #dc143c;
+    color: white;
     font-weight: bold;
-    text-shadow: 0 0 1px rgba(0, 0, 0, 0.2);
 }
 
 .cluster-option-name {

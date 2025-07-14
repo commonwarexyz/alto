@@ -63,27 +63,23 @@
     background-color: #f0f0f0;
     color: black;
     transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-/* USA Cluster - Red/White/Blue theme */
+/* USA Cluster - Red theme */
 .dropdown-trigger.usa-cluster {
-    background: linear-gradient(90deg, #dc143c 0%, #ffffff 50%, #0052cc 100%);
+    background: #dc143c;
     border: 1px solid #dc143c;
-    color: black;
-    font-weight: bold;
-    position: relative;
+    color: white;
 }
 
 .dropdown-trigger.usa-cluster:hover {
-    background: linear-gradient(90deg, #b91c3c 0%, #f8f9fa 50%, #003d99 100%);
+    background-color: #f0f0f0;
+    color: #dc143c;
     transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), 0 0 6px rgba(220, 20, 60, 0.3);
-    border-color: #b91c3c;
 }
 
 .dropdown-trigger.usa-cluster .dropdown-label {
-    text-shadow: 0 0 1px rgba(0, 0, 0, 0.3);
+    /* No special styling needed */
 }
 
 .dropdown-label {
@@ -106,7 +102,6 @@
     background-color: white;
     border: 1px solid #ccc;
     border-top: none;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     z-index: 1000;
     max-height: 400px;
     overflow-y: auto;
@@ -136,21 +131,19 @@
     border-left: 3px solid #666;
 }
 
-/* USA Cluster selected option - Patriotic theme */
+/* USA Cluster selected option - Red theme */
 .dropdown-option.usa-option.selected {
-    background: linear-gradient(90deg, #dc143c 0%, #ffffff 50%, #0052cc 100%);
+    background-color: #ffebee;
     border-left: 3px solid #dc143c;
 }
 
 .dropdown-option.usa-option.selected .option-name {
-    color: #000;
+    color: black;
     font-weight: bold;
-    text-shadow: 0 0 1px rgba(0, 0, 0, 0.2);
 }
 
 .dropdown-option.usa-option.selected .option-description {
-    color: #000;
-    text-shadow: 0 0 1px rgba(0, 0, 0, 0.1);
+    color: black;
 }
 
 .option-name {
