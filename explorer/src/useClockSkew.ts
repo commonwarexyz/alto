@@ -7,7 +7,7 @@ const endpoint = 'https://1.1.1.1/cdn-cgi/trace';
 const timeout = 3000;
 
 // Interval to fetch server time (in milliseconds)
-const interval = 5000;
+const interval = 10000;
 
 /**
  * Custom hook to detect clock skew between client and server
