@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Cluster, ClusterConfig } from './config';
 
 // ViewData interface (no changes)
 export interface ViewData {
@@ -18,11 +19,12 @@ export interface ViewData {
 
 interface StatsSectionProps {
     views: ViewData[];
-    connectionError?: boolean;
-    connectionStatusKnown?: boolean;
+    selectedCluster: Cluster;
+    onClusterChange: (cluster: Cluster) => void;
+    configs: Record<Cluster, ClusterConfig>;
 }
 
-const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = false, connectionStatusKnown = false }) => {
+const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onClusterChange, configs }) => {
     // Calculation logic (unchanged from original)
     const notarizationTimes = views
         .filter(view => (view.status === "notarized" || view.status === "finalized"))
@@ -144,12 +146,19 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = fa
         <div className="stats-card">
             <div className="stats-header">
                 <h2 className="stats-title">Latency</h2>
-                {connectionStatusKnown && (
-                    <div className={`connection-status-badge ${connectionError ? 'error' : 'success'}`}>
-                        <span className={`connection-status-dot ${connectionError ? 'error' : 'success'}`}></span>
-                        {connectionError ? 'DISCONNECTED' : 'CONNECTED'}
-                    </div>
-                )}
+                <div className="cluster-toggle">
+                    <select
+                        value={selectedCluster}
+                        onChange={(e) => onClusterChange(e.target.value as Cluster)}
+                        className="cluster-select"
+                    >
+                        {Object.entries(configs).map(([clusterId, config]) => (
+                            <option key={clusterId} value={clusterId}>
+                                {config.name}
+                            </option>
+                        ))}
+                    </select>
+                </div>
             </div>
 
             <div className="stats-grid">

@@ -18,6 +18,11 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    margin-bottom: 4px;
+}
+
+.overlay-item:last-child {
+    margin-bottom: 0;
 }
 
 .overlay-label {

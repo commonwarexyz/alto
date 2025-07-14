@@ -21,9 +21,32 @@
     gap: 12px;
 }
 
+.cluster-toggle {
+    display: flex;
+    align-items: center;
+}
 
+.cluster-select {
+    padding: 6px 12px;
+    border: 1px solid #ccc;
+    border-radius: 0;
+    font-family: 'Consolas', monospace;
+    font-size: 12px;
+    background-color: white;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    color: black;
+    -webkit-text-fill-color: black;
+    -webkit-tap-highlight-color: transparent;
+    min-width: 120px;
+}
 
-
+.cluster-select:hover,
+.cluster-select:focus {
+    border-color: #2c3e50;
+    outline: none;
+}
 
 .connection-status-badge {
     display: flex;
@@ -208,9 +231,9 @@
         font-size: 20px;
     }
 
-
-
-
+    .cluster-select {
+        font-size: 14px;
+    }
 
     .stat-label {
         font-size: 14px;
@@ -241,9 +264,11 @@
         gap: 8px;
     }
 
-
-
-
+    .cluster-select {
+        font-size: 10px;
+        min-width: 100px;
+        padding: 4px 8px;
+    }
 
     .stat-label {
         font-size: 10px;
