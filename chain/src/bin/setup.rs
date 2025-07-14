@@ -628,7 +628,9 @@ fn indexer(sub_matches: &ArgMatches) {
 fn get_aws_location(region: &str) -> Option<([f64; 2], String)> {
     match region {
         "us-west-1" => Some(([37.7749, -122.4194], "San Francisco".to_string())),
+        "us-west-2" => Some(([45.9175, -119.2684], "Boardman".to_string())),
         "us-east-1" => Some(([38.8339, -77.3074], "Ashburn".to_string())),
+        "us-east-2" => Some(([40.0946, -82.7541], "Columbus".to_string())),
         "eu-west-1" => Some(([53.3498, -6.2603], "Dublin".to_string())),
         "ap-northeast-1" => Some(([35.6895, 139.6917], "Tokyo".to_string())),
         "eu-north-1" => Some(([59.3293, 18.0686], "Stockholm".to_string())),
