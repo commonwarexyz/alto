@@ -377,6 +377,24 @@ body {
   -webkit-text-fill-color: black;
 }
 
+/* USA Cluster variant for about button */
+.about-header-button.usa-cluster {
+  background: #dc143c;
+  border: 1px solid #dc143c;
+  color: white;
+  -webkit-text-fill-color: white;
+}
+
+.about-header-button.usa-cluster:hover,
+.about-header-button.usa-cluster:focus,
+.about-header-button.usa-cluster:active,
+.about-header-button.usa-cluster:visited {
+  background-color: #f0f0f0;
+  text-decoration: none;
+  color: #dc143c;
+  -webkit-text-fill-color: #dc143c;
+}
+
 /* Media Queries */
 @media (min-width: 768px) {
   .app-header {

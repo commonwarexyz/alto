@@ -121,9 +121,9 @@
     background-color: #f8f9fa;
 }
 
-/* USA Cluster option hover - Red theme */
+/* USA Cluster option hover - Black theme */
 .dropdown-option.usa-option:hover {
-    background-color: #ffebee;
+    background-color: #f0f0f0;
 }
 
 /* Global Cluster selected option - Grey theme */
