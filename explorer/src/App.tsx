@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { DivIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -62,11 +62,11 @@ const initializeLogoAnimations = () => {
 
 const App: React.FC = () => {
   const [selectedCluster, setSelectedCluster] = useState<Cluster>('global');
-  const clusterConfig = getClusterConfig(selectedCluster);
-  const allConfigs = getClusters();
-  const PUBLIC_KEY = hexToUint8Array(clusterConfig.PUBLIC_KEY_HEX);
-  const LOCATIONS = clusterConfig.LOCATIONS;
-  const BACKEND_URL = clusterConfig.BACKEND_URL;
+  const clusterConfig = useMemo(() => getClusterConfig(selectedCluster), [selectedCluster]);
+  const allConfigs = useMemo(() => getClusters(), []);
+  const { BACKEND_URL, PUBLIC_KEY_HEX, LOCATIONS } = clusterConfig;
+
+  const PUBLIC_KEY = useMemo(() => hexToUint8Array(PUBLIC_KEY_HEX), [PUBLIC_KEY_HEX]);
 
   const [views, setViews] = useState<ViewData[]>([]);
   const [lastObservedView, setLastObservedView] = useState<number | null>(null);
@@ -88,7 +88,6 @@ const App: React.FC = () => {
   const handleSeedRef = useRef<typeof handleSeed>(null!);
   const handleNotarizedRef = useRef<typeof handleNotarization>(null!);
   const handleFinalizedRef = useRef<typeof handleFinalization>(null!);
-  const isInitializedRef = useRef(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const markerIcon = new DivIcon({
@@ -127,7 +126,6 @@ const App: React.FC = () => {
     setErrorMessage("");
     setShowError(false);
     setConnectionStatusKnown(false);
-    isInitializedRef.current = false;
   }, [selectedCluster]);
 
   // Health check function
@@ -568,10 +566,6 @@ const App: React.FC = () => {
       }
       return;
     }
-
-    // Skip if already initialized to prevent duplicate connections during development mode's double-invocation
-    if (isInitializedRef.current) return;
-    isInitializedRef.current = true;
 
     const connectWebSocket = () => {
       // Clear any existing reconnection timers
