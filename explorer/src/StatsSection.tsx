@@ -20,10 +20,9 @@ interface StatsSectionProps {
     views: ViewData[];
     connectionError?: boolean;
     connectionStatusKnown?: boolean;
-    clusterName?: string;
 }
 
-const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = false, connectionStatusKnown = false, clusterName }) => {
+const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = false, connectionStatusKnown = false }) => {
     // Calculation logic (unchanged from original)
     const notarizationTimes = views
         .filter(view => (view.status === "notarized" || view.status === "finalized"))
@@ -144,14 +143,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, connectionError = fa
     return (
         <div className="stats-card">
             <div className="stats-header">
-                <h2 className="stats-title">
-                    Latency
-                    {clusterName && (
-                        <span className="cluster-indicator">
-                            {clusterName}
-                        </span>
-                    )}
-                </h2>
+                <h2 className="stats-title">Latency</h2>
                 {connectionStatusKnown && (
                     <div className={`connection-status-badge ${connectionError ? 'error' : 'success'}`}>
                         <span className={`connection-status-dot ${connectionError ? 'error' : 'success'}`}></span>

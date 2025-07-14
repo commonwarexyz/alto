@@ -792,8 +792,7 @@ const App: React.FC = () => {
 
         {/* Cluster Selection */}
         <div className="cluster-selection-card">
-          <h2 className="cluster-selection-title">Choose Cluster</h2>
-          <div className="cluster-description" dangerouslySetInnerHTML={{ __html: clusterConfig.description }} />
+          <h2 className="cluster-selection-title">Cluster</h2>
           <div className="cluster-options">
             {Object.entries(allConfigs).map(([clusterId, config]) => (
               <button
@@ -806,6 +805,7 @@ const App: React.FC = () => {
               </button>
             ))}
           </div>
+          <div className="cluster-description" dangerouslySetInnerHTML={{ __html: clusterConfig.description }} />
         </div>
 
         {/* Stats Section */}
@@ -813,7 +813,6 @@ const App: React.FC = () => {
           views={views}
           connectionError={errorMessage.length > 0}
           connectionStatusKnown={connectionStatusKnown}
-          clusterName={clusterConfig.name}
         />
 
         {/* Bars with integrated legend */}
