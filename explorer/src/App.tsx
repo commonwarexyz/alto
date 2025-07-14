@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import { LatLng, DivIcon } from "leaflet";
+import { DivIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
 import { getClusterConfig, getClusters, Cluster } from "./config";
@@ -27,18 +27,6 @@ import "./ClusterSelector.css";
 const SCALE_DURATION = 750; // 750ms
 const TIMEOUT_DURATION = 5000; // 5s
 const HEALTH_CHECK_INTERVAL = 60000; // Check health every minute
-
-const markerIcon = new DivIcon({
-  className: "custom-div-icon",
-  html: `<div style="
-      background-color: #0000eeff;
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-    "></div>`,
-  iconSize: [12, 12],
-  iconAnchor: [6, 6],
-});
 
 // ASCII Logo animation logic
 const initializeLogoAnimations = () => {
