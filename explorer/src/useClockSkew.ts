@@ -7,11 +7,11 @@ const endpoint = 'https://1.1.1.1/cdn-cgi/trace';
 const timeout = 3000;
 
 // Interval to fetch server time (in milliseconds)
-const interval = 10000;
+const interval = 15000;
 
 /**
  * Custom hook to detect clock skew between client and server
- * Runs once on mount and then every 30 seconds, using the latest successful measurement as the skew
+ * Runs once on mount and then every 15 seconds, using the latest successful measurement as the skew
  */
 export const useClockSkew = () => {
     const [clockSkew, setClockSkew] = useState<number>(0);
