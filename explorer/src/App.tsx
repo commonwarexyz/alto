@@ -109,21 +109,18 @@ const App: React.FC = () => {
     if (cluster !== selectedCluster) {
       console.log(`Switching to ${cluster} cluster`);
       setSelectedCluster(cluster);
-
-      // Reset all state
-      setViews([]);
-      setLastObservedView(null);
-      setErrorMessage("");
-      setShowError(false);
-      setConnectionStatusKnown(false);
-      isInitializedRef.current = false;
-
-      // The useEffect for websocket will handle reconnection
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
     }
   };
+
+  // Reset state when the cluster changes
+  useEffect(() => {
+    setViews([]);
+    setLastObservedView(null);
+    setErrorMessage("");
+    setShowError(false);
+    setConnectionStatusKnown(false);
+    isInitializedRef.current = false;
+  }, [selectedCluster]);
 
   // Health check function
   const checkHealth = useCallback(async () => {
