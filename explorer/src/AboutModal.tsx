@@ -106,11 +106,11 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         <h3>Where is the data coming from?</h3>
                         <p>
                             We deployed alto to a cluster of <strong>50 validators</strong> running c7g.large (2 vCPU, 4GB RAM) nodes on AWS in two separate clusters:
-                            <ul>
-                                <li><strong>Global Cluster</strong>: 10 regions (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2).</li>
-                                <li><strong>USA Cluster</strong>: 4 regions (us-east-1, us-west-1, us-east-2, us-west-2).</li>
-                            </ul>
                         </p>
+                        <ul>
+                            <li><strong>Global Cluster</strong>: 10 regions (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2).</li>
+                            <li><strong>USA Cluster</strong>: 4 regions (us-east-1, us-west-1, us-east-2, us-west-2).</li>
+                        </ul>
                         <p>
                             When you visit this page, however, you don't connect to any of those nodes. You connect to custom-built infrastructure (<a href="https://exoware.xyz">exoware::relay</a>) that streams consensus
                             artifacts to your browser in real time.
@@ -147,19 +147,20 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         </p>
                         <p>
                             To download the tool, run:
-                            <pre className="code-block">
-                                <code>
-                                    cargo install alto-inspector
-                                </code>
-                            </pre>
-
-                            And then, to fetch block 10, run:
-                            <pre className="code-block">
-                                <code>
-                                    inspector get block 10
-                                </code>
-                            </pre>
                         </p>
+                        <pre className="code-block">
+                            <code>
+                                cargo install alto-inspector
+                            </code>
+                        </pre>
+                        <p>
+                            And then, to fetch block 10, run:
+                        </p>
+                        <pre className="code-block">
+                            <code>
+                                inspector get block 10
+                            </code>
+                        </pre>
                     </section>
 
                     <section>
