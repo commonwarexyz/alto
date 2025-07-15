@@ -630,7 +630,7 @@ const App: React.FC = () => {
           // If connection closed very quickly, likely rate-limited
           const timeSinceStarted = Date.now() - wsCreationTime;
           if (timeSinceStarted < 1000) {
-            setErrorMessage("Too many connection attempts from your IP. Try connecting again in an hour.");
+            setErrorMessage("Too many connection attempts from your IP. Try connecting again in a few minutes.");
             setShowError(true);
 
             // Clear reference to prevent reconnection
