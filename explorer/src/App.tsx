@@ -846,9 +846,6 @@ const App: React.FC = () => {
       <AboutModal
         isOpen={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
-        selectedCluster={selectedCluster}
-        onClusterChange={handleClusterChange}
-        configs={allConfigs}
       />
       <KeyInfoModal
         isOpen={isKeyInfoModalOpen}

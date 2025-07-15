@@ -4,12 +4,9 @@ import { Cluster, ClusterConfig } from './config';
 interface AboutModalProps {
     isOpen: boolean;
     onClose: () => void;
-    selectedCluster: Cluster;
-    onClusterChange: (cluster: Cluster) => void;
-    configs: Record<Cluster, ClusterConfig>;
 }
 
-const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, selectedCluster, onClusterChange, configs }) => {
+const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
     // Add effect to handle link targets
     useEffect(() => {
         if (isOpen) {
