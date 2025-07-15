@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { DivIcon, LatLng } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
-import { getClusterConfig, getClusters, Cluster, ClusterConfig } from "./config";
+import { getClusterConfig, getClusters, Cluster } from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, ViewData } from "./types";
 import { hexToUint8Array, hexUint8Array } from "./utils";
 import "./App.css";
@@ -20,7 +20,6 @@ import './ErrorNotification.css';
 import MaintenancePage from './MaintenancePage';
 import SearchModal from './SearchModal';
 import './SearchModal.css';
-
 
 const SCALE_DURATION = 500; // 500ms
 const TIMEOUT_DURATION = 5000; // 5s
@@ -84,7 +83,6 @@ const App: React.FC = () => {
   const [isKeyInfoModalOpen, setIsKeyInfoModalOpen] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
-  const [connectionStatusKnown, setConnectionStatusKnown] = useState<boolean>(false);
   const [showError, setShowError] = useState<boolean>(false);
   const [isInMaintenance, setIsInMaintenance] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -124,7 +122,6 @@ const App: React.FC = () => {
     setLastObservedView(null);
     setErrorMessage("");
     setShowError(false);
-    setConnectionStatusKnown(false);
   }, [selectedCluster]);
 
   // Health check function
@@ -599,7 +596,6 @@ const App: React.FC = () => {
         console.log(`WebSocket connected: ${BACKEND_URL}`);
         setErrorMessage("");
         setShowError(false);
-        setConnectionStatusKnown(true);
       };
 
       ws.onmessage = (event) => {
@@ -644,7 +640,6 @@ const App: React.FC = () => {
             setShowError(true);
           }
         }
-        setConnectionStatusKnown(true);
 
         // Only attempt to reconnect if we still have a reference to this websocket (and we didn't detect a rate limit error)
         if (wsRef.current === ws) {

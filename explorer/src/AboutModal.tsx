@@ -1,5 +1,4 @@
 import React, { useEffect } from 'react';
-import { Cluster, ClusterConfig } from './config';
 
 interface AboutModalProps {
     isOpen: boolean;
