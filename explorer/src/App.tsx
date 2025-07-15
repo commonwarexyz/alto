@@ -754,7 +754,7 @@ const App: React.FC = () => {
             className={`about-header-button ${selectedCluster === 'usa' ? 'usa-cluster' : ''}`}
             onClick={() => setIsAboutModalOpen(true)}
           >
-            🌐
+            🌐︎
           </button>
         </div>
       </header>
