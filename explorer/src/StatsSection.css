@@ -48,9 +48,7 @@
     -webkit-tap-highlight-color: transparent;
 }
 
-.dropdown-trigger:active {
-    transform: translateY(0);
-}
+
 
 /* Global Cluster - Black/White theme */
 .dropdown-trigger.global-cluster {
@@ -62,7 +60,6 @@
 .dropdown-trigger.global-cluster:hover {
     background-color: #f0f0f0;
     color: black;
-    transform: translateY(-1px);
 }
 
 /* USA Cluster - Red theme */
@@ -73,9 +70,8 @@
 }
 
 .dropdown-trigger.usa-cluster:hover {
-    background-color: #ffebee;
+    background-color: #f0f0f0;
     color: #dc143c;
-    transform: translateY(-1px);
 }
 
 .dropdown-label {
@@ -121,9 +117,9 @@
     background-color: #f8f9fa;
 }
 
-/* USA Cluster option hover - Black theme */
+/* USA Cluster option hover - Red theme */
 .dropdown-option.usa-option:hover {
-    background-color: #f0f0f0;
+    background-color: #ffebee;
 }
 
 /* Global Cluster selected option - Grey theme */
