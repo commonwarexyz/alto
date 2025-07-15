@@ -42,13 +42,10 @@
     font-size: 12px;
     cursor: pointer;
     min-width: 160px;
-    transition: all 0.2s ease;
     -webkit-appearance: none;
     appearance: none;
     -webkit-tap-highlight-color: transparent;
 }
-
-
 
 /* Global Cluster - Black/White theme */
 .dropdown-trigger.global-cluster {
@@ -83,7 +80,6 @@
 .dropdown-arrow {
     margin-left: 8px;
     font-size: 10px;
-    transition: transform 0.2s ease;
 }
 
 .dropdown-menu {
@@ -110,7 +106,6 @@
     font-family: 'Consolas', monospace;
     font-size: 12px;
     border-bottom: 1px solid #eee;
-    transition: background-color 0.2s ease;
 }
 
 .dropdown-option:hover {
@@ -202,7 +197,6 @@
 .metric-container {
     padding: 8px;
     background: rgba(255, 255, 255, 0.7);
-    transition: background-color 0.2s;
 }
 
 .metric-container:hover {
