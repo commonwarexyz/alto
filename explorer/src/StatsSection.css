@@ -159,63 +159,6 @@
     color: #2c3e50;
 }
 
-.connection-status-badge {
-    display: flex;
-    align-items: center;
-    font-size: 12px;
-    padding: 4px 8px;
-    border-radius: 0;
-}
-
-.connection-status-badge.error {
-    background-color: rgba(255, 0, 0, 0.1);
-    color: #ff0000;
-    border: 1px solid #ff0000;
-}
-
-.connection-status-badge.success {
-    background-color: rgba(34, 139, 34, 0.1);
-    color: #228B22;
-    border: 1px solid #228B22;
-}
-
-.connection-status-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    margin-right: 6px;
-}
-
-.connection-status-dot.error {
-    background-color: #ff0000;
-    animation: pulse 1.5s infinite;
-}
-
-.connection-status-dot.success {
-    background-color: #228B22;
-}
-
-/* Remove the old connection-error classes since they're replaced */
-.connection-error-badge,
-.connection-error-dot {
-    display: none;
-}
-
-@keyframes pulse {
-    0% {
-        opacity: 1;
-    }
-
-    50% {
-        opacity: 0.4;
-    }
-
-    100% {
-        opacity: 1;
-    }
-}
-
 .stats-grid {
     display: flex;
     gap: 12px;

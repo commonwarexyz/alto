@@ -14,8 +14,6 @@ import './StatsSection.css';
 import KeyInfoModal from './KeyModal';
 import MapOverlay from './MapOverlay';
 import './MapOverlay.css';
-import ConnectionStatusOverlay from './ConnectionStatusOverlay';
-import './ConnectionStatusOverlay.css';
 import { useClockSkew } from './useClockSkew';
 import ErrorNotification from './ErrorNotification';
 import './ErrorNotification.css';
@@ -796,10 +794,6 @@ const App: React.FC = () => {
               </Marker>
             )}
             <MapOverlay numValidators={LOCATIONS.length} />
-            <ConnectionStatusOverlay
-              connectionError={errorMessage.length > 0}
-              connectionStatusKnown={connectionStatusKnown}
-            />
           </MapContainer>
         </div>
 
