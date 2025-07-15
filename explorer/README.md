@@ -1,6 +1,6 @@
 # alto-explorer
 
-## Populate Configuration
+## Populate Configurations (Global and USA)
 
 ```typescript
 // TODO: Replace this with the backend URL
