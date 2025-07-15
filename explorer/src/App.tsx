@@ -117,12 +117,12 @@ const App: React.FC = () => {
 
   const handleClusterChange = (cluster: Cluster) => {
     if (cluster !== selectedCluster) {
+      console.log(`Switching to ${cluster} cluster`);
+
       // Update URL and push to history
       const url = new URL(window.location.href);
       url.searchParams.set('cluster', cluster);
       window.history.pushState({ cluster }, '', url.toString());
-
-      console.log(`Switching to ${cluster} cluster`);
 
       // When switching, we close the old socket. The `onclose` handler for that socket
       // should not trigger a reconnect or error message.
