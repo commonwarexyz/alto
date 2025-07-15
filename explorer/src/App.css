@@ -391,7 +391,7 @@ body {
 
 /* USA Cluster variant for about button */
 .about-header-button.usa-cluster {
-  background: linear-gradient(45deg, #B22234, #FFFFFF, #3C3B6E, #FFFFFF, #B22234);
+  background: linear-gradient(45deg, #B22234, #3C3B6E, #B22234);
   background-size: 300% 300%;
   border: 1px solid #B22234;
   color: white;
