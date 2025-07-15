@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
-import { DivIcon } from "leaflet";
+import { DivIcon, LatLng } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
 import { getClusterConfig, getClusters, Cluster, ClusterConfig } from "./config";
@@ -27,6 +27,9 @@ import './SearchModal.css';
 const SCALE_DURATION = 500; // 500ms
 const TIMEOUT_DURATION = 5000; // 5s
 const HEALTH_CHECK_INTERVAL = 60000; // Check health every minute
+
+// Define center using LatLng
+const center = new LatLng(0, 0);
 
 // ASCII Logo animation logic
 const initializeLogoAnimations = () => {
@@ -768,7 +771,7 @@ const App: React.FC = () => {
       <main className="app-main">
         {/* Map */}
         <div className="map-container">
-          <MapContainer key={selectedCluster} center={clusterConfig.mapCenter} zoom={clusterConfig.mapZoom} style={{ height: "100%", width: "100%" }} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false} dragging={false}>
+          <MapContainer key={selectedCluster} center={center} zoom={1} style={{ height: "100%", width: "100%" }} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false} dragging={false}>
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
               attribution='&copy; OSM | &copy; CARTO</a>'
