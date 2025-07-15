@@ -59,85 +59,29 @@
     color: black;
 }
 
-/* Patriotic flag animation keyframes for dropdown - continuous flow */
-@keyframes patrioticWaveX {
+/* Smooth waving animation for patriotic gradient */
+@keyframes smoothWave {
     0% {
-        background-position-x: 0%;
+        background-position: 0% 50%;
+    }
+
+    50% {
+        background-position: 100% 50%;
     }
 
     100% {
-        background-position-x: 400%;
-    }
-}
-
-@keyframes patrioticWaveY {
-    0% {
-        background-position-y: 30%;
-    }
-
-    17% {
-        background-position-y: 70%;
-    }
-
-    34% {
-        background-position-y: 45%;
-    }
-
-    51% {
-        background-position-y: 65%;
-    }
-
-    68% {
-        background-position-y: 35%;
-    }
-
-    85% {
-        background-position-y: 60%;
-    }
-
-    100% {
-        background-position-y: 30%;
-    }
-}
-
-@keyframes patrioticShimmer {
-    0% {
-        filter: brightness(1) contrast(1);
-    }
-
-    23% {
-        filter: brightness(1.08) contrast(1.02);
-    }
-
-    47% {
-        filter: brightness(0.94) contrast(0.98);
-    }
-
-    71% {
-        filter: brightness(1.06) contrast(1.01);
-    }
-
-    100% {
-        filter: brightness(1) contrast(1);
+        background-position: 0% 50%;
     }
 }
 
 /* USA Cluster - Patriotic theme */
 .dropdown-trigger.usa-cluster {
-    background: linear-gradient(47deg,
-            #dc143c,
-            #ffffff,
-            #0052cc,
-            #ffffff,
-            #dc143c);
-    background-size: 400% 400%;
-    border: 1px solid #dc143c;
+    background: linear-gradient(45deg, #B22234, #FFFFFF, #3C3B6E, #FFFFFF, #B22234);
+    background-size: 300% 300%;
+    border: 1px solid #B22234;
     color: white;
     text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7);
-    animation:
-        patrioticWaveX 10s linear infinite,
-        patrioticWaveY 7s ease-in-out infinite,
-        patrioticShimmer 8s ease-in-out infinite;
+    animation: smoothWave 4s ease-in-out infinite;
 }
 
 .dropdown-trigger.usa-cluster:hover {
