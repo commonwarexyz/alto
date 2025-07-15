@@ -22,15 +22,18 @@ import SearchModal from './SearchModal';
 import './SearchModal.css';
 
 const getInitialCluster = (): Cluster => {
+  // Get the cluster from the URL
   const params = new URLSearchParams(window.location.search);
   const clusterFromUrl = params.get('cluster');
   const allClusters = getClusters();
-  const clusterExists = clusterFromUrl && (clusterFromUrl in allClusters);
 
-  if (clusterFromUrl && clusterExists) {
+  // If the cluster exists, use it
+  if (clusterFromUrl && (clusterFromUrl in allClusters)) {
     return clusterFromUrl as Cluster;
   }
-  return 'global'; // Default cluster
+
+  // Otherwise, use the global cluster
+  return 'global';
 };
 
 const SCALE_DURATION = 500; // 500ms
