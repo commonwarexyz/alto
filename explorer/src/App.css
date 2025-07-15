@@ -308,12 +308,9 @@ body {
   filter: grayscale(100%) !important;
 }
 
-
-
 .about-button-container {
   display: flex;
   align-items: center;
-  gap: 6px;
 }
 
 .key-header-button {
@@ -405,8 +402,6 @@ body {
   .app-main {
     padding: 20px;
   }
-
-
 
   .map-container {
     height: 400px;
@@ -567,7 +562,6 @@ body {
     font-size: 0.8rem;
   }
 }
-
 
 .search-header-button {
   background: #ffb200;
