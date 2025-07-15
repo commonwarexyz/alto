@@ -19,11 +19,14 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-shrink: 1;
+    min-width: 0;
 }
 
 .cluster-toggle {
     display: flex;
     align-items: center;
+    flex-shrink: 0;
 }
 
 /* Custom Dropdown Styles */
@@ -287,7 +290,7 @@
     }
 
     .dropdown-trigger {
-        min-width: 140px;
+        min-width: 150px;
         padding: 6px 12px;
     }
 
@@ -346,6 +349,11 @@
 }
 
 @media (max-width: 480px) {
+    .stats-header {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
     .source-label {
         font-size: 10px;
     }
@@ -359,7 +367,7 @@
 
     .dropdown-trigger {
         font-size: 10px;
-        min-width: 120px;
+        min-width: 130px;
         padding: 4px 8px;
     }
 
