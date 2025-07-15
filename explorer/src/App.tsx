@@ -28,8 +28,18 @@ const SCALE_DURATION = 500; // 500ms
 const TIMEOUT_DURATION = 5000; // 5s
 const HEALTH_CHECK_INTERVAL = 60000; // Check health every minute
 
-// Define center using LatLng
 const center = new LatLng(0, 0);
+const markerIcon = new DivIcon({
+  className: "custom-div-icon",
+  html: `<div style="
+        background-color: #0000eeff;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        "></div>`,
+  iconSize: [12, 12],
+  iconAnchor: [6, 6],
+});
 
 // ASCII Logo animation logic
 const initializeLogoAnimations = () => {
@@ -68,7 +78,6 @@ const App: React.FC = () => {
   const clusterConfig = useMemo(() => getClusterConfig(selectedCluster), [selectedCluster]);
   const allConfigs = useMemo(() => getClusters(), []);
   const { BACKEND_URL, PUBLIC_KEY_HEX, LOCATIONS } = clusterConfig;
-
   const PUBLIC_KEY = useMemo(() => hexToUint8Array(PUBLIC_KEY_HEX), [PUBLIC_KEY_HEX]);
 
   const [views, setViews] = useState<ViewData[]>([]);
@@ -94,17 +103,6 @@ const App: React.FC = () => {
   const isInitializedRef = useRef(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const markerIcon = new DivIcon({
-    className: "custom-div-icon",
-    html: `<div style="
-        background-color: #0000eeff;
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        "></div>`,
-    iconSize: [12, 12],
-    iconAnchor: [6, 6],
-  });
 
   const handleClusterChange = (cluster: Cluster) => {
     if (cluster !== selectedCluster) {
