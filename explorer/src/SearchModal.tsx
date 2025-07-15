@@ -18,7 +18,7 @@ interface SearchResultWithLatency {
 
 const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfig }) => {
     const [searchType, setSearchType] = useState<SearchType>('finalization');
-    const [searchQuery, setSearchQuery] = useState<string>('latest');
+    const [searchQuery, setSearchQuery] = useState<string>('42645..42664');
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const [results, setResults] = useState<SearchResultWithLatency[]>([]);
@@ -353,9 +353,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
                                     type="text"
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    placeholder={
-                                        searchType === 'block' ? "Enter height, digest, or 'latest'" : "Enter view number, range, or 'latest'"
-                                    }
+                                    placeholder="Enter number, range, or 'latest'"
                                 />
                             </div>
 
