@@ -1221,6 +1221,4 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
   );
 };
 
-
-
 export default App;
