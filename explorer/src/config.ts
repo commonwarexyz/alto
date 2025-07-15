@@ -1,4 +1,3 @@
-
 import * as globalConfig from './global_config';
 import * as usaConfig from './usa_config';
 
