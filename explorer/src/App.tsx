@@ -21,6 +21,18 @@ import MaintenancePage from './MaintenancePage';
 import SearchModal from './SearchModal';
 import './SearchModal.css';
 
+const getInitialCluster = (): Cluster => {
+  const params = new URLSearchParams(window.location.search);
+  const clusterFromUrl = params.get('cluster');
+  const allClusters = getClusters();
+  const clusterExists = clusterFromUrl && (clusterFromUrl in allClusters);
+
+  if (clusterFromUrl && clusterExists) {
+    return clusterFromUrl as Cluster;
+  }
+  return 'global'; // Default cluster
+};
+
 const SCALE_DURATION = 500; // 500ms
 const TIMEOUT_DURATION = 5000; // 5s
 const HEALTH_CHECK_INTERVAL = 60000; // Check health every minute
@@ -71,7 +83,7 @@ const initializeLogoAnimations = () => {
 };
 
 const App: React.FC = () => {
-  const [selectedCluster, setSelectedCluster] = useState<Cluster>('global');
+  const [selectedCluster, setSelectedCluster] = useState<Cluster>(getInitialCluster());
   const clusterConfig = useMemo(() => getClusterConfig(selectedCluster), [selectedCluster]);
   const allConfigs = useMemo(() => getClusters(), []);
   const { BACKEND_URL, PUBLIC_KEY_HEX, LOCATIONS } = clusterConfig;
@@ -102,6 +114,11 @@ const App: React.FC = () => {
 
   const handleClusterChange = (cluster: Cluster) => {
     if (cluster !== selectedCluster) {
+      // Update URL and push to history
+      const url = new URL(window.location.href);
+      url.searchParams.set('cluster', cluster);
+      window.history.pushState({ cluster }, '', url.toString());
+
       console.log(`Switching to ${cluster} cluster`);
 
       // When switching, we close the old socket. The `onclose` handler for that socket
@@ -115,6 +132,28 @@ const App: React.FC = () => {
       setSelectedCluster(cluster);
     }
   };
+
+  // Effect to handle browser navigation (back/forward)
+  useEffect(() => {
+    const handlePopState = () => {
+      const newCluster = getInitialCluster();
+      if (newCluster !== selectedCluster) {
+        console.log(`Switching to ${newCluster} cluster from popstate`);
+
+        isInitializedRef.current = false;
+        if (wsRef.current) {
+          wsRef.current.onclose = null;
+          wsRef.current.close();
+        }
+        setSelectedCluster(newCluster);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [selectedCluster]);
 
   // Reset state when the cluster changes
   useEffect(() => {
