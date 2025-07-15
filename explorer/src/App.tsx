@@ -114,25 +114,32 @@ const App: React.FC = () => {
   const isInitializedRef = useRef(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const performClusterSwitch = useCallback((cluster: Cluster) => {
+    console.log(`Switching to ${cluster} cluster`);
+
+    // When switching, we close the old socket. The `onclose` handler for that socket
+    // should not trigger a reconnect or error message.
+    isInitializedRef.current = false;
+    if (wsRef.current) {
+      // Temporarily disable the onclose handler to prevent side-effects.
+      wsRef.current.onclose = null;
+      wsRef.current.close();
+    }
+
+    // Update the selected cluster
+    setSelectedCluster(cluster);
+  }, []);
+
 
   const handleClusterChange = (cluster: Cluster) => {
     if (cluster !== selectedCluster) {
-      console.log(`Switching to ${cluster} cluster`);
-
       // Update URL and push to history
       const url = new URL(window.location.href);
       url.searchParams.set('cluster', cluster);
       window.history.pushState({ cluster }, '', url.toString());
 
-      // When switching, we close the old socket. The `onclose` handler for that socket
-      // should not trigger a reconnect or error message.
-      isInitializedRef.current = false;
-      if (wsRef.current) {
-        // Temporarily disable the onclose handler to prevent side-effects.
-        wsRef.current.onclose = null;
-        wsRef.current.close();
-      }
-      setSelectedCluster(cluster);
+      // Perform the cluster switch
+      performClusterSwitch(cluster);
     }
   };
 
@@ -141,14 +148,7 @@ const App: React.FC = () => {
     const handlePopState = () => {
       const newCluster = getInitialCluster();
       if (newCluster !== selectedCluster) {
-        console.log(`Switching to ${newCluster} cluster from popstate`);
-
-        isInitializedRef.current = false;
-        if (wsRef.current) {
-          wsRef.current.onclose = null;
-          wsRef.current.close();
-        }
-        setSelectedCluster(newCluster);
+        performClusterSwitch(newCluster);
       }
     };
 
@@ -156,7 +156,7 @@ const App: React.FC = () => {
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [selectedCluster]);
+  }, [selectedCluster, performClusterSwitch]);
 
   // Reset state when the cluster changes
   useEffect(() => {
