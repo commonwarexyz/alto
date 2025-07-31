@@ -1,4 +1,4 @@
-use alto_types::{Activity, Block, Notarized};
+use alto_types::{Activity, Block, Finalized, Notarized};
 use commonware_consensus::{marshal, threshold_simplex::types::Seedable, Reporter, Viewable};
 use commonware_cryptography::bls12381::primitives::variant::MinSig;
 use commonware_runtime::{Metrics, Spawner};
@@ -33,7 +33,7 @@ impl<E: Spawner + Metrics, I: crate::Indexer> Reporter for Indexer<E, I> {
             Activity::Notarization(notarization) => {
                 // Upload seed to indexer
                 let view = notarization.view();
-                self.context.with_label("seed").spawn({
+                self.context.with_label("notarized_seed").spawn({
                     let indexer = self.indexer.clone();
                     let seed = notarization.seed();
                     move |_| async move {
@@ -47,7 +47,7 @@ impl<E: Spawner + Metrics, I: crate::Indexer> Reporter for Indexer<E, I> {
                 });
 
                 // Upload block to indexer (once we have it)
-                self.context.with_label("notarized").spawn({
+                self.context.with_label("notarized_block").spawn({
                     let indexer = self.indexer.clone();
                     let mut marshal = self.marshal.clone();
                     move |_| async move {
@@ -69,6 +69,47 @@ impl<E: Spawner + Metrics, I: crate::Indexer> Reporter for Indexer<E, I> {
                             return;
                         }
                         debug!(view, "notarization uploaded to indexer");
+                    }
+                });
+            }
+            Activity::Finalization(finalization) => {
+                // Upload seed to indexer
+                let view = finalization.view();
+                self.context.with_label("finalized_seed").spawn({
+                    let indexer = self.indexer.clone();
+                    let seed = finalization.seed();
+                    move |_| async move {
+                        let result = indexer.seed_upload(seed).await;
+                        if let Err(e) = result {
+                            warn!(?e, "failed to upload seed");
+                            return;
+                        }
+                        debug!(view, "seed uploaded to indexer");
+                    }
+                });
+
+                // Upload block to indexer (once we have it)
+                self.context.with_label("finalized_block").spawn({
+                    let indexer = self.indexer.clone();
+                    let mut marshal = self.marshal.clone();
+                    move |_| async move {
+                        let block = marshal
+                            .subscribe(Some(finalization.view()), finalization.proposal.payload)
+                            .await
+                            .await;
+                        let Ok(block) = block else {
+                            warn!(view, "subscription for block cancelled");
+                            return;
+                        };
+
+                        // Upload to indexer once we have it
+                        let finalization = Finalized::new(finalization, block);
+                        let result = indexer.finalized_upload(finalization).await;
+                        if let Err(e) = result {
+                            warn!(?e, "failed to upload finalization");
+                            return;
+                        }
+                        debug!(view, "finalization uploaded to indexer");
                     }
                 });
             }
