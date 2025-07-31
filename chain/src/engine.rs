@@ -1,10 +1,13 @@
 use crate::{
-    actors::{application, syncer},
+    actors::{application, coordinator::Coordinator, syncer},
     Indexer,
 };
 use alto_types::{Block, Evaluation, NAMESPACE};
 use commonware_broadcast::buffered;
-use commonware_consensus::threshold_simplex::{self, Engine as Consensus};
+use commonware_consensus::{
+    marshal,
+    threshold_simplex::{self, Engine as Consensus},
+};
 use commonware_cryptography::{
     bls12381::primitives::{
         group,
@@ -27,8 +30,15 @@ use tracing::{error, warn};
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
 const SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER: u64 = 10;
-const REPLAY_BUFFER: usize = 8 * 1024 * 1024;
-const WRITE_BUFFER: usize = 1024 * 1024;
+const PRUNABLE_ITEMS_PER_SECTION: u64 = 4_096;
+const IMMUTABLE_ITEMS_PER_SECTION: u64 = 262_144;
+const FREEZER_TABLE_RESIZE_FREQUENCY: u8 = 4;
+const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // 3MB
+const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
+const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
+const REPLAY_BUFFER: usize = 8 * 1024 * 1024; // 8MB
+const WRITE_BUFFER: usize = 1024 * 1024; // 1MB
+const MAX_REPAIR: u64 = 20;
 
 pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub blocker: B,
@@ -112,6 +122,38 @@ impl<
                 codec_config: (),
             },
         );
+
+        // Create the coordinator
+        let coordinator = Coordinator::new(cfg.participants);
+
+        // Create marshal
+        let (marshal, marshal_mailbox) = marshal::actor::Actor::init(
+            context.with_label("marshal"),
+            marshal::config::Config {
+                public_key: cfg.signer.public_key(),
+                identity,
+                coordinator,
+                partition_prefix: cfg.partition_prefix.clone(),
+                mailbox_size: cfg.mailbox_size,
+                backfill_quota: cfg.backfill_quota,
+                view_retention_timeout: cfg
+                    .activity_timeout
+                    .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
+                namespace: NAMESPACE.to_vec(),
+                prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
+                immutable_items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
+                freezer_table_initial_size: cfg.blocks_freezer_table_initial_size,
+                freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
+                freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
+                freezer_journal_target_size: FREEZER_JOURNAL_TARGET_SIZE,
+                freezer_journal_compression: FREEZER_JOURNAL_COMPRESSION,
+                replay_buffer: REPLAY_BUFFER,
+                write_buffer: WRITE_BUFFER,
+                codec_config: (),
+                max_repair: MAX_REPAIR,
+            },
+        )
+        .await;
 
         // Create the syncer
         let (syncer, syncer_mailbox) = syncer::Actor::init(
