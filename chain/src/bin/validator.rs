@@ -28,7 +28,9 @@ const PENDING_CHANNEL: u32 = 0;
 const RECOVERED_CHANNEL: u32 = 1;
 const RESOLVER_CHANNEL: u32 = 2;
 const BROADCASTER_CHANNEL: u32 = 3;
-const BACKFILLER_CHANNEL: u32 = 4;
+const BACKFILL_BY_DIGEST_CHANNEL: u32 = 4;
+const BACKFILL_BY_HEIGHT_CHANNEL: u32 = 5;
+const BACKFILL_BY_VIEW_CHANNEL: u32 = 6;
 
 const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 const NOTARIZATION_TIMEOUT: Duration = Duration::from_secs(2);
@@ -215,8 +217,21 @@ fn main() {
 
         // Register backfill channel
         let backfiller_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
-        let backfiller =
-            network.register(BACKFILLER_CHANNEL, backfiller_limit, config.message_backlog);
+        let backfill_by_digest = network.register(
+            BACKFILL_BY_DIGEST_CHANNEL,
+            backfiller_limit,
+            config.message_backlog,
+        );
+        let backfill_by_height = network.register(
+            BACKFILL_BY_HEIGHT_CHANNEL,
+            backfiller_limit,
+            config.message_backlog,
+        );
+        let backfill_by_view = network.register(
+            BACKFILL_BY_VIEW_CHANNEL,
+            backfiller_limit,
+            config.message_backlog,
+        );
 
         // Create network
         let p2p = network.start();
@@ -255,7 +270,15 @@ fn main() {
         let engine = engine::Engine::new(context.with_label("engine"), config).await;
 
         // Start engine
-        let engine = engine.start(pending, recovered, resolver, broadcaster, backfiller);
+        let engine = engine.start(
+            pending,
+            recovered,
+            resolver,
+            broadcaster,
+            backfill_by_digest,
+            backfill_by_height,
+            backfill_by_view,
+        );
 
         // Wait for any task to error
         if let Err(e) = try_join_all(vec![p2p, engine]).await {
