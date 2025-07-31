@@ -1,5 +1,5 @@
 use crate::{
-    actors::{application, coordinator::Coordinator, indexer, syncer},
+    actors::{application, coordinator::Coordinator, indexer},
     Indexer,
 };
 use alto_types::{Activity, Block, Evaluation, NAMESPACE};
@@ -244,6 +244,7 @@ impl<
     /// Start the `simplex` consensus engine.
     ///
     /// This will also rebuild the state of the engine from provided `Journal`.
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         self,
         pending_network: (
@@ -262,7 +263,15 @@ impl<
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        backfill_network: (
+        backfill_by_digest_network: (
+            impl Sender<PublicKey = PublicKey>,
+            impl Receiver<PublicKey = PublicKey>,
+        ),
+        backfill_by_height_network: (
+            impl Sender<PublicKey = PublicKey>,
+            impl Receiver<PublicKey = PublicKey>,
+        ),
+        backfill_by_view_network: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
@@ -273,11 +282,14 @@ impl<
                 recovered_network,
                 resolver_network,
                 broadcast_network,
-                backfill_network,
+                backfill_by_digest_network,
+                backfill_by_height_network,
+                backfill_by_view_network,
             )
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run(
         self,
         pending_network: (
@@ -296,7 +308,15 @@ impl<
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        backfill_network: (
+        backfill_by_digest_network: (
+            impl Sender<PublicKey = PublicKey>,
+            impl Receiver<PublicKey = PublicKey>,
+        ),
+        backfill_by_height_network: (
+            impl Sender<PublicKey = PublicKey>,
+            impl Receiver<PublicKey = PublicKey>,
+        ),
+        backfill_by_view_network: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
@@ -311,7 +331,9 @@ impl<
         let marshal_handle = self.marshal.start(
             self.application_mailbox,
             self.buffer_mailbox,
-            backfill_network,
+            backfill_by_digest_network,
+            backfill_by_height_network,
+            backfill_by_view_network,
         );
 
         // Start consensus
