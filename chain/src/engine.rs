@@ -127,33 +127,34 @@ impl<
         let coordinator = Coordinator::new(cfg.participants);
 
         // Create marshal
-        let (marshal, marshal_mailbox) = marshal::actor::Actor::init(
-            context.with_label("marshal"),
-            marshal::config::Config {
-                public_key: cfg.signer.public_key(),
-                identity,
-                coordinator,
-                partition_prefix: cfg.partition_prefix.clone(),
-                mailbox_size: cfg.mailbox_size,
-                backfill_quota: cfg.backfill_quota,
-                view_retention_timeout: cfg
-                    .activity_timeout
-                    .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
-                namespace: NAMESPACE.to_vec(),
-                prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
-                immutable_items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
-                freezer_table_initial_size: cfg.blocks_freezer_table_initial_size,
-                freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
-                freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
-                freezer_journal_target_size: FREEZER_JOURNAL_TARGET_SIZE,
-                freezer_journal_compression: FREEZER_JOURNAL_COMPRESSION,
-                replay_buffer: REPLAY_BUFFER,
-                write_buffer: WRITE_BUFFER,
-                codec_config: (),
-                max_repair: MAX_REPAIR,
-            },
-        )
-        .await;
+        let (marshal, marshal_mailbox): (_, marshal::ingress::mailbox::Mailbox<MinSig, Block>) =
+            marshal::actor::Actor::init(
+                context.with_label("marshal"),
+                marshal::config::Config {
+                    public_key: cfg.signer.public_key(),
+                    identity,
+                    coordinator,
+                    partition_prefix: cfg.partition_prefix.clone(),
+                    mailbox_size: cfg.mailbox_size,
+                    backfill_quota: cfg.backfill_quota,
+                    view_retention_timeout: cfg
+                        .activity_timeout
+                        .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
+                    namespace: NAMESPACE.to_vec(),
+                    prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
+                    immutable_items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
+                    freezer_table_initial_size: cfg.blocks_freezer_table_initial_size,
+                    freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
+                    freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
+                    freezer_journal_target_size: FREEZER_JOURNAL_TARGET_SIZE,
+                    freezer_journal_compression: FREEZER_JOURNAL_COMPRESSION,
+                    replay_buffer: REPLAY_BUFFER,
+                    write_buffer: WRITE_BUFFER,
+                    codec_config: (),
+                    max_repair: MAX_REPAIR,
+                },
+            )
+            .await;
 
         // Create the syncer
         let (syncer, syncer_mailbox) = syncer::Actor::init(
