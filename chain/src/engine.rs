@@ -7,6 +7,7 @@ use commonware_broadcast::buffered;
 use commonware_consensus::{
     marshal,
     threshold_simplex::{self, Engine as Consensus},
+    tuple, Reporter,
 };
 use commonware_cryptography::{
     bls12381::primitives::{
@@ -74,7 +75,6 @@ pub struct Engine<
 > {
     context: E,
 
-    indexer: Option<indexer::Indexer<E, I>>,
     application: application::Actor<E>,
     buffer: buffered::Engine<E, PublicKey, Block>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
@@ -158,34 +158,14 @@ impl<
             .await;
 
         // Create the indexer
-        let indexer = if let Some(indexer) = cfg.indexer {
-            Some(indexer::Indexer::new(
-                context.with_label("indexer"),
-                indexer,
-            ))
+        let reporter: Reporter = if let Some(indexer) = cfg.indexer {
+            (
+                marshal_mailbox.clone(),
+                indexer::Indexer::new(context.with_label("indexer"), indexer),
+            )
         } else {
-            None
+            marshal_mailbox
         };
-
-        // Create the syncer
-        let (syncer, syncer_mailbox) = syncer::Actor::init(
-            context.with_label("syncer"),
-            syncer::Config {
-                partition_prefix: cfg.partition_prefix.clone(),
-                public_key: cfg.signer.public_key(),
-                identity,
-                participants: cfg.participants,
-                blocks_freezer_table_initial_size: cfg.blocks_freezer_table_initial_size,
-                finalized_freezer_table_initial_size: cfg.finalized_freezer_table_initial_size,
-                mailbox_size: cfg.mailbox_size,
-                backfill_quota: cfg.backfill_quota,
-                activity_timeout: cfg
-                    .activity_timeout
-                    .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
-                indexer: cfg.indexer,
-            },
-        )
-        .await;
 
         // Create the consensus engine
         let consensus = Consensus::new(
@@ -195,7 +175,7 @@ impl<
                 crypto: cfg.signer,
                 automaton: application_mailbox.clone(),
                 relay: application_mailbox.clone(),
-                reporter: syncer_mailbox.clone(),
+                reporter,
                 supervisor,
                 partition: format!("{}-consensus", cfg.partition_prefix),
                 compression: None,
@@ -219,7 +199,6 @@ impl<
         Self {
             context,
 
-            indexer,
             application,
             buffer,
             buffer_mailbox,
