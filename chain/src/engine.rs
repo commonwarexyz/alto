@@ -2,12 +2,11 @@ use crate::{
     actors::{application, coordinator::Coordinator, indexer, syncer},
     Indexer,
 };
-use alto_types::{Block, Evaluation, NAMESPACE};
+use alto_types::{Activity, Block, Evaluation, NAMESPACE};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
     marshal,
     threshold_simplex::{self, Engine as Consensus},
-    tuple, Reporter,
 };
 use commonware_cryptography::{
     bls12381::primitives::{
@@ -21,12 +20,42 @@ use commonware_cryptography::{
 };
 use commonware_p2p::{Blocker, Receiver, Sender};
 use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
-use futures::future::try_join_all;
+use futures::{future::try_join_all, join};
 use governor::clock::Clock as GClock;
 use governor::Quota;
 use rand::{CryptoRng, Rng};
 use std::time::Duration;
 use tracing::{error, warn};
+
+#[derive(Clone)]
+struct Reporter<E: Spawner, I: Indexer> {
+    marshal: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
+    indexer: Option<indexer::Indexer<E, I>>,
+}
+
+impl<E: Spawner, I: Indexer> Reporter<E, I> {
+    pub fn new(
+        marshal: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
+        indexer: Option<indexer::Indexer<E, I>>,
+    ) -> Self {
+        Self { marshal, indexer }
+    }
+}
+
+impl<E: Spawner, I: Indexer> commonware_consensus::Reporter for Reporter<E, I> {
+    type Activity = Activity;
+
+    async fn report(&mut self, activity: Self::Activity) {
+        if let Some(indexer) = self.indexer.as_mut() {
+            join!(
+                self.marshal.report(activity.clone()),
+                indexer.report(activity)
+            );
+        } else {
+            self.marshal.report(activity).await;
+        }
+    }
+}
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -157,15 +186,12 @@ impl<
             )
             .await;
 
-        // Create the indexer
-        let reporter: Reporter = if let Some(indexer) = cfg.indexer {
-            (
-                marshal_mailbox.clone(),
-                indexer::Indexer::new(context.with_label("indexer"), indexer),
-            )
-        } else {
-            marshal_mailbox
-        };
+        // Create the reporter
+        let reporter = Reporter::new(
+            marshal_mailbox.clone(),
+            cfg.indexer
+                .map(|indexer| indexer::Indexer::new(context.with_label("indexer"), indexer)),
+        );
 
         // Create the consensus engine
         let consensus = Consensus::new(
