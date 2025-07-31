@@ -169,6 +169,8 @@ mod tests {
             (Sender<PublicKey>, Receiver<PublicKey>),
             (Sender<PublicKey>, Receiver<PublicKey>),
             (Sender<PublicKey>, Receiver<PublicKey>),
+            (Sender<PublicKey>, Receiver<PublicKey>),
+            (Sender<PublicKey>, Receiver<PublicKey>),
         ),
     > {
         let mut registrations = HashMap::new();
@@ -181,8 +183,12 @@ mod tests {
                 oracle.register(validator.clone(), 2).await.unwrap();
             let (broadcast_sender, broadcast_receiver) =
                 oracle.register(validator.clone(), 3).await.unwrap();
-            let (backfill_sender, backfill_receiver) =
+            let (backfill_by_digest_sender, backfill_by_digest_receiver) =
                 oracle.register(validator.clone(), 4).await.unwrap();
+            let (backfill_by_height_sender, backfill_by_height_receiver) =
+                oracle.register(validator.clone(), 5).await.unwrap();
+            let (backfill_by_view_sender, backfill_by_view_receiver) =
+                oracle.register(validator.clone(), 6).await.unwrap();
             registrations.insert(
                 validator.clone(),
                 (
@@ -190,7 +196,9 @@ mod tests {
                     (recovered_sender, recovered_receiver),
                     (resolver_sender, resolver_receiver),
                     (broadcast_sender, broadcast_receiver),
-                    (backfill_sender, backfill_receiver),
+                    (backfill_by_digest_sender, backfill_by_digest_receiver),
+                    (backfill_by_height_sender, backfill_by_height_receiver),
+                    (backfill_by_view_sender, backfill_by_view_receiver),
                 ),
             );
         }
@@ -304,11 +312,26 @@ mod tests {
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
                 // Get networking
-                let (pending, recovered, resolver, broadcast, backfill) =
-                    registrations.remove(&public_key).unwrap();
+                let (
+                    pending,
+                    recovered,
+                    resolver,
+                    broadcast,
+                    backfill_by_digest,
+                    backfill_by_height,
+                    backfill_by_view,
+                ) = registrations.remove(&public_key).unwrap();
 
                 // Start engine
-                engine.start(pending, recovered, resolver, broadcast, backfill);
+                engine.start(
+                    pending,
+                    recovered,
+                    resolver,
+                    broadcast,
+                    backfill_by_digest,
+                    backfill_by_height,
+                    backfill_by_view,
+                );
             }
 
             // Poll metrics
@@ -478,11 +501,26 @@ mod tests {
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
                 // Get networking
-                let (pending, recovered, resolver, broadcast, backfill) =
-                    registrations.remove(&public_key).unwrap();
+                let (
+                    pending,
+                    recovered,
+                    resolver,
+                    broadcast,
+                    backfill_by_digest,
+                    backfill_by_height,
+                    backfill_by_view,
+                ) = registrations.remove(&public_key).unwrap();
 
                 // Start engine
-                engine.start(pending, recovered, resolver, broadcast, backfill);
+                engine.start(
+                    pending,
+                    recovered,
+                    resolver,
+                    broadcast,
+                    backfill_by_digest,
+                    backfill_by_height,
+                    backfill_by_view,
+                );
             }
 
             // Poll metrics
@@ -566,11 +604,26 @@ mod tests {
             let engine = Engine::new(context.with_label(&uid), config).await;
 
             // Get networking
-            let (pending, recovered, resolver, broadcast, backfill) =
-                registrations.remove(&public_key).unwrap();
+            let (
+                pending,
+                recovered,
+                resolver,
+                broadcast,
+                backfill_by_digest,
+                backfill_by_height,
+                backfill_by_view,
+            ) = registrations.remove(&public_key).unwrap();
 
             // Start engine
-            engine.start(pending, recovered, resolver, broadcast, backfill);
+            engine.start(
+                pending,
+                recovered,
+                resolver,
+                broadcast,
+                backfill_by_digest,
+                backfill_by_height,
+                backfill_by_view,
+            );
 
             // Poll metrics
             loop {
@@ -701,11 +754,26 @@ mod tests {
                     let engine = Engine::new(context.with_label(&uid), config).await;
 
                     // Get networking
-                    let (pending, recovered, resolver, broadcast, backfill) =
-                        registrations.remove(&public_key).unwrap();
+                    let (
+                        pending,
+                        recovered,
+                        resolver,
+                        broadcast,
+                        backfill_by_digest,
+                        backfill_by_height,
+                        backfill_by_view,
+                    ) = registrations.remove(&public_key).unwrap();
 
                     // Start engine
-                    engine.start(pending, recovered, resolver, broadcast, backfill);
+                    engine.start(
+                        pending,
+                        recovered,
+                        resolver,
+                        broadcast,
+                        backfill_by_digest,
+                        backfill_by_height,
+                        backfill_by_view,
+                    );
                 }
 
                 // Poll metrics
@@ -872,11 +940,26 @@ mod tests {
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
                 // Get networking
-                let (pending, recovered, resolver, broadcast, backfill) =
-                    registrations.remove(&public_key).unwrap();
+                let (
+                    pending,
+                    recovered,
+                    resolver,
+                    broadcast,
+                    backfill_by_digest,
+                    backfill_by_height,
+                    backfill_by_view,
+                ) = registrations.remove(&public_key).unwrap();
 
                 // Start engine
-                engine.start(pending, recovered, resolver, broadcast, backfill);
+                engine.start(
+                    pending,
+                    recovered,
+                    resolver,
+                    broadcast,
+                    backfill_by_digest,
+                    backfill_by_height,
+                    backfill_by_view,
+                );
             }
 
             // Poll metrics
