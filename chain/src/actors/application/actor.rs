@@ -3,10 +3,9 @@ use super::{
     supervisor::Supervisor,
     Config,
 };
-use crate::actors::syncer;
 use alto_types::Block;
-use commonware_consensus::threshold_simplex::types::View;
-use commonware_cryptography::{Digestible, Hasher, Sha256};
+use commonware_consensus::{marshal, threshold_simplex::types::View};
+use commonware_cryptography::{bls12381::primitives::variant::MinSig, Digestible, Hasher, Sha256};
 use commonware_macros::select;
 use commonware_runtime::{Clock, Handle, Metrics, Spawner};
 use commonware_utils::SystemTimeExt;
@@ -74,12 +73,15 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
         )
     }
 
-    pub fn start(mut self, syncer: syncer::Mailbox) -> Handle<()> {
-        self.context.spawn_ref()(self.run(syncer))
+    pub fn start(
+        mut self,
+        marshal: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
+    ) -> Handle<()> {
+        self.context.spawn_ref()(self.run(marshal))
     }
 
     /// Run the application actor.
-    async fn run(mut self, mut syncer: syncer::Mailbox) {
+    async fn run(mut self, mut marshal: marshal::ingress::mailbox::Mailbox<MinSig, Block>) {
         // Compute genesis digest
         self.hasher.update(GENESIS);
         let genesis_parent = self.hasher.finalize();
@@ -103,7 +105,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     let parent_request = if parent.1 == genesis_digest {
                         Either::Left(future::ready(Ok(genesis.clone())))
                     } else {
-                        Either::Right(syncer.get(Some(parent.0), parent.1).await)
+                        Either::Right(marshal.subscribe(Some(parent.0), parent.1).await)
                     };
 
                     // Wait for the parent block to be available or the request to be cancelled in a separate task (to
@@ -155,7 +157,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                         height = built.1.height,
                         "broadcast requested"
                     );
-                    syncer.broadcast(built.1.clone()).await;
+                    marshal.broadcast(built.1.clone()).await;
                 }
                 Message::Verify {
                     view,
@@ -167,16 +169,16 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     let parent_request = if parent.1 == genesis_digest {
                         Either::Left(future::ready(Ok(genesis.clone())))
                     } else {
-                        Either::Right(syncer.get(Some(parent.0), parent.1).await)
+                        Either::Right(marshal.subscribe(Some(parent.0), parent.1).await)
                     };
 
                     // Wait for the blocks to be available or the request to be cancelled in a separate task (to
                     // continue processing other messages)
                     self.context.with_label("verify").spawn({
-                        let mut syncer = syncer.clone();
+                        let mut marshal = marshal.clone();
                         move |context| async move {
                             let requester =
-                                try_join(parent_request, syncer.get(None, payload).await);
+                                try_join(parent_request, marshal.subscribe(None, payload).await);
                             let response_closed = oneshot_closed_future(&mut response);
                             select! {
                                 result = requester => {
@@ -203,7 +205,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                     }
 
                                     // Persist the verified block
-                                    syncer.verified(view, block).await;
+                                    marshal.verified(view, block).await;
 
                                     // Send the verification result to the consensus
                                     let _ = response.send(true);
