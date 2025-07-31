@@ -73,15 +73,12 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
         )
     }
 
-    pub fn start(
-        mut self,
-        marshal: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
-    ) -> Handle<()> {
+    pub fn start(mut self, marshal: marshal::Mailbox<MinSig, Block>) -> Handle<()> {
         self.context.spawn_ref()(self.run(marshal))
     }
 
     /// Run the application actor.
-    async fn run(mut self, mut marshal: marshal::ingress::mailbox::Mailbox<MinSig, Block>) {
+    async fn run(mut self, mut marshal: marshal::Mailbox<MinSig, Block>) {
         // Compute genesis digest
         self.hasher.update(GENESIS);
         let genesis_parent = self.hasher.finalize();

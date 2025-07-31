@@ -2,11 +2,12 @@ use crate::{
     actors::{application, coordinator::Coordinator, indexer},
     Indexer,
 };
-use alto_types::{Block, Evaluation, NAMESPACE};
+use alto_types::{Activity, Block, Evaluation, NAMESPACE};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
     marshal,
     threshold_simplex::{self, Engine as Consensus},
+    Reporters,
 };
 use commonware_cryptography::{
     bls12381::primitives::{
@@ -28,10 +29,8 @@ use std::time::Duration;
 use tracing::{error, warn};
 
 /// Reporter type for the consensus engine.
-type Reporter<E, I> = (
-    marshal::ingress::mailbox::Mailbox<MinSig, Block>,
-    Option<indexer::Indexer<E, I>>,
-);
+type Reporter<E, I> =
+    Reporters<Activity, marshal::Mailbox<MinSig, Block>, Option<indexer::Indexer<E, I>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -84,8 +83,8 @@ pub struct Engine<
     application_mailbox: application::Mailbox,
     buffer: buffered::Engine<E, PublicKey, Block>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
-    marshal: marshal::actor::Actor<Block, E, MinSig, PublicKey, Coordinator<PublicKey>>,
-    marshal_mailbox: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
+    marshal: marshal::Actor<Block, E, MinSig, PublicKey, Coordinator<PublicKey>>,
+    marshal_mailbox: marshal::Mailbox<MinSig, Block>,
 
     consensus: Consensus<
         E,
@@ -135,10 +134,10 @@ impl<
         let coordinator = Coordinator::new(cfg.participants);
 
         // Create marshal
-        let (marshal, marshal_mailbox): (_, marshal::ingress::mailbox::Mailbox<MinSig, Block>) =
-            marshal::actor::Actor::init(
+        let (marshal, marshal_mailbox): (_, marshal::Mailbox<MinSig, Block>) =
+            marshal::Actor::init(
                 context.with_label("marshal"),
-                marshal::config::Config {
+                marshal::Config {
                     public_key: cfg.signer.public_key(),
                     identity,
                     coordinator,
@@ -164,7 +163,7 @@ impl<
             )
             .await;
 
-        // Create the reporter - always use a tuple
+        // Create the reporter
         let reporter = (
             marshal_mailbox.clone(),
             cfg.indexer.map(|indexer| {
@@ -174,7 +173,8 @@ impl<
                     marshal_mailbox.clone(),
                 )
             }),
-        );
+        )
+            .into();
 
         // Create the consensus engine
         let consensus = Consensus::new(

@@ -8,15 +8,11 @@ use tracing::{debug, warn};
 pub struct Indexer<E: Spawner + Metrics, I: crate::Indexer> {
     context: E,
     indexer: I,
-    marshal: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
+    marshal: marshal::Mailbox<MinSig, Block>,
 }
 
 impl<E: Spawner + Metrics, I: crate::Indexer> Indexer<E, I> {
-    pub fn new(
-        context: E,
-        indexer: I,
-        marshal: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
-    ) -> Self {
+    pub fn new(context: E, indexer: I, marshal: marshal::Mailbox<MinSig, Block>) -> Self {
         Self {
             context,
             indexer,
