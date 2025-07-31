@@ -1,6 +1,7 @@
+use alto_types::Block;
 use commonware_consensus::{
     threshold_simplex::types::{Context, View},
-    Automaton, Relay,
+    Automaton, Relay, Reporter,
 };
 use commonware_cryptography::sha256::Digest;
 use futures::{
@@ -97,5 +98,13 @@ impl Relay for Mailbox {
             .send(Message::Broadcast { payload: digest })
             .await
             .expect("Failed to send broadcast");
+    }
+}
+
+impl Reporter for Mailbox {
+    type Activity = Block;
+
+    async fn report(&mut self, activity: Self::Activity) {
+        unimplemented!()
     }
 }

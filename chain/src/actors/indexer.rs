@@ -28,6 +28,6 @@ impl<E: Spawner, I: crate::Indexer> Reporter for Indexer<E, I> {
     type Activity = Activity;
 
     async fn report(&mut self, activity: Self::Activity) {
-        // TODO: wait for block associated with activity to upload (from marshal)
+        unimplemented!()
     }
 }

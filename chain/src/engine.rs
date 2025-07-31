@@ -105,6 +105,7 @@ pub struct Engine<
     context: E,
 
     application: application::Actor<E>,
+    application_mailbox: application::Mailbox,
     buffer: buffered::Engine<E, PublicKey, Block>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
     marshal: marshal::actor::Actor<Block, E, MinSig, PublicKey, Coordinator<PublicKey>>,
@@ -231,6 +232,7 @@ impl<
             context,
 
             application,
+            application_mailbox,
             buffer,
             buffer_mailbox,
             marshal,
@@ -306,7 +308,11 @@ impl<
         let buffer_handle = self.buffer.start(broadcast_network);
 
         // Start marshal
-        let marshal_handle = self.marshal.start(self.buffer_mailbox, backfill_network);
+        let marshal_handle = self.marshal.start(
+            self.application_mailbox,
+            self.buffer_mailbox,
+            backfill_network,
+        );
 
         // Start consensus
         //
