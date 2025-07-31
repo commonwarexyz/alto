@@ -24,7 +24,7 @@ use futures::{future::try_join_all, join};
 use governor::clock::Clock as GClock;
 use governor::Quota;
 use rand::{CryptoRng, Rng};
-use std::time::Duration;
+use std::{marker::PhantomData, time::Duration};
 use tracing::{error, warn};
 
 #[derive(Clone)]
@@ -107,8 +107,8 @@ pub struct Engine<
     application: application::Actor<E>,
     buffer: buffered::Engine<E, PublicKey, Block>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
-    syncer: syncer::Actor<E, I>,
-    syncer_mailbox: syncer::Mailbox,
+    marshal: marshal::actor::Actor<Block, E, MinSig, PublicKey, Coordinator<PublicKey>>,
+    marshal_mailbox: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
     consensus: Consensus<
         E,
         PrivateKey,
@@ -117,7 +117,7 @@ pub struct Engine<
         Digest,
         application::Mailbox,
         application::Mailbox,
-        syncer::Mailbox,
+        Reporter<E, I>,
         application::Supervisor,
     >,
 }
@@ -189,8 +189,13 @@ impl<
         // Create the reporter
         let reporter = Reporter::new(
             marshal_mailbox.clone(),
-            cfg.indexer
-                .map(|indexer| indexer::Indexer::new(context.with_label("indexer"), indexer)),
+            cfg.indexer.map(|indexer| {
+                indexer::Indexer::new(
+                    context.with_label("indexer"),
+                    indexer,
+                    marshal_mailbox.clone(),
+                )
+            }),
         );
 
         // Create the consensus engine
@@ -228,8 +233,8 @@ impl<
             application,
             buffer,
             buffer_mailbox,
-            syncer,
-            syncer_mailbox,
+            marshal,
+            marshal_mailbox,
             consensus,
         }
     }

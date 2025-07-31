@@ -1,16 +1,26 @@
-use alto_types::Activity;
-use commonware_consensus::Reporter;
+use alto_types::{Activity, Block};
+use commonware_consensus::{marshal, Reporter};
+use commonware_cryptography::bls12381::primitives::variant::MinSig;
 use commonware_runtime::{Handle, Spawner};
 
 #[derive(Clone)]
 pub struct Indexer<E: Spawner, I: crate::Indexer> {
     context: E,
     indexer: I,
+    marshal: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
 }
 
 impl<E: Spawner, I: crate::Indexer> Indexer<E, I> {
-    pub fn new(context: E, indexer: I) -> Self {
-        Self { context, indexer }
+    pub fn new(
+        context: E,
+        indexer: I,
+        marshal: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
+    ) -> Self {
+        Self {
+            context,
+            indexer,
+            marshal,
+        }
     }
 }
 
