@@ -2,7 +2,7 @@ use crate::{
     actors::{application, coordinator::Coordinator, indexer},
     Indexer,
 };
-use alto_types::{Activity, Block, Evaluation, NAMESPACE};
+use alto_types::{Block, Evaluation, NAMESPACE};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
     marshal,
@@ -20,42 +20,18 @@ use commonware_cryptography::{
 };
 use commonware_p2p::{Blocker, Receiver, Sender};
 use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
-use futures::{future::try_join_all, join};
+use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use governor::Quota;
 use rand::{CryptoRng, Rng};
 use std::time::Duration;
 use tracing::{error, warn};
 
-#[derive(Clone)]
-struct Reporter<E: Spawner + Metrics, I: Indexer> {
-    marshal: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
-    indexer: Option<indexer::Indexer<E, I>>,
-}
-
-impl<E: Spawner + Metrics, I: Indexer> Reporter<E, I> {
-    pub fn new(
-        marshal: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
-        indexer: Option<indexer::Indexer<E, I>>,
-    ) -> Self {
-        Self { marshal, indexer }
-    }
-}
-
-impl<E: Spawner + Metrics, I: Indexer> commonware_consensus::Reporter for Reporter<E, I> {
-    type Activity = Activity;
-
-    async fn report(&mut self, activity: Self::Activity) {
-        if let Some(indexer) = self.indexer.as_mut() {
-            join!(
-                self.marshal.report(activity.clone()),
-                indexer.report(activity)
-            );
-        } else {
-            self.marshal.report(activity).await;
-        }
-    }
-}
+/// Reporter type for the consensus engine.
+type Reporter<E, I> = (
+    marshal::ingress::mailbox::Mailbox<MinSig, Block>,
+    Option<indexer::Indexer<E, I>>,
+);
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -110,6 +86,7 @@ pub struct Engine<
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
     marshal: marshal::actor::Actor<Block, E, MinSig, PublicKey, Coordinator<PublicKey>>,
     marshal_mailbox: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
+
     consensus: Consensus<
         E,
         PrivateKey,
@@ -187,8 +164,8 @@ impl<
             )
             .await;
 
-        // Create the reporter
-        let reporter = Reporter::new(
+        // Create the reporter - always use a tuple
+        let reporter = (
             marshal_mailbox.clone(),
             cfg.indexer.map(|indexer| {
                 indexer::Indexer::new(
