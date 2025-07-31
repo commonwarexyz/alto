@@ -28,12 +28,12 @@ use std::time::Duration;
 use tracing::{error, warn};
 
 #[derive(Clone)]
-struct Reporter<E: Spawner, I: Indexer> {
+struct Reporter<E: Spawner + Metrics, I: Indexer> {
     marshal: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
     indexer: Option<indexer::Indexer<E, I>>,
 }
 
-impl<E: Spawner, I: Indexer> Reporter<E, I> {
+impl<E: Spawner + Metrics, I: Indexer> Reporter<E, I> {
     pub fn new(
         marshal: marshal::ingress::mailbox::Mailbox<MinSig, Block>,
         indexer: Option<indexer::Indexer<E, I>>,
@@ -42,7 +42,7 @@ impl<E: Spawner, I: Indexer> Reporter<E, I> {
     }
 }
 
-impl<E: Spawner, I: Indexer> commonware_consensus::Reporter for Reporter<E, I> {
+impl<E: Spawner + Metrics, I: Indexer> commonware_consensus::Reporter for Reporter<E, I> {
     type Activity = Activity;
 
     async fn report(&mut self, activity: Self::Activity) {
