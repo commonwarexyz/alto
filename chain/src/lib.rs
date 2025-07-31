@@ -358,7 +358,7 @@ mod tests {
                     }
 
                     // If ends with contiguous_height, ensure it is at least required_container
-                    if metric.ends_with("_syncer_contiguous_height") {
+                    if metric.ends_with("_marshal_processed_height") {
                         let value = value.parse::<u64>().unwrap();
                         if value >= required {
                             success = true;
@@ -649,7 +649,7 @@ mod tests {
                     }
 
                     // If ends with contiguous_height, ensure it is at least required_container
-                    if metric.ends_with("_syncer_contiguous_height") {
+                    if metric.ends_with("_marshal_processed_height") {
                         let value = value.parse::<u64>().unwrap();
                         if value >= final_container_required {
                             success = true;
@@ -803,7 +803,7 @@ mod tests {
                                 }
 
                                 // If ends with contiguous_height, ensure it is at least required_container
-                                if metric.ends_with("_syncer_contiguous_height") {
+                                if metric.ends_with("_marshal_processed_height") {
                                     let value = value.parse::<u64>().unwrap();
                                     if value >= required_container {
                                         success = true;
@@ -986,7 +986,7 @@ mod tests {
                     }
 
                     // If ends with contiguous_height, ensure it is at least required_container
-                    if metric.ends_with("_syncer_contiguous_height") {
+                    if metric.ends_with("_marshal_processed_height") {
                         let value = value.parse::<u64>().unwrap();
                         if value >= required_container {
                             success = true;
