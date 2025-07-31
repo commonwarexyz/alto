@@ -3,11 +3,12 @@ use commonware_consensus::{
     threshold_simplex::types::{Context, View},
     Automaton, Relay, Reporter,
 };
-use commonware_cryptography::sha256::Digest;
+use commonware_cryptography::{sha256::Digest, Committable};
 use futures::{
     channel::{mpsc, oneshot},
     SinkExt,
 };
+use tracing::info;
 
 pub enum Message {
     Genesis {
@@ -104,7 +105,14 @@ impl Relay for Mailbox {
 impl Reporter for Mailbox {
     type Activity = Block;
 
-    async fn report(&mut self, activity: Self::Activity) {
-        unimplemented!()
+    async fn report(&mut self, block: Self::Activity) {
+        // In an application that maintains state, you would compute the state transition function here.
+        //
+        // After an unclean shutdown, it is possible that the application may be asked to process a block it has already seen (which it can simply ignore).
+        info!(
+            height = block.height,
+            digest = ?block.commitment(),
+            "processed block"
+        );
     }
 }
