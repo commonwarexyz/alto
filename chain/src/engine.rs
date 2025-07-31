@@ -24,7 +24,7 @@ use futures::{future::try_join_all, join};
 use governor::clock::Clock as GClock;
 use governor::Quota;
 use rand::{CryptoRng, Rng};
-use std::{marker::PhantomData, time::Duration};
+use std::time::Duration;
 use tracing::{error, warn};
 
 #[derive(Clone)]
@@ -300,13 +300,13 @@ impl<
         ),
     ) {
         // Start the application
-        let application_handle = self.application.start(self.syncer_mailbox);
+        let application_handle = self.application.start(self.marshal_mailbox);
 
         // Start the buffer
         let buffer_handle = self.buffer.start(broadcast_network);
 
-        // Start the syncer
-        let syncer_handle = self.syncer.start(self.buffer_mailbox, backfill_network);
+        // Start marshal
+        let marshal_handle = self.marshal.start(self.buffer_mailbox, backfill_network);
 
         // Start consensus
         //
@@ -320,7 +320,7 @@ impl<
         if let Err(e) = try_join_all(vec![
             application_handle,
             buffer_handle,
-            syncer_handle,
+            marshal_handle,
             consensus_handle,
         ])
         .await
