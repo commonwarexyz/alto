@@ -187,3 +187,13 @@ impl EncodeSize for Finalized {
         self.proof.encode_size() + self.block.encode_size()
     }
 }
+
+impl commonware_consensus::Block for Block {
+    fn parent(&self) -> Digest {
+        self.parent
+    }
+
+    fn height(&self) -> u64 {
+        self.height
+    }
+}
