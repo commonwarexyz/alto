@@ -1,5 +1,5 @@
 use crate::{
-    actors::{application, coordinator::Coordinator, syncer},
+    actors::{application, coordinator::Coordinator, indexer, syncer},
     Indexer,
 };
 use alto_types::{Block, Evaluation, NAMESPACE};
@@ -74,6 +74,7 @@ pub struct Engine<
 > {
     context: E,
 
+    indexer: Option<indexer::Indexer<E, I>>,
     application: application::Actor<E>,
     buffer: buffered::Engine<E, PublicKey, Block>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
@@ -156,6 +157,16 @@ impl<
             )
             .await;
 
+        // Create the indexer
+        let indexer = if let Some(indexer) = cfg.indexer {
+            Some(indexer::Indexer::new(
+                context.with_label("indexer"),
+                indexer,
+            ))
+        } else {
+            None
+        };
+
         // Create the syncer
         let (syncer, syncer_mailbox) = syncer::Actor::init(
             context.with_label("syncer"),
@@ -208,6 +219,7 @@ impl<
         Self {
             context,
 
+            indexer,
             application,
             buffer,
             buffer_mailbox,
