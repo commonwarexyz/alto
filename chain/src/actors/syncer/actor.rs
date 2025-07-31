@@ -14,7 +14,7 @@ use crate::{
 use alto_types::{Block, Finalization, Finalized, Identity, Notarized, NAMESPACE};
 use commonware_broadcast::{buffered, Broadcaster};
 use commonware_codec::{DecodeExt, Encode};
-use commonware_consensus::threshold_simplex::types::{Seedable, Viewable};
+use commonware_consensus::{threshold_simplex::types::Seedable, Viewable};
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest, Digestible};
 use commonware_macros::select;
 use commonware_p2p::{utils::requester, Receiver, Recipients, Sender};

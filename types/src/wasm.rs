@@ -2,7 +2,7 @@ use crate::{
     leader_index as compute_leader_index, Block, Finalized, Identity, Notarized, Seed, NAMESPACE,
 };
 use commonware_codec::{DecodeExt, Encode};
-use commonware_consensus::threshold_simplex::types::Viewable;
+use commonware_consensus::Viewable;
 use commonware_cryptography::Digestible;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
