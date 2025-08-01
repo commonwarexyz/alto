@@ -1,7 +1,4 @@
-use crate::{
-    actors::{application, coordinator::Coordinator, indexer},
-    Indexer,
-};
+use crate::{application, indexer, Coordinator, Indexer};
 use alto_types::{Activity, Block, Evaluation, NAMESPACE};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
