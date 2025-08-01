@@ -24,16 +24,6 @@ export const LOCATIONS: [[number, number], string][] = [
 ];
 ```
 
-## Compile `alto-types`
-
-```bash
-cd ../types
-wasm-pack build --release --target web
-mv pkg/alto_types.js ../explorer/src/alto_types
-mv pkg/alto_types_bg.wasm ../explorer/src/alto_types
-cd ../explorer
-```
-
 ## Run the app
 
 ```bash
@@ -45,6 +35,8 @@ npm start
 ```bash
 npm run build
 ```
+
+_This will compile the WASM module from `alto-types` before building the React app._
 
 ## Run the production app
 
