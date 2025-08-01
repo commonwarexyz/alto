@@ -25,7 +25,7 @@ use rand::{CryptoRng, Rng};
 use std::time::Duration;
 use tracing::{error, warn};
 
-/// Reporter type for the consensus engine.
+/// Reporter type for [threshold_simplex::Engine].
 type Reporter<E, I> =
     Reporters<Activity, marshal::Mailbox<MinSig, Block>, Option<indexer::Pusher<E, I>>>;
 
@@ -42,6 +42,7 @@ const REPLAY_BUFFER: usize = 8 * 1024 * 1024; // 8MB
 const WRITE_BUFFER: usize = 1024 * 1024; // 1MB
 const MAX_REPAIR: u64 = 20;
 
+/// Configuration for the [Engine].
 pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub blocker: B,
     pub partition_prefix: String,
@@ -69,6 +70,7 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub indexer: Option<I>,
 }
 
+/// The engine that drives the [application].
 pub struct Engine<
     E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
@@ -102,6 +104,7 @@ impl<
         I: Indexer,
     > Engine<E, B, I>
 {
+    /// Create a new [Engine].
     pub async fn new(context: E, cfg: Config<B, I>) -> Self {
         // Create the application
         let identity = *public::<MinSig>(&cfg.polynomial);
@@ -212,9 +215,7 @@ impl<
         }
     }
 
-    /// Start the `simplex` consensus engine.
-    ///
-    /// This will also rebuild the state of the engine from provided `Journal`.
+    /// Start the [threshold_simplex::Engine].
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         self,

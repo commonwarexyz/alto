@@ -17,7 +17,7 @@ use commonware_cryptography::{
 use commonware_resolver::p2p;
 use std::collections::HashMap;
 
-/// Implementation of `commonware-consensus::Supervisor`.
+/// Implementation of [commonware_consensus::Supervisor].
 #[derive(Clone)]
 pub struct Supervisor {
     identity: Identity,
@@ -29,6 +29,7 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
+    /// Create a new [Supervisor].
     pub fn new(
         polynomial: Poly<Evaluation>,
         mut participants: Vec<ed25519::PublicKey>,

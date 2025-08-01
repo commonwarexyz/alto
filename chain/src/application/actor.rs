@@ -2,7 +2,7 @@ use super::{
     ingress::{Mailbox, Message},
     Config,
 };
-use crate::supervisor::Supervisor;
+use crate::{supervisor::Supervisor, utils::OneshotClosedFut};
 use alto_types::Block;
 use commonware_consensus::{marshal, threshold_simplex::types::View};
 use commonware_cryptography::{bls12381::primitives::variant::MinSig, Digestible, Hasher, Sha256};
@@ -11,39 +11,10 @@ use commonware_runtime::{Clock, Handle, Metrics, Spawner};
 use commonware_utils::SystemTimeExt;
 use futures::StreamExt;
 use futures::{channel::mpsc, future::try_join};
-use futures::{channel::oneshot, future};
-use futures::{
-    future::Either,
-    task::{Context, Poll},
-};
+use futures::{future, future::Either};
 use rand::Rng;
-use std::{
-    pin::Pin,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
-
-// Define a future that checks if the oneshot channel is closed using a mutable reference
-struct ChannelClosedFuture<'a, T> {
-    sender: &'a mut oneshot::Sender<T>,
-}
-
-impl<T> futures::Future for ChannelClosedFuture<'_, T> {
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Use poll_canceled to check if the receiver has dropped the channel
-        match self.sender.poll_canceled(cx) {
-            Poll::Ready(()) => Poll::Ready(()), // Receiver dropped, channel closed
-            Poll::Pending => Poll::Pending,     // Channel still open
-        }
-    }
-}
-
-// Helper function to create the future using a mutable reference
-fn oneshot_closed_future<T>(sender: &mut oneshot::Sender<T>) -> ChannelClosedFuture<T> {
-    ChannelClosedFuture { sender }
-}
 
 /// Genesis message to use during initialization.
 const GENESIS: &[u8] = b"commonware is neat";
@@ -110,7 +81,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     self.context.with_label("propose").spawn({
                         let built = built.clone();
                         move |context| async move {
-                            let response_closed = oneshot_closed_future(&mut response);
+                            let response_closed = OneshotClosedFut::new(&mut response);
                             select! {
                                 parent = parent_request => {
                                     // Get the parent block
@@ -176,7 +147,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                         move |context| async move {
                             let requester =
                                 try_join(parent_request, marshal.subscribe(None, payload).await);
-                            let response_closed = oneshot_closed_future(&mut response);
+                            let response_closed = OneshotClosedFut::new(&mut response);
                             select! {
                                 result = requester => {
                                     // Unwrap the results

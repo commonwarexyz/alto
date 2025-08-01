@@ -5,8 +5,9 @@ pub mod application;
 pub mod engine;
 pub mod indexer;
 pub mod supervisor;
+pub mod utils;
 
-/// Configuration for the engine.
+/// Configuration for the [engine::Engine].
 #[derive(Deserialize, Serialize)]
 pub struct Config {
     pub private_key: String,
