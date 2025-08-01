@@ -61,6 +61,13 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+    - name: Get Rust version
+      id: rust-version
+      run: echo "rust_version=$(rustc --version)" >> "$GITHUB_OUTPUT"
+    - name: Run setup
+      uses: ./.github/actions/setup
+    - name: Install wasm-pack
+      run: cargo install wasm-pack
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
