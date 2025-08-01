@@ -30,7 +30,7 @@ pub trait Indexer: Clone + Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
-/// Mock is a simple indexer implementation for testing.
+/// A mock indexer implementation for testing.
 #[cfg(test)]
 #[derive(Clone)]
 pub struct Mock {
@@ -96,6 +96,7 @@ impl Indexer for alto_client::Client {
     }
 }
 
+/// An implementation of [Indexer] for the [Reporter] trait.
 #[derive(Clone)]
 pub struct Pusher<E: Spawner + Metrics, I: Indexer> {
     context: E,
@@ -104,6 +105,7 @@ pub struct Pusher<E: Spawner + Metrics, I: Indexer> {
 }
 
 impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
+    /// Create a new [Pusher].
     pub fn new(context: E, indexer: I, marshal: marshal::Mailbox<MinSig, Block>) -> Self {
         Self {
             context,
