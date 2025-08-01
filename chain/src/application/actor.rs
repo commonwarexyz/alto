@@ -5,7 +5,9 @@ use super::{
 use crate::{supervisor::Supervisor, utils::OneshotClosedFut};
 use alto_types::Block;
 use commonware_consensus::{marshal, threshold_simplex::types::View};
-use commonware_cryptography::{bls12381::primitives::variant::MinSig, Digestible, Hasher, Sha256};
+use commonware_cryptography::{
+    bls12381::primitives::variant::MinSig, Committable, Digestible, Hasher, Sha256,
+};
 use commonware_macros::select;
 use commonware_runtime::{Clock, Handle, Metrics, Spawner};
 use commonware_utils::SystemTimeExt;
@@ -185,6 +187,16 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                             }
                         }
                     });
+                }
+                Message::Finalized { block } => {
+                    // In an application that maintains state, you would compute the state transition function here.
+                    //
+                    // After an unclean shutdown, it is possible that the application may be asked to process a block it has already seen (which it can simply ignore).
+                    info!(
+                        height = block.height,
+                        digest = ?block.commitment(),
+                        "processed block"
+                    );
                 }
             }
         }
