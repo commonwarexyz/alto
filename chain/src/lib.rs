@@ -40,8 +40,6 @@ pub struct Peers {
 
 #[cfg(test)]
 mod tests {
-    use crate::indexer::Indexer;
-
     use super::*;
     use commonware_cryptography::{
         bls12381::{
@@ -60,7 +58,7 @@ mod tests {
     use commonware_utils::quorum;
     use engine::{Config, Engine};
     use governor::Quota;
-    use indexer::Mock;
+    use indexer::{Indexer, Mock};
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use std::{
         collections::{HashMap, HashSet},
