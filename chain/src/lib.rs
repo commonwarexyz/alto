@@ -1,60 +1,10 @@
-use alto_types::{Finalized, Identity, Notarized, Seed};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, future::Future, net::SocketAddr};
+use std::{collections::HashMap, net::SocketAddr};
 
 pub mod application;
 pub mod engine;
 pub mod indexer;
 pub mod supervisor;
-
-/// Trait for interacting with an indexer.
-pub trait Indexer: Clone + Send + Sync + 'static {
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    /// Create a new indexer with the given URI and public key.
-    fn new(uri: &str, public: Identity) -> Self;
-
-    /// Upload a seed to the indexer.
-    fn seed_upload(&self, seed: Seed) -> impl Future<Output = Result<(), Self::Error>> + Send;
-
-    /// Upload a notarization to the indexer.
-    fn notarized_upload(
-        &self,
-        notarized: Notarized,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
-
-    /// Upload a finalization to the indexer.
-    fn finalized_upload(
-        &self,
-        finalized: Finalized,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
-}
-
-impl Indexer for alto_client::Client {
-    type Error = alto_client::Error;
-
-    fn new(uri: &str, identity: Identity) -> Self {
-        Self::new(uri, identity)
-    }
-
-    fn seed_upload(&self, seed: Seed) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.seed_upload(seed)
-    }
-
-    fn notarized_upload(
-        &self,
-        notarized: Notarized,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.notarized_upload(notarized)
-    }
-
-    fn finalized_upload(
-        &self,
-        finalized: Finalized,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.finalized_upload(finalized)
-    }
-}
 
 /// Configuration for the engine.
 #[derive(Deserialize, Serialize)]
@@ -89,8 +39,9 @@ pub struct Peers {
 
 #[cfg(test)]
 mod tests {
+    use crate::indexer::Indexer;
+
     use super::*;
-    use alto_types::{Finalized, Notarized};
     use commonware_cryptography::{
         bls12381::{
             dkg::ops,
@@ -108,56 +59,18 @@ mod tests {
     use commonware_utils::quorum;
     use engine::{Config, Engine};
     use governor::Quota;
+    use indexer::Mock;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use std::{
         collections::{HashMap, HashSet},
         num::NonZeroU32,
-        sync::Arc,
+        time::Duration,
     };
-    use std::{sync::atomic::AtomicBool, time::Duration};
     use tracing::info;
 
     /// Limit the freezer table size to 1MB because the deterministic runtime stores
     /// everything in RAM.
     const FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(14); // 1MB
-
-    /// MockIndexer is a simple indexer implementation for testing.
-    #[derive(Clone)]
-    struct MockIndexer {
-        seed_seen: Arc<AtomicBool>,
-        notarization_seen: Arc<AtomicBool>,
-        finalization_seen: Arc<AtomicBool>,
-    }
-
-    impl Indexer for MockIndexer {
-        type Error = std::io::Error;
-
-        fn new(_: &str, _: Identity) -> Self {
-            MockIndexer {
-                seed_seen: Arc::new(AtomicBool::new(false)),
-                notarization_seen: Arc::new(AtomicBool::new(false)),
-                finalization_seen: Arc::new(AtomicBool::new(false)),
-            }
-        }
-
-        async fn seed_upload(&self, _: Seed) -> Result<(), Self::Error> {
-            self.seed_seen
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            Ok(())
-        }
-
-        async fn notarized_upload(&self, _: Notarized) -> Result<(), Self::Error> {
-            self.notarization_seen
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            Ok(())
-        }
-
-        async fn finalized_upload(&self, _: Finalized) -> Result<(), Self::Error> {
-            self.finalization_seen
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            Ok(())
-        }
-    }
 
     /// Registers all validators using the oracle.
     async fn register_validators(
@@ -279,7 +192,7 @@ mod tests {
 
                 // Configure engine
                 let uid = format!("validator-{public_key}");
-                let config: Config<_, MockIndexer> = engine::Config {
+                let config: Config<_, Mock> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -453,7 +366,7 @@ mod tests {
                 // Configure engine
                 let public_key = signer.public_key();
                 let uid = format!("validator-{public_key}");
-                let config: Config<_, MockIndexer> = engine::Config {
+                let config: Config<_, Mock> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -541,7 +454,7 @@ mod tests {
             let share = shares[0].clone();
             let public_key = signer.public_key();
             let uid = format!("validator-{public_key}");
-            let config: Config<_, MockIndexer> = engine::Config {
+            let config: Config<_, Mock> = engine::Config {
                 blocker: oracle.control(public_key.clone()),
                 partition_prefix: uid.clone(),
                 blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -676,7 +589,7 @@ mod tests {
 
                     // Configure engine
                     let uid = format!("validator-{public_key}");
-                    let config: Config<_, MockIndexer> = engine::Config {
+                    let config: Config<_, Mock> = engine::Config {
                         blocker: oracle.control(public_key.clone()),
                         partition_prefix: uid.clone(),
                         blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -836,7 +749,7 @@ mod tests {
             let identity = *poly::public::<MinSig>(&polynomial);
 
             // Define mock indexer
-            let indexer = MockIndexer::new("", identity);
+            let indexer = Mock::new("", identity);
 
             // Create instances
             let mut public_keys = HashSet::new();
@@ -847,7 +760,7 @@ mod tests {
 
                 // Configure engine
                 let uid = format!("validator-{public_key}");
-                let config: Config<_, MockIndexer> = engine::Config {
+                let config: Config<_, Mock> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,

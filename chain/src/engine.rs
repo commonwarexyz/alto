@@ -1,4 +1,4 @@
-use crate::{application, indexer, supervisor::Supervisor, Indexer};
+use crate::{application, indexer, indexer::Indexer, supervisor::Supervisor};
 use alto_types::{Activity, Block, Evaluation, NAMESPACE};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
@@ -27,7 +27,7 @@ use tracing::{error, warn};
 
 /// Reporter type for the consensus engine.
 type Reporter<E, I> =
-    Reporters<Activity, marshal::Mailbox<MinSig, Block>, Option<indexer::Indexer<E, I>>>;
+    Reporters<Activity, marshal::Mailbox<MinSig, Block>, Option<indexer::Pusher<E, I>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -161,7 +161,7 @@ impl<
         let reporter = (
             marshal_mailbox.clone(),
             cfg.indexer.map(|indexer| {
-                indexer::Indexer::new(
+                indexer::Pusher::new(
                     context.with_label("indexer"),
                     indexer,
                     marshal_mailbox.clone(),
