@@ -29,8 +29,6 @@ const RECOVERED_CHANNEL: u32 = 1;
 const RESOLVER_CHANNEL: u32 = 2;
 const BROADCASTER_CHANNEL: u32 = 3;
 const BACKFILL_BY_DIGEST_CHANNEL: u32 = 4;
-const BACKFILL_BY_HEIGHT_CHANNEL: u32 = 5;
-const BACKFILL_BY_VIEW_CHANNEL: u32 = 6;
 
 const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 const NOTARIZATION_TIMEOUT: Duration = Duration::from_secs(2);
@@ -216,20 +214,10 @@ fn main() {
         );
 
         // Register backfill channel
-        let backfiller_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
-        let backfill_by_digest = network.register(
+        let backfill_quota = Quota::per_second(NonZeroU32::new(8).unwrap());
+        let backfill = network.register(
             BACKFILL_BY_DIGEST_CHANNEL,
-            backfiller_limit,
-            config.message_backlog,
-        );
-        let backfill_by_height = network.register(
-            BACKFILL_BY_HEIGHT_CHANNEL,
-            backfiller_limit,
-            config.message_backlog,
-        );
-        let backfill_by_view = network.register(
-            BACKFILL_BY_VIEW_CHANNEL,
-            backfiller_limit,
+            backfill_quota,
             config.message_backlog,
         );
 
@@ -254,7 +242,7 @@ fn main() {
             participants: peers,
             mailbox_size: config.mailbox_size,
             deque_size: config.deque_size,
-            backfill_quota: backfiller_limit,
+            backfill_quota,
             leader_timeout: LEADER_TIMEOUT,
             notarization_timeout: NOTARIZATION_TIMEOUT,
             nullify_retry: NULLIFY_RETRY,
@@ -270,15 +258,7 @@ fn main() {
         let engine = engine::Engine::new(context.with_label("engine"), config).await;
 
         // Start engine
-        let engine = engine.start(
-            pending,
-            recovered,
-            resolver,
-            broadcaster,
-            backfill_by_digest,
-            backfill_by_height,
-            backfill_by_view,
-        );
+        let engine = engine.start(pending, recovered, resolver, broadcaster, backfill);
 
         // Wait for any task to error
         if let Err(e) = try_join_all(vec![p2p, engine]).await {

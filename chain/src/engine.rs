@@ -240,15 +240,7 @@ impl<
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        backfill_by_digest_network: (
-            impl Sender<PublicKey = PublicKey>,
-            impl Receiver<PublicKey = PublicKey>,
-        ),
-        backfill_by_height_network: (
-            impl Sender<PublicKey = PublicKey>,
-            impl Receiver<PublicKey = PublicKey>,
-        ),
-        backfill_by_view_network: (
+        backfill_network: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
@@ -259,9 +251,7 @@ impl<
                 recovered_network,
                 resolver_network,
                 broadcast_network,
-                backfill_by_digest_network,
-                backfill_by_height_network,
-                backfill_by_view_network,
+                backfill_network,
             )
         })
     }
@@ -285,15 +275,7 @@ impl<
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        backfill_by_digest_network: (
-            impl Sender<PublicKey = PublicKey>,
-            impl Receiver<PublicKey = PublicKey>,
-        ),
-        backfill_by_height_network: (
-            impl Sender<PublicKey = PublicKey>,
-            impl Receiver<PublicKey = PublicKey>,
-        ),
-        backfill_by_view_network: (
+        backfill_network: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
@@ -308,9 +290,7 @@ impl<
         let marshal_handle = self.marshal.start(
             self.application_mailbox,
             self.buffer_mailbox,
-            backfill_by_digest_network,
-            backfill_by_height_network,
-            backfill_by_view_network,
+            backfill_network,
         );
 
         // Start consensus
