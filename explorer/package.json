@@ -16,7 +16,8 @@
   "scripts": {
     "start": "react-scripts start",
     "build:wasm": "cd ../types && wasm-pack build --target web --out-dir ../explorer/src/alto_types --out-name alto_types",
-    "build": "npm run build:wasm && react-scripts build"
+    "build": "npm run build:wasm && react-scripts build",
+    "build:react": "react-scripts build"
   },
   "eslintConfig": {
     "extends": [
