@@ -44,3 +44,15 @@ runs:
       run: |
         cargo install cargo-cache
         cargo cache --autoclean
+    - name: Cache wasm-pack
+      id: wasm-pack-cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/wasm-pack
+          ~/AppData/Local/cargo/bin/wasm-pack.exe
+        key: ${{ runner.os }}-wasm-pack-${{ steps.rust-version.outputs.rust_version }}
+    - name: Install wasm-pack
+      if: steps.wasm-pack-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: cargo install wasm-pack
