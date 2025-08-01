@@ -30,6 +30,46 @@ pub trait Indexer: Clone + Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
+/// Mock is a simple indexer implementation for testing.
+#[cfg(test)]
+#[derive(Clone)]
+pub struct Mock {
+    pub seed_seen: Arc<AtomicBool>,
+    pub notarization_seen: Arc<AtomicBool>,
+    pub finalization_seen: Arc<AtomicBool>,
+}
+
+#[cfg(test)]
+impl Indexer for Mock {
+    type Error = std::io::Error;
+
+    fn new(_: &str, _: Identity) -> Self {
+        Mock {
+            seed_seen: Arc::new(AtomicBool::new(false)),
+            notarization_seen: Arc::new(AtomicBool::new(false)),
+            finalization_seen: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    async fn seed_upload(&self, _: Seed) -> Result<(), Self::Error> {
+        self.seed_seen
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
+    async fn notarized_upload(&self, _: Notarized) -> Result<(), Self::Error> {
+        self.notarization_seen
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
+    async fn finalized_upload(&self, _: Finalized) -> Result<(), Self::Error> {
+        self.finalization_seen
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+}
+
 impl Indexer for alto_client::Client {
     type Error = alto_client::Error;
 
@@ -163,45 +203,5 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
             }
             _ => {}
         }
-    }
-}
-
-/// MockIndexer is a simple indexer implementation for testing.
-#[cfg(test)]
-#[derive(Clone)]
-pub struct Mock {
-    pub seed_seen: Arc<AtomicBool>,
-    pub notarization_seen: Arc<AtomicBool>,
-    pub finalization_seen: Arc<AtomicBool>,
-}
-
-#[cfg(test)]
-impl Indexer for Mock {
-    type Error = std::io::Error;
-
-    fn new(_: &str, _: Identity) -> Self {
-        Mock {
-            seed_seen: Arc::new(AtomicBool::new(false)),
-            notarization_seen: Arc::new(AtomicBool::new(false)),
-            finalization_seen: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    async fn seed_upload(&self, _: Seed) -> Result<(), Self::Error> {
-        self.seed_seen
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        Ok(())
-    }
-
-    async fn notarized_upload(&self, _: Notarized) -> Result<(), Self::Error> {
-        self.notarization_seen
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        Ok(())
-    }
-
-    async fn finalized_upload(&self, _: Finalized) -> Result<(), Self::Error> {
-        self.finalization_seen
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        Ok(())
     }
 }
