@@ -1,8 +1,8 @@
 use super::{
     ingress::{Mailbox, Message},
-    supervisor::Supervisor,
     Config,
 };
+use crate::supervisor::Supervisor;
 use alto_types::Block;
 use commonware_consensus::{marshal, threshold_simplex::types::View};
 use commonware_cryptography::{bls12381::primitives::variant::MinSig, Digestible, Hasher, Sha256};

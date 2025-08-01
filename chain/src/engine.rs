@@ -1,4 +1,4 @@
-use crate::{application, indexer, Coordinator, Indexer};
+use crate::{application, indexer, supervisor::Supervisor, Indexer};
 use alto_types::{Activity, Block, Evaluation, NAMESPACE};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
@@ -80,7 +80,7 @@ pub struct Engine<
     application_mailbox: application::Mailbox,
     buffer: buffered::Engine<E, PublicKey, Block>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
-    marshal: marshal::Actor<Block, E, MinSig, PublicKey, Coordinator<PublicKey>>,
+    marshal: marshal::Actor<Block, E, MinSig, PublicKey, Supervisor>,
     marshal_mailbox: marshal::Mailbox<MinSig, Block>,
 
     consensus: Consensus<
@@ -92,7 +92,7 @@ pub struct Engine<
         application::Mailbox,
         application::Mailbox,
         Reporter<E, I>,
-        application::Supervisor,
+        Supervisor,
     >,
 }
 
@@ -127,9 +127,6 @@ impl<
             },
         );
 
-        // Create the coordinator
-        let coordinator = Coordinator::new(cfg.participants);
-
         // Create marshal
         let (marshal, marshal_mailbox): (_, marshal::Mailbox<MinSig, Block>) =
             marshal::Actor::init(
@@ -137,7 +134,7 @@ impl<
                 marshal::Config {
                     public_key: cfg.signer.public_key(),
                     identity,
-                    coordinator,
+                    coordinator: supervisor.clone(),
                     partition_prefix: cfg.partition_prefix.clone(),
                     mailbox_size: cfg.mailbox_size,
                     backfill_quota: cfg.backfill_quota,

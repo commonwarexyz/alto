@@ -8,8 +8,6 @@ mod actor;
 pub use actor::Actor;
 mod ingress;
 pub use ingress::Mailbox;
-mod supervisor;
-pub use supervisor::Supervisor;
 
 /// Configuration for the application.
 pub struct Config {

@@ -1,12 +1,11 @@
 use alto_types::{Finalized, Identity, Notarized, Seed};
-use commonware_cryptography::PublicKey;
-use commonware_resolver::p2p;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, future::Future, net::SocketAddr};
 
 pub mod application;
 pub mod engine;
 pub mod indexer;
+pub mod supervisor;
 
 /// Trait for interacting with an indexer.
 pub trait Indexer: Clone + Send + Sync + 'static {
@@ -86,29 +85,6 @@ pub struct Config {
 #[derive(Deserialize, Serialize)]
 pub struct Peers {
     pub addresses: HashMap<String, SocketAddr>,
-}
-
-#[derive(Clone)]
-pub struct Coordinator<P: PublicKey> {
-    participants: Vec<P>,
-}
-
-impl<P: PublicKey> Coordinator<P> {
-    pub fn new(participants: Vec<P>) -> Self {
-        Self { participants }
-    }
-}
-
-impl<P: PublicKey> p2p::Coordinator for Coordinator<P> {
-    type PublicKey = P;
-
-    fn peers(&self) -> &Vec<Self::PublicKey> {
-        &self.participants
-    }
-
-    fn peer_set_id(&self) -> u64 {
-        0
-    }
 }
 
 #[cfg(test)]

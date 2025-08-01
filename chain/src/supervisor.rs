@@ -12,8 +12,9 @@ use commonware_cryptography::{
             variant::MinSig,
         },
     },
-    ed25519::PublicKey,
+    ed25519,
 };
+use commonware_resolver::p2p;
 use std::collections::HashMap;
 
 /// Implementation of `commonware-consensus::Supervisor`.
@@ -21,8 +22,8 @@ use std::collections::HashMap;
 pub struct Supervisor {
     identity: Identity,
     polynomial: Vec<Evaluation>,
-    participants: Vec<PublicKey>,
-    participants_map: HashMap<PublicKey, u32>,
+    participants: Vec<ed25519::PublicKey>,
+    participants_map: HashMap<ed25519::PublicKey, u32>,
 
     share: group::Share,
 }
@@ -30,7 +31,7 @@ pub struct Supervisor {
 impl Supervisor {
     pub fn new(
         polynomial: Poly<Evaluation>,
-        mut participants: Vec<PublicKey>,
+        mut participants: Vec<ed25519::PublicKey>,
         share: group::Share,
     ) -> Self {
         // Setup participants
@@ -53,9 +54,21 @@ impl Supervisor {
     }
 }
 
+impl p2p::Coordinator for Supervisor {
+    type PublicKey = ed25519::PublicKey;
+
+    fn peers(&self) -> &Vec<Self::PublicKey> {
+        &self.participants
+    }
+
+    fn peer_set_id(&self) -> u64 {
+        0
+    }
+}
+
 impl Su for Supervisor {
     type Index = View;
-    type PublicKey = PublicKey;
+    type PublicKey = ed25519::PublicKey;
 
     fn leader(&self, _: Self::Index) -> Option<Self::PublicKey> {
         unimplemented!("only defined in supertrait")
