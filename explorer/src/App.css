@@ -7,7 +7,7 @@
 
 body {
   margin: 0;
-  font-family: 'Consolas', monospace;
+  font-family: 'Inconsolata', monospace;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -76,7 +76,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  font-family: 'Consolas', monospace;
+  font-family: 'Inconsolata', monospace;
   justify-content: flex-end;
 }
 
@@ -124,7 +124,7 @@ body {
   margin: 0;
   font-size: 18px;
   font-weight: normal;
-  font-family: 'Consolas', monospace;
+  font-family: 'Inconsolata', monospace;
 }
 
 .bars-list {
@@ -140,7 +140,7 @@ body {
   font-size: 14px;
   width: 100%;
   max-width: 100%;
-  font-family: 'Consolas', monospace;
+  font-family: 'Inconsolata', monospace;
 }
 
 .view-info {
@@ -290,7 +290,7 @@ body {
 .leaflet-popup-content {
   margin: 8px;
   min-width: 150px;
-  font-family: 'Consolas', monospace;
+  font-family: 'Inconsolata', monospace;
   color: black;
 }
 
@@ -317,7 +317,7 @@ body {
   background: #0000eeff;
   border: 1px solid #0000eeff;
   cursor: pointer;
-  font-family: 'Consolas', monospace;
+  font-family: 'Inconsolata', monospace;
   font-size: 0.9rem;
   margin-right: 6px;
   color: white;
@@ -348,7 +348,7 @@ body {
   background: black;
   border: 1px solid black;
   cursor: pointer;
-  font-family: 'Consolas', monospace;
+  font-family: 'Inconsolata', monospace;
   font-size: 0.9rem;
   color: white;
   -webkit-appearance: none;
@@ -584,7 +584,7 @@ body {
   background: #ffb200;
   border: 1px solid #ffb200;
   cursor: pointer;
-  font-family: 'Consolas', monospace;
+  font-family: 'Inconsolata', monospace;
   font-size: 0.9rem;
   color: white;
   -webkit-appearance: none;

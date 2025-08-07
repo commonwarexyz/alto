@@ -21,7 +21,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    font-family: 'Consolas', monospace;
+    font-family: 'Inconsolata', monospace;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
@@ -115,7 +115,7 @@
     padding: 8px 12px;
     border: 1px solid #ccc;
     border-radius: 0;
-    font-family: 'Consolas', monospace;
+    font-family: 'Inconsolata', monospace;
     min-width: 200px;
     background-color: white;
     height: 38px;
@@ -133,7 +133,7 @@
     color: white;
     border-radius: 0;
     cursor: pointer;
-    font-family: 'Consolas', monospace;
+    font-family: 'Inconsolata', monospace;
     height: 38px;
 }
 
@@ -160,7 +160,7 @@
     background-color: #f4f4f4;
     border: 1px solid #ddd;
     cursor: pointer;
-    font-family: 'Consolas', monospace;
+    font-family: 'Inconsolata', monospace;
     font-size: 0.9rem;
     color: black;
     -webkit-text-fill-color: black;
@@ -230,7 +230,7 @@
     padding: 8px 12px;
     background-color: #f0f0f0;
     border-bottom: 1px solid #eee;
-    font-family: 'Consolas', monospace;
+    font-family: 'Inconsolata', monospace;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -268,7 +268,7 @@
 }
 
 .search-result-value {
-    font-family: 'Consolas', monospace;
+    font-family: 'Inconsolata', monospace;
     word-break: break-all;
 }
 
@@ -287,7 +287,7 @@
 
 .search-result-value.signature {
     color: #0000ee;
-    font-family: 'Consolas', monospace;
+    font-family: 'Inconsolata', monospace;
 }
 
 .search-result-json {

@@ -2,7 +2,7 @@
     background-color: white;
     border: 1px solid #ccc;
     padding: 16px;
-    font-family: 'Consolas', monospace;
+    font-family: 'Inconsolata', monospace;
 }
 
 .stats-header {
@@ -41,7 +41,7 @@
     justify-content: space-between;
     padding: 8px 16px;
     border-radius: 0;
-    font-family: 'Consolas', monospace;
+    font-family: 'Inconsolata', monospace;
     font-size: 12px;
     cursor: pointer;
     min-width: 160px;
@@ -123,7 +123,7 @@
     background: white;
     cursor: pointer;
     text-align: left;
-    font-family: 'Consolas', monospace;
+    font-family: 'Inconsolata', monospace;
     font-size: 12px;
     border-bottom: 1px solid #eee;
 }

@@ -23,7 +23,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    font-family: 'Consolas', monospace;
+    font-family: 'Inconsolata', monospace;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
@@ -100,7 +100,7 @@ ol {
     flex: 1;
     padding: 12px;
     cursor: pointer;
-    font-family: 'Consolas', monospace;
+    font-family: 'Inconsolata', monospace;
     text-align: left;
     transition: all 0.2s ease;
     -webkit-tap-highlight-color: transparent;
@@ -199,7 +199,7 @@ ol {
     border: 1px solid #ddd;
     border-radius: 0;
     padding: 10px;
-    font-family: 'Consolas', monospace;
+    font-family: 'Inconsolata', monospace;
     font-size: 0.9rem;
     margin: 10px 0;
     white-space: pre-wrap;
@@ -212,7 +212,7 @@ ol {
     background-color: #f4f4f4;
     border: 1px solid #ddd;
     cursor: pointer;
-    font-family: 'Consolas', monospace;
+    font-family: 'Inconsolata', monospace;
     font-size: 0.9rem;
     color: black !important;
     -webkit-appearance: none;
