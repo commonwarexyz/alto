@@ -6,7 +6,7 @@
     height: 100vh;
     background-color: #000;
     overflow: hidden;
-    font-family: 'Inconsolata', 'Inconsolata', 'Monaco', 'Courier New', monospace;
+    font-family: 'Inconsolata', monospace;
 }
 
 .dvd-logo {
