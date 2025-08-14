@@ -15,7 +15,7 @@ struct Args {
         long,
         help = "Identity public key in hex format (BLS12-381 public key)"
     )]
-    identity: Option<String>,
+    identity: String,
 }
 
 #[tokio::main]
@@ -28,18 +28,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    // Parse identity if provided
-    let identity: Identity = if let Some(id_hex) = args.identity {
-        let bytes = commonware_utils::from_hex(&id_hex).ok_or("Invalid identity hex format")?;
-        Identity::decode(&mut bytes.as_slice()).map_err(|_| "Failed to decode identity")?
-    } else {
-        // Generate a default identity for testing
-        use commonware_cryptography::bls12381::primitives::{ops, variant::MinSig};
-        use rand::{rngs::StdRng, SeedableRng};
-        let mut rng = StdRng::seed_from_u64(0);
-        let (_, public) = ops::keypair::<_, MinSig>(&mut rng);
-        public
-    };
+    // Parse identity
+    let bytes = commonware_utils::from_hex(&args.identity)
+        .ok_or("Invalid identity hex format")?;
+    let identity: Identity = Identity::decode(&mut bytes.as_slice())
+        .map_err(|_| "Failed to decode identity")?;
 
     // Initialize simulator
     let simulator = Arc::new(Simulator::new(identity));
