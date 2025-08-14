@@ -1,0 +1,34 @@
+[package]
+name = "alto-simulator"
+version = "0.0.14"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Alto simulator for testing and development."
+
+[dependencies]
+alto-client = { workspace = true }
+alto-types = { workspace = true }
+commonware-codec = { workspace = true }
+commonware-consensus = { workspace = true }
+commonware-cryptography = { workspace = true }
+commonware-utils = { workspace = true }
+bytes = { workspace = true }
+rand = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+tokio = { version = "1.41", features = ["full"] }
+axum = { version = "0.7", features = ["ws"] }
+tower = { version = "0.5" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = { version = "0.24" }
+
+[[bin]]
+name = "simulator"
+path = "src/main.rs"
+
+[lib]
+name = "alto_simulator"
+path = "src/lib.rs"
