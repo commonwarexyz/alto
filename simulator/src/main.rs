@@ -29,10 +29,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Parse identity
-    let bytes = commonware_utils::from_hex(&args.identity)
-        .ok_or("Invalid identity hex format")?;
-    let identity: Identity = Identity::decode(&mut bytes.as_slice())
-        .map_err(|_| "Failed to decode identity")?;
+    let bytes = commonware_utils::from_hex(&args.identity).ok_or("Invalid identity hex format")?;
+    let identity: Identity =
+        Identity::decode(&mut bytes.as_slice()).map_err(|_| "Failed to decode identity")?;
 
     // Initialize simulator
     let simulator = Arc::new(Simulator::new(identity));
