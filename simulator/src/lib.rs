@@ -84,7 +84,7 @@ impl Simulator {
         }
 
         let mut state = self.state.write().unwrap();
-        
+
         // Store block by digest
         state
             .blocks_by_digest
@@ -92,7 +92,11 @@ impl Simulator {
 
         // Store notarization
         let view = notarized.proof.view();
-        if state.notarizations.insert(view, notarized.clone()).is_some() {
+        if state
+            .notarizations
+            .insert(view, notarized.clone())
+            .is_some()
+        {
             return Ok(()); // Already exists
         }
 
@@ -106,10 +110,7 @@ impl Simulator {
     pub fn get_notarization(&self, query: &str) -> Option<Notarized> {
         let state = self.state.read().unwrap();
         if query == LATEST {
-            state
-                .notarizations
-                .last_key_value()
-                .map(|(_, n)| n.clone())
+            state.notarizations.last_key_value().map(|(_, n)| n.clone())
         } else {
             // Parse as hex-encoded index
             let raw = from_hex(query)?;
@@ -125,7 +126,7 @@ impl Simulator {
         }
 
         let mut state = self.state.write().unwrap();
-        
+
         // Store block by digest
         state
             .blocks_by_digest
@@ -133,7 +134,11 @@ impl Simulator {
 
         // Store finalization
         let view = finalized.proof.view();
-        if state.finalizations.insert(view, finalized.clone()).is_some() {
+        if state
+            .finalizations
+            .insert(view, finalized.clone())
+            .is_some()
+        {
             return Ok(()); // Already exists
         }
 
@@ -147,10 +152,7 @@ impl Simulator {
     pub fn get_finalization(&self, query: &str) -> Option<Finalized> {
         let state = self.state.read().unwrap();
         if query == LATEST {
-            state
-                .finalizations
-                .last_key_value()
-                .map(|(_, f)| f.clone())
+            state.finalizations.last_key_value().map(|(_, f)| f.clone())
         } else {
             // Parse as hex-encoded index
             let raw = from_hex(query)?;
@@ -161,7 +163,7 @@ impl Simulator {
 
     pub fn get_block(&self, query: &str) -> Option<BlockResult> {
         let state = self.state.read().unwrap();
-        
+
         if query == LATEST {
             // Return latest finalized block
             state
@@ -200,6 +202,7 @@ impl Simulator {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum BlockResult {
     Block(Block),
     Finalized(Finalized),
@@ -378,20 +381,20 @@ mod tests {
             .iter()
             .map(|share| Notarize::<MinSig, _>::sign(NAMESPACE, share, proposal.clone()))
             .collect::<Vec<_>>();
-        
+
         let proposal_partials = partials
             .iter()
             .map(|partial| partial.proposal_signature.clone())
             .collect::<Vec<_>>();
         let proposal_recovered =
             threshold_signature_recover::<MinSig, _>(3, &proposal_partials).unwrap();
-        
+
         let seed_partials = partials
             .into_iter()
             .map(|partial| partial.seed_signature)
             .collect::<Vec<_>>();
         let seed_recovered = threshold_signature_recover::<MinSig, _>(3, &seed_partials).unwrap();
-        
+
         Notarization::new(proposal, proposal_recovered, seed_recovered)
     }
 
@@ -408,7 +411,7 @@ mod tests {
             .map(|partial| partial.seed_signature)
             .collect::<Vec<_>>();
         let seed_recovered = threshold_signature_recover::<MinSig, _>(3, &seed_partials).unwrap();
-        
+
         let finalize_partials = shares
             .iter()
             .map(|share| Finalize::<MinSig, _>::sign(NAMESPACE, share, proposal.clone()))
@@ -419,7 +422,7 @@ mod tests {
             .collect::<Vec<_>>();
         let finalize_recovered =
             threshold_signature_recover::<MinSig, _>(3, &finalize_partials).unwrap();
-        
+
         Finalization::new(proposal, finalize_recovered, seed_recovered)
     }
 
@@ -448,8 +451,8 @@ mod tests {
         let (master_secret, identity) = ops::keypair::<_, MinSig>(&mut rng);
 
         // Start server
-        let (addr, _handle) = start_test_server(identity.clone()).await;
-        let client = Client::new(&format!("http://{}", addr), identity.clone());
+        let (addr, _handle) = start_test_server(identity).await;
+        let client = Client::new(&format!("http://{addr}"), identity);
 
         // Test seed upload and retrieval
         let seed = create_test_seed(&master_secret, 1);
@@ -467,18 +470,18 @@ mod tests {
         // Create network key for identity (what the simulator checks)
         let mut rng = StdRng::seed_from_u64(0);
         let (polynomial, shares) = dkg_ops::generate_shares::<_, MinSig>(&mut rng, None, 4, 3);
-        let identity = poly::public::<MinSig>(&polynomial);
+        let identity = *poly::public::<MinSig>(&polynomial);
 
         // Start server
-        let (addr, _handle) = start_test_server(identity.clone()).await;
-        let client = Client::new(&format!("http://{}", addr), identity.clone());
+        let (addr, _handle) = start_test_server(identity).await;
+        let client = Client::new(&format!("http://{addr}"), identity);
 
         // Test notarization
         let block = Block::new(hash(b"genesis"), 1, 1000);
         let proposal = Proposal::new(1, 0, block.digest());
         let notarization = create_notarization(&shares, proposal);
         let notarized = Notarized::new(notarization, block);
-        
+
         client.notarized_upload(notarized.clone()).await.unwrap();
 
         let retrieved = client.notarized_get(IndexQuery::Latest).await.unwrap();
@@ -493,18 +496,18 @@ mod tests {
         // Create network key for identity (what the simulator checks)
         let mut rng = StdRng::seed_from_u64(0);
         let (polynomial, shares) = dkg_ops::generate_shares::<_, MinSig>(&mut rng, None, 4, 3);
-        let identity = poly::public::<MinSig>(&polynomial);
+        let identity = *poly::public::<MinSig>(&polynomial);
 
         // Start server
-        let (addr, _handle) = start_test_server(identity.clone()).await;
-        let client = Client::new(&format!("http://{}", addr), identity.clone());
+        let (addr, _handle) = start_test_server(identity).await;
+        let client = Client::new(&format!("http://{addr}"), identity);
 
         // Test finalization
         let block = Block::new(hash(b"genesis"), 1, 1000);
         let proposal = Proposal::new(1, 0, block.digest());
         let finalization = create_finalization(&shares, proposal);
         let finalized = Finalized::new(finalization, block);
-        
+
         client.finalized_upload(finalized.clone()).await.unwrap();
 
         let retrieved = client.finalized_get(IndexQuery::Latest).await.unwrap();
@@ -519,18 +522,18 @@ mod tests {
         // Create network key for identity (what the simulator checks)
         let mut rng = StdRng::seed_from_u64(0);
         let (polynomial, shares) = dkg_ops::generate_shares::<_, MinSig>(&mut rng, None, 4, 3);
-        let identity = poly::public::<MinSig>(&polynomial);
+        let identity = *poly::public::<MinSig>(&polynomial);
 
         // Start server
-        let (addr, _handle) = start_test_server(identity.clone()).await;
-        let client = Client::new(&format!("http://{}", addr), identity.clone());
+        let (addr, _handle) = start_test_server(identity).await;
+        let client = Client::new(&format!("http://{addr}"), identity);
 
         // Submit finalized block
         let block = Block::new(hash(b"genesis"), 1, 1000);
         let proposal = Proposal::new(1, 0, block.digest());
         let finalization = create_finalization(&shares, proposal);
         let finalized = Finalized::new(finalization, block.clone());
-        
+
         client.finalized_upload(finalized).await.unwrap();
 
         // Test retrieval by latest
@@ -552,7 +555,10 @@ mod tests {
         }
 
         // Test retrieval by digest
-        let payload = client.block_get(Query::Digest(block.digest())).await.unwrap();
+        let payload = client
+            .block_get(Query::Digest(block.digest()))
+            .await
+            .unwrap();
         match payload {
             alto_client::consensus::Payload::Block(b) => {
                 assert_eq!(b.digest(), block.digest());
@@ -568,8 +574,8 @@ mod tests {
         let (master_secret, identity) = ops::keypair::<_, MinSig>(&mut rng);
 
         // Start server
-        let (addr, _handle) = start_test_server(identity.clone()).await;
-        let client = Client::new(&format!("http://{}", addr), identity.clone());
+        let (addr, _handle) = start_test_server(identity).await;
+        let client = Client::new(&format!("http://{addr}"), identity);
 
         // Start listening
         let mut stream = client.listen().await.unwrap();
@@ -604,15 +610,15 @@ mod tests {
         let (_, identity2) = ops::keypair::<_, MinSig>(&mut rng);
 
         // Start server with identity1
-        let (addr, _handle) = start_test_server(identity1.clone()).await;
-        
+        let (addr, _handle) = start_test_server(identity1).await;
+
         // Create client with identity2 (different from server)
-        let client = Client::new(&format!("http://{}", addr), identity2.clone());
+        let client = Client::new(&format!("http://{addr}"), identity2);
 
         // Upload a seed signed by identity1 (server will accept it)
         let seed = create_test_seed(&master_secret1, 1);
         client.seed_upload(seed).await.unwrap(); // This succeeds - server accepts it
-        
+
         // Try to retrieve the seed - client will fail to verify since it expects identity2
         let result = client.seed_get(IndexQuery::Latest).await;
         assert!(result.is_err()); // Fails because client expects identity2 but seed is signed by identity1
@@ -628,12 +634,12 @@ mod tests {
         let (wrong_master_secret, _) = ops::keypair::<_, MinSig>(&mut rng);
 
         // Start server
-        let (addr, _handle) = start_test_server(identity.clone()).await;
-        let client = Client::new(&format!("http://{}", addr), identity.clone());
+        let (addr, _handle) = start_test_server(identity).await;
+        let client = Client::new(&format!("http://{addr}"), identity);
 
         // Create seed with wrong signature
         let bad_seed = create_test_seed(&wrong_master_secret, 1);
-        
+
         // This should fail at the server because the signature doesn't match the identity
         let result = client.seed_upload(bad_seed).await;
         assert!(result.is_err());
