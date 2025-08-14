@@ -16,10 +16,10 @@ commonware-codec = { workspace = true }
 commonware-consensus = { workspace = true }
 commonware-cryptography = { workspace = true }
 commonware-utils = { workspace = true }
-bytes =  { workspace = true }
+bytes = { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
 futures = { workspace = true }
-reqwest = "0.12.12"
-tokio-tungstenite = { version = "0.17", features = ["native-tls"] }
-tokio = { version = "1.40.0", features = ["full"] }
+reqwest = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
