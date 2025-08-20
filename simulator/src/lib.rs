@@ -17,6 +17,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 use tokio::sync::broadcast;
+use tower_http::cors::CorsLayer;
 
 const LATEST: &str = "latest";
 
@@ -219,6 +220,7 @@ impl Api {
 
     pub fn router(&self) -> Router {
         Router::new()
+            .route("/health", get(health_check))
             .route("/seed", post(seed_upload))
             .route("/seed/:query", get(seed_get))
             .route("/notarization", post(notarization_upload))
@@ -227,8 +229,13 @@ impl Api {
             .route("/finalization/:query", get(finalization_get))
             .route("/block/:query", get(block_get))
             .route("/consensus/ws", get(consensus_ws))
+            .layer(CorsLayer::permissive())
             .with_state(self.simulator.clone())
     }
+}
+
+async fn health_check() -> impl IntoResponse {
+    (StatusCode::OK, "ok")
 }
 
 async fn seed_upload(
