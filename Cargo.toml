@@ -38,6 +38,7 @@ clap = "4.5.18"
 tokio = "1.41.0"
 axum = "0.7.9"
 tower = "0.5.2"
+tower-http = "0.6.2"
 reqwest = "0.12.12"
 tokio-tungstenite = "0.24.0"
 
