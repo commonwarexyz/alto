@@ -271,8 +271,8 @@ mod tests {
     #[test_traced]
     fn test_good_links() {
         let link = Link {
-            latency: 10.0,
-            jitter: 1.0,
+            latency: Duration::from_millis(10),
+            jitter: Duration::from_millis(1),
             success_rate: 1.0,
         };
         for seed in 0..5 {
@@ -284,8 +284,8 @@ mod tests {
     #[test_traced]
     fn test_bad_links() {
         let link = Link {
-            latency: 200.0,
-            jitter: 150.0,
+            latency: Duration::from_millis(200),
+            jitter: Duration::from_millis(150),
             success_rate: 0.75,
         };
         for seed in 0..5 {
@@ -297,8 +297,8 @@ mod tests {
     #[test_traced]
     fn test_1k() {
         let link = Link {
-            latency: 80.0,
-            jitter: 10.0,
+            latency: Duration::from_millis(80),
+            jitter: Duration::from_millis(10),
             success_rate: 0.98,
         };
         all_online(10, 0, link.clone(), 1000);
@@ -339,8 +339,8 @@ mod tests {
 
             // Link all validators (except 0)
             let link = Link {
-                latency: 10.0,
-                jitter: 1.0,
+                latency: Duration::from_millis(10),
+                jitter: Duration::from_millis(1),
                 success_rate: 1.0,
             };
             link_validators(
@@ -573,8 +573,8 @@ mod tests {
 
                 // Link all validators
                 let link = Link {
-                    latency: 10.0,
-                    jitter: 1.0,
+                    latency: Duration::from_millis(10),
+                    jitter: Duration::from_millis(1),
                     success_rate: 1.0,
                 };
                 link_validators(&mut oracle, &validators, link, None).await;
@@ -736,8 +736,8 @@ mod tests {
 
             // Link all validators
             let link = Link {
-                latency: 10.0,
-                jitter: 1.0,
+                latency: Duration::from_millis(10),
+                jitter: Duration::from_millis(1),
                 success_rate: 1.0,
             };
             link_validators(&mut oracle, &validators, link, None).await;

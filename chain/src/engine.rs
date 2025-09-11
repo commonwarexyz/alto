@@ -191,7 +191,6 @@ impl<
                 reporter,
                 supervisor,
                 partition: format!("{}-consensus", cfg.partition_prefix),
-                compression: None,
                 mailbox_size: cfg.mailbox_size,
                 leader_timeout: cfg.leader_timeout,
                 notarization_timeout: cfg.notarization_timeout,

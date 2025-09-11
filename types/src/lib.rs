@@ -49,7 +49,7 @@ mod tests {
             dkg::ops,
             primitives::{ops::threshold_signature_recover, poly, variant::MinSig},
         },
-        hash, Digestible,
+        Digestible, Hasher, Sha256,
     };
     use rand::{rngs::StdRng, SeedableRng};
 
@@ -60,7 +60,7 @@ mod tests {
         let (polynomial, shares) = ops::generate_shares::<_, MinSig>(&mut rng, None, 4, 3);
 
         // Create a block
-        let digest = hash(b"hello world");
+        let digest = Sha256::hash(b"hello world");
         let block = Block::new(digest, 10, 100);
         let proposal = Proposal::new(11, 8, block.digest());
 
@@ -100,7 +100,7 @@ mod tests {
         let (polynomial, shares) = ops::generate_shares::<_, MinSig>(&mut rng, None, 4, 3);
 
         // Create a block
-        let digest = hash(b"hello world");
+        let digest = Sha256::hash(b"hello world");
         let block = Block::new(digest, 10, 100);
         let proposal = Proposal::new(11, 8, block.digest());
 
