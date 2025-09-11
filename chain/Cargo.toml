@@ -1,9 +1,9 @@
 [package]
 name = "alto-chain"
-version = "0.0.14"
+version.workspace = true
 publish = true
-edition = "2021"
-license = "MIT OR Apache-2.0"
+edition.workspace = true
+license.workspace = true
 description = "A minimal (and wicked fast) blockchain built with the Commonware Library."
 readme = "README.md"
 homepage = "https://alto.commonware.xyz"

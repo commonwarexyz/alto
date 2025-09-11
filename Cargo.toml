@@ -7,6 +7,11 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+version = "0.0.14"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
 [workspace.dependencies]
 alto-client = { version = "0.0.14", path = "client" }
 alto-types = { version = "0.0.14", path = "types" }
