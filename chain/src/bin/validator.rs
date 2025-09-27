@@ -3,13 +3,14 @@ use alto_client::Client;
 use alto_types::NAMESPACE;
 use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt};
+use commonware_consensus::marshal::resolver::p2p;
 use commonware_cryptography::{
     bls12381::primitives::{group, poly, variant::MinSig},
     ed25519::{PrivateKey, PublicKey},
     Signer,
 };
 use commonware_deployer::ec2::Hosts;
-use commonware_p2p::authenticated::discovery as authenticated;
+use commonware_p2p::{authenticated::discovery as authenticated, utils::requester};
 use commonware_runtime::{tokio, Metrics, Runner};
 use commonware_utils::{from_hex_formatted, quorum, union_unique};
 use futures::future::try_join_all;
@@ -257,8 +258,24 @@ fn main() {
         };
         let engine = engine::Engine::new(context.with_label("engine"), config).await;
 
+        let resolver_cfg = p2p::Config {
+            public_key: public_key.clone(),
+            coordinator: engine.supervisor.clone(),
+            mailbox_size: 200,
+            requester_config: requester::Config {
+                public_key,
+                rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
+                initial: Duration::from_secs(1),
+                timeout: Duration::from_secs(2),
+            },
+            fetch_retry_timeout: Duration::from_millis(100),
+            priority_requests: false,
+            priority_responses: false,
+        };
+        let p2p_resolver = p2p::init(&context, resolver_cfg, backfill);
+
         // Start engine
-        let engine = engine.start(pending, recovered, resolver, broadcaster, backfill);
+        let engine = engine.start(pending, recovered, resolver, broadcaster, p2p_resolver);
 
         // Wait for any task to error
         if let Err(e) = try_join_all(vec![p2p, engine]).await {

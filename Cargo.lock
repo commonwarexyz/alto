@@ -46,6 +46,7 @@ dependencies = [
  "clap",
  "commonware-broadcast",
  "commonware-codec",
+ "commonware-coding",
  "commonware-consensus",
  "commonware-cryptography",
  "commonware-deployer",
@@ -522,8 +523,7 @@ checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 [[package]]
 name = "commonware-broadcast"
 version = "0.0.62"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc71e670241b8b07840cbb01d0d9521ae68bc2195f620adaeb57f76c51584bd5"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#3a1153066d67ac38c5187806d5d4a9ce9776ddb5"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -541,8 +541,7 @@ dependencies = [
 [[package]]
 name = "commonware-codec"
 version = "0.0.62"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "881d86d9cc88835dac1774701cfc296f8485acbbeb6c50d0c04246e066f3a169"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#3a1153066d67ac38c5187806d5d4a9ce9776ddb5"
 dependencies = [
  "bytes",
  "paste",
@@ -550,15 +549,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "commonware-coding"
+version = "0.0.62"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#3a1153066d67ac38c5187806d5d4a9ce9776ddb5"
+dependencies = [
+ "bytes",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-storage",
+ "rand_core",
+ "reed-solomon-simd",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "commonware-consensus"
 version = "0.0.62"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f8ba91ccb78397634c478b1199a3d3ff20eaa5dc637a1a657450fa3eafbc0ae"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#3a1153066d67ac38c5187806d5d4a9ce9776ddb5"
 dependencies = [
  "bytes",
  "cfg-if",
  "commonware-broadcast",
  "commonware-codec",
+ "commonware-coding",
  "commonware-cryptography",
  "commonware-macros",
  "commonware-p2p",
@@ -570,6 +583,7 @@ dependencies = [
  "governor",
  "prometheus-client",
  "rand",
+ "rand_core",
  "rand_distr",
  "thiserror 2.0.12",
  "tracing",
@@ -578,13 +592,13 @@ dependencies = [
 [[package]]
 name = "commonware-cryptography"
 version = "0.0.62"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e97eba4685c332ae24a5842893f37c839371c33647645c314a124a7e4ee9ba60"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#3a1153066d67ac38c5187806d5d4a9ce9776ddb5"
 dependencies = [
  "blake3",
  "blst",
  "bytes",
  "cfg-if",
+ "chacha20poly1305",
  "commonware-codec",
  "commonware-utils",
  "ed25519-consensus",
@@ -596,14 +610,14 @@ dependencies = [
  "rayon",
  "sha2 0.10.8",
  "thiserror 2.0.12",
+ "x25519-dalek",
  "zeroize",
 ]
 
 [[package]]
 name = "commonware-deployer"
 version = "0.0.62"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9fb89f381ebd87e4b8272f9509d77ee34a6784a35916b9ae114d4afdf415e6a"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#3a1153066d67ac38c5187806d5d4a9ce9776ddb5"
 dependencies = [
  "cfg-if",
  "serde",
@@ -613,8 +627,7 @@ dependencies = [
 [[package]]
 name = "commonware-macros"
 version = "0.0.62"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25989115bb59d92b1b7f79018792b31882dbe08e3ecaa6fd4ade5c4244f0d4e3"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#3a1153066d67ac38c5187806d5d4a9ce9776ddb5"
 dependencies = [
  "futures",
  "proc-macro2",
@@ -627,8 +640,7 @@ dependencies = [
 [[package]]
 name = "commonware-p2p"
 version = "0.0.62"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e25f8905f151ae133e13866b208d485f4fb17121bf73a57f6587ffaaac2c9a0"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#3a1153066d67ac38c5187806d5d4a9ce9776ddb5"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -640,6 +652,10 @@ dependencies = [
  "either",
  "futures",
  "governor",
+ "num-bigint",
+ "num-integer",
+ "num-rational",
+ "num-traits",
  "prometheus-client",
  "rand",
  "rand_distr",
@@ -650,8 +666,7 @@ dependencies = [
 [[package]]
 name = "commonware-resolver"
 version = "0.0.62"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c778ccaea860de1fd11305cb51f2ef1de085eafd707adbf48a533afdd8742004"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#3a1153066d67ac38c5187806d5d4a9ce9776ddb5"
 dependencies = [
  "bimap",
  "bytes",
@@ -673,8 +688,7 @@ dependencies = [
 [[package]]
 name = "commonware-runtime"
 version = "0.0.62"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffb9485b85b504ae6ae37c49a94050b1d3eafe222778e46d354ed0ca65259575"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#3a1153066d67ac38c5187806d5d4a9ce9776ddb5"
 dependencies = [
  "async-lock",
  "axum",
@@ -705,10 +719,10 @@ dependencies = [
 [[package]]
 name = "commonware-storage"
 version = "0.0.62"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ac3dfa058a662ce951500abebb865608afc68bfbde206d23a591b6aa3b235f9"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#3a1153066d67ac38c5187806d5d4a9ce9776ddb5"
 dependencies = [
  "bytes",
+ "cfg-if",
  "commonware-codec",
  "commonware-cryptography",
  "commonware-macros",
@@ -727,8 +741,7 @@ dependencies = [
 [[package]]
 name = "commonware-stream"
 version = "0.0.62"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d7599a9b3b015b9eebe87a4cc572c223843eb281e06262ea13c92db5b29f9a5"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#3a1153066d67ac38c5187806d5d4a9ce9776ddb5"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -738,8 +751,8 @@ dependencies = [
  "commonware-runtime",
  "commonware-utils",
  "futures",
- "hkdf",
  "rand",
+ "rand_core",
  "thiserror 2.0.12",
  "x25519-dalek",
  "zeroize",
@@ -748,13 +761,17 @@ dependencies = [
 [[package]]
 name = "commonware-utils"
 version = "0.0.62"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b052e7cbeed6ba05dee34b82434dd4e76ed5dd3b1c4585eafab08233e4033f9"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#3a1153066d67ac38c5187806d5d4a9ce9776ddb5"
 dependencies = [
  "bytes",
+ "cfg-if",
  "commonware-codec",
  "futures",
  "getrandom 0.2.15",
+ "num-bigint",
+ "num-integer",
+ "num-rational",
+ "num-traits",
  "rand",
  "thiserror 2.0.12",
 ]
@@ -1127,6 +1144,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
+name = "fixedbitset"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1388,15 +1411,6 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-
-[[package]]
-name = "hkdf"
-version = "0.12.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7"
-dependencies = [
- "hmac",
-]
 
 [[package]]
 name = "hmac"
@@ -1903,6 +1917,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-bigint"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
+dependencies = [
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "num-integer"
+version = "0.1.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "num-rational"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f83d14da390562dca69fc84082e73e548e1ad308d24accdedd2720017cb37824"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2392,12 +2436,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "readme-rustdocifier"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08ad765b21a08b1a8e5cdce052719188a23772bcbefb3c439f0baaf62c56ceac"
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b8c0c260b63a8219631167be35e6a988e9554dbd323f8bd08439c8ed1302bd1"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "reed-solomon-simd"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab6badd4f4b9c93832eb3707431e8e7bea282fae96801312f0990d48b030f8c5"
+dependencies = [
+ "fixedbitset",
+ "readme-rustdocifier",
 ]
 
 [[package]]

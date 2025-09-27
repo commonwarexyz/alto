@@ -41,15 +41,17 @@ impl Kind {
 mod tests {
     use super::*;
     use commonware_codec::{DecodeExt, Encode};
-    use commonware_consensus::threshold_simplex::types::{
-        Finalization, Finalize, Notarization, Notarize, Proposal,
+    use commonware_consensus::{
+        threshold_simplex::types::{Finalization, Finalize, Notarization, Notarize, Proposal},
+        types::CodingCommitment,
+        types::Round,
     };
     use commonware_cryptography::{
         bls12381::{
             dkg::ops,
             primitives::{ops::threshold_signature_recover, poly, variant::MinSig},
         },
-        Digestible, Hasher, Sha256,
+        Committable, Hasher, Sha256,
     };
     use rand::{rngs::StdRng, SeedableRng};
 
@@ -61,8 +63,9 @@ mod tests {
 
         // Create a block
         let digest = Sha256::hash(b"hello world");
-        let block = Block::new(digest, 10, 100);
-        let proposal = Proposal::new(11, 8, block.digest());
+        let coding_commitment = CodingCommitment::from((digest, Default::default()));
+        let block = Block::new(coding_commitment, 10, 100);
+        let proposal = Proposal::new(Round::new(0, 11), 8, block.commitment());
 
         // Create a notarization
         let partials = shares
@@ -101,8 +104,9 @@ mod tests {
 
         // Create a block
         let digest = Sha256::hash(b"hello world");
-        let block = Block::new(digest, 10, 100);
-        let proposal = Proposal::new(11, 8, block.digest());
+        let coding_commitment = CodingCommitment::from((digest, Default::default()));
+        let block = Block::new(coding_commitment, 10, 100);
+        let proposal = Proposal::new(Round::new(0, 11), 8, block.commitment());
 
         // Create a finalization
         let partials = shares
