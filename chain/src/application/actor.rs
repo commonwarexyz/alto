@@ -55,7 +55,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
         // Compute genesis digest
         self.hasher.update(GENESIS);
         let genesis_parent = self.hasher.finalize();
-        let genesis = Block::new(genesis_parent, 0, 0);
+        let genesis = Block::new(genesis_parent, 0, 0, Vec::new());
         let genesis_digest = genesis.digest();
         let built: Option<(View, Block)> = None;
         let built = Arc::new(Mutex::new(built));
@@ -82,7 +82,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     // continue processing other messages)
                     self.context.with_label("propose").spawn({
                         let built = built.clone();
-                        move |context| async move {
+                        move |mut context| async move {
                             let response_closed = OneshotClosedFut::new(&mut response);
                             select! {
                                 parent = parent_request => {
@@ -94,7 +94,12 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                     if current <= parent.timestamp {
                                         current = parent.timestamp + 1;
                                     }
-                                    let block = Block::new(parent.digest(), parent.height+1, current);
+
+                                    // Generate 1 MiB of random junk data.
+                                    let mut junk = vec![0u8; 1024 * 1024];
+                                    context.fill_bytes(&mut junk);
+
+                                    let block = Block::new(parent.digest(), parent.height+1, current, junk);
                                     let digest = block.digest();
                                     {
                                         let mut built = built.lock().unwrap();

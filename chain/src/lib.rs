@@ -155,7 +155,7 @@ mod tests {
             let (network, mut oracle) = Network::new(
                 context.with_label("network"),
                 simulated::Config {
-                    max_size: 1024 * 1024,
+                    max_size: 1024 * 1024 * 10,
                 },
             );
 
@@ -317,7 +317,7 @@ mod tests {
             let (network, mut oracle) = Network::new(
                 context.with_label("network"),
                 simulated::Config {
-                    max_size: 1024 * 1024,
+                    max_size: 1024 * 1024 * 10,
                 },
             );
 
@@ -551,7 +551,7 @@ mod tests {
                 let (network, mut oracle) = Network::new(
                     context.with_label("network"),
                     simulated::Config {
-                        max_size: 1024 * 1024,
+                        max_size: 1024 * 1024 * 10,
                     },
                 );
 
@@ -714,7 +714,7 @@ mod tests {
             let (network, mut oracle) = Network::new(
                 context.with_label("network"),
                 simulated::Config {
-                    max_size: 1024 * 1024,
+                    max_size: 1024 * 1024 * 10,
                 },
             );
 
