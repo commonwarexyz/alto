@@ -1,5 +1,5 @@
 use bytes::{Buf, BufMut};
-use commonware_codec::{varint::UInt, EncodeSize, Error, Read, ReadExt, Write};
+use commonware_codec::{varint::UInt, EncodeSize, Error, RangeCfg, Read, ReadExt, Write};
 use commonware_consensus::{
     threshold_simplex::types::{Finalization, Notarization},
     types::CodingCommitment,
@@ -21,25 +21,35 @@ pub struct Block {
     /// The timestamp of the block (in milliseconds since the Unix epoch).
     pub timestamp: u64,
 
+    /// The junk data appended to the block.
+    pub junk: Vec<u8>,
+
     /// Pre-computed digest of the block.
     digest: Digest,
 }
 
 impl Block {
-    fn compute_digest(parent: &CodingCommitment, height: u64, timestamp: u64) -> Digest {
+    fn compute_digest(
+        parent: &CodingCommitment,
+        height: u64,
+        timestamp: u64,
+        junk: &[u8],
+    ) -> Digest {
         let mut hasher = Sha256::new();
         hasher.update(parent);
         hasher.update(&height.to_be_bytes());
         hasher.update(&timestamp.to_be_bytes());
+        hasher.update(junk);
         hasher.finalize()
     }
 
-    pub fn new(parent: CodingCommitment, height: u64, timestamp: u64) -> Self {
-        let digest = Self::compute_digest(&parent, height, timestamp);
+    pub fn new(parent: CodingCommitment, height: u64, timestamp: u64, junk: Vec<u8>) -> Self {
+        let digest = Self::compute_digest(&parent, height, timestamp, junk.as_slice());
         Self {
             parent,
             height,
             timestamp,
+            junk,
             digest,
         }
     }
@@ -50,6 +60,7 @@ impl Write for Block {
         self.parent.write(writer);
         UInt(self.height).write(writer);
         UInt(self.timestamp).write(writer);
+        self.junk.write(writer);
     }
 }
 
@@ -60,13 +71,15 @@ impl Read for Block {
         let parent = CodingCommitment::read(reader)?;
         let height = UInt::read(reader)?.into();
         let timestamp = UInt::read(reader)?.into();
+        let junk = Vec::<u8>::read_cfg(reader, &(RangeCfg::from(0..1024 * 1024 * 10), ()))?;
 
         // Pre-compute the digest
-        let digest = Self::compute_digest(&parent, height, timestamp);
+        let digest = Self::compute_digest(&parent, height, timestamp, junk.as_slice());
         Ok(Self {
             parent,
             height,
             timestamp,
+            junk,
 
             digest,
         })
@@ -78,6 +91,7 @@ impl EncodeSize for Block {
         self.parent.encode_size()
             + UInt(self.height).encode_size()
             + UInt(self.timestamp).encode_size()
+            + self.junk.encode_size()
     }
 }
 

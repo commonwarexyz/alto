@@ -21,7 +21,7 @@ impl Default for AltoApp {
         let genesis_parent = Sha256::hash(GENESIS);
         let coding_commitment = CodingCommitment::from((genesis_parent, Default::default()));
         Self {
-            genesis: Block::new(coding_commitment, 0, 0),
+            genesis: Block::new(coding_commitment, 0, 0, Vec::new()),
         }
     }
 }
@@ -39,7 +39,7 @@ where
 
     async fn build(
         &mut self,
-        ctx: E,
+        mut ctx: E,
         parent_commitment: <Self::Block as Committable>::Commitment,
         parent_block: Self::Block,
     ) -> Self::Block {
@@ -47,7 +47,12 @@ where
         if current <= parent_block.timestamp {
             current = parent_block.timestamp + 1;
         }
-        Block::new(parent_commitment, parent_block.height + 1, current)
+
+        // Add 1 MiB of junk data to the block.
+        let mut junk = vec![0u8; 1024 * 1024];
+        ctx.fill_bytes(&mut junk);
+
+        Block::new(parent_commitment, parent_block.height + 1, current, junk)
     }
 
     async fn finalize(&mut self, block: Self::Block) {

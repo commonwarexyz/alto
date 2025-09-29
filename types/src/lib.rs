@@ -64,7 +64,7 @@ mod tests {
         // Create a block
         let digest = Sha256::hash(b"hello world");
         let coding_commitment = CodingCommitment::from((digest, Default::default()));
-        let block = Block::new(coding_commitment, 10, 100);
+        let block = Block::new(coding_commitment, 10, 100, Vec::new());
         let proposal = Proposal::new(Round::new(0, 11), 8, block.commitment());
 
         // Create a notarization
@@ -105,7 +105,7 @@ mod tests {
         // Create a block
         let digest = Sha256::hash(b"hello world");
         let coding_commitment = CodingCommitment::from((digest, Default::default()));
-        let block = Block::new(coding_commitment, 10, 100);
+        let block = Block::new(coding_commitment, 10, 100, Vec::new());
         let proposal = Proposal::new(Round::new(0, 11), 8, block.commitment());
 
         // Create a finalization
