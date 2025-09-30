@@ -184,7 +184,11 @@ impl<
                 codec_config: (usize::MAX, usize::MAX),
             },
         );
-        let shard_mailbox = ShardMailbox::new(buffer_mailbox.clone(), ());
+        let shard_mailbox = ShardMailbox::new(
+            context.with_label("shard_mailbox"),
+            buffer_mailbox.clone(),
+            (),
+        );
 
         // Create the reporter
         let reporter = (
