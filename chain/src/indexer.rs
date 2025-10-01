@@ -1,7 +1,6 @@
 use alto_types::{Activity, Block, Finalized, Identity, Notarized, Seed};
-use commonware_coding::ReedSolomon;
 use commonware_consensus::{marshal, threshold_simplex::types::Seedable, Reporter, Viewable};
-use commonware_cryptography::{bls12381::primitives::variant::MinSig, ed25519::PublicKey, Sha256};
+use commonware_cryptography::bls12381::primitives::variant::MinSig;
 use commonware_runtime::{Metrics, Spawner};
 use std::future::Future;
 #[cfg(test)]
@@ -102,16 +101,12 @@ impl Indexer for alto_client::Client {
 pub struct Pusher<E: Spawner + Metrics, I: Indexer> {
     context: E,
     indexer: I,
-    marshal: marshal::Mailbox<MinSig, Block, ReedSolomon<Sha256>, PublicKey>,
+    marshal: marshal::Mailbox<MinSig, Block>,
 }
 
 impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
     /// Create a new [Pusher].
-    pub fn new(
-        context: E,
-        indexer: I,
-        marshal: marshal::Mailbox<MinSig, Block, ReedSolomon<Sha256>, PublicKey>,
-    ) -> Self {
+    pub fn new(context: E, indexer: I, marshal: marshal::Mailbox<MinSig, Block>) -> Self {
         Self {
             context,
             indexer,

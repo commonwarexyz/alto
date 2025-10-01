@@ -9,14 +9,8 @@ use commonware_coding::ReedSolomon;
 use commonware_consensus::{
     marshal::{
         self,
-        ingress::{
-            coding::{
-                application::CodingAdapter,
-                mailbox::ShardMailbox,
-                types::{CodedBlock, Shard},
-            },
-            handler,
-        },
+        coding::{self, CodedBlock, CodingAdapter, Shard},
+        ingress::handler,
     },
     threshold_simplex::{self, Engine as Consensus},
     types::CodingCommitment,
@@ -42,11 +36,8 @@ use std::{num::NonZero, time::Duration};
 use tracing::{error, warn};
 
 /// Reporter type for [threshold_simplex::Engine].
-type Reporter<E, I> = Reporters<
-    Activity,
-    marshal::Mailbox<MinSig, Block, ReedSolomon<Sha256>, PublicKey>,
-    Option<indexer::Pusher<E, I>>,
->;
+type Reporter<E, I> =
+    Reporters<Activity, marshal::Mailbox<MinSig, Block>, Option<indexer::Pusher<E, I>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -104,8 +95,9 @@ pub struct Engine<
 
     application: Application<E>,
     buffer: buffered::Engine<E, PublicKey, Shard<ReedSolomon<Sha256>, Sha256>>,
-    shard_mailbox: ShardMailbox<ReedSolomon<Sha256>, Sha256, Block, PublicKey>,
-    marshal: marshal::Actor<Block, E, MinSig, ReedSolomon<Sha256>, PublicKey>,
+    shard_mailbox: coding::Mailbox<Block, ReedSolomon<Sha256>, PublicKey>,
+    coding: coding::Actor<E, ReedSolomon<Sha256>, Sha256, Block, PublicKey>,
+    marshal: marshal::Actor<Block, E, MinSig, ReedSolomon<Sha256>>,
 
     pub supervisor: Supervisor,
 
@@ -135,43 +127,32 @@ impl<
         let buffer_pool = PoolRef::new(BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
 
         // Create marshal
-        let (marshal, marshal_mailbox): (
-            _,
-            marshal::Mailbox<MinSig, Block, ReedSolomon<Sha256>, PublicKey>,
-        ) = marshal::Actor::init(
-            context.with_label("marshal"),
-            marshal::Config {
-                identity,
-                partition_prefix: cfg.partition_prefix.clone(),
-                mailbox_size: cfg.mailbox_size,
-                view_retention_timeout: cfg
-                    .activity_timeout
-                    .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
-                namespace: NAMESPACE.to_vec(),
-                prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
-                immutable_items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
-                freezer_table_initial_size: cfg.blocks_freezer_table_initial_size,
-                freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
-                freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
-                freezer_journal_target_size: FREEZER_JOURNAL_TARGET_SIZE,
-                freezer_journal_compression: FREEZER_JOURNAL_COMPRESSION,
-                freezer_journal_buffer_pool: buffer_pool.clone(),
-                replay_buffer: REPLAY_BUFFER,
-                write_buffer: WRITE_BUFFER,
-                codec_config: (),
-                max_repair: MAX_REPAIR,
-            },
-        )
-        .await;
-
-        let supervisor = Supervisor::new(cfg.polynomial, cfg.participants.clone(), cfg.share);
-        let application = CodingAdapter::new(
-            context.with_label("app"),
-            AltoApp::default(),
-            marshal_mailbox.clone(),
-            cfg.signer.public_key(),
-            supervisor.clone(),
-        );
+        let (marshal, marshal_mailbox): (_, marshal::Mailbox<MinSig, Block>) =
+            marshal::Actor::init(
+                context.with_label("marshal"),
+                marshal::Config {
+                    identity,
+                    partition_prefix: cfg.partition_prefix.clone(),
+                    mailbox_size: cfg.mailbox_size,
+                    view_retention_timeout: cfg
+                        .activity_timeout
+                        .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
+                    namespace: NAMESPACE.to_vec(),
+                    prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
+                    immutable_items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
+                    freezer_table_initial_size: cfg.blocks_freezer_table_initial_size,
+                    freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
+                    freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
+                    freezer_journal_target_size: FREEZER_JOURNAL_TARGET_SIZE,
+                    freezer_journal_compression: FREEZER_JOURNAL_COMPRESSION,
+                    freezer_journal_buffer_pool: buffer_pool.clone(),
+                    replay_buffer: REPLAY_BUFFER,
+                    write_buffer: WRITE_BUFFER,
+                    codec_config: (),
+                    max_repair: MAX_REPAIR,
+                },
+            )
+            .await;
 
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
@@ -184,10 +165,18 @@ impl<
                 codec_config: (usize::MAX, usize::MAX),
             },
         );
-        let shard_mailbox = ShardMailbox::new(
-            context.with_label("shard_mailbox"),
-            buffer_mailbox.clone(),
-            (),
+
+        let (coding, shard_mailbox) =
+            coding::Actor::new(context.with_label("coding"), buffer_mailbox, ());
+
+        let supervisor = Supervisor::new(cfg.polynomial, cfg.participants.clone(), cfg.share);
+        let application = CodingAdapter::new(
+            context.with_label("app"),
+            AltoApp::default(),
+            marshal_mailbox.clone(),
+            shard_mailbox.clone(),
+            cfg.signer.public_key(),
+            supervisor.clone(),
         );
 
         // Create the reporter
@@ -235,6 +224,7 @@ impl<
             application,
             buffer,
             shard_mailbox,
+            coding,
             marshal,
 
             supervisor,
@@ -309,6 +299,9 @@ impl<
         // Start the buffer
         let buffer_handle = self.buffer.start(broadcast_network);
 
+        // Start coding
+        let coding_handle = self.coding.start();
+
         // Start marshal
         let marshal_handle =
             self.marshal
@@ -323,7 +316,14 @@ impl<
                 .start(pending_network, recovered_network, resolver_network);
 
         // Wait for any actor to finish
-        if let Err(e) = try_join_all(vec![buffer_handle, marshal_handle, consensus_handle]).await {
+        if let Err(e) = try_join_all(vec![
+            buffer_handle,
+            coding_handle,
+            marshal_handle,
+            consensus_handle,
+        ])
+        .await
+        {
             error!(?e, "engine failed");
         } else {
             warn!("engine stopped");
