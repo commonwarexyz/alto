@@ -36,8 +36,15 @@ use std::{num::NonZero, time::Duration};
 use tracing::{error, warn};
 
 /// Reporter type for [threshold_simplex::Engine].
-type Reporter<E, I> =
-    Reporters<Activity, marshal::Mailbox<MinSig, Block>, Option<indexer::Pusher<E, I>>>;
+type Reporter<E, I> = Reporters<
+    Activity,
+    Reporters<
+        Activity,
+        marshal::Mailbox<MinSig, Block>,
+        coding::Mailbox<MinSig, Block, ReedSolomon<Sha256>, PublicKey>,
+    >,
+    Option<indexer::Pusher<E, I>>,
+>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -95,8 +102,8 @@ pub struct Engine<
 
     application: Application<E>,
     buffer: buffered::Engine<E, PublicKey, Shard<ReedSolomon<Sha256>, Sha256>>,
-    shard_mailbox: coding::Mailbox<Block, ReedSolomon<Sha256>, PublicKey>,
-    coding: coding::Actor<E, ReedSolomon<Sha256>, Sha256, Block, PublicKey>,
+    shard_mailbox: coding::Mailbox<MinSig, Block, ReedSolomon<Sha256>, PublicKey>,
+    coding: coding::Actor<E, MinSig, ReedSolomon<Sha256>, Sha256, Block, PublicKey>,
     marshal: marshal::Actor<Block, E, MinSig, ReedSolomon<Sha256>>,
 
     pub supervisor: Supervisor,
@@ -173,7 +180,6 @@ impl<
         let application = CodingAdapter::new(
             context.with_label("app"),
             AltoApp::default(),
-            marshal_mailbox.clone(),
             shard_mailbox.clone(),
             cfg.signer.public_key(),
             supervisor.clone(),
@@ -181,7 +187,7 @@ impl<
 
         // Create the reporter
         let reporter = (
-            marshal_mailbox.clone(),
+            Reporters::from((marshal_mailbox.clone(), shard_mailbox.clone())),
             cfg.indexer.map(|indexer| {
                 indexer::Pusher::new(context.with_label("indexer"), indexer, marshal_mailbox)
             }),

@@ -523,7 +523,7 @@ checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 [[package]]
 name = "commonware-broadcast"
 version = "0.0.62"
-source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#ecd698a42169450195a12a4212d4a05b39c2436c"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#d902967dbc6d3c64bc25909500a7fc3cdaba928d"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -541,7 +541,7 @@ dependencies = [
 [[package]]
 name = "commonware-codec"
 version = "0.0.62"
-source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#ecd698a42169450195a12a4212d4a05b39c2436c"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#d902967dbc6d3c64bc25909500a7fc3cdaba928d"
 dependencies = [
  "bytes",
  "paste",
@@ -551,7 +551,7 @@ dependencies = [
 [[package]]
 name = "commonware-coding"
 version = "0.0.62"
-source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#ecd698a42169450195a12a4212d4a05b39c2436c"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#d902967dbc6d3c64bc25909500a7fc3cdaba928d"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -565,7 +565,7 @@ dependencies = [
 [[package]]
 name = "commonware-consensus"
 version = "0.0.62"
-source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#ecd698a42169450195a12a4212d4a05b39c2436c"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#d902967dbc6d3c64bc25909500a7fc3cdaba928d"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -593,7 +593,7 @@ dependencies = [
 [[package]]
 name = "commonware-cryptography"
 version = "0.0.62"
-source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#ecd698a42169450195a12a4212d4a05b39c2436c"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#d902967dbc6d3c64bc25909500a7fc3cdaba928d"
 dependencies = [
  "blake3",
  "blst",
@@ -618,7 +618,7 @@ dependencies = [
 [[package]]
 name = "commonware-deployer"
 version = "0.0.62"
-source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#ecd698a42169450195a12a4212d4a05b39c2436c"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#d902967dbc6d3c64bc25909500a7fc3cdaba928d"
 dependencies = [
  "cfg-if",
  "serde",
@@ -628,7 +628,7 @@ dependencies = [
 [[package]]
 name = "commonware-macros"
 version = "0.0.62"
-source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#ecd698a42169450195a12a4212d4a05b39c2436c"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#d902967dbc6d3c64bc25909500a7fc3cdaba928d"
 dependencies = [
  "futures",
  "proc-macro2",
@@ -641,7 +641,7 @@ dependencies = [
 [[package]]
 name = "commonware-p2p"
 version = "0.0.62"
-source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#ecd698a42169450195a12a4212d4a05b39c2436c"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#d902967dbc6d3c64bc25909500a7fc3cdaba928d"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -667,7 +667,7 @@ dependencies = [
 [[package]]
 name = "commonware-resolver"
 version = "0.0.62"
-source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#ecd698a42169450195a12a4212d4a05b39c2436c"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#d902967dbc6d3c64bc25909500a7fc3cdaba928d"
 dependencies = [
  "bimap",
  "bytes",
@@ -689,7 +689,7 @@ dependencies = [
 [[package]]
 name = "commonware-runtime"
 version = "0.0.62"
-source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#ecd698a42169450195a12a4212d4a05b39c2436c"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#d902967dbc6d3c64bc25909500a7fc3cdaba928d"
 dependencies = [
  "async-lock",
  "axum",
@@ -720,7 +720,7 @@ dependencies = [
 [[package]]
 name = "commonware-storage"
 version = "0.0.62"
-source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#ecd698a42169450195a12a4212d4a05b39c2436c"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#d902967dbc6d3c64bc25909500a7fc3cdaba928d"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -742,7 +742,7 @@ dependencies = [
 [[package]]
 name = "commonware-stream"
 version = "0.0.62"
-source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#ecd698a42169450195a12a4212d4a05b39c2436c"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#d902967dbc6d3c64bc25909500a7fc3cdaba928d"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -762,7 +762,7 @@ dependencies = [
 [[package]]
 name = "commonware-utils"
 version = "0.0.62"
-source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#ecd698a42169450195a12a4212d4a05b39c2436c"
+source = "git+https://github.com/clabby/commonware.git?branch=cl%2Fconsensus-erasure-coding#d902967dbc6d3c64bc25909500a7fc3cdaba928d"
 dependencies = [
  "bytes",
  "cfg-if",
