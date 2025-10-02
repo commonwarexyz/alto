@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use alto_types::Block;
 use commonware_consensus::{
     threshold_simplex::types::Context, types::CodingCommitment, Application, Block as _, Epochable,
@@ -5,6 +7,7 @@ use commonware_consensus::{
 use commonware_cryptography::{Committable, Digestible, Hasher, Sha256};
 use commonware_runtime::{Clock, Metrics, Spawner};
 use commonware_utils::SystemTimeExt;
+use prometheus_client::metrics::gauge::Gauge;
 use rand::Rng;
 use tracing::info;
 
@@ -12,21 +15,33 @@ use tracing::info;
 const GENESIS: &[u8] = b"commonware bit twiddling club";
 
 #[derive(Clone)]
-pub struct AltoApp {
+pub struct AltoApp<E: Rng + Clock + Metrics + Spawner> {
     genesis: Block,
+    bandwidth: Gauge,
+
+    _context: PhantomData<E>,
 }
 
-impl Default for AltoApp {
-    fn default() -> Self {
+impl<E: Rng + Clock + Metrics + Spawner> AltoApp<E> {
+    pub fn new(context: E) -> Self {
+        // Setup genesis
         let genesis_parent = Sha256::hash(GENESIS);
         let coding_commitment = CodingCommitment::from((genesis_parent, Default::default()));
+
+        // Setup bandwidth gauge
+        let bandwidth = Gauge::default();
+        context.register("bandwidth", "Finalized block bandwidth", bandwidth.clone());
+
         Self {
             genesis: Block::new(coding_commitment, 0, 0, Vec::new()),
+            bandwidth,
+
+            _context: PhantomData,
         }
     }
 }
 
-impl<E> Application<E> for AltoApp
+impl<E> Application<E> for AltoApp<E>
 where
     E: Rng + Clock + Metrics + Spawner,
 {
@@ -62,5 +77,6 @@ where
             digest = %block.digest(),
             "New finalized head"
         );
+        self.bandwidth.inc_by(block.junk.len() as i64);
     }
 }

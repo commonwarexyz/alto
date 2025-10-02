@@ -90,7 +90,7 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
 }
 
 type Application<E> =
-    CodingAdapter<E, AltoApp, MinSig, Block, ReedSolomon<Sha256>, PublicKey, Supervisor>;
+    CodingAdapter<E, AltoApp<E>, MinSig, Block, ReedSolomon<Sha256>, PublicKey, Supervisor>;
 
 /// The engine that drives the application.
 pub struct Engine<
@@ -178,8 +178,8 @@ impl<
 
         let supervisor = Supervisor::new(cfg.polynomial, cfg.participants.clone(), cfg.share);
         let application = CodingAdapter::new(
-            context.with_label("app"),
-            AltoApp::default(),
+            context.with_label("coding-adapter"),
+            AltoApp::new(context.with_label("app")),
             shard_mailbox.clone(),
             cfg.signer.public_key(),
             supervisor.clone(),
