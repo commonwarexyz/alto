@@ -178,8 +178,8 @@ impl<
 
         let supervisor = Supervisor::new(cfg.polynomial, cfg.participants.clone(), cfg.share);
         let application = CodingAdapter::new(
-            context.with_label("coding-adapter"),
-            AltoApp::new(context.with_label("app")),
+            context.with_label("app"),
+            AltoApp::new(context.with_label("alto")),
             shard_mailbox.clone(),
             cfg.signer.public_key(),
             supervisor.clone(),
