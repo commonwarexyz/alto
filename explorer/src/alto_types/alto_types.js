@@ -84,8 +84,9 @@ export function parse_block(bytes) {
  * @param {number} participants
  * @returns {number}
  */
-export function leader_index(signature, participants) {
-    const ptr0 = passArray8ToWasm0(signature, wasm.__wbindgen_malloc);
+export function leader_index(seed, participants) {
+    // FIXME
+    const ptr0 = passArray8ToWasm0(seed, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.leader_index(ptr0, len0, participants);
     return ret >>> 0;

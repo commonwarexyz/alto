@@ -1,15 +1,16 @@
-use alto_chain::{engine, Config, Peers};
+use alto_chain::{engine, Config, Coordinator, Peers};
 use alto_client::Client;
 use alto_types::NAMESPACE;
 use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt};
+use commonware_consensus::marshal;
 use commonware_cryptography::{
     bls12381::primitives::{group, poly, variant::MinSig},
     ed25519::{PrivateKey, PublicKey},
     Signer,
 };
 use commonware_deployer::ec2::Hosts;
-use commonware_p2p::authenticated::discovery as authenticated;
+use commonware_p2p::{authenticated::discovery as authenticated, utils::requester};
 use commonware_runtime::{tokio, Metrics, Runner};
 use commonware_utils::{from_hex_formatted, quorum, union_unique};
 use futures::future::try_join_all;
@@ -175,7 +176,7 @@ fn main() {
 
         // Configure network
         let p2p_namespace = union_unique(NAMESPACE, b"_P2P");
-        let mut p2p_cfg = authenticated::Config::aggressive(
+        let mut p2p_cfg = authenticated::Config::recommended(
             signer.clone(),
             &p2p_namespace,
             SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
@@ -231,7 +232,7 @@ fn main() {
         }
 
         // Create engine
-        let config = engine::Config {
+        let engine_cfg = engine::Config {
             blocker: oracle,
             partition_prefix: "engine".to_string(),
             blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
@@ -239,7 +240,7 @@ fn main() {
             signer,
             polynomial,
             share,
-            participants: peers,
+            participants: peers.clone(),
             mailbox_size: config.mailbox_size,
             deque_size: config.deque_size,
             backfill_quota,
@@ -255,10 +256,27 @@ fn main() {
             fetch_rate_per_peer: resolver_limit,
             indexer,
         };
-        let engine = engine::Engine::new(context.with_label("engine"), config).await;
+        let engine = engine::Engine::new(context.with_label("engine"), engine_cfg).await;
+
+        let marshal_resolver_cfg = marshal::resolver::p2p::Config {
+            public_key: public_key.clone(),
+            coordinator: Coordinator::from(peers),
+            mailbox_size: config.mailbox_size,
+            requester_config: requester::Config {
+                public_key: public_key.clone(),
+                rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
+                initial: Duration::from_secs(1),
+                timeout: Duration::from_secs(2),
+            },
+            fetch_retry_timeout: Duration::from_millis(100),
+            priority_requests: false,
+            priority_responses: false,
+        };
+        let marshal_resolver =
+            marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
 
         // Start engine
-        let engine = engine.start(pending, recovered, resolver, broadcaster, backfill);
+        let engine = engine.start(pending, recovered, resolver, broadcaster, marshal_resolver);
 
         // Wait for any task to error
         if let Err(e) = try_join_all(vec![p2p, engine]).await {

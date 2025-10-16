@@ -1,6 +1,7 @@
 use alto_types::Block;
 use commonware_consensus::{
-    threshold_simplex::types::{Context, View},
+    threshold_simplex::types::Context,
+    types::{Epoch, Round, View},
     Automaton, Relay, Reporter,
 };
 use commonware_cryptography::sha256::Digest;
@@ -15,7 +16,7 @@ pub enum Message {
         response: oneshot::Sender<Digest>,
     },
     Propose {
-        view: View,
+        round: Round,
         parent: (View, Digest),
         response: oneshot::Sender<Digest>,
     },
@@ -23,7 +24,7 @@ pub enum Message {
         payload: Digest,
     },
     Verify {
-        view: View,
+        round: Round,
         parent: (View, Digest),
         payload: Digest,
         response: oneshot::Sender<bool>,
@@ -49,7 +50,7 @@ impl Automaton for Mailbox {
     type Digest = Digest;
     type Context = Context<Self::Digest>;
 
-    async fn genesis(&mut self) -> Self::Digest {
+    async fn genesis(&mut self, _epoch: Epoch) -> Self::Digest {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::Genesis { response })
@@ -64,7 +65,7 @@ impl Automaton for Mailbox {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::Propose {
-                view: context.view,
+                round: context.round,
                 parent: context.parent,
                 response,
             })
@@ -83,7 +84,7 @@ impl Automaton for Mailbox {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::Verify {
-                view: context.view,
+                round: context.round,
                 parent: context.parent,
                 payload,
                 response,

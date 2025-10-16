@@ -15,18 +15,18 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 alto-client = { version = "0.0.14", path = "client" }
 alto-types = { version = "0.0.14", path = "types" }
-commonware-broadcast = { version = "0.0.62" }
-commonware-codec = { version = "0.0.62" }
-commonware-consensus = { version = "0.0.62" }
-commonware-cryptography = { version = "0.0.62" }
-commonware-deployer = { version = "0.0.62", default-features = false }
-commonware-macros = { version = "0.0.62" }
-commonware-p2p = { version = "0.0.62" }
-commonware-resolver = { version = "0.0.62" }
-commonware-runtime = { version = "0.0.62" }
-commonware-storage = { version = "0.0.62" }
-commonware-stream = { version = "0.0.62" }
-commonware-utils = { version = "0.0.62" }
+commonware-broadcast = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "andre/simplex-merge-v3" }
+commonware-codec = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "andre/simplex-merge-v3" }
+commonware-consensus = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "andre/simplex-merge-v3" }
+commonware-cryptography = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "andre/simplex-merge-v3" }
+commonware-deployer = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "andre/simplex-merge-v3", default-features = false }
+commonware-macros = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "andre/simplex-merge-v3" }
+commonware-p2p = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "andre/simplex-merge-v3" }
+commonware-resolver = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "andre/simplex-merge-v3" }
+commonware-runtime = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "andre/simplex-merge-v3" }
+commonware-storage = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "andre/simplex-merge-v3" }
+commonware-stream = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "andre/simplex-merge-v3" }
+commonware-utils = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "andre/simplex-merge-v3" }
 thiserror = "2.0.12"
 bytes = "1.7.1"
 rand = "0.8.5"

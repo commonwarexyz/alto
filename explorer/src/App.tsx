@@ -294,7 +294,7 @@ const App: React.FC = () => {
         // the location and signature information without changing timing
         const existingStatus = newViews[existingIndex].status;
         if (existingStatus === "finalized" || existingStatus === "notarized") {
-          const locationIndex = leader_index(seed.signature, LOCATIONS.length);
+          const locationIndex = leader_index(seed, LOCATIONS.length);
 
           // Only update location and signature info, preserve all timing and status
           newViews[existingIndex] = {
@@ -319,7 +319,7 @@ const App: React.FC = () => {
       }
 
       // Create the new view data
-      const locationIndex = leader_index(seed.signature, LOCATIONS.length);
+      const locationIndex = leader_index(seed, LOCATIONS.length);
       const newView: ViewData = {
         view,
         location: LOCATIONS[locationIndex][0],

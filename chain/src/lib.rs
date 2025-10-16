@@ -1,10 +1,13 @@
+use alto_types::SigningScheme;
+use commonware_consensus::marshal::SigningSchemeProvider as CSigningSchemeProvider;
+use commonware_cryptography::ed25519;
+use commonware_resolver::p2p;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr};
 
 pub mod application;
 pub mod engine;
 pub mod indexer;
-pub mod supervisor;
 pub mod utils;
 
 /// Configuration for the [engine::Engine].
@@ -38,9 +41,49 @@ pub struct Peers {
     pub addresses: HashMap<String, SocketAddr>,
 }
 
+/// A static provider that always returns the same signing scheme.
+pub struct SigningSchemeProvider(SigningScheme);
+
+impl CSigningSchemeProvider<SigningScheme> for SigningSchemeProvider {
+    fn for_epoch(&self, _epoch: u64) -> Option<SigningScheme> {
+        Some(self.0.clone())
+    }
+}
+
+impl From<SigningScheme> for SigningSchemeProvider {
+    fn from(scheme: SigningScheme) -> Self {
+        Self(scheme)
+    }
+}
+
+/// A static coordinator that always returns the same set of peers.
+#[derive(Clone)]
+pub struct Coordinator {
+    participants: Vec<ed25519::PublicKey>,
+}
+
+impl p2p::Coordinator for Coordinator {
+    type PublicKey = ed25519::PublicKey;
+
+    fn peers(&self) -> &[Self::PublicKey] {
+        &self.participants
+    }
+
+    fn peer_set_id(&self) -> u64 {
+        0
+    }
+}
+
+impl From<Vec<ed25519::PublicKey>> for Coordinator {
+    fn from(participants: Vec<ed25519::PublicKey>) -> Self {
+        Self { participants }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use commonware_consensus::marshal;
     use commonware_cryptography::{
         bls12381::{
             dkg::ops,
@@ -50,7 +93,10 @@ mod tests {
         PrivateKeyExt, Signer,
     };
     use commonware_macros::{select, test_traced};
-    use commonware_p2p::simulated::{self, Link, Network, Oracle, Receiver, Sender};
+    use commonware_p2p::{
+        simulated::{self, Link, Network, Oracle, Receiver, Sender},
+        utils::requester,
+    };
     use commonware_runtime::{
         deterministic::{self, Runner},
         Clock, Metrics, Runner as _, Spawner,
@@ -156,6 +202,7 @@ mod tests {
                 context.with_label("network"),
                 simulated::Config {
                     max_size: 1024 * 1024,
+                    disconnect_on_block: true,
                 },
             );
 
@@ -221,8 +268,27 @@ mod tests {
                 let (pending, recovered, resolver, broadcast, backfill) =
                     registrations.remove(&public_key).unwrap();
 
+                // Configure marshal resolver
+                let marshal_resolver_cfg = marshal::resolver::p2p::Config {
+                    public_key: public_key.clone(),
+                    coordinator: Coordinator::from(validators.clone()),
+                    mailbox_size: 1024,
+                    requester_config: requester::Config {
+                        public_key: public_key.clone(),
+                        rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
+                        initial: Duration::from_secs(1),
+                        timeout: Duration::from_secs(2),
+                    },
+                    fetch_retry_timeout: Duration::from_millis(100),
+                    priority_requests: false,
+                    priority_responses: false,
+                };
+
+                let marshal_resolver =
+                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+
                 // Start engine
-                engine.start(pending, recovered, resolver, broadcast, backfill);
+                engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
             // Poll metrics
@@ -318,6 +384,7 @@ mod tests {
                 context.with_label("network"),
                 simulated::Config {
                     max_size: 1024 * 1024,
+                    disconnect_on_block: true,
                 },
             );
 
@@ -395,8 +462,27 @@ mod tests {
                 let (pending, recovered, resolver, broadcast, backfill) =
                     registrations.remove(&public_key).unwrap();
 
+                // Configure marshal resolver
+                let marshal_resolver_cfg = marshal::resolver::p2p::Config {
+                    public_key: public_key.clone(),
+                    coordinator: Coordinator::from(validators.clone()),
+                    mailbox_size: 1024,
+                    requester_config: requester::Config {
+                        public_key: public_key.clone(),
+                        rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
+                        initial: Duration::from_secs(1),
+                        timeout: Duration::from_secs(2),
+                    },
+                    fetch_retry_timeout: Duration::from_millis(100),
+                    priority_requests: false,
+                    priority_responses: false,
+                };
+
+                let marshal_resolver =
+                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+
                 // Start engine
-                engine.start(pending, recovered, resolver, broadcast, backfill);
+                engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
             // Poll metrics
@@ -483,8 +569,27 @@ mod tests {
             let (pending, recovered, resolver, broadcast, backfill) =
                 registrations.remove(&public_key).unwrap();
 
+            // Configure marshal resolver
+            let marshal_resolver_cfg = marshal::resolver::p2p::Config {
+                public_key: public_key.clone(),
+                coordinator: Coordinator::from(validators.clone()),
+                mailbox_size: 1024,
+                requester_config: requester::Config {
+                    public_key: public_key.clone(),
+                    rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
+                    initial: Duration::from_secs(1),
+                    timeout: Duration::from_secs(2),
+                },
+                fetch_retry_timeout: Duration::from_millis(100),
+                priority_requests: false,
+                priority_responses: false,
+            };
+
+            let marshal_resolver =
+                marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+
             // Start engine
-            engine.start(pending, recovered, resolver, broadcast, backfill);
+            engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
 
             // Poll metrics
             loop {
@@ -541,7 +646,7 @@ mod tests {
 
         // Random restarts every x seconds
         let mut runs = 0;
-        let mut prev_ctx = None;
+        let mut prev_checkpoint = None;
         loop {
             // Setup run
             let polynomial = polynomial.clone();
@@ -552,6 +657,7 @@ mod tests {
                     context.with_label("network"),
                     simulated::Config {
                         max_size: 1024 * 1024,
+                        disconnect_on_block: true,
                     },
                 );
 
@@ -618,8 +724,27 @@ mod tests {
                     let (pending, recovered, resolver, broadcast, backfill) =
                         registrations.remove(&public_key).unwrap();
 
+                    // Configure marshal resolver
+                    let marshal_resolver_cfg = marshal::resolver::p2p::Config {
+                        public_key: public_key.clone(),
+                        coordinator: Coordinator::from(validators.clone()),
+                        mailbox_size: 1024,
+                        requester_config: requester::Config {
+                            public_key: public_key.clone(),
+                            rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
+                            initial: Duration::from_secs(1),
+                            timeout: Duration::from_secs(2),
+                        },
+                        fetch_retry_timeout: Duration::from_millis(100),
+                        priority_requests: false,
+                        priority_responses: false,
+                    };
+
+                    let marshal_resolver =
+                        marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+
                     // Start engine
-                    engine.start(pending, recovered, resolver, broadcast, backfill);
+                    engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
                 }
 
                 // Poll metrics
@@ -674,28 +799,30 @@ mod tests {
                 select! {
                     _ = poller => {
                         // Finished
-                        (true, context)
+                        true
                     },
                     _ = context.sleep(wait) => {
                         // Randomly exit
-                        (false, context)
+                        false
                     }
                 }
             };
 
             // Handle run
-            let (complete, context) = if let Some(prev_ctx) = prev_ctx {
-                Runner::from(prev_ctx)
+            let (complete, checkpoint) = if let Some(prev_checkpoint) = prev_checkpoint {
+                Runner::from(prev_checkpoint)
             } else {
                 Runner::timed(Duration::from_secs(30))
             }
-            .start(f);
+            .start_and_recover(f);
+
+            // Check if we should exit
             if complete {
                 break;
             }
 
             // Prepare for next run
-            prev_ctx = Some(context.recover());
+            prev_checkpoint = Some(checkpoint);
             runs += 1;
         }
         assert!(runs > 1);
@@ -715,6 +842,7 @@ mod tests {
                 context.with_label("network"),
                 simulated::Config {
                     max_size: 1024 * 1024,
+                    disconnect_on_block: true,
                 },
             );
 
@@ -789,8 +917,27 @@ mod tests {
                 let (pending, recovered, resolver, broadcast, backfill) =
                     registrations.remove(&public_key).unwrap();
 
+                // Configure marshal resolver
+                let marshal_resolver_cfg = marshal::resolver::p2p::Config {
+                    public_key: public_key.clone(),
+                    coordinator: Coordinator::from(validators.clone()),
+                    mailbox_size: 1024,
+                    requester_config: requester::Config {
+                        public_key: public_key.clone(),
+                        rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
+                        initial: Duration::from_secs(1),
+                        timeout: Duration::from_secs(2),
+                    },
+                    fetch_retry_timeout: Duration::from_millis(100),
+                    priority_requests: false,
+                    priority_responses: false,
+                };
+
+                let marshal_resolver =
+                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+
                 // Start engine
-                engine.start(pending, recovered, resolver, broadcast, backfill);
+                engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
             // Poll metrics

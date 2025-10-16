@@ -2,14 +2,12 @@ use super::{
     ingress::{Mailbox, Message},
     Config,
 };
-use crate::{supervisor::Supervisor, utils::OneshotClosedFut};
-use alto_types::Block;
-use commonware_consensus::{marshal, threshold_simplex::types::View};
-use commonware_cryptography::{
-    bls12381::primitives::variant::MinSig, Committable, Digestible, Hasher, Sha256,
-};
+use crate::utils::OneshotClosedFut;
+use alto_types::{Block, SigningScheme};
+use commonware_consensus::{marshal, types::Round};
+use commonware_cryptography::{Committable, Digestible, Hasher, Sha256};
 use commonware_macros::select;
-use commonware_runtime::{Clock, Handle, Metrics, Spawner};
+use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner};
 use commonware_utils::SystemTimeExt;
 use futures::StreamExt;
 use futures::{channel::mpsc, future::try_join};
@@ -26,38 +24,37 @@ const SYNCHRONY_BOUND: u64 = 500;
 
 /// Application actor.
 pub struct Actor<R: Rng + Spawner + Metrics + Clock> {
-    context: R,
+    context: ContextCell<R>,
     hasher: Sha256,
     mailbox: mpsc::Receiver<Message>,
 }
 
 impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
     /// Create a new application actor.
-    pub fn new(context: R, config: Config) -> (Self, Supervisor, Mailbox) {
+    pub fn new(context: R, config: Config) -> (Self, Mailbox) {
         let (sender, mailbox) = mpsc::channel(config.mailbox_size);
         (
             Self {
-                context,
+                context: ContextCell::new(context),
                 hasher: Sha256::new(),
                 mailbox,
             },
-            Supervisor::new(config.polynomial, config.participants, config.share),
             Mailbox::new(sender),
         )
     }
 
-    pub fn start(mut self, marshal: marshal::Mailbox<MinSig, Block>) -> Handle<()> {
-        self.context.spawn_ref()(self.run(marshal))
+    pub fn start(mut self, marshal: marshal::Mailbox<SigningScheme, Block>) -> Handle<()> {
+        spawn_cell!(self.context, self.run(marshal).await)
     }
 
     /// Run the application actor.
-    async fn run(mut self, mut marshal: marshal::Mailbox<MinSig, Block>) {
+    async fn run(mut self, mut marshal: marshal::Mailbox<SigningScheme, Block>) {
         // Compute genesis digest
         self.hasher.update(GENESIS);
         let genesis_parent = self.hasher.finalize();
         let genesis = Block::new(genesis_parent, 0, 0);
         let genesis_digest = genesis.digest();
-        let built: Option<(View, Block)> = None;
+        let built: Option<(Round, Block)> = None;
         let built = Arc::new(Mutex::new(built));
         while let Some(message) = self.mailbox.next().await {
             match message {
@@ -67,7 +64,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     let _ = response.send(genesis_digest);
                 }
                 Message::Propose {
-                    view,
+                    round,
                     parent,
                     mut response,
                 } => {
@@ -75,7 +72,11 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     let parent_request = if parent.1 == genesis_digest {
                         Either::Left(future::ready(Ok(genesis.clone())))
                     } else {
-                        Either::Right(marshal.subscribe(Some(parent.0), parent.1).await)
+                        Either::Right(
+                            marshal
+                                .subscribe(Some(Round::new(round.epoch(), parent.0)), parent.1)
+                                .await,
+                        )
                     };
 
                     // Wait for the parent block to be available or the request to be cancelled in a separate task (to
@@ -98,16 +99,16 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                     let digest = block.digest();
                                     {
                                         let mut built = built.lock().unwrap();
-                                        *built = Some((view, block));
+                                        *built = Some((round, block));
                                     }
 
                                     // Send the digest to the consensus
                                     let result = response.send(digest);
-                                    info!(view, ?digest, success=result.is_ok(), "proposed new block");
+                                    info!(%round, ?digest, success=result.is_ok(), "proposed new block");
                                 },
                                 _ = response_closed => {
                                     // The response was cancelled
-                                    warn!(view, "propose aborted");
+                                    warn!(%round, "propose aborted");
                                 }
                             }
                         }
@@ -123,14 +124,14 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     // Send the block to the syncer
                     debug!(
                         ?payload,
-                        view = built.0,
+                        round = %built.0,
                         height = built.1.height,
                         "broadcast requested"
                     );
                     marshal.broadcast(built.1.clone()).await;
                 }
                 Message::Verify {
-                    view,
+                    round,
                     parent,
                     payload,
                     mut response,
@@ -139,7 +140,11 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     let parent_request = if parent.1 == genesis_digest {
                         Either::Left(future::ready(Ok(genesis.clone())))
                     } else {
-                        Either::Right(marshal.subscribe(Some(parent.0), parent.1).await)
+                        Either::Right(
+                            marshal
+                                .subscribe(Some(Round::new(round.epoch(), parent.0)), parent.1)
+                                .await,
+                        )
                     };
 
                     // Wait for the blocks to be available or the request to be cancelled in a separate task (to
@@ -175,14 +180,14 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                     }
 
                                     // Persist the verified block
-                                    marshal.verified(view, block).await;
+                                    marshal.verified(round, block).await;
 
                                     // Send the verification result to the consensus
                                     let _ = response.send(true);
                                 },
                                 _ = response_closed => {
                                     // The response was cancelled
-                                    warn!(view, "verify aborted");
+                                    warn!(%round, "verify aborted");
                                 }
                             }
                         }

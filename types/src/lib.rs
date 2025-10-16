@@ -5,11 +5,13 @@ pub use block::{Block, Finalized, Notarized};
 mod consensus;
 use commonware_utils::hex;
 pub use consensus::{
-    leader_index, Activity, Evaluation, Finalization, Identity, Notarization, Seed, Signature,
+    Activity, Evaluation, Finalization, Identity, Notarization, Seed, Seedable, Signature,
+    SigningScheme,
 };
 pub mod wasm;
 
 pub const NAMESPACE: &[u8] = b"_ALTO";
+pub const EPOCH: u64 = 0;
 
 #[repr(u8)]
 pub enum Kind {
@@ -41,13 +43,14 @@ impl Kind {
 mod tests {
     use super::*;
     use commonware_codec::{DecodeExt, Encode};
-    use commonware_consensus::threshold_simplex::types::{
-        Finalization, Finalize, Notarization, Notarize, Proposal,
+    use commonware_consensus::{
+        threshold_simplex::types::{Finalization, Finalize, Notarization, Notarize, Proposal},
+        types::Round,
     };
     use commonware_cryptography::{
         bls12381::{
             dkg::ops,
-            primitives::{ops::threshold_signature_recover, poly, variant::MinSig},
+            primitives::{poly, variant::MinSig},
         },
         Digestible, Hasher, Sha256,
     };
@@ -57,30 +60,25 @@ mod tests {
     fn test_notarized() {
         // Create network key
         let mut rng = StdRng::seed_from_u64(0);
-        let (polynomial, shares) = ops::generate_shares::<_, MinSig>(&mut rng, None, 4, 3);
+        let n = 4;
+        let (polynomial, shares) = ops::generate_shares::<_, MinSig>(&mut rng, None, n, 3);
+        let participants = vec![(); n as usize];
+        let schemes: Vec<_> = shares
+            .into_iter()
+            .map(|share| SigningScheme::new(&participants, &polynomial, share))
+            .collect();
 
         // Create a block
         let digest = Sha256::hash(b"hello world");
         let block = Block::new(digest, 10, 100);
-        let proposal = Proposal::new(11, 8, block.digest());
+        let proposal = Proposal::new(Round::new(EPOCH, 11), 8, block.digest());
 
         // Create a notarization
-        let partials = shares
+        let notarizes: Vec<_> = schemes
             .iter()
-            .map(|share| Notarize::<MinSig, _>::sign(NAMESPACE, share, proposal.clone()))
-            .collect::<Vec<_>>();
-        let proposal_partials = partials
-            .iter()
-            .map(|partial| partial.proposal_signature.clone())
-            .collect::<Vec<_>>();
-        let proposal_recovered =
-            threshold_signature_recover::<MinSig, _>(3, &proposal_partials).unwrap();
-        let seed_partials = partials
-            .into_iter()
-            .map(|partial| partial.seed_signature)
-            .collect::<Vec<_>>();
-        let seed_recovered = threshold_signature_recover::<MinSig, _>(3, &seed_partials).unwrap();
-        let notarization = Notarization::new(proposal, proposal_recovered, seed_recovered);
+            .map(|scheme| Notarize::sign(scheme, NAMESPACE, proposal.clone()))
+            .collect();
+        let notarization = Notarization::from_notarizes(&schemes[0], &notarizes).unwrap();
         let notarized = Notarized::new(notarization, block.clone());
 
         // Serialize and deserialize
@@ -89,43 +87,33 @@ mod tests {
         assert_eq!(notarized, decoded);
 
         // Verify notarized
-        let public_key = poly::public::<MinSig>(&polynomial);
-        assert!(notarized.verify(NAMESPACE, public_key));
+        assert!(notarized.verify(&schemes[0], NAMESPACE));
     }
 
     #[test]
     fn test_finalized() {
         // Create network key
         let mut rng = StdRng::seed_from_u64(0);
-        let (polynomial, shares) = ops::generate_shares::<_, MinSig>(&mut rng, None, 4, 3);
+        let n = 4;
+        let (polynomial, shares) = ops::generate_shares::<_, MinSig>(&mut rng, None, n, 3);
+        let participants = vec![(); n as usize];
+        let schemes: Vec<_> = shares
+            .into_iter()
+            .map(|share| SigningScheme::new(&participants, &polynomial, share))
+            .collect();
 
         // Create a block
         let digest = Sha256::hash(b"hello world");
         let block = Block::new(digest, 10, 100);
-        let proposal = Proposal::new(11, 8, block.digest());
+        let proposal = Proposal::new(Round::new(EPOCH, 11), 8, block.digest());
 
         // Create a finalization
-        let partials = shares
+        let finalizes: Vec<_> = schemes
             .iter()
-            .map(|share| Notarize::<MinSig, _>::sign(NAMESPACE, share, proposal.clone()))
-            .collect::<Vec<_>>();
-        let seed_partials = partials
-            .into_iter()
-            .map(|partial| partial.seed_signature)
-            .collect::<Vec<_>>();
-        let seed_recovered = threshold_signature_recover::<MinSig, _>(3, &seed_partials).unwrap();
-        let finalize_partials = shares
-            .iter()
-            .map(|share| Finalize::<MinSig, _>::sign(NAMESPACE, share, proposal.clone()))
-            .collect::<Vec<_>>();
-        let finalize_partials = finalize_partials
-            .into_iter()
-            .map(|partial| partial.proposal_signature)
-            .collect::<Vec<_>>();
-        let finalize_recovered =
-            threshold_signature_recover::<MinSig, _>(3, &finalize_partials).unwrap();
-        let finalized = Finalization::new(proposal, finalize_recovered, seed_recovered);
-        let finalized = Finalized::new(finalized, block.clone());
+            .map(|scheme| Finalize::sign(scheme, NAMESPACE, proposal.clone()))
+            .collect();
+        let finalization = Finalization::from_finalizes(&schemes[0], &finalizes, None).unwrap();
+        let finalized = Finalized::new(finalization, block.clone());
 
         // Serialize and deserialize
         let encoded = finalized.encode();
@@ -133,7 +121,6 @@ mod tests {
         assert_eq!(finalized, decoded);
 
         // Verify finalized
-        let public_key = poly::public::<MinSig>(&polynomial);
-        assert!(finalized.verify(NAMESPACE, public_key));
+        assert!(finalized.verify(&schemes[0], NAMESPACE));
     }
 }

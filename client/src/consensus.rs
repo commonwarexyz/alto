@@ -79,7 +79,7 @@ impl Client {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let seed = Seed::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !seed.verify(NAMESPACE, &self.identity) {
+        if !seed.verify(&self.certificate_verifier, NAMESPACE) {
             return Err(Error::InvalidSignature);
         }
 
@@ -122,7 +122,7 @@ impl Client {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let notarized = Notarized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !notarized.verify(NAMESPACE, &self.identity) {
+        if !notarized.verify(&self.certificate_verifier, NAMESPACE) {
             return Err(Error::InvalidSignature);
         }
 
@@ -165,7 +165,7 @@ impl Client {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let finalized = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !finalized.verify(NAMESPACE, &self.identity) {
+        if !finalized.verify(&self.certificate_verifier, NAMESPACE) {
             return Err(Error::InvalidSignature);
         }
 
@@ -198,14 +198,14 @@ impl Client {
         let result = match query {
             Query::Latest => {
                 let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-                if !result.verify(NAMESPACE, &self.identity) {
+                if !result.verify(&self.certificate_verifier, NAMESPACE) {
                     return Err(Error::InvalidSignature);
                 }
                 Payload::Finalized(Box::new(result))
             }
             Query::Index(index) => {
                 let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-                if !result.verify(NAMESPACE, &self.identity) {
+                if !result.verify(&self.certificate_verifier, NAMESPACE) {
                     return Err(Error::InvalidSignature);
                 }
                 if result.block.height != index {
@@ -234,7 +234,7 @@ impl Client {
         // Create an unbounded channel for streaming consensus messages
         let (sender, receiver) = unbounded();
         tokio::spawn({
-            let identity = self.identity;
+            let certificate_verifier = self.certificate_verifier.clone();
             async move {
                 read.for_each(|message| async {
                     match message {
@@ -253,7 +253,7 @@ impl Client {
                                     let result = Seed::decode(data);
                                     match result {
                                         Ok(seed) => {
-                                            if !seed.verify(NAMESPACE, &identity) {
+                                            if !seed.verify(&certificate_verifier, NAMESPACE) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;
@@ -270,7 +270,7 @@ impl Client {
                                     let result = Notarized::decode(data);
                                     match result {
                                         Ok(notarized) => {
-                                            if !notarized.verify(NAMESPACE, &identity) {
+                                            if !notarized.verify(&certificate_verifier, NAMESPACE) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;
@@ -289,7 +289,7 @@ impl Client {
                                     let result = Finalized::decode(data);
                                     match result {
                                         Ok(finalized) => {
-                                            if !finalized.verify(NAMESPACE, &identity) {
+                                            if !finalized.verify(&certificate_verifier, NAMESPACE) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;

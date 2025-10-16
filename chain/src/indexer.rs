@@ -1,6 +1,5 @@
-use alto_types::{Activity, Block, Finalized, Identity, Notarized, Seed};
-use commonware_consensus::{marshal, threshold_simplex::types::Seedable, Reporter, Viewable};
-use commonware_cryptography::bls12381::primitives::variant::MinSig;
+use alto_types::{Activity, Block, Finalized, Identity, Notarized, Seed, Seedable, SigningScheme};
+use commonware_consensus::{marshal, Reporter, Viewable};
 use commonware_runtime::{Metrics, Spawner};
 use std::future::Future;
 #[cfg(test)]
@@ -101,12 +100,12 @@ impl Indexer for alto_client::Client {
 pub struct Pusher<E: Spawner + Metrics, I: Indexer> {
     context: E,
     indexer: I,
-    marshal: marshal::Mailbox<MinSig, Block>,
+    marshal: marshal::Mailbox<SigningScheme, Block>,
 }
 
 impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
     /// Create a new [Pusher].
-    pub fn new(context: E, indexer: I, marshal: marshal::Mailbox<MinSig, Block>) -> Self {
+    pub fn new(context: E, indexer: I, marshal: marshal::Mailbox<SigningScheme, Block>) -> Self {
         Self {
             context,
             indexer,
@@ -143,7 +142,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                     move |_| async move {
                         // Wait for block
                         let block = marshal
-                            .subscribe(Some(notarization.view()), notarization.proposal.payload)
+                            .subscribe(Some(notarization.round()), notarization.proposal.payload)
                             .await
                             .await;
                         let Ok(block) = block else {
@@ -184,7 +183,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                     let mut marshal = self.marshal.clone();
                     move |_| async move {
                         let block = marshal
-                            .subscribe(Some(finalization.view()), finalization.proposal.payload)
+                            .subscribe(Some(finalization.round()), finalization.proposal.payload)
                             .await
                             .await;
                         let Ok(block) = block else {

@@ -1,6 +1,6 @@
 //! Client for interacting with `alto`.
 
-use alto_types::Identity;
+use alto_types::{Identity, SigningScheme};
 use commonware_cryptography::sha256::Digest;
 use commonware_utils::hex;
 use thiserror::Error;
@@ -60,7 +60,7 @@ pub enum Error {
 pub struct Client {
     uri: String,
     ws_uri: String,
-    identity: Identity,
+    certificate_verifier: SigningScheme,
 
     client: reqwest::Client,
 }
@@ -69,10 +69,11 @@ impl Client {
     pub fn new(uri: &str, identity: Identity) -> Self {
         let uri = uri.to_string();
         let ws_uri = uri.replace("http", "ws");
+        let certificate_verifier = SigningScheme::certificate_verifier(identity);
         Self {
             uri,
             ws_uri,
-            identity,
+            certificate_verifier,
 
             client: reqwest::Client::new(),
         }
