@@ -176,14 +176,25 @@ fn main() {
 
         // Configure network
         let p2p_namespace = union_unique(NAMESPACE, b"_P2P");
-        let mut p2p_cfg = authenticated::Config::recommended(
-            signer.clone(),
-            &p2p_namespace,
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
-            SocketAddr::new(ip, config.port),
-            bootstrappers,
-            MAX_MESSAGE_SIZE,
-        );
+        let mut p2p_cfg = if config.local {
+            authenticated::Config::local(
+                signer.clone(),
+                &p2p_namespace,
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
+                SocketAddr::new(ip, config.port),
+                bootstrappers,
+                MAX_MESSAGE_SIZE,
+            )
+        } else {
+            authenticated::Config::recommended(
+                signer.clone(),
+                &p2p_namespace,
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
+                SocketAddr::new(ip, config.port),
+                bootstrappers,
+                MAX_MESSAGE_SIZE,
+            )
+        };
         p2p_cfg.mailbox_size = config.mailbox_size;
 
         // Start p2p

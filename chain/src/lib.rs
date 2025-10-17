@@ -23,6 +23,7 @@ pub struct Config {
     pub worker_threads: usize,
     pub log_level: String,
 
+    pub local: bool,
     pub allowed_peers: Vec<String>,
     pub bootstrappers: Vec<String>,
 

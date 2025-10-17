@@ -303,6 +303,7 @@ fn generate_local(
             worker_threads,
             log_level: log_level.clone(),
 
+            local: true,
             allowed_peers: allowed_peers.clone(),
             bootstrappers: bootstrappers.clone(),
 
@@ -447,6 +448,7 @@ fn generate_remote(
             worker_threads,
             log_level: log_level.clone(),
 
+            local: false,
             allowed_peers: allowed_peers.clone(),
             bootstrappers: bootstrappers.clone(),
 
