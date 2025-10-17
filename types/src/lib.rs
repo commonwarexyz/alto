@@ -48,10 +48,7 @@ mod tests {
         types::Round,
     };
     use commonware_cryptography::{
-        bls12381::{
-            dkg::ops,
-            primitives::{poly, variant::MinSig},
-        },
+        bls12381::{dkg::ops, primitives::variant::MinSig},
         Digestible, Hasher, Sha256,
     };
     use rand::{rngs::StdRng, SeedableRng};
