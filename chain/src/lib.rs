@@ -404,7 +404,7 @@ mod tests {
                 let metrics = context.encode();
 
                 // Iterate over all lines
-                let mut success = true;
+                let mut success = false;
                 for line in metrics.lines() {
                     // Ensure it is a metrics line
                     if !line.starts_with("validator-") {
