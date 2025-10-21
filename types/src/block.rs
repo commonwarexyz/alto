@@ -1,4 +1,4 @@
-use crate::consensus::{Finalization, Notarization, SigningScheme};
+use crate::consensus::{Finalization, Notarization, Scheme};
 use bytes::{Buf, BufMut};
 use commonware_codec::{varint::UInt, EncodeSize, Error, Read, ReadExt, Write};
 use commonware_cryptography::{sha256::Digest, Committable, Digestible, Hasher, Sha256};
@@ -102,8 +102,8 @@ impl Notarized {
         Self { proof, block }
     }
 
-    pub fn verify(&self, signing: &SigningScheme, namespace: &[u8]) -> bool {
-        self.proof.verify(&mut OsRng, signing, namespace)
+    pub fn verify(&self, scheme: &Scheme, namespace: &[u8]) -> bool {
+        self.proof.verify(&mut OsRng, scheme, namespace)
     }
 }
 
@@ -149,8 +149,8 @@ impl Finalized {
         Self { proof, block }
     }
 
-    pub fn verify(&self, signing: &SigningScheme, namespace: &[u8]) -> bool {
-        self.proof.verify(&mut OsRng, signing, namespace)
+    pub fn verify(&self, scheme: &Scheme, namespace: &[u8]) -> bool {
+        self.proof.verify(&mut OsRng, scheme, namespace)
     }
 }
 

@@ -522,7 +522,7 @@ checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 [[package]]
 name = "commonware-broadcast"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=andre%2Fsimplex-merge-v3#64e0d4a9d8f64af232657dfb26c86b30147e4927"
+source = "git+https://github.com/commonwarexyz/monorepo.git#11034a27faa9c9159ee209898c52242f89a941c7"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -540,7 +540,7 @@ dependencies = [
 [[package]]
 name = "commonware-codec"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=andre%2Fsimplex-merge-v3#64e0d4a9d8f64af232657dfb26c86b30147e4927"
+source = "git+https://github.com/commonwarexyz/monorepo.git#11034a27faa9c9159ee209898c52242f89a941c7"
 dependencies = [
  "bytes",
  "paste",
@@ -550,7 +550,7 @@ dependencies = [
 [[package]]
 name = "commonware-consensus"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=andre%2Fsimplex-merge-v3#64e0d4a9d8f64af232657dfb26c86b30147e4927"
+source = "git+https://github.com/commonwarexyz/monorepo.git#11034a27faa9c9159ee209898c52242f89a941c7"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -575,7 +575,7 @@ dependencies = [
 [[package]]
 name = "commonware-cryptography"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=andre%2Fsimplex-merge-v3#64e0d4a9d8f64af232657dfb26c86b30147e4927"
+source = "git+https://github.com/commonwarexyz/monorepo.git#11034a27faa9c9159ee209898c52242f89a941c7"
 dependencies = [
  "blake3",
  "blst",
@@ -600,7 +600,7 @@ dependencies = [
 [[package]]
 name = "commonware-deployer"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=andre%2Fsimplex-merge-v3#64e0d4a9d8f64af232657dfb26c86b30147e4927"
+source = "git+https://github.com/commonwarexyz/monorepo.git#11034a27faa9c9159ee209898c52242f89a941c7"
 dependencies = [
  "cfg-if",
  "serde",
@@ -610,7 +610,7 @@ dependencies = [
 [[package]]
 name = "commonware-macros"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=andre%2Fsimplex-merge-v3#64e0d4a9d8f64af232657dfb26c86b30147e4927"
+source = "git+https://github.com/commonwarexyz/monorepo.git#11034a27faa9c9159ee209898c52242f89a941c7"
 dependencies = [
  "futures",
  "proc-macro2",
@@ -623,7 +623,7 @@ dependencies = [
 [[package]]
 name = "commonware-p2p"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=andre%2Fsimplex-merge-v3#64e0d4a9d8f64af232657dfb26c86b30147e4927"
+source = "git+https://github.com/commonwarexyz/monorepo.git#11034a27faa9c9159ee209898c52242f89a941c7"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -649,7 +649,7 @@ dependencies = [
 [[package]]
 name = "commonware-resolver"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=andre%2Fsimplex-merge-v3#64e0d4a9d8f64af232657dfb26c86b30147e4927"
+source = "git+https://github.com/commonwarexyz/monorepo.git#11034a27faa9c9159ee209898c52242f89a941c7"
 dependencies = [
  "bimap",
  "bytes",
@@ -671,7 +671,7 @@ dependencies = [
 [[package]]
 name = "commonware-runtime"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=andre%2Fsimplex-merge-v3#64e0d4a9d8f64af232657dfb26c86b30147e4927"
+source = "git+https://github.com/commonwarexyz/monorepo.git#11034a27faa9c9159ee209898c52242f89a941c7"
 dependencies = [
  "async-lock",
  "axum",
@@ -702,7 +702,7 @@ dependencies = [
 [[package]]
 name = "commonware-storage"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=andre%2Fsimplex-merge-v3#64e0d4a9d8f64af232657dfb26c86b30147e4927"
+source = "git+https://github.com/commonwarexyz/monorepo.git#11034a27faa9c9159ee209898c52242f89a941c7"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -724,7 +724,7 @@ dependencies = [
 [[package]]
 name = "commonware-stream"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=andre%2Fsimplex-merge-v3#64e0d4a9d8f64af232657dfb26c86b30147e4927"
+source = "git+https://github.com/commonwarexyz/monorepo.git#11034a27faa9c9159ee209898c52242f89a941c7"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -744,7 +744,7 @@ dependencies = [
 [[package]]
 name = "commonware-utils"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=andre%2Fsimplex-merge-v3#64e0d4a9d8f64af232657dfb26c86b30147e4927"
+source = "git+https://github.com/commonwarexyz/monorepo.git#11034a27faa9c9159ee209898c52242f89a941c7"
 dependencies = [
  "bytes",
  "cfg-if",

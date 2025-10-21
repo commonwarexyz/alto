@@ -31,7 +31,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section>
                         <h3>About</h3>
                         <p>
-                            This explorer visualizes the performance of <a href="https://github.com/commonwarexyz/alto">alto</a>'s consensus, <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html">threshold-simplex</a>,
+                            This explorer visualizes the performance of <a href="https://github.com/commonwarexyz/alto">alto</a>'s consensus, <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/simplex/index.html">simplex</a>,
                             deployed on a cluster of globally distributed nodes.
                         </p>
                         <p>
@@ -61,7 +61,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section>
                         <h3>What are you looking at?</h3>
                         <p>
-                            This explorer displays the progression of <i>threshold-simplex</i> over time, broken into <strong>views</strong>.
+                            This explorer displays the progression of <i>simplex</i> over time, broken into <strong>views</strong>.
                         </p>
                         <p>
                             Validators enter a new view whenever they observe either <i>2f+1</i> votes for a block proposal or <i>2f+1</i> nullifies
@@ -97,7 +97,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             </li>
                         </ul>
                         <p>
-                            You can read more about the design of <i>threshold-simplex</i> <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/threshold_simplex/index.html">here</a>.
+                            You can read more about the design of <i>simplex</i> <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/simplex/index.html">here</a>.
                         </p>
                     </section>
 
@@ -125,7 +125,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section>
                         <h3>Why is it so fast?</h3>
                         <p>
-                            <i>threshold-simplex</i>, like <a href="https://eprint.iacr.org/2023/463">Simplex Consensus</a>, employs <strong>all-to-all broadcast</strong> and <strong>progress-driven view transitions</strong> to
+                            <i>simplex</i>, like <a href="https://eprint.iacr.org/2023/463">Simplex Consensus</a>, employs <strong>all-to-all broadcast</strong> and <strong>progress-driven view transitions</strong> to
                             achieve optimal latency in both the optimistic and pessimistic case (under the partial synchrony model).
                         </p>
                         <p>
@@ -135,7 +135,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             for a view <i>v</i>, they enter view <i>v+1</i> immediately (ensuring validators stay synchronized without using a clock).
                         </p>
                         <p>
-                            English? <i>threshold-simplex</i> moves at <strong>network speed</strong> (and it turns out that's pretty fast in 2025).
+                            English? <i>simplex</i> moves at <strong>network speed</strong> (and it turns out that's pretty fast in 2025).
                         </p>
                     </section>
 

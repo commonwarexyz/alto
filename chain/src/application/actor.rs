@@ -3,7 +3,7 @@ use super::{
     Config,
 };
 use crate::utils::OneshotClosedFut;
-use alto_types::{Block, SigningScheme};
+use alto_types::{Block, Scheme};
 use commonware_consensus::{marshal, types::Round};
 use commonware_cryptography::{Committable, Digestible, Hasher, Sha256};
 use commonware_macros::select;
@@ -43,12 +43,12 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
         )
     }
 
-    pub fn start(mut self, marshal: marshal::Mailbox<SigningScheme, Block>) -> Handle<()> {
+    pub fn start(mut self, marshal: marshal::Mailbox<Scheme, Block>) -> Handle<()> {
         spawn_cell!(self.context, self.run(marshal).await)
     }
 
     /// Run the application actor.
-    async fn run(mut self, mut marshal: marshal::Mailbox<SigningScheme, Block>) {
+    async fn run(mut self, mut marshal: marshal::Mailbox<Scheme, Block>) {
         // Compute genesis digest
         self.hasher.update(GENESIS);
         let genesis_parent = self.hasher.finalize();

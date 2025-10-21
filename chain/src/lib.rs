@@ -1,9 +1,9 @@
-use alto_types::SigningScheme;
-use commonware_consensus::marshal::SigningSchemeProvider as CSigningSchemeProvider;
+use alto_types::Scheme;
+use commonware_consensus::marshal::SchemeProvider as CSchemeProvider;
 use commonware_cryptography::ed25519;
 use commonware_resolver::p2p;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, net::SocketAddr};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 pub mod application;
 pub mod engine;
@@ -43,17 +43,20 @@ pub struct Peers {
 }
 
 /// A static provider that always returns the same signing scheme.
-pub struct SigningSchemeProvider(SigningScheme);
+#[derive(Clone)]
+pub struct SchemeProvider(Arc<Scheme>);
 
-impl CSigningSchemeProvider<SigningScheme> for SigningSchemeProvider {
-    fn for_epoch(&self, _epoch: u64) -> Option<SigningScheme> {
+impl CSchemeProvider for SchemeProvider {
+    type Scheme = Scheme;
+
+    fn scheme(&self, _epoch: u64) -> Option<Arc<Scheme>> {
         Some(self.0.clone())
     }
 }
 
-impl From<SigningScheme> for SigningSchemeProvider {
-    fn from(scheme: SigningScheme) -> Self {
-        Self(scheme)
+impl From<Scheme> for SchemeProvider {
+    fn from(scheme: Scheme) -> Self {
+        Self(Arc::new(scheme))
     }
 }
 
@@ -244,10 +247,10 @@ mod tests {
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                    signer,
+                    me: signer.public_key(),
                     polynomial: polynomial.clone(),
                     share: shares[idx].clone(),
-                    participants: validators.clone(),
+                    participants: validators.clone().into(),
                     mailbox_size: 1024,
                     deque_size: 10,
                     backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
@@ -438,10 +441,10 @@ mod tests {
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                    signer: signer.clone(),
+                    me: signer.public_key(),
                     polynomial: polynomial.clone(),
                     share: shares[idx].clone(),
-                    participants: validators.clone(),
+                    participants: validators.clone().into(),
                     mailbox_size: 1024,
                     deque_size: 10,
                     backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
@@ -545,10 +548,10 @@ mod tests {
                 partition_prefix: uid.clone(),
                 blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                 finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                signer: signer.clone(),
+                me: signer.public_key(),
                 polynomial: polynomial.clone(),
                 share,
-                participants: validators.clone(),
+                participants: validators.clone().into(),
                 mailbox_size: 1024,
                 deque_size: 10,
                 backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
@@ -700,10 +703,10 @@ mod tests {
                         partition_prefix: uid.clone(),
                         blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                         finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                        signer,
+                        me: signer.public_key(),
                         polynomial: polynomial.clone(),
                         share: shares[idx].clone(),
-                        participants: validators.clone(),
+                        participants: validators.clone().into(),
                         mailbox_size: 1024,
                         deque_size: 10,
                         backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
@@ -893,10 +896,10 @@ mod tests {
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                    signer,
+                    me: signer.public_key(),
                     polynomial: polynomial.clone(),
                     share: shares[idx].clone(),
-                    participants: validators.clone(),
+                    participants: validators.clone().into(),
                     mailbox_size: 1024,
                     deque_size: 10,
                     backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),

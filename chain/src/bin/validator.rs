@@ -25,11 +25,11 @@ use std::{
 };
 use tracing::{error, info, Level};
 
-const PENDING_CHANNEL: u32 = 0;
-const RECOVERED_CHANNEL: u32 = 1;
-const RESOLVER_CHANNEL: u32 = 2;
-const BROADCASTER_CHANNEL: u32 = 3;
-const BACKFILL_BY_DIGEST_CHANNEL: u32 = 4;
+const PENDING_CHANNEL: u64 = 0;
+const RECOVERED_CHANNEL: u64 = 1;
+const RESOLVER_CHANNEL: u64 = 2;
+const BROADCASTER_CHANNEL: u64 = 3;
+const BACKFILL_BY_DIGEST_CHANNEL: u64 = 4;
 
 const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 const NOTARIZATION_TIMEOUT: Duration = Duration::from_secs(2);
@@ -248,10 +248,10 @@ fn main() {
             partition_prefix: "engine".to_string(),
             blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
             finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
-            signer,
+            me: public_key.clone(),
             polynomial,
             share,
-            participants: peers.clone(),
+            participants: peers.clone().into(),
             mailbox_size: config.mailbox_size,
             deque_size: config.deque_size,
             backfill_quota,

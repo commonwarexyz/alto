@@ -1,4 +1,4 @@
-use alto_types::{Activity, Block, Finalized, Identity, Notarized, Seed, Seedable, SigningScheme};
+use alto_types::{Activity, Block, Finalized, Identity, Notarized, Scheme, Seed, Seedable};
 use commonware_consensus::{marshal, Reporter, Viewable};
 use commonware_runtime::{Metrics, Spawner};
 use std::future::Future;
@@ -100,12 +100,12 @@ impl Indexer for alto_client::Client {
 pub struct Pusher<E: Spawner + Metrics, I: Indexer> {
     context: E,
     indexer: I,
-    marshal: marshal::Mailbox<SigningScheme, Block>,
+    marshal: marshal::Mailbox<Scheme, Block>,
 }
 
 impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
     /// Create a new [Pusher].
-    pub fn new(context: E, indexer: I, marshal: marshal::Mailbox<SigningScheme, Block>) -> Self {
+    pub fn new(context: E, indexer: I, marshal: marshal::Mailbox<Scheme, Block>) -> Self {
         Self {
             context,
             indexer,

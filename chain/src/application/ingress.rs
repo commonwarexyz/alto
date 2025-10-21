@@ -1,6 +1,6 @@
 use alto_types::Block;
 use commonware_consensus::{
-    threshold_simplex::types::Context,
+    simplex::types::Context,
     types::{Epoch, Round, View},
     Automaton, Relay, Reporter,
 };

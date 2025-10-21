@@ -5,13 +5,13 @@ pub use block::{Block, Finalized, Notarized};
 mod consensus;
 use commonware_utils::hex;
 pub use consensus::{
-    Activity, Evaluation, Finalization, Identity, Notarization, Seed, Seedable, Signature,
-    SigningScheme,
+    Activity, Evaluation, Finalization, Identity, Notarization, Scheme, Seed, Seedable, Signature,
 };
 pub mod wasm;
 
 pub const NAMESPACE: &[u8] = b"_ALTO";
 pub const EPOCH: u64 = 0;
+pub const EPOCH_LENGTH: u64 = u64::MAX;
 
 #[repr(u8)]
 pub enum Kind {
@@ -44,7 +44,7 @@ mod tests {
     use super::*;
     use commonware_codec::{DecodeExt, Encode};
     use commonware_consensus::{
-        threshold_simplex::types::{Finalization, Finalize, Notarization, Notarize, Proposal},
+        simplex::types::{Finalization, Finalize, Notarization, Notarize, Proposal},
         types::Round,
     };
     use commonware_cryptography::{
@@ -62,7 +62,7 @@ mod tests {
         let participants = vec![(); n as usize];
         let schemes: Vec<_> = shares
             .into_iter()
-            .map(|share| SigningScheme::new(&participants, &polynomial, share))
+            .map(|share| Scheme::new(&participants, &polynomial, share))
             .collect();
 
         // Create a block
@@ -73,7 +73,7 @@ mod tests {
         // Create a notarization
         let notarizes: Vec<_> = schemes
             .iter()
-            .map(|scheme| Notarize::sign(scheme, NAMESPACE, proposal.clone()))
+            .map(|scheme| Notarize::sign(scheme, NAMESPACE, proposal.clone()).unwrap())
             .collect();
         let notarization = Notarization::from_notarizes(&schemes[0], &notarizes).unwrap();
         let notarized = Notarized::new(notarization, block.clone());
@@ -96,7 +96,7 @@ mod tests {
         let participants = vec![(); n as usize];
         let schemes: Vec<_> = shares
             .into_iter()
-            .map(|share| SigningScheme::new(&participants, &polynomial, share))
+            .map(|share| Scheme::new(&participants, &polynomial, share))
             .collect();
 
         // Create a block
@@ -107,9 +107,9 @@ mod tests {
         // Create a finalization
         let finalizes: Vec<_> = schemes
             .iter()
-            .map(|scheme| Finalize::sign(scheme, NAMESPACE, proposal.clone()))
+            .map(|scheme| Finalize::sign(scheme, NAMESPACE, proposal.clone()).unwrap())
             .collect();
-        let finalization = Finalization::from_finalizes(&schemes[0], &finalizes, None).unwrap();
+        let finalization = Finalization::from_finalizes(&schemes[0], &finalizes).unwrap();
         let finalized = Finalized::new(finalization, block.clone());
 
         // Serialize and deserialize

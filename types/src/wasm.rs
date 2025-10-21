@@ -1,8 +1,6 @@
-use crate::{
-    Block, Finalized, Identity, Notarized, Seed, Signature, SigningScheme, EPOCH, NAMESPACE,
-};
+use crate::{Block, Finalized, Identity, Notarized, Scheme, Seed, Signature, EPOCH, NAMESPACE};
 use commonware_codec::{DecodeExt, Encode};
-use commonware_consensus::{threshold_simplex::select_leader, types::Round, Viewable};
+use commonware_consensus::{simplex::select_leader, types::Round, Viewable};
 use commonware_cryptography::Digestible;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -44,7 +42,7 @@ pub struct FinalizedJs {
 #[wasm_bindgen]
 pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = SigningScheme::certificate_verifier(identity);
+    let certificate_verifier = Scheme::certificate_verifier(identity);
 
     let Ok(seed) = Seed::decode(bytes.as_ref()) else {
         return JsValue::NULL;
@@ -62,7 +60,7 @@ pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 #[wasm_bindgen]
 pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = SigningScheme::certificate_verifier(identity);
+    let certificate_verifier = Scheme::certificate_verifier(identity);
 
     let Ok(notarized) = Notarized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
@@ -75,12 +73,7 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
             view: notarized.proof.view(),
             parent: notarized.proof.proposal.parent,
             payload: notarized.proof.proposal.payload.to_vec(),
-            signature: notarized
-                .proof
-                .certificate
-                .message_signature
-                .encode()
-                .to_vec(),
+            signature: notarized.proof.certificate.vote_signature.encode().to_vec(),
         },
         block: BlockJs {
             parent: notarized.block.parent.to_vec(),
@@ -95,7 +88,7 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 #[wasm_bindgen]
 pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = SigningScheme::certificate_verifier(identity);
+    let certificate_verifier = Scheme::certificate_verifier(identity);
     let Ok(finalized) = Finalized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
@@ -107,12 +100,7 @@ pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
             view: finalized.proof.view(),
             parent: finalized.proof.proposal.parent,
             payload: finalized.proof.proposal.payload.to_vec(),
-            signature: finalized
-                .proof
-                .certificate
-                .message_signature
-                .encode()
-                .to_vec(),
+            signature: finalized.proof.certificate.vote_signature.encode().to_vec(),
         },
         block: BlockJs {
             parent: finalized.block.parent.to_vec(),
@@ -148,7 +136,8 @@ pub fn leader_index(seed: JsValue, participants: usize) -> usize {
         return 0;
     };
 
-    let seed = Seed::new(Round::new(EPOCH, seed.view), signature);
+    let round = Round::new(EPOCH, seed.view);
+    let seed = Seed::new(round, signature);
 
-    select_leader::<SigningScheme, ()>(&vec![(); participants], 0, Some(seed)) as usize
+    select_leader::<Scheme, ()>(&vec![(); participants], round, Some(seed)) as usize
 }

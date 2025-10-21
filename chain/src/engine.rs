@@ -1,22 +1,22 @@
-use crate::{application, indexer, indexer::Indexer, SigningSchemeProvider};
-use alto_types::{Activity, Block, Evaluation, SigningScheme, EPOCH, NAMESPACE};
+use crate::{application, indexer, indexer::Indexer, SchemeProvider};
+use alto_types::{Activity, Block, Evaluation, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
     marshal::{self, ingress::handler},
-    threshold_simplex::{self, Engine as Consensus},
+    simplex::{self, Engine as Consensus},
     Reporters,
 };
 use commonware_cryptography::{
     bls12381::primitives::{group, poly::Poly},
-    ed25519::{PrivateKey, PublicKey},
+    ed25519::PublicKey,
     sha256::Digest,
-    Signer,
 };
 use commonware_p2p::{Blocker, Receiver, Sender};
 use commonware_resolver::Resolver;
 use commonware_runtime::{
     buffer::PoolRef, spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
 };
+use commonware_utils::set::Set;
 use commonware_utils::{NZUsize, NZU64};
 use futures::{channel::mpsc, future::try_join_all};
 use governor::clock::Clock as GClock;
@@ -26,9 +26,9 @@ use std::marker::PhantomData;
 use std::{num::NonZero, time::Duration};
 use tracing::{error, warn};
 
-/// Reporter type for [threshold_simplex::Engine].
+/// Reporter type for [simplex::Engine].
 type Reporter<E, I> =
-    Reporters<Activity, marshal::Mailbox<SigningScheme, Block>, Option<indexer::Pusher<E, I>>>;
+    Reporters<Activity, marshal::Mailbox<Scheme, Block>, Option<indexer::Pusher<E, I>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -51,10 +51,10 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub partition_prefix: String,
     pub blocks_freezer_table_initial_size: u32,
     pub finalized_freezer_table_initial_size: u32,
-    pub signer: PrivateKey,
+    pub me: PublicKey,
     pub polynomial: Poly<Evaluation>,
     pub share: group::Share,
-    pub participants: Vec<PublicKey>,
+    pub participants: Set<PublicKey>,
     pub mailbox_size: usize,
     pub backfill_quota: Quota,
     pub deque_size: usize,
@@ -85,13 +85,13 @@ pub struct Engine<
     application_mailbox: application::Mailbox,
     buffer: buffered::Engine<E, PublicKey, Block>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
-    marshal: marshal::Actor<E, Block, SigningSchemeProvider, SigningScheme>,
-    marshal_mailbox: marshal::Mailbox<SigningScheme, Block>,
+    marshal: marshal::Actor<E, Block, SchemeProvider, Scheme>,
+    marshal_mailbox: marshal::Mailbox<Scheme, Block>,
 
     consensus: Consensus<
         E,
-        PrivateKey,
-        SigningScheme,
+        PublicKey,
+        Scheme,
         B,
         Digest,
         application::Mailbox,
@@ -120,7 +120,7 @@ impl<
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
             buffered::Config {
-                public_key: cfg.signer.public_key(),
+                public_key: cfg.me.clone(),
                 mailbox_size: cfg.mailbox_size,
                 deque_size: cfg.deque_size,
                 priority: true,
@@ -132,13 +132,14 @@ impl<
         let buffer_pool = PoolRef::new(BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
 
         // Create the signing scheme
-        let signing = SigningScheme::new(&cfg.participants, &cfg.polynomial, cfg.share);
+        let scheme = Scheme::new(cfg.participants.as_ref(), &cfg.polynomial, cfg.share);
 
         // Create marshal
         let (marshal, marshal_mailbox) = marshal::Actor::init(
             context.with_label("marshal"),
             marshal::Config {
-                signing_provider: signing.clone().into(),
+                scheme_provider: scheme.clone().into(),
+                epoch_length: EPOCH_LENGTH,
                 partition_prefix: cfg.partition_prefix.clone(),
                 mailbox_size: cfg.mailbox_size,
                 view_retention_timeout: cfg
@@ -178,12 +179,12 @@ impl<
         // Create the consensus engine
         let consensus = Consensus::new(
             context.with_label("consensus"),
-            threshold_simplex::Config {
+            simplex::Config {
                 epoch: EPOCH,
                 namespace: NAMESPACE.to_vec(),
-                crypto: cfg.signer,
+                me: cfg.me,
                 participants: cfg.participants,
-                signing,
+                scheme,
                 automaton: application_mailbox.clone(),
                 relay: application_mailbox.clone(),
                 reporter,
@@ -219,7 +220,7 @@ impl<
         }
     }
 
-    /// Start the [threshold_simplex::Engine].
+    /// Start the [simplex::Engine].
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         mut self,
