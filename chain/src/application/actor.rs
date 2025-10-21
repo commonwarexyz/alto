@@ -104,11 +104,11 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
 
                                     // Send the digest to the consensus
                                     let result = response.send(digest);
-                                    info!(%round, ?digest, success=result.is_ok(), "proposed new block");
+                                    info!(?round, ?digest, success=result.is_ok(), "proposed new block");
                                 },
                                 _ = response_closed => {
                                     // The response was cancelled
-                                    warn!(%round, "propose aborted");
+                                    warn!(?round, "propose aborted");
                                 }
                             }
                         }
@@ -124,7 +124,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     // Send the block to the syncer
                     debug!(
                         ?payload,
-                        round = %built.0,
+                        round = ?built.0,
                         height = built.1.height,
                         "broadcast requested"
                     );
@@ -187,7 +187,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                 },
                                 _ = response_closed => {
                                     // The response was cancelled
-                                    warn!(%round, "verify aborted");
+                                    warn!(?round, "verify aborted");
                                 }
                             }
                         }

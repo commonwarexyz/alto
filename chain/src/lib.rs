@@ -1,5 +1,5 @@
 use alto_types::Scheme;
-use commonware_consensus::marshal::SchemeProvider as CSchemeProvider;
+use commonware_consensus::marshal::SchemeProvider;
 use commonware_cryptography::ed25519;
 use commonware_resolver::p2p;
 use serde::{Deserialize, Serialize};
@@ -44,9 +44,9 @@ pub struct Peers {
 
 /// A static provider that always returns the same signing scheme.
 #[derive(Clone)]
-pub struct SchemeProvider(Arc<Scheme>);
+pub struct StaticSchemeProvider(Arc<Scheme>);
 
-impl CSchemeProvider for SchemeProvider {
+impl SchemeProvider for StaticSchemeProvider {
     type Scheme = Scheme;
 
     fn scheme(&self, _epoch: u64) -> Option<Arc<Scheme>> {
@@ -54,7 +54,7 @@ impl CSchemeProvider for SchemeProvider {
     }
 }
 
-impl From<Scheme> for SchemeProvider {
+impl From<Scheme> for StaticSchemeProvider {
     fn from(scheme: Scheme) -> Self {
         Self(Arc::new(scheme))
     }
@@ -62,11 +62,11 @@ impl From<Scheme> for SchemeProvider {
 
 /// A static coordinator that always returns the same set of peers.
 #[derive(Clone)]
-pub struct Coordinator {
+pub struct StaticCoordinator {
     participants: Vec<ed25519::PublicKey>,
 }
 
-impl p2p::Coordinator for Coordinator {
+impl p2p::Coordinator for StaticCoordinator {
     type PublicKey = ed25519::PublicKey;
 
     fn peers(&self) -> &[Self::PublicKey] {
@@ -78,7 +78,7 @@ impl p2p::Coordinator for Coordinator {
     }
 }
 
-impl From<Vec<ed25519::PublicKey>> for Coordinator {
+impl From<Vec<ed25519::PublicKey>> for StaticCoordinator {
     fn from(participants: Vec<ed25519::PublicKey>) -> Self {
         Self { participants }
     }
@@ -275,7 +275,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    coordinator: Coordinator::from(validators.clone()),
+                    coordinator: StaticCoordinator::from(validators.clone()),
                     mailbox_size: 1024,
                     requester_config: requester::Config {
                         public_key: public_key.clone(),
@@ -469,7 +469,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    coordinator: Coordinator::from(validators.clone()),
+                    coordinator: StaticCoordinator::from(validators.clone()),
                     mailbox_size: 1024,
                     requester_config: requester::Config {
                         public_key: public_key.clone(),
@@ -576,7 +576,7 @@ mod tests {
             // Configure marshal resolver
             let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                 public_key: public_key.clone(),
-                coordinator: Coordinator::from(validators.clone()),
+                coordinator: StaticCoordinator::from(validators.clone()),
                 mailbox_size: 1024,
                 requester_config: requester::Config {
                     public_key: public_key.clone(),
@@ -731,7 +731,7 @@ mod tests {
                     // Configure marshal resolver
                     let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                         public_key: public_key.clone(),
-                        coordinator: Coordinator::from(validators.clone()),
+                        coordinator: StaticCoordinator::from(validators.clone()),
                         mailbox_size: 1024,
                         requester_config: requester::Config {
                             public_key: public_key.clone(),
@@ -924,7 +924,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    coordinator: Coordinator::from(validators.clone()),
+                    coordinator: StaticCoordinator::from(validators.clone()),
                     mailbox_size: 1024,
                     requester_config: requester::Config {
                         public_key: public_key.clone(),

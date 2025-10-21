@@ -1,4 +1,4 @@
-use crate::{application, indexer, indexer::Indexer, SchemeProvider};
+use crate::{application, indexer, indexer::Indexer, StaticSchemeProvider};
 use alto_types::{Activity, Block, Evaluation, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
@@ -85,7 +85,7 @@ pub struct Engine<
     application_mailbox: application::Mailbox,
     buffer: buffered::Engine<E, PublicKey, Block>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
-    marshal: marshal::Actor<E, Block, SchemeProvider, Scheme>,
+    marshal: marshal::Actor<E, Block, StaticSchemeProvider, Scheme>,
     marshal_mailbox: marshal::Mailbox<Scheme, Block>,
 
     consensus: Consensus<

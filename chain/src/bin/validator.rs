@@ -1,4 +1,4 @@
-use alto_chain::{engine, Config, Coordinator, Peers};
+use alto_chain::{engine, Config, Peers, StaticCoordinator};
 use alto_client::Client;
 use alto_types::NAMESPACE;
 use clap::{Arg, Command};
@@ -271,7 +271,7 @@ fn main() {
 
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),
-            coordinator: Coordinator::from(peers),
+            coordinator: StaticCoordinator::from(peers),
             mailbox_size: config.mailbox_size,
             requester_config: requester::Config {
                 public_key: public_key.clone(),
