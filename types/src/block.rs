@@ -1,6 +1,9 @@
 use bytes::{Buf, BufMut};
-use commonware_codec::{varint::UInt, EncodeSize, Error, Read, ReadExt, Write};
-use commonware_consensus::threshold_simplex::types::{Finalization, Notarization};
+use commonware_codec::{varint::UInt, EncodeSize, Error, RangeCfg, Read, ReadExt, Write};
+use commonware_consensus::{
+    threshold_simplex::types::{Finalization, Notarization},
+    types::CodingCommitment,
+};
 use commonware_cryptography::{
     bls12381::primitives::variant::{MinSig, Variant},
     sha256::Digest,
@@ -9,8 +12,8 @@ use commonware_cryptography::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
-    /// The parent block's digest.
-    pub parent: Digest,
+    /// The parent block's [CodingCommitment].
+    pub parent: CodingCommitment,
 
     /// The height of the block in the blockchain.
     pub height: u64,
@@ -18,25 +21,35 @@ pub struct Block {
     /// The timestamp of the block (in milliseconds since the Unix epoch).
     pub timestamp: u64,
 
+    /// The junk data appended to the block.
+    pub junk: Vec<u8>,
+
     /// Pre-computed digest of the block.
     digest: Digest,
 }
 
 impl Block {
-    fn compute_digest(parent: &Digest, height: u64, timestamp: u64) -> Digest {
+    fn compute_digest(
+        parent: &CodingCommitment,
+        height: u64,
+        timestamp: u64,
+        junk: &[u8],
+    ) -> Digest {
         let mut hasher = Sha256::new();
         hasher.update(parent);
         hasher.update(&height.to_be_bytes());
         hasher.update(&timestamp.to_be_bytes());
+        hasher.update(junk);
         hasher.finalize()
     }
 
-    pub fn new(parent: Digest, height: u64, timestamp: u64) -> Self {
-        let digest = Self::compute_digest(&parent, height, timestamp);
+    pub fn new(parent: CodingCommitment, height: u64, timestamp: u64, junk: Vec<u8>) -> Self {
+        let digest = Self::compute_digest(&parent, height, timestamp, junk.as_slice());
         Self {
             parent,
             height,
             timestamp,
+            junk,
             digest,
         }
     }
@@ -47,6 +60,7 @@ impl Write for Block {
         self.parent.write(writer);
         UInt(self.height).write(writer);
         UInt(self.timestamp).write(writer);
+        self.junk.write(writer);
     }
 }
 
@@ -54,16 +68,18 @@ impl Read for Block {
     type Cfg = ();
 
     fn read_cfg(reader: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
-        let parent = Digest::read(reader)?;
+        let parent = CodingCommitment::read(reader)?;
         let height = UInt::read(reader)?.into();
         let timestamp = UInt::read(reader)?.into();
+        let junk = Vec::<u8>::read_cfg(reader, &(RangeCfg::from(0..1024 * 1024 * 10), ()))?;
 
         // Pre-compute the digest
-        let digest = Self::compute_digest(&parent, height, timestamp);
+        let digest = Self::compute_digest(&parent, height, timestamp, junk.as_slice());
         Ok(Self {
             parent,
             height,
             timestamp,
+            junk,
 
             digest,
         })
@@ -75,6 +91,7 @@ impl EncodeSize for Block {
         self.parent.encode_size()
             + UInt(self.height).encode_size()
             + UInt(self.timestamp).encode_size()
+            + self.junk.encode_size()
     }
 }
 
@@ -87,21 +104,21 @@ impl Digestible for Block {
 }
 
 impl Committable for Block {
-    type Commitment = Digest;
+    type Commitment = CodingCommitment;
 
-    fn commitment(&self) -> Digest {
-        self.digest
+    fn commitment(&self) -> Self::Commitment {
+        Default::default()
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notarized {
-    pub proof: Notarization<MinSig, Digest>,
+    pub proof: Notarization<MinSig, CodingCommitment>,
     pub block: Block,
 }
 
 impl Notarized {
-    pub fn new(proof: Notarization<MinSig, Digest>, block: Block) -> Self {
+    pub fn new(proof: Notarization<MinSig, CodingCommitment>, block: Block) -> Self {
         Self { proof, block }
     }
 
@@ -121,11 +138,11 @@ impl Read for Notarized {
     type Cfg = ();
 
     fn read_cfg(buf: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
-        let proof = Notarization::<MinSig, Digest>::read(buf)?;
+        let proof = Notarization::<MinSig, CodingCommitment>::read(buf)?;
         let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
-        if proof.proposal.payload != block.digest() {
+        if proof.proposal.payload != block.commitment() {
             return Err(Error::Invalid(
                 "types::Notarized",
                 "Proof payload does not match block digest",
@@ -143,12 +160,12 @@ impl EncodeSize for Notarized {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Finalized {
-    pub proof: Finalization<MinSig, Digest>,
+    pub proof: Finalization<MinSig, CodingCommitment>,
     pub block: Block,
 }
 
 impl Finalized {
-    pub fn new(proof: Finalization<MinSig, Digest>, block: Block) -> Self {
+    pub fn new(proof: Finalization<MinSig, CodingCommitment>, block: Block) -> Self {
         Self { proof, block }
     }
 
@@ -168,11 +185,11 @@ impl Read for Finalized {
     type Cfg = ();
 
     fn read_cfg(buf: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
-        let proof = Finalization::<MinSig, Digest>::read(buf)?;
+        let proof = Finalization::<MinSig, CodingCommitment>::read(buf)?;
         let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
-        if proof.proposal.payload != block.digest() {
+        if proof.proposal.payload != block.commitment() {
             return Err(Error::Invalid(
                 "types::Finalized",
                 "Proof payload does not match block digest",
@@ -189,7 +206,7 @@ impl EncodeSize for Finalized {
 }
 
 impl commonware_consensus::Block for Block {
-    fn parent(&self) -> Digest {
+    fn parent(&self) -> Self::Commitment {
         self.parent
     }
 

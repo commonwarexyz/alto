@@ -1,8 +1,6 @@
 use alto_types::{leader_index, Evaluation, Identity, Signature};
 use commonware_codec::Encode;
-use commonware_consensus::{
-    threshold_simplex::types::View, Supervisor as Su, ThresholdSupervisor as TSu,
-};
+use commonware_consensus::{types::View, Supervisor as Su, ThresholdSupervisor as TSu};
 use commonware_cryptography::{
     bls12381::{
         dkg::ops::evaluate_all,

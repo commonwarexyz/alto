@@ -1,9 +1,19 @@
-use crate::{application, indexer, indexer::Indexer, supervisor::Supervisor};
+use crate::{
+    application::AltoApp,
+    indexer::{self, Indexer},
+    supervisor::Supervisor,
+};
 use alto_types::{Activity, Block, Evaluation, NAMESPACE};
 use commonware_broadcast::buffered;
+use commonware_coding::ReedSolomon;
 use commonware_consensus::{
-    marshal,
+    marshal::{
+        self,
+        coding::{self, CodedBlock, CodingAdapter, Shard},
+        ingress::handler,
+    },
     threshold_simplex::{self, Engine as Consensus},
+    types::CodingCommitment,
     Reporters,
 };
 use commonware_cryptography::{
@@ -13,13 +23,12 @@ use commonware_cryptography::{
         variant::MinSig,
     },
     ed25519::{PrivateKey, PublicKey},
-    sha256::Digest,
-    Signer,
+    Sha256, Signer,
 };
 use commonware_p2p::{Blocker, Receiver, Sender};
 use commonware_runtime::{buffer::PoolRef, Clock, Handle, Metrics, Spawner, Storage};
 use commonware_utils::{NZUsize, NZU64};
-use futures::future::try_join_all;
+use futures::{channel::mpsc, future::try_join_all};
 use governor::clock::Clock as GClock;
 use governor::Quota;
 use rand::{CryptoRng, Rng};
@@ -27,8 +36,15 @@ use std::{num::NonZero, time::Duration};
 use tracing::{error, warn};
 
 /// Reporter type for [threshold_simplex::Engine].
-type Reporter<E, I> =
-    Reporters<Activity, marshal::Mailbox<MinSig, Block>, Option<indexer::Pusher<E, I>>>;
+type Reporter<E, I> = Reporters<
+    Activity,
+    Reporters<
+        Activity,
+        marshal::Mailbox<MinSig, Block>,
+        coding::Mailbox<MinSig, Block, ReedSolomon<Sha256>, PublicKey>,
+    >,
+    Option<indexer::Pusher<E, I>>,
+>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -73,7 +89,10 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub indexer: Option<I>,
 }
 
-/// The engine that drives the [application].
+type Application<E> =
+    CodingAdapter<E, AltoApp<E>, MinSig, Block, ReedSolomon<Sha256>, PublicKey, Supervisor>;
+
+/// The engine that drives the application.
 pub struct Engine<
     E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
@@ -81,21 +100,23 @@ pub struct Engine<
 > {
     context: E,
 
-    application: application::Actor<E>,
-    application_mailbox: application::Mailbox,
-    buffer: buffered::Engine<E, PublicKey, Block>,
-    buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
-    marshal: marshal::Actor<Block, E, MinSig, PublicKey, Supervisor>,
-    marshal_mailbox: marshal::Mailbox<MinSig, Block>,
+    application: Application<E>,
+    buffer: buffered::Engine<E, PublicKey, Shard<ReedSolomon<Sha256>, Sha256>>,
+    shard_mailbox: coding::Mailbox<MinSig, Block, ReedSolomon<Sha256>, PublicKey>,
+    coding: coding::Actor<E, MinSig, ReedSolomon<Sha256>, Sha256, Block, PublicKey>,
+    marshal: marshal::Actor<Block, E, MinSig, ReedSolomon<Sha256>>,
 
+    pub supervisor: Supervisor,
+
+    #[allow(clippy::type_complexity)]
     consensus: Consensus<
         E,
         PrivateKey,
         B,
         MinSig,
-        Digest,
-        application::Mailbox,
-        application::Mailbox,
+        CodingCommitment,
+        Application<E>,
+        Application<E>,
         Reporter<E, I>,
         Supervisor,
     >,
@@ -109,31 +130,7 @@ impl<
 {
     /// Create a new [Engine].
     pub async fn new(context: E, cfg: Config<B, I>) -> Self {
-        // Create the application
         let identity = *public::<MinSig>(&cfg.polynomial);
-        let (application, supervisor, application_mailbox) = application::Actor::new(
-            context.with_label("application"),
-            application::Config {
-                participants: cfg.participants.clone(),
-                polynomial: cfg.polynomial,
-                share: cfg.share,
-                mailbox_size: cfg.mailbox_size,
-            },
-        );
-
-        // Create the buffer
-        let (buffer, buffer_mailbox) = buffered::Engine::new(
-            context.with_label("buffer"),
-            buffered::Config {
-                public_key: cfg.signer.public_key(),
-                mailbox_size: cfg.mailbox_size,
-                deque_size: cfg.deque_size,
-                priority: true,
-                codec_config: (),
-            },
-        );
-
-        // Create the buffer pool
         let buffer_pool = PoolRef::new(BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
 
         // Create marshal
@@ -141,12 +138,9 @@ impl<
             marshal::Actor::init(
                 context.with_label("marshal"),
                 marshal::Config {
-                    public_key: cfg.signer.public_key(),
                     identity,
-                    coordinator: supervisor.clone(),
                     partition_prefix: cfg.partition_prefix.clone(),
                     mailbox_size: cfg.mailbox_size,
-                    backfill_quota: cfg.backfill_quota,
                     view_retention_timeout: cfg
                         .activity_timeout
                         .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
@@ -167,15 +161,35 @@ impl<
             )
             .await;
 
+        // Create the buffer
+        let (buffer, buffer_mailbox) = buffered::Engine::new(
+            context.with_label("buffer"),
+            buffered::Config {
+                public_key: cfg.signer.public_key(),
+                mailbox_size: cfg.mailbox_size,
+                deque_size: cfg.deque_size,
+                priority: true,
+                codec_config: (usize::MAX, usize::MAX),
+            },
+        );
+
+        let (coding, shard_mailbox) =
+            coding::Actor::new(context.with_label("coding"), buffer_mailbox, ());
+
+        let supervisor = Supervisor::new(cfg.polynomial, cfg.participants.clone(), cfg.share);
+        let application = CodingAdapter::new(
+            context.with_label("app"),
+            AltoApp::new(context.with_label("alto")),
+            shard_mailbox.clone(),
+            cfg.signer.public_key(),
+            supervisor.clone(),
+        );
+
         // Create the reporter
         let reporter = (
-            marshal_mailbox.clone(),
+            Reporters::from((marshal_mailbox.clone(), shard_mailbox.clone())),
             cfg.indexer.map(|indexer| {
-                indexer::Pusher::new(
-                    context.with_label("indexer"),
-                    indexer,
-                    marshal_mailbox.clone(),
-                )
+                indexer::Pusher::new(context.with_label("indexer"), indexer, marshal_mailbox)
             }),
         )
             .into();
@@ -184,12 +198,13 @@ impl<
         let consensus = Consensus::new(
             context.with_label("consensus"),
             threshold_simplex::Config {
+                epoch: 0,
                 namespace: NAMESPACE.to_vec(),
                 crypto: cfg.signer,
-                automaton: application_mailbox.clone(),
-                relay: application_mailbox.clone(),
+                automaton: application.clone(),
+                relay: application.clone(),
                 reporter,
-                supervisor,
+                supervisor: supervisor.clone(),
                 partition: format!("{}-consensus", cfg.partition_prefix),
                 mailbox_size: cfg.mailbox_size,
                 leader_timeout: cfg.leader_timeout,
@@ -213,17 +228,18 @@ impl<
             context,
 
             application,
-            application_mailbox,
             buffer,
-            buffer_mailbox,
+            shard_mailbox,
+            coding,
             marshal,
-            marshal_mailbox,
+
+            supervisor,
             consensus,
         }
     }
 
     /// Start the [threshold_simplex::Engine].
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     pub fn start(
         self,
         pending_network: (
@@ -243,8 +259,10 @@ impl<
             impl Receiver<PublicKey = PublicKey>,
         ),
         backfill_network: (
-            impl Sender<PublicKey = PublicKey>,
-            impl Receiver<PublicKey = PublicKey>,
+            mpsc::Receiver<handler::Message<CodedBlock<Block, ReedSolomon<Sha256>>>>,
+            commonware_resolver::p2p::Mailbox<
+                handler::Request<CodedBlock<Block, ReedSolomon<Sha256>>>,
+            >,
         ),
     ) -> Handle<()> {
         self.context.clone().spawn(|_| {
@@ -258,7 +276,7 @@ impl<
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     async fn run(
         self,
         pending_network: (
@@ -278,22 +296,22 @@ impl<
             impl Receiver<PublicKey = PublicKey>,
         ),
         backfill_network: (
-            impl Sender<PublicKey = PublicKey>,
-            impl Receiver<PublicKey = PublicKey>,
+            mpsc::Receiver<handler::Message<CodedBlock<Block, ReedSolomon<Sha256>>>>,
+            commonware_resolver::p2p::Mailbox<
+                handler::Request<CodedBlock<Block, ReedSolomon<Sha256>>>,
+            >,
         ),
     ) {
-        // Start the application
-        let application_handle = self.application.start(self.marshal_mailbox);
-
         // Start the buffer
         let buffer_handle = self.buffer.start(broadcast_network);
 
+        // Start coding
+        let coding_handle = self.coding.start();
+
         // Start marshal
-        let marshal_handle = self.marshal.start(
-            self.application_mailbox,
-            self.buffer_mailbox,
-            backfill_network,
-        );
+        let marshal_handle =
+            self.marshal
+                .start(self.application, self.shard_mailbox, backfill_network);
 
         // Start consensus
         //
@@ -305,8 +323,8 @@ impl<
 
         // Wait for any actor to finish
         if let Err(e) = try_join_all(vec![
-            application_handle,
             buffer_handle,
+            coding_handle,
             marshal_handle,
             consensus_handle,
         ])

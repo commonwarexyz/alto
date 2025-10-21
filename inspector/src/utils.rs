@@ -85,7 +85,7 @@ pub fn format_age(age: u64) -> String {
 }
 
 pub fn log_seed(seed: Seed) {
-    info!(view = seed.view, signature = ?seed.signature, "seed");
+    info!(round = %seed.round, signature = ?seed.signature, "seed");
 }
 
 pub fn log_notarization(notarized: Notarized) {

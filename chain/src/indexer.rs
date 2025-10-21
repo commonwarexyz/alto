@@ -143,7 +143,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                     move |_| async move {
                         // Wait for block
                         let block = marshal
-                            .subscribe(Some(notarization.view()), notarization.proposal.payload)
+                            .subscribe(Some(notarization.round()), notarization.proposal.payload)
                             .await
                             .await;
                         let Ok(block) = block else {
@@ -184,7 +184,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                     let mut marshal = self.marshal.clone();
                     move |_| async move {
                         let block = marshal
-                            .subscribe(Some(finalization.view()), finalization.proposal.payload)
+                            .subscribe(Some(finalization.round()), finalization.proposal.payload)
                             .await
                             .await;
                         let Ok(block) = block else {
