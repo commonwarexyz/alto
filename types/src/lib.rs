@@ -5,11 +5,17 @@ pub use block::{Block, Finalized, Notarized};
 mod consensus;
 use commonware_utils::hex;
 pub use consensus::{
-    Activity, Evaluation, Finalization, Identity, Notarization, Scheme, Seed, Seedable, Signature,
+    Activity, Evaluation, Finalization, Identity, Notarization, PublicKey, Scheme, Seed, Seedable,
+    Signature,
 };
 pub mod wasm;
 
 pub const NAMESPACE: &[u8] = b"_ALTO";
+/// The epoch number used in alto's simplex consensus.
+///
+/// This is hardcoded as alto does not currently implement reconfiguration, hence it never transitions to new
+/// epochs. Future versions may implement reconfiguration and resharing as done in the
+/// [reshare example](https://github.com/commonwarexyz/monorepo/tree/ad0b3bf987b40fb0ba25a1d6fd38d892ad43c0fe/examples/reshare).
 pub const EPOCH: u64 = 0;
 pub const EPOCH_LENGTH: u64 = u64::MAX;
 
@@ -49,8 +55,9 @@ mod tests {
     };
     use commonware_cryptography::{
         bls12381::{dkg::ops, primitives::variant::MinSig},
-        Digestible, Hasher, Sha256,
+        ed25519, Digestible, Hasher, PrivateKeyExt, Sha256, Signer,
     };
+    use commonware_utils::set::Ordered;
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
@@ -58,11 +65,13 @@ mod tests {
         // Create network key
         let mut rng = StdRng::seed_from_u64(0);
         let n = 4;
+        let participants = (0..n)
+            .map(|_| ed25519::PrivateKey::from_rng(&mut rng).public_key())
+            .collect::<Ordered<_>>();
         let (polynomial, shares) = ops::generate_shares::<_, MinSig>(&mut rng, None, n, 3);
-        let participants = vec![(); n as usize];
         let schemes: Vec<_> = shares
             .into_iter()
-            .map(|share| Scheme::new(&participants, &polynomial, share))
+            .map(|share| Scheme::new(participants.clone(), &polynomial, share))
             .collect();
 
         // Create a block
@@ -93,10 +102,12 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0);
         let n = 4;
         let (polynomial, shares) = ops::generate_shares::<_, MinSig>(&mut rng, None, n, 3);
-        let participants = vec![(); n as usize];
+        let participants = (0..n)
+            .map(|_| ed25519::PrivateKey::from_rng(&mut rng).public_key())
+            .collect::<Ordered<_>>();
         let schemes: Vec<_> = shares
             .into_iter()
-            .map(|share| Scheme::new(&participants, &polynomial, share))
+            .map(|share| Scheme::new(participants.clone(), &polynomial, share))
             .collect();
 
         // Create a block

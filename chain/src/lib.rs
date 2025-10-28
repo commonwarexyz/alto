@@ -278,7 +278,7 @@ mod tests {
                     coordinator: StaticCoordinator::from(validators.clone()),
                     mailbox_size: 1024,
                     requester_config: requester::Config {
-                        public_key: public_key.clone(),
+                        me: Some(public_key.clone()),
                         rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
                         initial: Duration::from_secs(1),
                         timeout: Duration::from_secs(2),
@@ -472,7 +472,7 @@ mod tests {
                     coordinator: StaticCoordinator::from(validators.clone()),
                     mailbox_size: 1024,
                     requester_config: requester::Config {
-                        public_key: public_key.clone(),
+                        me: Some(public_key.clone()),
                         rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
                         initial: Duration::from_secs(1),
                         timeout: Duration::from_secs(2),
@@ -579,7 +579,7 @@ mod tests {
                 coordinator: StaticCoordinator::from(validators.clone()),
                 mailbox_size: 1024,
                 requester_config: requester::Config {
-                    public_key: public_key.clone(),
+                    me: Some(public_key.clone()),
                     rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
                     initial: Duration::from_secs(1),
                     timeout: Duration::from_secs(2),
@@ -734,7 +734,7 @@ mod tests {
                         coordinator: StaticCoordinator::from(validators.clone()),
                         mailbox_size: 1024,
                         requester_config: requester::Config {
-                            public_key: public_key.clone(),
+                            me: Some(public_key.clone()),
                             rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
                             initial: Duration::from_secs(1),
                             timeout: Duration::from_secs(2),
@@ -927,7 +927,7 @@ mod tests {
                     coordinator: StaticCoordinator::from(validators.clone()),
                     mailbox_size: 1024,
                     requester_config: requester::Config {
-                        public_key: public_key.clone(),
+                        me: Some(public_key.clone()),
                         rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
                         initial: Duration::from_secs(1),
                         timeout: Duration::from_secs(2),

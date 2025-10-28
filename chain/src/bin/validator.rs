@@ -202,7 +202,7 @@ fn main() {
             authenticated::Network::new(context.with_label("network"), p2p_cfg);
 
         // Provide authorized peers
-        oracle.register(0, peers.clone()).await;
+        oracle.register(0, peers.clone().into()).await;
 
         // Register pending channel
         let pending_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
@@ -274,7 +274,7 @@ fn main() {
             coordinator: StaticCoordinator::from(peers),
             mailbox_size: config.mailbox_size,
             requester_config: requester::Config {
-                public_key: public_key.clone(),
+                me: Some(public_key.clone()),
                 rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
                 initial: Duration::from_secs(1),
                 timeout: Duration::from_secs(2),

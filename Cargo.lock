@@ -522,7 +522,7 @@ checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 [[package]]
 name = "commonware-broadcast"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=11034a27faa9c9159ee209898c52242f89a941c7#11034a27faa9c9159ee209898c52242f89a941c7"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=9be96719befb3fc68515daa2718aa6997d308289#9be96719befb3fc68515daa2718aa6997d308289"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -540,7 +540,7 @@ dependencies = [
 [[package]]
 name = "commonware-codec"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=11034a27faa9c9159ee209898c52242f89a941c7#11034a27faa9c9159ee209898c52242f89a941c7"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=9be96719befb3fc68515daa2718aa6997d308289#9be96719befb3fc68515daa2718aa6997d308289"
 dependencies = [
  "bytes",
  "paste",
@@ -550,7 +550,7 @@ dependencies = [
 [[package]]
 name = "commonware-consensus"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=11034a27faa9c9159ee209898c52242f89a941c7#11034a27faa9c9159ee209898c52242f89a941c7"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=9be96719befb3fc68515daa2718aa6997d308289#9be96719befb3fc68515daa2718aa6997d308289"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -575,7 +575,7 @@ dependencies = [
 [[package]]
 name = "commonware-cryptography"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=11034a27faa9c9159ee209898c52242f89a941c7#11034a27faa9c9159ee209898c52242f89a941c7"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=9be96719befb3fc68515daa2718aa6997d308289#9be96719befb3fc68515daa2718aa6997d308289"
 dependencies = [
  "blake3",
  "blst",
@@ -600,7 +600,7 @@ dependencies = [
 [[package]]
 name = "commonware-deployer"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=11034a27faa9c9159ee209898c52242f89a941c7#11034a27faa9c9159ee209898c52242f89a941c7"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=9be96719befb3fc68515daa2718aa6997d308289#9be96719befb3fc68515daa2718aa6997d308289"
 dependencies = [
  "cfg-if",
  "serde",
@@ -610,9 +610,10 @@ dependencies = [
 [[package]]
 name = "commonware-macros"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=11034a27faa9c9159ee209898c52242f89a941c7#11034a27faa9c9159ee209898c52242f89a941c7"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=9be96719befb3fc68515daa2718aa6997d308289#9be96719befb3fc68515daa2718aa6997d308289"
 dependencies = [
  "futures",
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
@@ -623,7 +624,7 @@ dependencies = [
 [[package]]
 name = "commonware-p2p"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=11034a27faa9c9159ee209898c52242f89a941c7#11034a27faa9c9159ee209898c52242f89a941c7"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=9be96719befb3fc68515daa2718aa6997d308289#9be96719befb3fc68515daa2718aa6997d308289"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -649,7 +650,7 @@ dependencies = [
 [[package]]
 name = "commonware-resolver"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=11034a27faa9c9159ee209898c52242f89a941c7#11034a27faa9c9159ee209898c52242f89a941c7"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=9be96719befb3fc68515daa2718aa6997d308289#9be96719befb3fc68515daa2718aa6997d308289"
 dependencies = [
  "bimap",
  "bytes",
@@ -671,7 +672,7 @@ dependencies = [
 [[package]]
 name = "commonware-runtime"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=11034a27faa9c9159ee209898c52242f89a941c7#11034a27faa9c9159ee209898c52242f89a941c7"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=9be96719befb3fc68515daa2718aa6997d308289#9be96719befb3fc68515daa2718aa6997d308289"
 dependencies = [
  "async-lock",
  "axum",
@@ -702,7 +703,7 @@ dependencies = [
 [[package]]
 name = "commonware-storage"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=11034a27faa9c9159ee209898c52242f89a941c7#11034a27faa9c9159ee209898c52242f89a941c7"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=9be96719befb3fc68515daa2718aa6997d308289#9be96719befb3fc68515daa2718aa6997d308289"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -724,7 +725,7 @@ dependencies = [
 [[package]]
 name = "commonware-stream"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=11034a27faa9c9159ee209898c52242f89a941c7#11034a27faa9c9159ee209898c52242f89a941c7"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=9be96719befb3fc68515daa2718aa6997d308289#9be96719befb3fc68515daa2718aa6997d308289"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -744,7 +745,7 @@ dependencies = [
 [[package]]
 name = "commonware-utils"
 version = "0.0.62"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=11034a27faa9c9159ee209898c52242f89a941c7#11034a27faa9c9159ee209898c52242f89a941c7"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=9be96719befb3fc68515daa2718aa6997d308289#9be96719befb3fc68515daa2718aa6997d308289"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -2265,6 +2266,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro-crate"
+version = "3.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "219cb19e96be00ab2e37d6e299658a0cfa83e52429179969b0f0121b4ac46983"
+dependencies = [
+ "toml_edit",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.94"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3153,6 +3163,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml_datetime"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bade1c3e902f58d73d3f294cd7f20391c1cb2fbcb643b73566bc773971df91e3"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.23.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7211ff1b8f0d3adae1663b7da9ffe396eabe1ca25f0b0bee42b0da29a9ddce93"
+dependencies = [
+ "indexmap",
+ "toml_datetime",
+ "toml_parser",
+ "winnow",
+]
+
+[[package]]
+name = "toml_parser"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0cbe268d35bdb4bb5a56a2de88d0ad0eb70af5384a99d648cd4b3d04039800e"
+dependencies = [
+ "winnow",
+]
+
+[[package]]
 name = "tonic"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3736,6 +3776,15 @@ name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+
+[[package]]
+name = "winnow"
+version = "0.7.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21a0236b59786fed61e2a80582dd500fe61f18b5dca67a4a067d0bc9039339cf"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "wit-bindgen-rt"

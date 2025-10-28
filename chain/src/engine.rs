@@ -16,7 +16,7 @@ use commonware_resolver::Resolver;
 use commonware_runtime::{
     buffer::PoolRef, spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
 };
-use commonware_utils::set::Set;
+use commonware_utils::set::Ordered;
 use commonware_utils::{NZUsize, NZU64};
 use futures::{channel::mpsc, future::try_join_all};
 use governor::clock::Clock as GClock;
@@ -54,7 +54,7 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub me: PublicKey,
     pub polynomial: Poly<Evaluation>,
     pub share: group::Share,
-    pub participants: Set<PublicKey>,
+    pub participants: Ordered<PublicKey>,
     pub mailbox_size: usize,
     pub backfill_quota: Quota,
     pub deque_size: usize,
@@ -132,7 +132,7 @@ impl<
         let buffer_pool = PoolRef::new(BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
 
         // Create the signing scheme
-        let scheme = Scheme::new(cfg.participants.as_ref(), &cfg.polynomial, cfg.share);
+        let scheme = Scheme::new(cfg.participants, &cfg.polynomial, cfg.share);
 
         // Create marshal
         let (marshal, marshal_mailbox) = marshal::Actor::init(
@@ -182,8 +182,6 @@ impl<
             simplex::Config {
                 epoch: EPOCH,
                 namespace: NAMESPACE.to_vec(),
-                me: cfg.me,
-                participants: cfg.participants,
                 scheme,
                 automaton: application_mailbox.clone(),
                 relay: application_mailbox.clone(),
