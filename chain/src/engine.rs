@@ -119,7 +119,7 @@ impl<
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
             buffered::Config {
-                public_key: cfg.me.clone(),
+                public_key: cfg.me,
                 mailbox_size: cfg.mailbox_size,
                 deque_size: cfg.deque_size,
                 priority: true,
