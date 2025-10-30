@@ -1,4 +1,4 @@
-use alto_types::Block;
+use alto_types::{Block, PublicKey};
 use commonware_consensus::{
     simplex::types::Context,
     types::{Epoch, Round, View},
@@ -48,7 +48,7 @@ impl Mailbox {
 
 impl Automaton for Mailbox {
     type Digest = Digest;
-    type Context = Context<Self::Digest>;
+    type Context = Context<Self::Digest, PublicKey>;
 
     async fn genesis(&mut self, _epoch: Epoch) -> Self::Digest {
         let (response, receiver) = oneshot::channel();
@@ -59,7 +59,10 @@ impl Automaton for Mailbox {
         receiver.await.expect("Failed to receive genesis")
     }
 
-    async fn propose(&mut self, context: Context<Self::Digest>) -> oneshot::Receiver<Self::Digest> {
+    async fn propose(
+        &mut self,
+        context: Context<Self::Digest, PublicKey>,
+    ) -> oneshot::Receiver<Self::Digest> {
         // If we linked payloads to their parent, we would include
         // the parent in the `Context` in the payload.
         let (response, receiver) = oneshot::channel();
@@ -76,7 +79,7 @@ impl Automaton for Mailbox {
 
     async fn verify(
         &mut self,
-        context: Context<Self::Digest>,
+        context: Context<Self::Digest, PublicKey>,
         payload: Self::Digest,
     ) -> oneshot::Receiver<bool> {
         // If we linked payloads to their parent, we would verify
