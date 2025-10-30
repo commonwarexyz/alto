@@ -10,13 +10,21 @@ pub use consensus::{
 };
 pub mod wasm;
 
+/// The unique namespace prefix used in all signing operations to prevent signature replay attacks.
 pub const NAMESPACE: &[u8] = b"_ALTO";
-/// The epoch number used in alto's simplex consensus.
+
+/// The epoch number used in [commonware_consensus::simplex].
 ///
-/// This is hardcoded as alto does not currently implement reconfiguration, hence it never transitions to new
-/// epochs. Future versions may implement reconfiguration and resharing as done in the
-/// [reshare example](https://github.com/commonwarexyz/monorepo/tree/ad0b3bf987b40fb0ba25a1d6fd38d892ad43c0fe/examples/reshare).
+/// Because alto does not implement reconfiguration (validator set changes and resharing), we hardcode the epoch to 0.
+///
+/// For an example of how to implement reconfiguration and resharing, see [commonware-reshare](https://github.com/commonwarexyz/monorepo/tree/main/examples/reshare).
 pub const EPOCH: u64 = 0;
+/// The epoch length used in [commonware_consensus::simplex].
+///
+/// Because alto does not implement reconfiguration (validator set changes and resharing), we hardcode the epoch length to u64::MAX (to
+/// stay in the first epoch forever).
+///
+/// For an example of how to implement reconfiguration and resharing, see [commonware-reshare](https://github.com/commonwarexyz/monorepo/tree/main/examples/reshare).
 pub const EPOCH_LENGTH: u64 = u64::MAX;
 
 #[repr(u8)]
