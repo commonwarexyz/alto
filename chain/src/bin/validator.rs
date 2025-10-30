@@ -248,7 +248,7 @@ fn main() {
             me: public_key.clone(),
             polynomial,
             share,
-            participants,
+            participants: peers.clone().into(),
             mailbox_size: config.mailbox_size,
             deque_size: config.deque_size,
             leader_timeout: LEADER_TIMEOUT,
@@ -270,7 +270,7 @@ fn main() {
             coordinator: StaticCoordinator::from(peers),
             mailbox_size: config.mailbox_size,
             requester_config: requester::Config {
-                me: Some(public_key.clone()),
+                me: Some(public_key),
                 rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
                 initial: Duration::from_secs(1),
                 timeout: Duration::from_secs(2),
