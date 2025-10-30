@@ -12,7 +12,7 @@ use commonware_cryptography::{
 use commonware_deployer::ec2::Hosts;
 use commonware_p2p::{authenticated::discovery as authenticated, utils::requester};
 use commonware_runtime::{tokio, Metrics, Runner};
-use commonware_utils::{from_hex_formatted, quorum, union_unique};
+use commonware_utils::{from_hex_formatted, quorum, set::Ordered, union_unique};
 use futures::future::try_join_all;
 use governor::Quota;
 use std::{
@@ -202,7 +202,8 @@ fn main() {
             authenticated::Network::new(context.with_label("network"), p2p_cfg);
 
         // Provide authorized peers
-        oracle.register(EPOCH, peers.clone().into()).await;
+        let participants: Ordered<PublicKey> = peers.clone().into();
+        oracle.register(EPOCH, participants.clone()).await;
 
         // Register pending channel
         let pending_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
@@ -247,7 +248,7 @@ fn main() {
             me: public_key.clone(),
             polynomial,
             share,
-            participants: peers.clone().into(),
+            participants,
             mailbox_size: config.mailbox_size,
             deque_size: config.deque_size,
             leader_timeout: LEADER_TIMEOUT,
