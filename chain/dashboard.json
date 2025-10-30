@@ -832,7 +832,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "network_tracker_blocked{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
+                    "expr": "network_tracker_directory_blocked{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
                     "fullMetaSearch": false,
                     "includeNullMetadata": true,
                     "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
@@ -1553,10 +1553,10 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "avg(histogram_quantile(0.75, avg_over_time(engine_consensus_voter_notarization_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__interval])))",
+                    "expr": "histogram_quantile(0.75, sum by(le) (rate(engine_consensus_voter_notarization_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])))",
                     "fullMetaSearch": false,
                     "hide": false,
-                    "includeNullMetadata": true,
+                    "includeNullMetadata": false,
                     "legendFormat": "Average",
                     "range": true,
                     "refId": "B",
@@ -1968,10 +1968,10 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "avg(histogram_quantile(0.75, avg_over_time(engine_consensus_voter_finalization_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__interval])))",
+                    "expr": "histogram_quantile(0.75, sum by(le) (rate(engine_consensus_voter_finalization_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])))",
                     "fullMetaSearch": false,
                     "hide": false,
-                    "includeNullMetadata": true,
+                    "includeNullMetadata": false,
                     "legendFormat": "Average",
                     "range": true,
                     "refId": "B",
@@ -2132,8 +2132,7 @@
                         "mode": "absolute",
                         "steps": [
                             {
-                                "color": "green",
-                                "value": null
+                                "color": "green"
                             },
                             {
                                 "color": "red",
@@ -2173,7 +2172,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "network_tracker_tracked{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
+                    "expr": "network_tracker_directory_tracked{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
                     "fullMetaSearch": false,
                     "includeNullMetadata": true,
                     "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
@@ -2233,8 +2232,7 @@
                         "mode": "absolute",
                         "steps": [
                             {
-                                "color": "green",
-                                "value": null
+                                "color": "green"
                             },
                             {
                                 "color": "red",
@@ -2334,8 +2332,7 @@
                         "mode": "absolute",
                         "steps": [
                             {
-                                "color": "green",
-                                "value": null
+                                "color": "green"
                             },
                             {
                                 "color": "red",
@@ -2435,8 +2432,7 @@
                         "mode": "absolute",
                         "steps": [
                             {
-                                "color": "green",
-                                "value": null
+                                "color": "green"
                             },
                             {
                                 "color": "red",
@@ -2537,8 +2533,7 @@
                         "mode": "absolute",
                         "steps": [
                             {
-                                "color": "green",
-                                "value": null
+                                "color": "green"
                             },
                             {
                                 "color": "red",
@@ -2639,8 +2634,7 @@
                         "mode": "absolute",
                         "steps": [
                             {
-                                "color": "green",
-                                "value": null
+                                "color": "green"
                             },
                             {
                                 "color": "red",
@@ -2736,8 +2730,7 @@
                         "mode": "absolute",
                         "steps": [
                             {
-                                "color": "green",
-                                "value": null
+                                "color": "green"
                             },
                             {
                                 "color": "red",
@@ -2853,8 +2846,7 @@
                         "mode": "absolute",
                         "steps": [
                             {
-                                "color": "green",
-                                "value": null
+                                "color": "green"
                             },
                             {
                                 "color": "red",
@@ -2951,8 +2943,7 @@
                         "mode": "absolute",
                         "steps": [
                             {
-                                "color": "green",
-                                "value": null
+                                "color": "green"
                             },
                             {
                                 "color": "red",
@@ -3049,8 +3040,7 @@
                         "mode": "absolute",
                         "steps": [
                             {
-                                "color": "green",
-                                "value": null
+                                "color": "green"
                             },
                             {
                                 "color": "red",
@@ -3147,8 +3137,7 @@
                         "mode": "absolute",
                         "steps": [
                             {
-                                "color": "green",
-                                "value": null
+                                "color": "green"
                             },
                             {
                                 "color": "red",
@@ -3245,8 +3234,7 @@
                         "mode": "absolute",
                         "steps": [
                             {
-                                "color": "green",
-                                "value": null
+                                "color": "green"
                             },
                             {
                                 "color": "red",
@@ -3343,8 +3331,7 @@
                         "mode": "absolute",
                         "steps": [
                             {
-                                "color": "green",
-                                "value": null
+                                "color": "green"
                             },
                             {
                                 "color": "red",
