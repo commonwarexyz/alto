@@ -200,7 +200,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     info!(
                         height = block.height,
                         digest = ?block.commitment(),
-                        "processed block"
+                        "processed finalized block"
                     );
                 }
             }

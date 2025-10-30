@@ -1,6 +1,6 @@
 use alto_chain::{engine, Config, Peers, StaticCoordinator};
 use alto_client::Client;
-use alto_types::NAMESPACE;
+use alto_types::{EPOCH, NAMESPACE};
 use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt};
 use commonware_consensus::marshal;
@@ -29,7 +29,7 @@ const PENDING_CHANNEL: u64 = 0;
 const RECOVERED_CHANNEL: u64 = 1;
 const RESOLVER_CHANNEL: u64 = 2;
 const BROADCASTER_CHANNEL: u64 = 3;
-const BACKFILL_BY_DIGEST_CHANNEL: u64 = 4;
+const MARSHAL_CHANNEL: u64 = 4;
 
 const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 const NOTARIZATION_TIMEOUT: Duration = Duration::from_secs(2);
@@ -202,7 +202,7 @@ fn main() {
             authenticated::Network::new(context.with_label("network"), p2p_cfg);
 
         // Provide authorized peers
-        oracle.register(0, peers.clone().into()).await;
+        oracle.register(EPOCH, peers.clone().into()).await;
 
         // Register pending channel
         let pending_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
@@ -225,13 +225,9 @@ fn main() {
             config.message_backlog,
         );
 
-        // Register backfill channel
-        let backfill_quota = Quota::per_second(NonZeroU32::new(8).unwrap());
-        let backfill = network.register(
-            BACKFILL_BY_DIGEST_CHANNEL,
-            backfill_quota,
-            config.message_backlog,
-        );
+        // Register marshal channel
+        let marshal_quota = Quota::per_second(NonZeroU32::new(8).unwrap());
+        let marshal = network.register(MARSHAL_CHANNEL, marshal_quota, config.message_backlog);
 
         // Create network
         let p2p = network.start();
@@ -254,7 +250,6 @@ fn main() {
             participants: peers.clone().into(),
             mailbox_size: config.mailbox_size,
             deque_size: config.deque_size,
-            backfill_quota,
             leader_timeout: LEADER_TIMEOUT,
             notarization_timeout: NOTARIZATION_TIMEOUT,
             nullify_retry: NULLIFY_RETRY,
@@ -284,7 +279,7 @@ fn main() {
             priority_responses: false,
         };
         let marshal_resolver =
-            marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+            marshal::resolver::p2p::init(&context, marshal_resolver_cfg, marshal);
 
         // Start engine
         let engine = engine.start(pending, recovered, resolver, broadcaster, marshal_resolver);

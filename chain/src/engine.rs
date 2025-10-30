@@ -56,7 +56,6 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub share: group::Share,
     pub participants: Ordered<PublicKey>,
     pub mailbox_size: usize,
-    pub backfill_quota: Quota,
     pub deque_size: usize,
 
     pub leader_timeout: Duration,
