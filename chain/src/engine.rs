@@ -221,60 +221,54 @@ impl<
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         mut self,
-        pending_network: (
+        pending: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        recovered_network: (
+        recovered: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        resolver_network: (
+        resolver: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        broadcast_network: (
+        broadcast: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        marshal_resolver: (
+        marshal: (
             mpsc::Receiver<handler::Message<Block>>,
             impl Resolver<Key = handler::Request<Block>>,
         ),
     ) -> Handle<()> {
         spawn_cell!(
             self.context,
-            self.run(
-                pending_network,
-                recovered_network,
-                resolver_network,
-                broadcast_network,
-                marshal_resolver,
-            )
-            .await
+            self.run(pending, recovered, resolver, broadcast, marshal,)
+                .await
         )
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn run(
         self,
-        pending_network: (
+        pending: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        recovered_network: (
+        recovered: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        resolver_network: (
+        resolver: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        broadcast_network: (
+        broadcast: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        marshal_resolver: (
+        marshal: (
             mpsc::Receiver<handler::Message<Block>>,
             impl Resolver<Key = handler::Request<Block>>,
         ),
@@ -283,22 +277,18 @@ impl<
         let application_handle = self.application.start(self.marshal_mailbox);
 
         // Start the buffer
-        let buffer_handle = self.buffer.start(broadcast_network);
+        let buffer_handle = self.buffer.start(broadcast);
 
         // Start marshal
-        let marshal_handle = self.marshal.start(
-            self.application_mailbox,
-            self.buffer_mailbox,
-            marshal_resolver,
-        );
+        let marshal_handle =
+            self.marshal
+                .start(self.application_mailbox, self.buffer_mailbox, marshal);
 
         // Start consensus
         //
         // We start the application prior to consensus to ensure we can handle enqueued events from consensus (otherwise
         // restart could block).
-        let consensus_handle =
-            self.consensus
-                .start(pending_network, recovered_network, resolver_network);
+        let consensus_handle = self.consensus.start(pending, recovered, resolver);
 
         // Wait for any actor to finish
         if let Err(e) = try_join_all(vec![
