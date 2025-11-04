@@ -74,6 +74,7 @@ mod tests {
     use commonware_p2p::{
         simulated::{self, Link, Network, Oracle, Receiver, Sender},
         utils::requester,
+        Manager,
     };
     use commonware_runtime::{
         deterministic::{self, Runner},
@@ -109,6 +110,7 @@ mod tests {
             (Sender<PublicKey>, Receiver<PublicKey>),
         ),
     > {
+        oracle.update(0, validators.into()).await;
         let mut registrations = HashMap::new();
         for validator in validators.iter() {
             let mut oracle = oracle.control(validator.clone());
@@ -177,7 +179,7 @@ mod tests {
                 simulated::Config {
                     max_size: 1024 * 1024,
                     disconnect_on_block: true,
-                    tracked_peer_sets: None,
+                    tracked_peer_sets: Some(1),
                 },
             );
 
@@ -359,7 +361,7 @@ mod tests {
                 simulated::Config {
                     max_size: 1024 * 1024,
                     disconnect_on_block: true,
-                    tracked_peer_sets: None,
+                    tracked_peer_sets: Some(1),
                 },
             );
 
@@ -631,7 +633,7 @@ mod tests {
                     simulated::Config {
                         max_size: 1024 * 1024,
                         disconnect_on_block: true,
-                        tracked_peer_sets: None,
+                        tracked_peer_sets: Some(1),
                     },
                 );
 
@@ -816,7 +818,7 @@ mod tests {
                 simulated::Config {
                     max_size: 1024 * 1024,
                     disconnect_on_block: true,
-                    tracked_peer_sets: None,
+                    tracked_peer_sets: Some(1),
                 },
             );
 
