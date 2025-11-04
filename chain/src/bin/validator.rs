@@ -1,4 +1,4 @@
-use alto_chain::{engine, Config, Peers, StaticCoordinator};
+use alto_chain::{engine, Config, Peers};
 use alto_client::Client;
 use alto_types::{EPOCH, NAMESPACE};
 use clap::{Arg, Command};
@@ -10,7 +10,7 @@ use commonware_cryptography::{
     Signer,
 };
 use commonware_deployer::ec2::Hosts;
-use commonware_p2p::{authenticated::discovery as authenticated, utils::requester};
+use commonware_p2p::{authenticated::discovery as authenticated, utils::requester, Manager};
 use commonware_runtime::{tokio, Metrics, Runner};
 use commonware_utils::{from_hex_formatted, quorum, set::Ordered, union_unique};
 use futures::future::try_join_all;
@@ -203,7 +203,7 @@ fn main() {
 
         // Provide authorized peers
         let participants: Ordered<PublicKey> = peers.clone().into();
-        oracle.register(EPOCH, participants.clone()).await;
+        oracle.update(EPOCH, participants.clone()).await;
 
         // Register pending channel
         let pending_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
@@ -241,7 +241,7 @@ fn main() {
 
         // Create engine
         let engine_cfg = engine::Config {
-            blocker: oracle,
+            blocker: oracle.clone(),
             partition_prefix: "engine".to_string(),
             blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
             finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
@@ -267,7 +267,7 @@ fn main() {
 
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),
-            coordinator: StaticCoordinator::from(peers),
+            manager: oracle,
             mailbox_size: config.mailbox_size,
             requester_config: requester::Config {
                 me: Some(public_key),

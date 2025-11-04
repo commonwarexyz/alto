@@ -1,5 +1,6 @@
 use alto_types::{Block, PublicKey};
 use commonware_consensus::{
+    marshal::Update,
     simplex::types::Context,
     types::{Epoch, Round, View},
     Automaton, Relay, Reporter,
@@ -110,9 +111,12 @@ impl Relay for Mailbox {
 }
 
 impl Reporter for Mailbox {
-    type Activity = Block;
+    type Activity = Update<Block>;
 
-    async fn report(&mut self, block: Self::Activity) {
+    async fn report(&mut self, update: Self::Activity) {
+        let Update::Block(block) = update else {
+            return;
+        };
         self.sender
             .send(Message::Finalized { block })
             .await

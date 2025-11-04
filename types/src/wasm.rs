@@ -139,5 +139,5 @@ pub fn leader_index(seed: JsValue, participants: usize) -> usize {
     let round = Round::new(EPOCH, seed.view);
     let seed = Seed::new(round, signature);
 
-    select_leader::<Scheme, ()>(&vec![(); participants], round, Some(seed)) as usize
+    select_leader::<Scheme, ()>(&vec![(); participants], round, Some(seed)).1 as usize
 }
