@@ -57,13 +57,15 @@ impl Kind {
 mod tests {
     use super::*;
     use commonware_codec::{DecodeExt, Encode};
+    use commonware_coding::ReedSolomon;
     use commonware_consensus::{
+        marshal::coding::types::{coding_config_for_participants, CodedBlock},
         simplex::types::{Finalization, Finalize, Notarization, Notarize, Proposal},
         types::Round,
     };
     use commonware_cryptography::{
         bls12381::{dkg::ops, primitives::variant::MinSig},
-        ed25519, Digestible, Hasher, PrivateKeyExt, Sha256, Signer,
+        ed25519, Committable, Hasher, PrivateKeyExt, Sha256, Signer,
     };
     use commonware_utils::set::Ordered;
     use rand::{rngs::StdRng, SeedableRng};
@@ -82,10 +84,15 @@ mod tests {
             .map(|share| Scheme::new(participants.clone(), &polynomial, share))
             .collect();
 
+        let coding_config = coding_config_for_participants(n as u16);
+
         // Create a block
         let digest = Sha256::hash(b"hello world");
-        let block = Block::new(digest, 10, 100);
-        let proposal = Proposal::new(Round::new(EPOCH, 11), 8, block.digest());
+        let block = CodedBlock::<_, ReedSolomon<Sha256>>::new(
+            Block::new(digest, 10, 100, Vec::new()),
+            coding_config,
+        );
+        let proposal = Proposal::new(Round::new(EPOCH, 11), 8, block.commitment());
 
         // Create a notarization
         let notarizes: Vec<_> = schemes
@@ -93,7 +100,7 @@ mod tests {
             .map(|scheme| Notarize::sign(scheme, NAMESPACE, proposal.clone()).unwrap())
             .collect();
         let notarization = Notarization::from_notarizes(&schemes[0], &notarizes).unwrap();
-        let notarized = Notarized::new(notarization, block.clone());
+        let notarized = Notarized::new(notarization, block.into_inner());
 
         // Serialize and deserialize
         let encoded = notarized.encode();
@@ -118,10 +125,15 @@ mod tests {
             .map(|share| Scheme::new(participants.clone(), &polynomial, share))
             .collect();
 
+        let coding_config = coding_config_for_participants(n as u16);
+
         // Create a block
         let digest = Sha256::hash(b"hello world");
-        let block = Block::new(digest, 10, 100);
-        let proposal = Proposal::new(Round::new(EPOCH, 11), 8, block.digest());
+        let block = CodedBlock::<_, ReedSolomon<Sha256>>::new(
+            Block::new(digest, 10, 100, Vec::new()),
+            coding_config,
+        );
+        let proposal = Proposal::new(Round::new(EPOCH, 11), 8, block.commitment());
 
         // Create a finalization
         let finalizes: Vec<_> = schemes
@@ -129,7 +141,7 @@ mod tests {
             .map(|scheme| Finalize::sign(scheme, NAMESPACE, proposal.clone()).unwrap())
             .collect();
         let finalization = Finalization::from_finalizes(&schemes[0], &finalizes).unwrap();
-        let finalized = Finalized::new(finalization, block.clone());
+        let finalized = Finalized::new(finalization, block.into_inner());
 
         // Serialize and deserialize
         let encoded = finalized.encode();

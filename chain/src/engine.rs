@@ -1,15 +1,28 @@
-use crate::{application, indexer, indexer::Indexer, StaticSchemeProvider};
-use alto_types::{Activity, Block, Evaluation, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
+use crate::{
+    application::AltoApp,
+    indexer::{self, Indexer},
+    StaticSchemeProvider,
+};
+use alto_types::{Activity, Block, Evaluation, PublicKey, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
 use commonware_broadcast::buffered;
+use commonware_coding::ReedSolomon;
 use commonware_consensus::{
-    marshal::{self, ingress::handler},
+    marshal::{
+        self,
+        coding::{
+            self,
+            ingress::handler,
+            shards,
+            types::{CodingCommitment, Shard},
+            Marshaled,
+        },
+    },
     simplex::{self, Engine as Consensus},
     Reporters,
 };
 use commonware_cryptography::{
     bls12381::primitives::{group, poly::Poly},
-    ed25519::PublicKey,
-    sha256::Digest,
+    Sha256,
 };
 use commonware_p2p::{Blocker, Receiver, Sender};
 use commonware_resolver::Resolver;
@@ -27,8 +40,15 @@ use std::{num::NonZero, time::Duration};
 use tracing::{error, warn};
 
 /// Reporter type for [simplex::Engine].
-type Reporter<E, I> =
-    Reporters<Activity, marshal::Mailbox<Scheme, Block>, Option<indexer::Pusher<E, I>>>;
+type Reporter<E, I> = Reporters<
+    Activity,
+    Reporters<
+        Activity,
+        coding::Mailbox<Scheme, Block, ReedSolomon<Sha256>>,
+        shards::Mailbox<Block, Scheme, ReedSolomon<Sha256>, PublicKey>,
+    >,
+    Option<indexer::Pusher<E, I>>,
+>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -43,7 +63,7 @@ const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
 const BUFFER_POOL_PAGE_SIZE: NonZero<usize> = NZUsize!(4_096); // 4KB
 const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
-const MAX_REPAIR: u64 = 20;
+const MAX_REPAIR: NonZero<u64> = NZU64!(20);
 
 /// Configuration for the [Engine].
 pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
@@ -80,21 +100,22 @@ pub struct Engine<
 > {
     context: ContextCell<E>,
 
-    application: application::Actor<E>,
-    application_mailbox: application::Mailbox,
-    buffer: buffered::Engine<E, PublicKey, Block>,
-    buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
-    marshal: marshal::Actor<E, Block, StaticSchemeProvider, Scheme>,
-    marshal_mailbox: marshal::Mailbox<Scheme, Block>,
+    buffer: buffered::Engine<E, PublicKey, Shard<ReedSolomon<Sha256>, Sha256>>,
+    shards: shards::Engine<E, Scheme, ReedSolomon<Sha256>, Sha256, Block, PublicKey>,
+    shard_mailbox: shards::Mailbox<Block, Scheme, ReedSolomon<Sha256>, PublicKey>,
+    marshal: coding::Actor<E, Block, ReedSolomon<Sha256>, StaticSchemeProvider, Scheme>,
 
+    marshaled:
+        Marshaled<E, Scheme, AltoApp, Block, ReedSolomon<Sha256>, PublicKey, StaticSchemeProvider>,
+    #[allow(clippy::type_complexity)]
     consensus: Consensus<
         E,
         PublicKey,
         Scheme,
         B,
-        Digest,
-        application::Mailbox,
-        application::Mailbox,
+        CodingCommitment,
+        Marshaled<E, Scheme, AltoApp, Block, ReedSolomon<Sha256>, PublicKey, StaticSchemeProvider>,
+        Marshaled<E, Scheme, AltoApp, Block, ReedSolomon<Sha256>, PublicKey, StaticSchemeProvider>,
         Reporter<E, I>,
     >,
 }
@@ -107,14 +128,6 @@ impl<
 {
     /// Create a new [Engine].
     pub async fn new(context: E, cfg: Config<B, I>) -> Self {
-        // Create the application
-        let (application, application_mailbox) = application::Actor::new(
-            context.with_label("application"),
-            application::Config {
-                mailbox_size: cfg.mailbox_size,
-            },
-        );
-
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
@@ -123,8 +136,18 @@ impl<
                 mailbox_size: cfg.mailbox_size,
                 deque_size: cfg.deque_size,
                 priority: true,
-                codec_config: (),
+                codec_config: commonware_coding::CodecConfig {
+                    maximum_shard_size: usize::MAX,
+                },
             },
+        );
+
+        // Create the shard engine
+        let (shards, shard_mailbox) = shards::Engine::new(
+            context.with_label("shards"),
+            buffer_mailbox,
+            (),
+            cfg.mailbox_size,
         );
 
         // Create the buffer pool
@@ -134,7 +157,7 @@ impl<
         let scheme = Scheme::new(cfg.participants, &cfg.polynomial, cfg.share);
 
         // Create marshal
-        let (marshal, marshal_mailbox) = marshal::Actor::init(
+        let (marshal, marshal_mailbox) = coding::Actor::init(
             context.with_label("marshal"),
             marshal::Config {
                 scheme_provider: scheme.clone().into(),
@@ -162,9 +185,20 @@ impl<
         )
         .await;
 
+        // Create the application
+        let app = AltoApp::new();
+        let marshaled = Marshaled::new(
+            context.with_label("marshaled"),
+            app,
+            marshal_mailbox.clone(),
+            shard_mailbox.clone(),
+            scheme.clone().into(),
+            EPOCH_LENGTH,
+        );
+
         // Create the reporter
         let reporter = (
-            marshal_mailbox.clone(),
+            Reporters::from((marshal_mailbox.clone(), shard_mailbox.clone())),
             cfg.indexer.map(|indexer| {
                 indexer::Pusher::new(
                     context.with_label("indexer"),
@@ -182,8 +216,8 @@ impl<
                 epoch: EPOCH,
                 namespace: NAMESPACE.to_vec(),
                 scheme,
-                automaton: application_mailbox.clone(),
-                relay: application_mailbox.clone(),
+                automaton: marshaled.clone(),
+                relay: marshaled.clone(),
                 reporter,
                 partition: format!("{}-consensus", cfg.partition_prefix),
                 mailbox_size: cfg.mailbox_size,
@@ -207,12 +241,12 @@ impl<
         Self {
             context: ContextCell::new(context),
 
-            application,
-            application_mailbox,
             buffer,
-            buffer_mailbox,
+            shards,
+            shard_mailbox,
             marshal,
-            marshal_mailbox,
+
+            marshaled,
             consensus,
         }
     }
@@ -273,16 +307,16 @@ impl<
             impl Resolver<Key = handler::Request<Block>>,
         ),
     ) {
-        // Start the application
-        let application_handle = self.application.start(self.marshal_mailbox);
-
         // Start the buffer
         let buffer_handle = self.buffer.start(broadcast);
 
+        // Start the shard engine
+        let shard_handle = self.shards.start();
+
         // Start marshal
-        let marshal_handle =
-            self.marshal
-                .start(self.application_mailbox, self.buffer_mailbox, marshal);
+        let marshal_handle = self
+            .marshal
+            .start(self.marshaled, self.shard_mailbox, marshal);
 
         // Start consensus
         //
@@ -292,8 +326,8 @@ impl<
 
         // Wait for any actor to finish
         if let Err(e) = try_join_all(vec![
-            application_handle,
             buffer_handle,
+            shard_handle,
             marshal_handle,
             consensus_handle,
         ])

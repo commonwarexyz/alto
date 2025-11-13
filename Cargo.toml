@@ -15,18 +15,19 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 alto-client = { version = "0.0.16", path = "client" }
 alto-types = { version = "0.0.16", path = "types" }
-commonware-broadcast ="0.0.63"
-commonware-codec ="0.0.63"
-commonware-consensus ="0.0.63"
-commonware-cryptography ="0.0.63"
-commonware-deployer = { version = "0.0.63", default-features = false }
-commonware-macros ="0.0.63"
-commonware-p2p ="0.0.63"
-commonware-resolver ="0.0.63"
-commonware-runtime ="0.0.63"
-commonware-storage ="0.0.63"
-commonware-stream ="0.0.63"
-commonware-utils ="0.0.63"
+commonware-broadcast = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "cl/consensus-coding-mk2" }
+commonware-codec = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "cl/consensus-coding-mk2" }
+commonware-consensus = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "cl/consensus-coding-mk2" }
+commonware-cryptography = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "cl/consensus-coding-mk2" }
+commonware-coding = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "cl/consensus-coding-mk2" }
+commonware-deployer = {  git = "https://github.com/commonwarexyz/monorepo.git", branch = "cl/consensus-coding-mk2", default-features = false }
+commonware-macros = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "cl/consensus-coding-mk2" }
+commonware-p2p = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "cl/consensus-coding-mk2" }
+commonware-resolver = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "cl/consensus-coding-mk2" }
+commonware-runtime = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "cl/consensus-coding-mk2" }
+commonware-storage = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "cl/consensus-coding-mk2" }
+commonware-stream = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "cl/consensus-coding-mk2" }
+commonware-utils = { git = "https://github.com/commonwarexyz/monorepo.git", branch = "cl/consensus-coding-mk2" }
 thiserror = "2.0.12"
 bytes = "1.7.1"
 rand = "0.8.5"
@@ -58,3 +59,7 @@ overflow-checks = true
 # Although overflow checks are enabled by default in "test", we explicitly
 # enable them here for clarity.
 overflow-checks = true
+
+[profile.profiling]
+inherits = "release"
+debug = true
