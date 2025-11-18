@@ -1,7 +1,9 @@
 use crate::consensus::{Finalization, Notarization, Scheme};
 use bytes::{Buf, BufMut};
-use commonware_codec::{varint::UInt, EncodeSize, Error, Read, ReadExt, Write};
-use commonware_cryptography::{sha256::Digest, Committable, Digestible, Hasher, Sha256};
+use commonware_codec::{varint::UInt, EncodeSize, Error, RangeCfg, Read, ReadExt, Write};
+use commonware_cryptography::{
+    sha256::Digest, sha256::Digest as Sha256Digest, Committable, Digestible, Hasher, Sha256,
+};
 use rand::rngs::OsRng;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,25 +17,30 @@ pub struct Block {
     /// The timestamp of the block (in milliseconds since the Unix epoch).
     pub timestamp: u64,
 
+    /// Junk data appended to the block.
+    pub junk: Vec<u8>,
+
     /// Pre-computed digest of the block.
     digest: Digest,
 }
 
 impl Block {
-    fn compute_digest(parent: &Digest, height: u64, timestamp: u64) -> Digest {
+    fn compute_digest(parent: &Digest, height: u64, timestamp: u64, junk: &[u8]) -> Digest {
         let mut hasher = Sha256::new();
         hasher.update(parent);
         hasher.update(&height.to_be_bytes());
         hasher.update(&timestamp.to_be_bytes());
+        hasher.update(junk);
         hasher.finalize()
     }
 
-    pub fn new(parent: Digest, height: u64, timestamp: u64) -> Self {
-        let digest = Self::compute_digest(&parent, height, timestamp);
+    pub fn new(parent: Digest, height: u64, timestamp: u64, junk: Vec<u8>) -> Self {
+        let digest = Self::compute_digest(&parent, height, timestamp, junk.as_slice());
         Self {
             parent,
             height,
             timestamp,
+            junk,
             digest,
         }
     }
@@ -44,6 +51,7 @@ impl Write for Block {
         self.parent.write(writer);
         UInt(self.height).write(writer);
         UInt(self.timestamp).write(writer);
+        self.junk.write(writer);
     }
 }
 
@@ -54,13 +62,15 @@ impl Read for Block {
         let parent = Digest::read(reader)?;
         let height = UInt::read(reader)?.into();
         let timestamp = UInt::read(reader)?.into();
+        let junk = Vec::<u8>::read_cfg(reader, &(RangeCfg::new(0..=usize::MAX), ()))?;
 
         // Pre-compute the digest
-        let digest = Self::compute_digest(&parent, height, timestamp);
+        let digest = Self::compute_digest(&parent, height, timestamp, junk.as_slice());
         Ok(Self {
             parent,
             height,
             timestamp,
+            junk,
 
             digest,
         })
@@ -72,6 +82,7 @@ impl EncodeSize for Block {
         self.parent.encode_size()
             + UInt(self.height).encode_size()
             + UInt(self.timestamp).encode_size()
+            + self.junk.encode_size()
     }
 }
 
@@ -122,7 +133,7 @@ impl Read for Notarized {
         let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
-        if proof.proposal.payload != block.digest() {
+        if proof.proposal.payload.block_digest::<Sha256Digest>() != block.digest() {
             return Err(Error::Invalid(
                 "types::Notarized",
                 "Proof payload does not match block digest",
@@ -169,7 +180,7 @@ impl Read for Finalized {
         let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
-        if proof.proposal.payload != block.digest() {
+        if proof.proposal.payload.block_digest::<Sha256Digest>() != block.digest() {
             return Err(Error::Invalid(
                 "types::Finalized",
                 "Proof payload does not match block digest",

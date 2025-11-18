@@ -61,7 +61,7 @@ impl From<Scheme> for StaticSchemeProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use commonware_consensus::marshal;
+    use commonware_consensus::marshal::{self, coding::ingress::handler::Handler};
     use commonware_cryptography::{
         bls12381::{
             dkg::ops,
@@ -110,7 +110,7 @@ mod tests {
             (Sender<PublicKey>, Receiver<PublicKey>),
         ),
     > {
-        oracle.update(0, validators.into()).await;
+        oracle.manager().update(0, validators.into()).await;
         let mut registrations = HashMap::new();
         for validator in validators.iter() {
             let mut oracle = oracle.control(validator.clone());
@@ -177,7 +177,7 @@ mod tests {
             let (network, mut oracle) = Network::new(
                 context.with_label("network"),
                 simulated::Config {
-                    max_size: 1024 * 1024,
+                    max_size: 20 * 1024 * 1024,
                     disconnect_on_block: true,
                     tracked_peer_sets: Some(1),
                 },
@@ -237,6 +237,7 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: None,
+                    concurrency: 1,
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -247,7 +248,8 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.clone(),
+                    manager: oracle.manager(),
+                    blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     requester_config: requester::Config {
                         me: Some(public_key.clone()),
@@ -260,8 +262,12 @@ mod tests {
                     priority_responses: false,
                 };
 
-                let marshal_resolver =
-                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &context,
+                    marshal_resolver_cfg,
+                    backfill,
+                    Handler::new,
+                );
 
                 // Start engine
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -359,7 +365,7 @@ mod tests {
             let (network, mut oracle) = Network::new(
                 context.with_label("network"),
                 simulated::Config {
-                    max_size: 1024 * 1024,
+                    max_size: 20 * 1024 * 1024,
                     disconnect_on_block: true,
                     tracked_peer_sets: Some(1),
                 },
@@ -431,6 +437,7 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: None,
+                    concurrency: 1,
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -441,7 +448,8 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.clone(),
+                    manager: oracle.manager(),
+                    blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     requester_config: requester::Config {
                         me: Some(public_key.clone()),
@@ -454,8 +462,12 @@ mod tests {
                     priority_responses: false,
                 };
 
-                let marshal_resolver =
-                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &context,
+                    marshal_resolver_cfg,
+                    backfill,
+                    Handler::new,
+                );
 
                 // Start engine
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -537,6 +549,7 @@ mod tests {
                 fetch_concurrent: 10,
                 fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                 indexer: None,
+                concurrency: 1,
             };
             let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -547,7 +560,8 @@ mod tests {
             // Configure marshal resolver
             let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                 public_key: public_key.clone(),
-                manager: oracle,
+                manager: oracle.manager(),
+                blocker: oracle.control(public_key.clone()),
                 mailbox_size: 1024,
                 requester_config: requester::Config {
                     me: Some(public_key.clone()),
@@ -560,8 +574,12 @@ mod tests {
                 priority_responses: false,
             };
 
-            let marshal_resolver =
-                marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+            let marshal_resolver = marshal::resolver::p2p::init(
+                &context,
+                marshal_resolver_cfg,
+                backfill,
+                Handler::new,
+            );
 
             // Start engine
             engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -631,7 +649,7 @@ mod tests {
                 let (network, mut oracle) = Network::new(
                     context.with_label("network"),
                     simulated::Config {
-                        max_size: 1024 * 1024,
+                        max_size: 20 * 1024 * 1024,
                         disconnect_on_block: true,
                         tracked_peer_sets: Some(1),
                     },
@@ -692,6 +710,7 @@ mod tests {
                         fetch_concurrent: 10,
                         fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                         indexer: None,
+                        concurrency: 1,
                     };
                     let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -702,7 +721,8 @@ mod tests {
                     // Configure marshal resolver
                     let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                         public_key: public_key.clone(),
-                        manager: oracle.clone(),
+                        manager: oracle.manager(),
+                        blocker: oracle.control(public_key.clone()),
                         mailbox_size: 1024,
                         requester_config: requester::Config {
                             me: Some(public_key.clone()),
@@ -715,8 +735,12 @@ mod tests {
                         priority_responses: false,
                     };
 
-                    let marshal_resolver =
-                        marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                    let marshal_resolver = marshal::resolver::p2p::init(
+                        &context,
+                        marshal_resolver_cfg,
+                        backfill,
+                        Handler::new,
+                    );
 
                     // Start engine
                     engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -816,7 +840,7 @@ mod tests {
             let (network, mut oracle) = Network::new(
                 context.with_label("network"),
                 simulated::Config {
-                    max_size: 1024 * 1024,
+                    max_size: 20 * 1024 * 1024,
                     disconnect_on_block: true,
                     tracked_peer_sets: Some(1),
                 },
@@ -885,6 +909,7 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: Some(indexer.clone()),
+                    concurrency: 1,
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -895,7 +920,8 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.clone(),
+                    manager: oracle.manager(),
+                    blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     requester_config: requester::Config {
                         me: Some(public_key.clone()),
@@ -908,8 +934,12 @@ mod tests {
                     priority_responses: false,
                 };
 
-                let marshal_resolver =
-                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &context,
+                    marshal_resolver_cfg,
+                    backfill,
+                    Handler::new,
+                );
 
                 // Start engine
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);

@@ -15,6 +15,7 @@ alto-types = { workspace = true }
 alto-client = { workspace = true }
 commonware-broadcast = { workspace = true }
 commonware-codec = { workspace = true }
+commonware-coding = { workspace = true }
 commonware-consensus = { workspace = true }
 commonware-cryptography = { workspace = true }
 commonware-deployer = { workspace = true }

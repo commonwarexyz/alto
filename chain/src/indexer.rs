@@ -1,5 +1,10 @@
 use alto_types::{Activity, Block, Finalized, Identity, Notarized, Scheme, Seed, Seedable};
-use commonware_consensus::{marshal, Reporter, Viewable};
+use commonware_coding::ReedSolomon;
+use commonware_consensus::{
+    marshal::coding::{self, types::DigestOrCommitment},
+    Reporter, Viewable,
+};
+use commonware_cryptography::Sha256;
 use commonware_runtime::{Metrics, Spawner};
 use std::future::Future;
 #[cfg(test)]
@@ -100,12 +105,16 @@ impl Indexer for alto_client::Client {
 pub struct Pusher<E: Spawner + Metrics, I: Indexer> {
     context: E,
     indexer: I,
-    marshal: marshal::Mailbox<Scheme, Block>,
+    marshal: coding::Mailbox<Scheme, Block, ReedSolomon<Sha256>>,
 }
 
 impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
     /// Create a new [Pusher].
-    pub fn new(context: E, indexer: I, marshal: marshal::Mailbox<Scheme, Block>) -> Self {
+    pub fn new(
+        context: E,
+        indexer: I,
+        marshal: coding::Mailbox<Scheme, Block, ReedSolomon<Sha256>>,
+    ) -> Self {
         Self {
             context,
             indexer,
@@ -142,7 +151,10 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                     move |_| async move {
                         // Wait for block
                         let block = marshal
-                            .subscribe(Some(notarization.round()), notarization.proposal.payload)
+                            .subscribe(
+                                Some(notarization.round()),
+                                DigestOrCommitment::Commitment(notarization.proposal.payload),
+                            )
                             .await
                             .await;
                         let Ok(block) = block else {
@@ -151,7 +163,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                         };
 
                         // Upload to indexer once we have it
-                        let notarization = Notarized::new(notarization, block);
+                        let notarization = Notarized::new(notarization, block.into_inner());
                         let result = indexer.notarized_upload(notarization).await;
                         if let Err(e) = result {
                             warn!(?e, "failed to upload notarization");
@@ -183,7 +195,10 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                     let mut marshal = self.marshal.clone();
                     move |_| async move {
                         let block = marshal
-                            .subscribe(Some(finalization.round()), finalization.proposal.payload)
+                            .subscribe(
+                                Some(finalization.round()),
+                                DigestOrCommitment::Commitment(finalization.proposal.payload),
+                            )
                             .await
                             .await;
                         let Ok(block) = block else {
@@ -192,7 +207,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                         };
 
                         // Upload to indexer once we have it
-                        let finalization = Finalized::new(finalization, block);
+                        let finalization = Finalized::new(finalization, block.into_inner());
                         let result = indexer.finalized_upload(finalization).await;
                         if let Err(e) = result {
                             warn!(?e, "failed to upload finalization");

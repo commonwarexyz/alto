@@ -3,7 +3,7 @@ use alto_client::Client;
 use alto_types::{EPOCH, NAMESPACE};
 use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt};
-use commonware_consensus::marshal;
+use commonware_consensus::marshal::{self, coding::ingress::handler::Handler};
 use commonware_cryptography::{
     bls12381::primitives::{group, poly, variant::MinSig},
     ed25519::{PrivateKey, PublicKey},
@@ -38,9 +38,9 @@ const ACTIVITY_TIMEOUT: u64 = 256;
 const SKIP_TIMEOUT: u64 = 32;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(2);
 const FETCH_CONCURRENT: usize = 4;
-const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+const MAX_MESSAGE_SIZE: usize = 20 * 1024 * 1024;
 const MAX_FETCH_COUNT: usize = 16;
-const MAX_FETCH_SIZE: usize = 512 * 1024;
+const MAX_FETCH_SIZE: usize = 20 * 1024 * 1024;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
@@ -261,13 +261,15 @@ fn main() {
             max_fetch_size: MAX_FETCH_SIZE,
             fetch_concurrent: FETCH_CONCURRENT,
             fetch_rate_per_peer: resolver_limit,
+            concurrency: std::thread::available_parallelism().unwrap().get(),
             indexer,
         };
         let engine = engine::Engine::new(context.with_label("engine"), engine_cfg).await;
 
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),
-            manager: oracle,
+            manager: oracle.clone(),
+            blocker: oracle,
             mailbox_size: config.mailbox_size,
             requester_config: requester::Config {
                 me: Some(public_key),
@@ -280,7 +282,7 @@ fn main() {
             priority_responses: false,
         };
         let marshal_resolver =
-            marshal::resolver::p2p::init(&context, marshal_resolver_cfg, marshal);
+            marshal::resolver::p2p::init(&context, marshal_resolver_cfg, marshal, Handler::new);
 
         // Start engine
         let engine = engine.start(pending, recovered, resolver, broadcaster, marshal_resolver);
