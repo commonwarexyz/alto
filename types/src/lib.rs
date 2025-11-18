@@ -91,6 +91,7 @@ mod tests {
         let block = CodedBlock::<_, ReedSolomon<Sha256>>::new(
             Block::new(digest, 10, 100, Vec::new()),
             coding_config,
+            1,
         );
         let proposal = Proposal::new(Round::new(EPOCH, 11), 8, block.commitment());
 
@@ -132,6 +133,7 @@ mod tests {
         let block = CodedBlock::<_, ReedSolomon<Sha256>>::new(
             Block::new(digest, 10, 100, Vec::new()),
             coding_config,
+            1,
         );
         let proposal = Proposal::new(Round::new(EPOCH, 11), 8, block.commitment());
 

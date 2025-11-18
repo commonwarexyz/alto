@@ -62,7 +62,7 @@ where
         }
 
         // Generate some random data.
-        let mut junk = vec![0u8; 8 * 1024 * 1024];
+        let mut junk = vec![0u8; 4 * 1024 * 1024];
         runtime_context.fill_bytes(&mut junk);
 
         Some(Block::new(

@@ -261,13 +261,15 @@ fn main() {
             max_fetch_size: MAX_FETCH_SIZE,
             fetch_concurrent: FETCH_CONCURRENT,
             fetch_rate_per_peer: resolver_limit,
+            concurrency: std::thread::available_parallelism().unwrap().get(),
             indexer,
         };
         let engine = engine::Engine::new(context.with_label("engine"), engine_cfg).await;
 
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),
-            manager: oracle,
+            manager: oracle.clone(),
+            blocker: oracle,
             mailbox_size: config.mailbox_size,
             requester_config: requester::Config {
                 me: Some(public_key),

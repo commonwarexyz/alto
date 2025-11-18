@@ -77,6 +77,7 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub participants: Ordered<PublicKey>,
     pub mailbox_size: usize,
     pub deque_size: usize,
+    pub concurrency: usize,
 
     pub leader_timeout: Duration,
     pub notarization_timeout: Duration,
@@ -148,6 +149,7 @@ impl<
             buffer_mailbox,
             (),
             cfg.mailbox_size,
+            cfg.concurrency,
         );
 
         // Create the buffer pool
@@ -179,6 +181,7 @@ impl<
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
                 block_codec_config: (),
+                concurrency: cfg.concurrency,
                 max_repair: MAX_REPAIR,
                 _marker: PhantomData,
             },
@@ -194,6 +197,7 @@ impl<
             shard_mailbox.clone(),
             scheme.clone().into(),
             EPOCH_LENGTH,
+            cfg.concurrency,
         );
 
         // Create the reporter
@@ -227,7 +231,6 @@ impl<
                 fetch_timeout: cfg.fetch_timeout,
                 activity_timeout: cfg.activity_timeout,
                 skip_timeout: cfg.skip_timeout,
-                max_fetch_count: cfg.max_fetch_count,
                 fetch_concurrent: cfg.fetch_concurrent,
                 fetch_rate_per_peer: cfg.fetch_rate_per_peer,
                 replay_buffer: REPLAY_BUFFER,
