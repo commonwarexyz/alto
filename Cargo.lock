@@ -65,7 +65,6 @@ dependencies = [
  "commonware-utils",
  "futures",
  "governor",
- "prometheus-client 0.22.3",
  "rand 0.8.5",
  "serde",
  "serde_yaml",
@@ -534,7 +533,7 @@ dependencies = [
  "commonware-runtime",
  "commonware-utils",
  "futures",
- "prometheus-client 0.24.0",
+ "prometheus-client",
  "thiserror 2.0.12",
  "tracing",
 ]
@@ -569,7 +568,7 @@ dependencies = [
  "commonware-utils",
  "futures",
  "pin-project",
- "prometheus-client 0.24.0",
+ "prometheus-client",
  "rand 0.8.5",
  "rand_distr",
  "thiserror 2.0.12",
@@ -659,7 +658,7 @@ dependencies = [
  "num-integer",
  "num-rational",
  "num-traits",
- "prometheus-client 0.24.0",
+ "prometheus-client",
  "rand 0.8.5",
  "rand_distr",
  "thiserror 2.0.12",
@@ -680,7 +679,7 @@ dependencies = [
  "commonware-stream",
  "commonware-utils",
  "futures",
- "prometheus-client 0.24.0",
+ "prometheus-client",
  "rand 0.8.5",
  "thiserror 2.0.12",
  "tracing",
@@ -706,7 +705,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
- "prometheus-client 0.24.0",
+ "prometheus-client",
  "rand 0.8.5",
  "rayon",
  "sha2 0.10.8",
@@ -734,7 +733,7 @@ dependencies = [
  "crc32fast",
  "futures",
  "futures-util",
- "prometheus-client 0.24.0",
+ "prometheus-client",
  "rayon",
  "thiserror 2.0.12",
  "tracing",
@@ -2309,18 +2308,6 @@ dependencies = [
 
 [[package]]
 name = "prometheus-client"
-version = "0.22.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "504ee9ff529add891127c4827eb481bd69dc0ebc72e9a682e187db4caa60c3ca"
-dependencies = [
- "dtoa",
- "itoa",
- "parking_lot",
- "prometheus-client-derive-encode 0.4.2",
-]
-
-[[package]]
-name = "prometheus-client"
 version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4500adecd7af8e0e9f4dbce15cfee07ce913fbf6ad605cc468b83f2d531ee94"
@@ -2328,18 +2315,7 @@ dependencies = [
  "dtoa",
  "itoa",
  "parking_lot",
- "prometheus-client-derive-encode 0.5.0",
-]
-
-[[package]]
-name = "prometheus-client-derive-encode"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "440f724eba9f6996b75d63681b0a92b06947f1457076d503a4d2e2c8f56442b8"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
+ "prometheus-client-derive-encode",
 ]
 
 [[package]]

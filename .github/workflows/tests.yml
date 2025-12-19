@@ -75,9 +75,6 @@ jobs:
     - uses: Swatinem/rust-cache@v2
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}
-    - name: Get Rust version
-      id: rust-version
-      run: echo "rust_version=$(rustc --version)" >> "$GITHUB_OUTPUT"
     - name: Build types
       run: cargo build --target wasm32-unknown-unknown --release --manifest-path types/Cargo.toml && du -h target/wasm32-unknown-unknown/release/alto_types.wasm
     - name: Install wasm-pack
