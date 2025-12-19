@@ -83,7 +83,7 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
 
 type Marshaled<E> = ConsensusMarshaled<E, Scheme, AltoApp, Block>;
 
-/// The engine that drives the [application].
+/// The engine that drives the [AltoApp].
 #[allow(clippy::type_complexity)]
 pub struct Engine<
     E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
