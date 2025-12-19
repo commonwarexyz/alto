@@ -44,6 +44,7 @@ jobs:
       run: echo "rust_version=$(rustc +nightly --version)" >> "$GITHUB_OUTPUT"
     - name: Run setup
       uses: ./.github/actions/setup
+    - uses: dtolnay/rust-toolchain@stable
     - name: Cache cargo-udeps
       id: cargo-udeps-cache
       uses: actions/cache@v4
@@ -52,9 +53,9 @@ jobs:
         key: ${{ runner.os }}-${{ env.UDEPS_VERSION }}-cargo-udeps-${{ steps.rust-version.outputs.rust_version }}
     - name: Install cargo-udeps
       if: steps.cargo-udeps-cache.outputs.cache-hit != 'true'
-      run: cargo +nightly install cargo-udeps --version ${{ env.UDEPS_VERSION }}
+      run: cargo install cargo-udeps --version ${{ env.UDEPS_VERSION }}
     - name: Check for unused dependencies
-      run: cargo +nightly udeps --all-targets
+      run: cargo udeps --all-targets
 
   React:
     runs-on: ubuntu-latest
