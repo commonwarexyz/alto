@@ -1,14 +1,18 @@
 //! Common types used throughout `alto`.
 
+use commonware_consensus::types::Epoch;
+use commonware_utils::{hex, NZU64};
+use std::num::NonZero;
+
 mod block;
 pub use block::{Block, Finalized, Notarized};
+
 mod consensus;
-use commonware_consensus::types::Epoch;
-use commonware_utils::hex;
 pub use consensus::{
     Activity, Evaluation, Finalization, Identity, Notarization, PublicKey, Scheme, Seed, Seedable,
     Signature,
 };
+
 pub mod wasm;
 
 /// The unique namespace prefix used in all signing operations to prevent signature replay attacks.
@@ -27,7 +31,7 @@ pub const EPOCH: Epoch = Epoch::zero();
 /// stay in the first epoch forever).
 ///
 /// For an example of how to implement reconfiguration and resharing, see [commonware-reshare](https://github.com/commonwarexyz/monorepo/tree/main/examples/reshare).
-pub const EPOCH_LENGTH: u64 = u64::MAX;
+pub const EPOCH_LENGTH: NonZero<u64> = NZU64!(u64::MAX);
 
 #[repr(u8)]
 pub enum Kind {

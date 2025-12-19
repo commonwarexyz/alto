@@ -8,7 +8,7 @@ use commonware_consensus::{
     application::marshaled::Marshaled as ConsensusMarshaled,
     marshal::{self, ingress::handler},
     simplex::{self, elector::Random, Engine as Consensus},
-    types::{Epoch, ViewDelta},
+    types::{Epoch, FixedEpocher, ViewDelta},
     Reporters,
 };
 use commonware_cryptography::{
@@ -81,7 +81,7 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub indexer: Option<I>,
 }
 
-type Marshaled<E> = ConsensusMarshaled<E, Scheme, AltoApp, Block>;
+type Marshaled<E> = ConsensusMarshaled<E, Scheme, AltoApp, Block, FixedEpocher>;
 
 /// The engine that drives the [AltoApp].
 #[allow(clippy::type_complexity)]
@@ -100,6 +100,7 @@ pub struct Engine<
         ConstantProvider<Scheme, Epoch>,
         immutable::Archive<E, Digest, Finalization>,
         immutable::Archive<E, Digest, Block>,
+        FixedEpocher,
     >,
     marshaled: Marshaled<E>,
 
@@ -201,13 +202,14 @@ impl<
         let scheme = Scheme::signer(cfg.participants, cfg.polynomial, cfg.share)
             .expect("failed to create scheme");
         let provider = ConstantProvider::new(scheme.clone());
+        let epocher = FixedEpocher::new(EPOCH_LENGTH);
         let (marshal, marshal_mailbox, _) = marshal::Actor::init(
             context.with_label("marshal"),
             finalizations_by_height,
             finalized_blocks,
             marshal::Config {
                 provider,
-                epoch_length: EPOCH_LENGTH,
+                epocher: epocher.clone(),
                 partition_prefix: cfg.partition_prefix.clone(),
                 mailbox_size: cfg.mailbox_size,
                 view_retention_timeout: ViewDelta::new(
@@ -232,7 +234,7 @@ impl<
             context.with_label("marshaled"),
             app,
             marshal_mailbox.clone(),
-            EPOCH_LENGTH,
+            epocher,
         );
 
         // Create the reporter
