@@ -37,7 +37,7 @@ futures = "0.3.31"
 futures-util = "0.3.31"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
-governor = "0.10.4"
+governor = "0.10.2"
 prometheus-client = "0.22.3"
 clap = "4.5.18"
 
