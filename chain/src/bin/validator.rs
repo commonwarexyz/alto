@@ -12,7 +12,7 @@ use commonware_cryptography::{
 use commonware_deployer::ec2::Hosts;
 use commonware_p2p::{authenticated::discovery as authenticated, Ingress, Manager};
 use commonware_runtime::{tokio, Metrics, Runner};
-use commonware_utils::{from_hex_formatted, ordered::Set, quorum, union_unique, NZU32};
+use commonware_utils::{from_hex_formatted, ordered::Set, union_unique, NZU32};
 use futures::future::try_join_all;
 use governor::Quota;
 use std::{
@@ -159,10 +159,9 @@ fn main() {
         // Parse config
         let share = from_hex_formatted(&config.share).expect("Could not parse share");
         let share = group::Share::decode(share.as_ref()).expect("Share is invalid");
-        let threshold = quorum(peers_u32);
         let polynomial =
             from_hex_formatted(&config.polynomial).expect("Could not parse polynomial");
-        let polynomial = Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(threshold))
+        let polynomial = Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(peers_u32))
             .expect("polynomial is invalid");
         let identity = polynomial.public();
         info!(

@@ -10,7 +10,7 @@ use commonware_cryptography::{
 };
 use commonware_deployer::ec2::{self, METRICS_PORT};
 use commonware_math::algebra::Random;
-use commonware_utils::{from_hex_formatted, hex, quorum, NZU32};
+use commonware_utils::{from_hex_formatted, hex, NZU32};
 use rand::{rngs::OsRng, seq::IteratorRandom};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -672,7 +672,6 @@ fn explorer(sub_matches: &ArgMatches) {
     }
 
     // Order by public key
-    let threshold = quorum(participants.len() as u32);
     let mut locations = Vec::new();
     for (_, location) in participants {
         locations.push(location);
@@ -688,8 +687,9 @@ fn explorer(sub_matches: &ArgMatches) {
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex_formatted(&polynomial_hex).expect("invalid polynomial");
-    let polynomial = Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(threshold))
-        .expect("polynomial is invalid");
+    let polynomial =
+        Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(locations.len() as u32))
+            .expect("polynomial is invalid");
     let identity = polynomial.public();
     let config_ts = format!(
         "export const BACKEND_URL = \"{}\";\n\

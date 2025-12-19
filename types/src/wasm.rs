@@ -146,6 +146,6 @@ pub fn leader_index(seed: JsValue, participants: usize) -> usize {
     if round.view().get() == 1 {
         round.epoch().get().wrapping_add(round.view().get()) as usize % participants
     } else {
-        modulo(seed.encode().as_ref(), participants as u64) as usize
+        modulo(seed.signature.encode().as_ref(), participants as u64) as usize
     }
 }
