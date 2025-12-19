@@ -3,16 +3,16 @@ use alto_client::Client;
 use alto_types::{EPOCH, NAMESPACE};
 use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt};
-use commonware_consensus::marshal;
+use commonware_consensus::{marshal, types::ViewDelta};
 use commonware_cryptography::{
-    bls12381::primitives::{group, poly, variant::MinSig},
+    bls12381::primitives::{group, sharing::Sharing, variant::MinSig},
     ed25519::{PrivateKey, PublicKey},
     Signer,
 };
 use commonware_deployer::ec2::Hosts;
-use commonware_p2p::{authenticated::discovery as authenticated, utils::requester, Manager};
+use commonware_p2p::{authenticated::discovery as authenticated, Ingress, Manager};
 use commonware_runtime::{tokio, Metrics, Runner};
-use commonware_utils::{from_hex_formatted, quorum, set::Ordered, union_unique};
+use commonware_utils::{from_hex_formatted, ordered::Set, quorum, union_unique, NZU32};
 use futures::future::try_join_all;
 use governor::Quota;
 use std::{
@@ -34,11 +34,11 @@ const MARSHAL_CHANNEL: u64 = 4;
 const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 const NOTARIZATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NULLIFY_RETRY: Duration = Duration::from_secs(10);
-const ACTIVITY_TIMEOUT: u64 = 256;
-const SKIP_TIMEOUT: u64 = 32;
+const ACTIVITY_TIMEOUT: ViewDelta = ViewDelta::new(256);
+const SKIP_TIMEOUT: ViewDelta = ViewDelta::new(32);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(2);
 const FETCH_CONCURRENT: usize = 4;
-const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+const MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
 const MAX_FETCH_COUNT: usize = 16;
 const MAX_FETCH_SIZE: usize = 512 * 1024;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
@@ -120,7 +120,7 @@ fn main() {
                 let bootstrapper_socket = format!("{}:{}", ip, config.port);
                 let bootstrapper_socket = SocketAddr::from_str(&bootstrapper_socket)
                     .expect("Could not parse bootstrapper socket");
-                bootstrappers.push((key, bootstrapper_socket));
+                bootstrappers.push((key, Ingress::Socket(bootstrapper_socket)));
             }
             let ip = peers.get(&public_key).expect("Could not find self in IPs");
             (*ip, peer_keys, bootstrappers)
@@ -145,7 +145,7 @@ fn main() {
                     from_hex_formatted(bootstrapper).expect("Could not parse bootstrapper key");
                 let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
                 let socket = peers.get(&key).expect("Could not find bootstrapper in IPs");
-                bootstrappers.push((key, *socket));
+                bootstrappers.push((key, Ingress::Socket(*socket)));
             }
             let ip = peers
                 .get(&public_key)
@@ -162,10 +162,9 @@ fn main() {
         let threshold = quorum(peers_u32);
         let polynomial =
             from_hex_formatted(&config.polynomial).expect("Could not parse polynomial");
-        let polynomial =
-            poly::Public::<MinSig>::decode_cfg(polynomial.as_ref(), &(threshold as usize))
-                .expect("polynomial is invalid");
-        let identity = *poly::public::<MinSig>(&polynomial);
+        let polynomial = Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(threshold))
+            .expect("polynomial is invalid");
+        let identity = polynomial.public();
         info!(
             ?public_key,
             ?identity,
@@ -202,8 +201,8 @@ fn main() {
             authenticated::Network::new(context.with_label("network"), p2p_cfg);
 
         // Provide authorized peers
-        let participants: Ordered<PublicKey> = peers.clone().into();
-        oracle.update(EPOCH, participants.clone()).await;
+        let participants: Set<PublicKey> = Set::from_iter_dedup(peers.clone());
+        oracle.update(EPOCH.get(), participants.clone()).await;
 
         // Register pending channel
         let pending_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
@@ -236,7 +235,7 @@ fn main() {
         // Create indexer
         let mut indexer = None;
         if let Some(uri) = config.indexer {
-            indexer = Some(Client::new(&uri, identity));
+            indexer = Some(Client::new(&uri, *identity));
         }
 
         // Create engine
@@ -246,9 +245,7 @@ fn main() {
             blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
             finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
             me: public_key.clone(),
-            polynomial,
-            share,
-            participants: peers.clone().into(),
+            participants,
             mailbox_size: config.mailbox_size,
             deque_size: config.deque_size,
             leader_timeout: LEADER_TIMEOUT,
@@ -262,19 +259,18 @@ fn main() {
             fetch_concurrent: FETCH_CONCURRENT,
             fetch_rate_per_peer: resolver_limit,
             indexer,
+            polynomial,
+            share,
         };
         let engine = engine::Engine::new(context.with_label("engine"), engine_cfg).await;
 
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),
-            manager: oracle,
+            manager: oracle.clone(),
+            blocker: oracle,
             mailbox_size: config.mailbox_size,
-            requester_config: requester::Config {
-                me: Some(public_key),
-                rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
-                initial: Duration::from_secs(1),
-                timeout: Duration::from_secs(2),
-            },
+            initial: Duration::from_secs(1),
+            timeout: Duration::from_secs(2),
             fetch_retry_timeout: Duration::from_millis(100),
             priority_requests: false,
             priority_responses: false,

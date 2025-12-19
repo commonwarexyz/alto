@@ -131,7 +131,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                             warn!(?e, "failed to upload seed");
                             return;
                         }
-                        debug!(view, "seed uploaded to indexer");
+                        debug!(%view, "seed uploaded to indexer");
                     }
                 });
 
@@ -146,7 +146,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                             .await
                             .await;
                         let Ok(block) = block else {
-                            warn!(view, "subscription for block cancelled");
+                            warn!(%view, "subscription for block cancelled");
                             return;
                         };
 
@@ -157,7 +157,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                             warn!(?e, "failed to upload notarization");
                             return;
                         }
-                        debug!(view, "notarization uploaded to indexer");
+                        debug!(%view, "notarization uploaded to indexer");
                     }
                 });
             }
@@ -173,7 +173,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                             warn!(?e, "failed to upload seed");
                             return;
                         }
-                        debug!(view, "seed uploaded to indexer");
+                        debug!(%view, "seed uploaded to indexer");
                     }
                 });
 
@@ -187,7 +187,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                             .await
                             .await;
                         let Ok(block) = block else {
-                            warn!(view, "subscription for block cancelled");
+                            warn!(%view, "subscription for block cancelled");
                             return;
                         };
 
@@ -198,7 +198,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                             warn!(?e, "failed to upload finalization");
                             return;
                         }
-                        debug!(view, "finalization uploaded to indexer");
+                        debug!(%view, "finalization uploaded to indexer");
                     }
                 });
             }

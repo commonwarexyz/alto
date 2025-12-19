@@ -1,4 +1,4 @@
-use commonware_consensus::simplex::signing_scheme::bls12381_threshold;
+use commonware_consensus::simplex::scheme::bls12381_threshold;
 use commonware_consensus::simplex::types::{
     Activity as CActivity, Finalization as CFinalization, Notarization as CNotarization,
 };
@@ -8,7 +8,7 @@ use commonware_cryptography::{
     sha256::Digest,
 };
 
-pub use commonware_consensus::simplex::signing_scheme::bls12381_threshold::Seedable;
+pub use commonware_consensus::simplex::scheme::bls12381_threshold::Seedable;
 
 pub type Scheme = bls12381_threshold::Scheme<PublicKey, MinSig>;
 pub type Seed = bls12381_threshold::Seed<MinSig>;

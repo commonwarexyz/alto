@@ -87,7 +87,7 @@ impl Client {
         match query {
             IndexQuery::Latest => {}
             IndexQuery::Index(index) => {
-                if seed.view() != index {
+                if seed.view().get() != index {
                     return Err(Error::UnexpectedResponse);
                 }
             }
@@ -130,7 +130,7 @@ impl Client {
         match query {
             IndexQuery::Latest => {}
             IndexQuery::Index(index) => {
-                if notarized.proof.view() != index {
+                if notarized.proof.view().get() != index {
                     return Err(Error::UnexpectedResponse);
                 }
             }
@@ -173,7 +173,7 @@ impl Client {
         match query {
             IndexQuery::Latest => {}
             IndexQuery::Index(index) => {
-                if finalized.proof.view() != index {
+                if finalized.proof.view().get() != index {
                     return Err(Error::UnexpectedResponse);
                 }
             }

@@ -15,8 +15,8 @@ alto-types = { workspace = true }
 alto-client = { workspace = true }
 commonware-broadcast = { workspace = true }
 commonware-codec = { workspace = true }
-commonware-consensus = { workspace = true }
-commonware-cryptography = { workspace = true }
+commonware-consensus = { workspace = true, features = ["mocks"] }
+commonware-cryptography = { workspace = true, features = ["mocks"] }
 commonware-deployer = { workspace = true }
 commonware-macros = { workspace = true }
 commonware-p2p = { workspace = true }
@@ -25,6 +25,7 @@ commonware-runtime = { workspace = true }
 commonware-storage = { workspace = true }
 commonware-stream = { workspace = true }
 commonware-utils = { workspace = true }
+commonware-math = { workspace = true }
 bytes =  { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }

@@ -85,7 +85,7 @@ pub fn format_age(age: u64) -> String {
 }
 
 pub fn log_seed(seed: Seed) {
-    info!(view = seed.view(), signature = ?seed.signature, "seed");
+    info!(view = %seed.view(), signature = ?seed.signature, "seed");
 }
 
 pub fn log_notarization(notarized: Notarized) {
@@ -93,7 +93,7 @@ pub fn log_notarization(notarized: Notarized) {
     let age_ms = now.saturating_sub(notarized.block.timestamp);
     let age_str = format_age(age_ms);
     info!(
-        view = notarized.proof.view(),
+        view = %notarized.proof.view(),
         height = notarized.block.height,
         timestamp = notarized.block.timestamp,
         age = %age_str,
@@ -107,7 +107,7 @@ pub fn log_finalization(finalized: Finalized) {
     let age_ms = now.saturating_sub(finalized.block.timestamp);
     let age_str = format_age(age_ms);
     info!(
-        view = finalized.proof.view(),
+        view = %finalized.proof.view(),
         height = finalized.block.height,
         timestamp = finalized.block.timestamp,
         age = %age_str,

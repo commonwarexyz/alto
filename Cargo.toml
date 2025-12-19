@@ -15,18 +15,19 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 alto-client = { version = "0.0.16", path = "client" }
 alto-types = { version = "0.0.16", path = "types" }
-commonware-broadcast ="0.0.63"
-commonware-codec ="0.0.63"
-commonware-consensus ="0.0.63"
-commonware-cryptography ="0.0.63"
-commonware-deployer = { version = "0.0.63", default-features = false }
-commonware-macros ="0.0.63"
-commonware-p2p ="0.0.63"
-commonware-resolver ="0.0.63"
-commonware-runtime ="0.0.63"
-commonware-storage ="0.0.63"
-commonware-stream ="0.0.63"
-commonware-utils ="0.0.63"
+commonware-broadcast = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "dcea23b" }
+commonware-codec = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "dcea23b" }
+commonware-consensus = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "dcea23b" }
+commonware-cryptography = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "dcea23b" }
+commonware-deployer = {  git = "https://github.com/commonwarexyz/monorepo.git", rev = "dcea23b", default-features = false }
+commonware-macros = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "dcea23b" }
+commonware-p2p = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "dcea23b" }
+commonware-resolver = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "dcea23b" }
+commonware-runtime = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "dcea23b" }
+commonware-storage = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "dcea23b" }
+commonware-stream = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "dcea23b" }
+commonware-utils = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "dcea23b" }
+commonware-math = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "dcea23b" }
 thiserror = "2.0.12"
 bytes = "1.7.1"
 rand = "0.8.5"
@@ -36,7 +37,7 @@ futures = "0.3.31"
 futures-util = "0.3.31"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
-governor = "0.6.3"
+governor = "0.10.4"
 prometheus-client = "0.22.3"
 clap = "4.5.18"
 

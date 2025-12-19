@@ -1,7 +1,5 @@
-use alto_types::Scheme;
-use commonware_consensus::marshal::SchemeProvider;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr};
 
 pub mod application;
 pub mod engine;
@@ -40,47 +38,24 @@ pub struct Peers {
     pub addresses: HashMap<String, SocketAddr>,
 }
 
-/// A static provider that always returns the same signing scheme.
-#[derive(Clone)]
-pub struct StaticSchemeProvider(Arc<Scheme>);
-
-impl SchemeProvider for StaticSchemeProvider {
-    type Scheme = Scheme;
-
-    fn scheme(&self, _epoch: u64) -> Option<Arc<Scheme>> {
-        Some(self.0.clone())
-    }
-}
-
-impl From<Scheme> for StaticSchemeProvider {
-    fn from(scheme: Scheme) -> Self {
-        Self(Arc::new(scheme))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use commonware_consensus::marshal;
+    use commonware_consensus::{marshal, simplex::scheme::bls12381_threshold, types::ViewDelta};
     use commonware_cryptography::{
-        bls12381::{
-            dkg::ops,
-            primitives::{poly, variant::MinSig},
-        },
-        ed25519::{PrivateKey, PublicKey},
-        PrivateKeyExt, Signer,
+        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519::PublicKey,
+        Signer,
     };
     use commonware_macros::{select, test_traced};
     use commonware_p2p::{
         simulated::{self, Link, Network, Oracle, Receiver, Sender},
-        utils::requester,
         Manager,
     };
     use commonware_runtime::{
         deterministic::{self, Runner},
         Clock, Metrics, Runner as _, Spawner,
     };
-    use commonware_utils::quorum;
+    use commonware_utils::{ordered::Set, NZU32};
     use engine::{Config, Engine};
     use governor::Quota;
     use indexer::{Indexer, Mock};
@@ -96,29 +71,54 @@ mod tests {
     /// everything in RAM.
     const FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(14); // 1MB
 
+    /// (Effectively) unlimited quota for tests.
+    const TEST_QUOTA: Quota = Quota::per_second(NZU32!(u32::MAX));
+
     /// Registers all validators using the oracle.
     async fn register_validators(
-        oracle: &mut Oracle<PublicKey>,
+        oracle: &mut Oracle<PublicKey, deterministic::Context>,
         validators: &[PublicKey],
     ) -> HashMap<
         PublicKey,
         (
-            (Sender<PublicKey>, Receiver<PublicKey>),
-            (Sender<PublicKey>, Receiver<PublicKey>),
-            (Sender<PublicKey>, Receiver<PublicKey>),
-            (Sender<PublicKey>, Receiver<PublicKey>),
-            (Sender<PublicKey>, Receiver<PublicKey>),
+            (
+                Sender<PublicKey, deterministic::Context>,
+                Receiver<PublicKey>,
+            ),
+            (
+                Sender<PublicKey, deterministic::Context>,
+                Receiver<PublicKey>,
+            ),
+            (
+                Sender<PublicKey, deterministic::Context>,
+                Receiver<PublicKey>,
+            ),
+            (
+                Sender<PublicKey, deterministic::Context>,
+                Receiver<PublicKey>,
+            ),
+            (
+                Sender<PublicKey, deterministic::Context>,
+                Receiver<PublicKey>,
+            ),
         ),
     > {
-        oracle.update(0, validators.into()).await;
+        oracle
+            .manager()
+            .update(0, Set::from_iter_dedup(validators.iter().cloned()))
+            .await;
         let mut registrations = HashMap::new();
         for validator in validators.iter() {
             let mut oracle = oracle.control(validator.clone());
-            let (pending_sender, pending_receiver) = oracle.register(0).await.unwrap();
-            let (recovered_sender, recovered_receiver) = oracle.register(1).await.unwrap();
-            let (resolver_sender, resolver_receiver) = oracle.register(2).await.unwrap();
-            let (broadcast_sender, broadcast_receiver) = oracle.register(3).await.unwrap();
-            let (backfill_sender, backfill_receiver) = oracle.register(4).await.unwrap();
+            let (pending_sender, pending_receiver) = oracle.register(0, TEST_QUOTA).await.unwrap();
+            let (recovered_sender, recovered_receiver) =
+                oracle.register(1, TEST_QUOTA).await.unwrap();
+            let (resolver_sender, resolver_receiver) =
+                oracle.register(2, TEST_QUOTA).await.unwrap();
+            let (broadcast_sender, broadcast_receiver) =
+                oracle.register(3, TEST_QUOTA).await.unwrap();
+            let (backfill_sender, backfill_receiver) =
+                oracle.register(4, TEST_QUOTA).await.unwrap();
             registrations.insert(
                 validator.clone(),
                 (
@@ -139,7 +139,7 @@ mod tests {
     /// The `restrict_to` function can be used to restrict the linking to certain connections,
     /// otherwise all validators will be linked to all other validators.
     async fn link_validators(
-        oracle: &mut Oracle<PublicKey>,
+        oracle: &mut Oracle<PublicKey, deterministic::Context>,
         validators: &[PublicKey],
         link: Link,
         restrict_to: Option<fn(usize, usize, usize) -> bool>,
@@ -169,7 +169,6 @@ mod tests {
 
     fn all_online(n: u32, seed: u64, link: Link, required: u64) -> String {
         // Create context
-        let threshold = quorum(n);
         let cfg = deterministic::Config::default().with_seed(seed);
         let executor = Runner::from(cfg);
         executor.start(|mut context| async move {
@@ -187,28 +186,21 @@ mod tests {
             network.start();
 
             // Register participants
-            let mut signers = Vec::new();
-            let mut validators = Vec::new();
-            for i in 0..n {
-                let signer = PrivateKey::from_seed(i as u64);
-                let pk = signer.public_key();
-                signers.push(signer);
-                validators.push(pk);
-            }
-            validators.sort();
-            signers.sort_by_key(|s| s.public_key());
-            let mut registrations = register_validators(&mut oracle, &validators).await;
+            let Fixture {
+                schemes,
+                private_keys,
+                participants,
+                ..
+            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, n);
+            let mut registrations = register_validators(&mut oracle, &participants).await;
+            let participants_set = Set::from_iter_dedup(participants.clone());
 
             // Link all validators
-            link_validators(&mut oracle, &validators, link, None).await;
-
-            // Derive threshold
-            let (polynomial, shares) =
-                ops::generate_shares::<_, MinSig>(&mut context, None, n, threshold);
+            link_validators(&mut oracle, &participants, link, None).await;
 
             // Create instances
             let mut public_keys = HashSet::new();
-            for (idx, signer) in signers.into_iter().enumerate() {
+            for (signer, scheme) in private_keys.into_iter().zip(schemes) {
                 // Create signer context
                 let public_key = signer.public_key();
                 public_keys.insert(public_key.clone());
@@ -221,17 +213,17 @@ mod tests {
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     me: signer.public_key(),
-                    polynomial: polynomial.clone(),
-                    share: shares[idx].clone(),
-                    participants: validators.clone().into(),
+                    polynomial: scheme.polynomial().clone(),
+                    share: scheme.share().cloned().unwrap(),
+                    participants: participants_set.clone(),
                     mailbox_size: 1024,
                     deque_size: 10,
                     leader_timeout: Duration::from_secs(1),
                     notarization_timeout: Duration::from_secs(2),
                     nullify_retry: Duration::from_secs(10),
                     fetch_timeout: Duration::from_secs(1),
-                    activity_timeout: 10,
-                    skip_timeout: 5,
+                    activity_timeout: ViewDelta::new(10),
+                    skip_timeout: ViewDelta::new(5),
                     max_fetch_count: 10,
                     max_fetch_size: 1024 * 512,
                     fetch_concurrent: 10,
@@ -247,14 +239,11 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.clone(),
+                    manager: oracle.manager(),
+                    blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
-                    requester_config: requester::Config {
-                        me: Some(public_key.clone()),
-                        rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
-                        initial: Duration::from_secs(1),
-                        timeout: Duration::from_secs(2),
-                    },
+                    initial: Duration::from_secs(1),
+                    timeout: Duration::from_secs(2),
                     fetch_retry_timeout: Duration::from_millis(100),
                     priority_requests: false,
                     priority_responses: false,
@@ -350,7 +339,6 @@ mod tests {
     fn test_backfill() {
         // Create context
         let n = 5;
-        let threshold = quorum(n);
         let initial_container_required = 10;
         let final_container_required = 20;
         let executor = Runner::timed(Duration::from_secs(30));
@@ -369,17 +357,15 @@ mod tests {
             network.start();
 
             // Register participants
-            let mut signers = Vec::new();
-            let mut validators = Vec::new();
-            for i in 0..n {
-                let signer = PrivateKey::from_seed(i as u64);
-                let pk = signer.public_key();
-                signers.push(signer);
-                validators.push(pk);
-            }
-            validators.sort();
-            signers.sort_by_key(|s| s.public_key());
-            let mut registrations = register_validators(&mut oracle, &validators).await;
+            // Register participants
+            let Fixture {
+                schemes,
+                private_keys,
+                participants,
+                ..
+            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, n);
+            let mut registrations = register_validators(&mut oracle, &participants).await;
+            let participants_set = Set::from_iter_dedup(participants.clone());
 
             // Link all validators (except 0)
             let link = Link {
@@ -389,18 +375,14 @@ mod tests {
             };
             link_validators(
                 &mut oracle,
-                &validators,
+                &participants,
                 link.clone(),
                 Some(|_, i, j| ![i, j].contains(&0usize)),
             )
             .await;
 
-            // Derive threshold
-            let (polynomial, shares) =
-                ops::generate_shares::<_, MinSig>(&mut context, None, n, threshold);
-
             // Create instances
-            for (idx, signer) in signers.iter().enumerate() {
+            for (idx, (signer, scheme)) in private_keys.iter().zip(schemes.iter()).enumerate() {
                 // Skip first
                 if idx == 0 {
                     continue;
@@ -415,17 +397,17 @@ mod tests {
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     me: signer.public_key(),
-                    polynomial: polynomial.clone(),
-                    share: shares[idx].clone(),
-                    participants: validators.clone().into(),
+                    polynomial: scheme.polynomial().clone(),
+                    share: scheme.share().cloned().unwrap(),
+                    participants: participants_set.clone(),
                     mailbox_size: 1024,
                     deque_size: 10,
                     leader_timeout: Duration::from_secs(1),
                     notarization_timeout: Duration::from_secs(2),
                     nullify_retry: Duration::from_secs(10),
                     fetch_timeout: Duration::from_secs(1),
-                    activity_timeout: 10,
-                    skip_timeout: 5,
+                    activity_timeout: ViewDelta::new(10),
+                    skip_timeout: ViewDelta::new(5),
                     max_fetch_count: 10,
                     max_fetch_size: 1024 * 512,
                     fetch_concurrent: 10,
@@ -441,14 +423,11 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.clone(),
+                    manager: oracle.manager(),
+                    blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
-                    requester_config: requester::Config {
-                        me: Some(public_key.clone()),
-                        rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
-                        initial: Duration::from_secs(1),
-                        timeout: Duration::from_secs(2),
-                    },
+                    initial: Duration::from_secs(1),
+                    timeout: Duration::from_secs(2),
                     fetch_retry_timeout: Duration::from_millis(100),
                     priority_requests: false,
                     priority_responses: false,
@@ -504,15 +483,15 @@ mod tests {
             // Link first peer
             link_validators(
                 &mut oracle,
-                &validators,
+                &participants,
                 link,
                 Some(|_, i, j| [i, j].contains(&0usize) && ![i, j].contains(&1usize)),
             )
             .await;
 
             // Configure engine
-            let signer = signers[0].clone();
-            let share = shares[0].clone();
+            let signer = private_keys[0].clone();
+            let share = schemes[0].share().cloned().unwrap();
             let public_key = signer.public_key();
             let uid = format!("validator-{public_key}");
             let config: Config<_, Mock> = engine::Config {
@@ -521,17 +500,17 @@ mod tests {
                 blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                 finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                 me: signer.public_key(),
-                polynomial: polynomial.clone(),
+                polynomial: schemes[0].polynomial().clone(),
                 share,
-                participants: validators.clone().into(),
+                participants: participants_set,
                 mailbox_size: 1024,
                 deque_size: 10,
                 leader_timeout: Duration::from_secs(1),
                 notarization_timeout: Duration::from_secs(2),
                 nullify_retry: Duration::from_secs(10),
                 fetch_timeout: Duration::from_secs(1),
-                activity_timeout: 10,
-                skip_timeout: 5,
+                activity_timeout: ViewDelta::new(10),
+                skip_timeout: ViewDelta::new(5),
                 max_fetch_count: 10,
                 max_fetch_size: 1024 * 512,
                 fetch_concurrent: 10,
@@ -547,14 +526,11 @@ mod tests {
             // Configure marshal resolver
             let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                 public_key: public_key.clone(),
-                manager: oracle,
+                manager: oracle.manager(),
+                blocker: oracle.control(public_key.clone()),
                 mailbox_size: 1024,
-                requester_config: requester::Config {
-                    me: Some(public_key.clone()),
-                    rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
-                    initial: Duration::from_secs(1),
-                    timeout: Duration::from_secs(2),
-                },
+                initial: Duration::from_secs(1),
+                timeout: Duration::from_secs(2),
                 fetch_retry_timeout: Duration::from_millis(100),
                 priority_requests: false,
                 priority_responses: false,
@@ -612,20 +588,23 @@ mod tests {
     fn test_unclean_shutdown() {
         // Create context
         let n = 5;
-        let threshold = quorum(n);
         let required_container = 100;
 
         // Derive threshold
         let mut rng = StdRng::seed_from_u64(0);
-        let (polynomial, shares) = ops::generate_shares::<_, MinSig>(&mut rng, None, n, threshold);
+        let fixture = bls12381_threshold::fixture::<MinSig, _>(&mut rng, n);
 
         // Random restarts every x seconds
         let mut runs = 0;
         let mut prev_checkpoint = None;
         loop {
             // Setup run
-            let polynomial = polynomial.clone();
-            let shares = shares.clone();
+            let Fixture {
+                schemes,
+                private_keys,
+                participants,
+                ..
+            } = fixture.clone();
             let f = |mut context: deterministic::Context| async move {
                 // Create simulated network
                 let (network, mut oracle) = Network::new(
@@ -641,17 +620,8 @@ mod tests {
                 network.start();
 
                 // Register participants
-                let mut signers = Vec::new();
-                let mut validators = Vec::new();
-                for i in 0..n {
-                    let signer = PrivateKey::from_seed(i as u64);
-                    let pk = signer.public_key();
-                    signers.push(signer);
-                    validators.push(pk);
-                }
-                validators.sort();
-                signers.sort_by_key(|s| s.public_key());
-                let mut registrations = register_validators(&mut oracle, &validators).await;
+                let mut registrations = register_validators(&mut oracle, &participants).await;
+                let participants_set = Set::from_iter_dedup(participants.clone());
 
                 // Link all validators
                 let link = Link {
@@ -659,11 +629,11 @@ mod tests {
                     jitter: Duration::from_millis(1),
                     success_rate: 1.0,
                 };
-                link_validators(&mut oracle, &validators, link, None).await;
+                link_validators(&mut oracle, &participants, link, None).await;
 
                 // Create instances
                 let mut public_keys = HashSet::new();
-                for (idx, signer) in signers.into_iter().enumerate() {
+                for (signer, scheme) in private_keys.into_iter().zip(schemes) {
                     // Create signer context
                     let public_key = signer.public_key();
                     public_keys.insert(public_key.clone());
@@ -676,17 +646,17 @@ mod tests {
                         blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                         finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                         me: signer.public_key(),
-                        polynomial: polynomial.clone(),
-                        share: shares[idx].clone(),
-                        participants: validators.clone().into(),
+                        polynomial: scheme.polynomial().clone(),
+                        share: scheme.share().cloned().unwrap(),
+                        participants: participants_set.clone(),
                         mailbox_size: 1024,
                         deque_size: 10,
                         leader_timeout: Duration::from_secs(1),
                         notarization_timeout: Duration::from_secs(2),
                         nullify_retry: Duration::from_secs(10),
                         fetch_timeout: Duration::from_secs(1),
-                        activity_timeout: 10,
-                        skip_timeout: 5,
+                        activity_timeout: ViewDelta::new(10),
+                        skip_timeout: ViewDelta::new(5),
                         max_fetch_count: 10,
                         max_fetch_size: 1024 * 512,
                         fetch_concurrent: 10,
@@ -702,14 +672,11 @@ mod tests {
                     // Configure marshal resolver
                     let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                         public_key: public_key.clone(),
-                        manager: oracle.clone(),
+                        manager: oracle.manager(),
+                        blocker: oracle.control(public_key.clone()),
                         mailbox_size: 1024,
-                        requester_config: requester::Config {
-                            me: Some(public_key.clone()),
-                            rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
-                            initial: Duration::from_secs(1),
-                            timeout: Duration::from_secs(2),
-                        },
+                        initial: Duration::from_secs(1),
+                        timeout: Duration::from_secs(2),
                         fetch_retry_timeout: Duration::from_millis(100),
                         priority_requests: false,
                         priority_responses: false,
@@ -808,7 +775,6 @@ mod tests {
     fn test_indexer() {
         // Create context
         let n = 5;
-        let threshold = quorum(n);
         let required_container = 10;
         let executor = Runner::timed(Duration::from_secs(30));
         executor.start(|mut context| async move {
@@ -826,17 +792,14 @@ mod tests {
             network.start();
 
             // Register participants
-            let mut signers = Vec::new();
-            let mut validators = Vec::new();
-            for i in 0..n {
-                let signer = PrivateKey::from_seed(i as u64);
-                let pk = signer.public_key();
-                signers.push(signer);
-                validators.push(pk);
-            }
-            validators.sort();
-            signers.sort_by_key(|s| s.public_key());
-            let mut registrations = register_validators(&mut oracle, &validators).await;
+            let Fixture {
+                schemes,
+                private_keys,
+                participants,
+                ..
+            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, n);
+            let mut registrations = register_validators(&mut oracle, &participants).await;
+            let participants_set = Set::from_iter_dedup(participants.clone());
 
             // Link all validators
             let link = Link {
@@ -844,19 +807,17 @@ mod tests {
                 jitter: Duration::from_millis(1),
                 success_rate: 1.0,
             };
-            link_validators(&mut oracle, &validators, link, None).await;
+            link_validators(&mut oracle, &participants, link, None).await;
 
             // Derive threshold
-            let (polynomial, shares) =
-                ops::generate_shares::<_, MinSig>(&mut context, None, n, threshold);
-            let identity = *poly::public::<MinSig>(&polynomial);
+            let identity = *schemes[0].polynomial().public();
 
             // Define mock indexer
             let indexer = Mock::new("", identity);
 
             // Create instances
             let mut public_keys = HashSet::new();
-            for (idx, signer) in signers.into_iter().enumerate() {
+            for (signer, scheme) in private_keys.into_iter().zip(schemes) {
                 // Create signer context
                 let public_key = signer.public_key();
                 public_keys.insert(public_key.clone());
@@ -869,17 +830,17 @@ mod tests {
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     me: signer.public_key(),
-                    polynomial: polynomial.clone(),
-                    share: shares[idx].clone(),
-                    participants: validators.clone().into(),
+                    polynomial: scheme.polynomial().clone(),
+                    share: scheme.share().cloned().unwrap(),
+                    participants: participants_set.clone(),
                     mailbox_size: 1024,
                     deque_size: 10,
                     leader_timeout: Duration::from_secs(1),
                     notarization_timeout: Duration::from_secs(2),
                     nullify_retry: Duration::from_secs(10),
                     fetch_timeout: Duration::from_secs(1),
-                    activity_timeout: 10,
-                    skip_timeout: 5,
+                    activity_timeout: ViewDelta::new(10),
+                    skip_timeout: ViewDelta::new(5),
                     max_fetch_count: 10,
                     max_fetch_size: 1024 * 512,
                     fetch_concurrent: 10,
@@ -895,14 +856,11 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.clone(),
+                    manager: oracle.manager(),
+                    blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
-                    requester_config: requester::Config {
-                        me: Some(public_key.clone()),
-                        rate_limit: Quota::per_second(NonZeroU32::new(5).unwrap()),
-                        initial: Duration::from_secs(1),
-                        timeout: Duration::from_secs(2),
-                    },
+                    initial: Duration::from_secs(1),
+                    timeout: Duration::from_secs(2),
                     fetch_retry_timeout: Duration::from_millis(100),
                     priority_requests: false,
                     priority_responses: false,
