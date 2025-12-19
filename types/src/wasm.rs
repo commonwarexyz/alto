@@ -1,11 +1,11 @@
 use crate::{Block, Finalized, Identity, Notarized, Scheme, Seed, Signature, EPOCH, NAMESPACE};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::{
+    simplex::elector::Random,
     types::{Round, View},
     Viewable,
 };
-use commonware_cryptography::Digestible;
-use commonware_utils::modulo;
+use commonware_cryptography::{bls12381::primitives::variant::MinSig, Digestible};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -143,9 +143,9 @@ pub fn leader_index(seed: JsValue, participants: usize) -> usize {
     let round = Round::new(EPOCH, View::new(seed.view));
     let seed = Seed::new(round, signature);
 
-    if round.view().get() == 1 {
-        round.epoch().get().wrapping_add(round.view().get()) as usize % participants
-    } else {
-        modulo(seed.signature.encode().as_ref(), participants as u64) as usize
-    }
+    Random::select_leader::<MinSig>(
+        round,
+        participants,
+        (round.view().get() != 1).then(|| seed.signature),
+    ) as usize
 }
