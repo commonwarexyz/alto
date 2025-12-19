@@ -206,7 +206,7 @@ mod tests {
                 public_keys.insert(public_key.clone());
 
                 // Configure engine
-                let uid = format!("validator-{public_key}");
+                let uid = format!("validator_{public_key}");
                 let config: Config<_, Mock> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
@@ -264,7 +264,7 @@ mod tests {
                 let mut success = false;
                 for line in metrics.lines() {
                     // Ensure it is a metrics line
-                    if !line.starts_with("validator-") {
+                    if !line.starts_with("validator_") {
                         continue;
                     }
 
@@ -390,7 +390,7 @@ mod tests {
 
                 // Configure engine
                 let public_key = signer.public_key();
-                let uid = format!("validator-{public_key}");
+                let uid = format!("validator_{public_key}");
                 let config: Config<_, Mock> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
@@ -448,7 +448,7 @@ mod tests {
                 let mut success = false;
                 for line in metrics.lines() {
                     // Ensure it is a metrics line
-                    if !line.starts_with("validator-") {
+                    if !line.starts_with("validator_") {
                         continue;
                     }
 
@@ -493,7 +493,7 @@ mod tests {
             let signer = private_keys[0].clone();
             let share = schemes[0].share().cloned().unwrap();
             let public_key = signer.public_key();
-            let uid = format!("validator-{public_key}");
+            let uid = format!("validator_{public_key}");
             let config: Config<_, Mock> = engine::Config {
                 blocker: oracle.control(public_key.clone()),
                 partition_prefix: uid.clone(),
@@ -550,7 +550,7 @@ mod tests {
                 let mut success = false;
                 for line in metrics.lines() {
                     // Ensure it is a metrics line
-                    if !line.starts_with("validator-") {
+                    if !line.starts_with("validator_") {
                         continue;
                     }
 
@@ -639,7 +639,7 @@ mod tests {
                     public_keys.insert(public_key.clone());
 
                     // Configure engine
-                    let uid = format!("validator-{public_key}");
+                    let uid = format!("validator_{public_key}");
                     let config: Config<_, Mock> = engine::Config {
                         blocker: oracle.control(public_key.clone()),
                         partition_prefix: uid.clone(),
@@ -700,7 +700,7 @@ mod tests {
                             let mut success = false;
                             for line in metrics.lines() {
                                 // Ensure it is a metrics line
-                                if !line.starts_with("validator-") {
+                                if !line.starts_with("validator_") {
                                     continue;
                                 }
 
@@ -823,7 +823,7 @@ mod tests {
                 public_keys.insert(public_key.clone());
 
                 // Configure engine
-                let uid = format!("validator-{public_key}");
+                let uid = format!("validator_{public_key}");
                 let config: Config<_, Mock> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
@@ -881,7 +881,7 @@ mod tests {
                 let mut success = false;
                 for line in metrics.lines() {
                     // Ensure it is a metrics line
-                    if !line.starts_with("validator-") {
+                    if !line.starts_with("validator_") {
                         continue;
                     }
 
