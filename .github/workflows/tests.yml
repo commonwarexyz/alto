@@ -16,11 +16,10 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    - name: Get Rust version
-      id: rust-version
-      run: echo "rust_version=$(rustc --version)" >> "$GITHUB_OUTPUT"
-    - name: Run setup
-      uses: ./.github/actions/setup
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+      with:
+        save-if: ${{ github.ref == 'refs/heads/main' }}
     - name: Lint
       run: cargo clippy --all-targets --all-features -- -D warnings
     - name: Fmt
@@ -37,23 +36,9 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    - name: Install nightly Rust toolchain
-      run: rustup toolchain install nightly
-    - name: Get Rust version
-      id: rust-version
-      run: echo "rust_version=$(rustc +nightly --version)" >> "$GITHUB_OUTPUT"
-    - name: Run setup
-      uses: ./.github/actions/setup
-    - uses: dtolnay/rust-toolchain@stable
-    - name: Cache cargo-udeps
-      id: cargo-udeps-cache
-      uses: actions/cache@v4
-      with:
-        path: ~/.cargo/bin/cargo-udeps
-        key: ${{ runner.os }}-${{ env.UDEPS_VERSION }}-cargo-udeps-${{ steps.rust-version.outputs.rust_version }}
-    - name: Install cargo-udeps
-      if: steps.cargo-udeps-cache.outputs.cache-hit != 'true'
-      run: cargo install cargo-udeps --version ${{ env.UDEPS_VERSION }}
+    - uses: dtolnay/rust-toolchain@nightly
+    - name: Install udeps
+      uses: taiki-e/install-action@cargo-udeps
     - name: Check for unused dependencies
       run: cargo udeps --all-targets
 
@@ -62,17 +47,18 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    - name: Get Rust version
-      id: rust-version
-      run: echo "rust_version=$(rustc --version)" >> "$GITHUB_OUTPUT"
-    - name: Run setup
-      uses: ./.github/actions/setup
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+      with:
+        save-if: ${{ github.ref == 'refs/heads/main' }}
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
         cache-dependency-path: explorer/package-lock.json
+    - name: Install wasm-pack
+      uses: taiki-e/install-action@wasm-pack
     - name: Install dependencies
       run: cd explorer && npm ci
     - name: Test compilation
@@ -83,14 +69,18 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+    - uses: Swatinem/rust-cache@v2
+      with:
+        save-if: ${{ github.ref == 'refs/heads/main' }}
     - name: Get Rust version
       id: rust-version
       run: echo "rust_version=$(rustc --version)" >> "$GITHUB_OUTPUT"
-    - name: Run setup
-      uses: ./.github/actions/setup
-    - name: Add WASM target
-      run: rustup target add wasm32-unknown-unknown
     - name: Build types
       run: cargo build --target wasm32-unknown-unknown --release --manifest-path types/Cargo.toml && du -h target/wasm32-unknown-unknown/release/alto_types.wasm
+    - name: Install wasm-pack
+      uses: taiki-e/install-action@wasm-pack
     - name: Pack types
       run: wasm-pack build types --release --target web
