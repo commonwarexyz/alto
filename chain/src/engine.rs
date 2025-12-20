@@ -311,12 +311,12 @@ impl<
         ),
         marshal: (
             mpsc::Receiver<handler::Message<Block>>,
-            impl Resolver<Key = handler::Request<Block>>,
+            impl Resolver<Key = handler::Request<Block>, PublicKey = PublicKey>,
         ),
     ) -> Handle<()> {
         spawn_cell!(
             self.context,
-            self.run(pending, recovered, resolver, broadcast, marshal,)
+            self.run(pending, recovered, resolver, broadcast, marshal)
                 .await
         )
     }
@@ -342,7 +342,7 @@ impl<
         ),
         marshal: (
             mpsc::Receiver<handler::Message<Block>>,
-            impl Resolver<Key = handler::Request<Block>>,
+            impl Resolver<Key = handler::Request<Block>, PublicKey = PublicKey>,
         ),
     ) {
         // Start the buffer
