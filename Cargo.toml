@@ -15,19 +15,19 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 alto-client = { version = "0.0.16", path = "client" }
 alto-types = { version = "0.0.16", path = "types" }
-commonware-broadcast = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "4c4c7dd3b4f581a522d798f205a2633091225f15" }
-commonware-codec = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "4c4c7dd3b4f581a522d798f205a2633091225f15" }
-commonware-consensus = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "4c4c7dd3b4f581a522d798f205a2633091225f15" }
-commonware-cryptography = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "4c4c7dd3b4f581a522d798f205a2633091225f15" }
-commonware-deployer = {  git = "https://github.com/commonwarexyz/monorepo.git", rev = "4c4c7dd3b4f581a522d798f205a2633091225f15", default-features = false }
-commonware-macros = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "4c4c7dd3b4f581a522d798f205a2633091225f15" }
-commonware-p2p = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "4c4c7dd3b4f581a522d798f205a2633091225f15" }
-commonware-resolver = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "4c4c7dd3b4f581a522d798f205a2633091225f15" }
-commonware-runtime = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "4c4c7dd3b4f581a522d798f205a2633091225f15" }
-commonware-storage = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "4c4c7dd3b4f581a522d798f205a2633091225f15" }
-commonware-stream = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "4c4c7dd3b4f581a522d798f205a2633091225f15" }
-commonware-utils = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "4c4c7dd3b4f581a522d798f205a2633091225f15" }
-commonware-math = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "4c4c7dd3b4f581a522d798f205a2633091225f15" }
+commonware-broadcast = "0.0.64"
+commonware-codec = "0.0.64"
+commonware-consensus = "0.0.64"
+commonware-cryptography = "0.0.64"
+commonware-deployer = { version = "0.0.64", default-features = false }
+commonware-macros = "0.0.64"
+commonware-p2p = "0.0.64"
+commonware-resolver = "0.0.64"
+commonware-runtime = "0.0.64"
+commonware-storage = "0.0.64"
+commonware-stream = "0.0.64"
+commonware-utils = "0.0.64"
+commonware-math = "0.0.64"
 thiserror = "2.0.12"
 bytes = "1.7.1"
 rand = "0.8.5"
