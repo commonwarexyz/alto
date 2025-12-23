@@ -345,309 +345,286 @@ async fn handle_consensus_ws(socket: axum::extract::ws::WebSocket, simulator: Ar
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
-    // use alto_client::{Client, IndexQuery, Query};
-    // use commonware_consensus::{
-    //     threshold_simplex::types::{
-    //         seed_namespace, view_message, Finalization, Finalize, Notarization, Notarize, Proposal,
-    //     },
-    //     Viewable,
-    // };
-    // use commonware_cryptography::{
-    //     bls12381::{
-    //         dkg::ops as dkg_ops,
-    //         primitives::{
-    //             group::{Private, Share},
-    //             ops,
-    //             ops::threshold_signature_recover,
-    //             poly,
-    //             variant::MinSig,
-    //         },
-    //     },
-    //     hash, Digestible,
-    // };
-    // use rand::{rngs::StdRng, SeedableRng};
-    // use std::net::SocketAddr;
-    // use tokio::net::TcpListener;
-    //
-    // fn create_test_seed(master_secret: &Private, view: u64) -> Seed {
-    //     let seed_namespace = seed_namespace(NAMESPACE);
-    //     let message = view_message(view);
-    //     Seed::new(
-    //         view,
-    //         ops::sign_message::<MinSig>(master_secret, Some(&seed_namespace), &message),
-    //     )
-    // }
-    //
-    // fn create_notarization(
-    //     shares: &[Share],
-    //     proposal: Proposal<commonware_cryptography::sha256::Digest>,
-    // ) -> Notarization<MinSig, commonware_cryptography::sha256::Digest> {
-    //     let partials = shares
-    //         .iter()
-    //         .map(|share| Notarize::<MinSig, _>::sign(NAMESPACE, share, proposal.clone()))
-    //         .collect::<Vec<_>>();
-    //
-    //     let proposal_partials = partials
-    //         .iter()
-    //         .map(|partial| partial.proposal_signature.clone())
-    //         .collect::<Vec<_>>();
-    //     let proposal_recovered =
-    //         threshold_signature_recover::<MinSig, _>(3, &proposal_partials).unwrap();
-    //
-    //     let seed_partials = partials
-    //         .into_iter()
-    //         .map(|partial| partial.seed_signature)
-    //         .collect::<Vec<_>>();
-    //     let seed_recovered = threshold_signature_recover::<MinSig, _>(3, &seed_partials).unwrap();
-    //
-    //     Notarization::new(proposal, proposal_recovered, seed_recovered)
-    // }
-    //
-    // fn create_finalization(
-    //     shares: &[Share],
-    //     proposal: Proposal<commonware_cryptography::sha256::Digest>,
-    // ) -> Finalization<MinSig, commonware_cryptography::sha256::Digest> {
-    //     let partials = shares
-    //         .iter()
-    //         .map(|share| Notarize::<MinSig, _>::sign(NAMESPACE, share, proposal.clone()))
-    //         .collect::<Vec<_>>();
-    //     let seed_partials = partials
-    //         .into_iter()
-    //         .map(|partial| partial.seed_signature)
-    //         .collect::<Vec<_>>();
-    //     let seed_recovered = threshold_signature_recover::<MinSig, _>(3, &seed_partials).unwrap();
-    //
-    //     let finalize_partials = shares
-    //         .iter()
-    //         .map(|share| Finalize::<MinSig, _>::sign(NAMESPACE, share, proposal.clone()))
-    //         .collect::<Vec<_>>();
-    //     let finalize_partials = finalize_partials
-    //         .into_iter()
-    //         .map(|partial| partial.proposal_signature)
-    //         .collect::<Vec<_>>();
-    //     let finalize_recovered =
-    //         threshold_signature_recover::<MinSig, _>(3, &finalize_partials).unwrap();
-    //
-    //     Finalization::new(proposal, finalize_recovered, seed_recovered)
-    // }
-    //
-    // async fn start_test_server(identity: Identity) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    //     let simulator = Arc::new(Simulator::new(identity));
-    //     let api = Api::new(simulator);
-    //     let app = api.router();
-    //
-    //     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    //     let addr = listener.local_addr().unwrap();
-    //
-    //     let handle = tokio::spawn(async move {
-    //         axum::serve(listener, app).await.unwrap();
-    //     });
-    //
-    //     // Give the server a moment to start
-    //     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    //
-    //     (addr, handle)
-    // }
-    //
-    // #[tokio::test]
-    // async fn test_seed_operations() {
-    //     // Create network key
-    //     let mut rng = StdRng::seed_from_u64(0);
-    //     let (master_secret, identity) = ops::keypair::<_, MinSig>(&mut rng);
-    //
-    //     // Start server
-    //     let (addr, _handle) = start_test_server(identity).await;
-    //     let client = Client::new(&format!("http://{addr}"), identity);
-    //
-    //     // Test seed upload and retrieval
-    //     let seed = create_test_seed(&master_secret, 1);
-    //     client.seed_upload(seed.clone()).await.unwrap();
-    //
-    //     let retrieved = client.seed_get(IndexQuery::Latest).await.unwrap();
-    //     assert_eq!(retrieved.view(), seed.view());
-    //
-    //     let retrieved = client.seed_get(IndexQuery::Index(1)).await.unwrap();
-    //     assert_eq!(retrieved.view(), 1);
-    // }
-    //
-    // #[tokio::test]
-    // async fn test_notarization_operations() {
-    //     // Create network key for identity (what the simulator checks)
-    //     let mut rng = StdRng::seed_from_u64(0);
-    //     let (polynomial, shares) = dkg_ops::generate_shares::<_, MinSig>(&mut rng, None, 4, 3);
-    //     let identity = *poly::public::<MinSig>(&polynomial);
-    //
-    //     // Start server
-    //     let (addr, _handle) = start_test_server(identity).await;
-    //     let client = Client::new(&format!("http://{addr}"), identity);
-    //
-    //     // Test notarization
-    //     let block = Block::new(hash(b"genesis"), 1, 1000);
-    //     let proposal = Proposal::new(1, 0, block.digest());
-    //     let notarization = create_notarization(&shares, proposal);
-    //     let notarized = Notarized::new(notarization, block);
-    //
-    //     client.notarized_upload(notarized.clone()).await.unwrap();
-    //
-    //     let retrieved = client.notarized_get(IndexQuery::Latest).await.unwrap();
-    //     assert_eq!(retrieved.proof.view(), 1);
-    //
-    //     let retrieved = client.notarized_get(IndexQuery::Index(1)).await.unwrap();
-    //     assert_eq!(retrieved.proof.view(), 1);
-    // }
-    //
-    // #[tokio::test]
-    // async fn test_finalization_operations() {
-    //     // Create network key for identity (what the simulator checks)
-    //     let mut rng = StdRng::seed_from_u64(0);
-    //     let (polynomial, shares) = dkg_ops::generate_shares::<_, MinSig>(&mut rng, None, 4, 3);
-    //     let identity = *poly::public::<MinSig>(&polynomial);
-    //
-    //     // Start server
-    //     let (addr, _handle) = start_test_server(identity).await;
-    //     let client = Client::new(&format!("http://{addr}"), identity);
-    //
-    //     // Test finalization
-    //     let block = Block::new(hash(b"genesis"), 1, 1000);
-    //     let proposal = Proposal::new(1, 0, block.digest());
-    //     let finalization = create_finalization(&shares, proposal);
-    //     let finalized = Finalized::new(finalization, block);
-    //
-    //     client.finalized_upload(finalized.clone()).await.unwrap();
-    //
-    //     let retrieved = client.finalized_get(IndexQuery::Latest).await.unwrap();
-    //     assert_eq!(retrieved.proof.view(), 1);
-    //
-    //     let retrieved = client.finalized_get(IndexQuery::Index(1)).await.unwrap();
-    //     assert_eq!(retrieved.proof.view(), 1);
-    // }
-    //
-    // #[tokio::test]
-    // async fn test_block_retrieval() {
-    //     // Create network key for identity (what the simulator checks)
-    //     let mut rng = StdRng::seed_from_u64(0);
-    //     let (polynomial, shares) = dkg_ops::generate_shares::<_, MinSig>(&mut rng, None, 4, 3);
-    //     let identity = *poly::public::<MinSig>(&polynomial);
-    //
-    //     // Start server
-    //     let (addr, _handle) = start_test_server(identity).await;
-    //     let client = Client::new(&format!("http://{addr}"), identity);
-    //
-    //     // Submit finalized block
-    //     let block = Block::new(hash(b"genesis"), 1, 1000);
-    //     let proposal = Proposal::new(1, 0, block.digest());
-    //     let finalization = create_finalization(&shares, proposal);
-    //     let finalized = Finalized::new(finalization, block.clone());
-    //
-    //     client.finalized_upload(finalized).await.unwrap();
-    //
-    //     // Test retrieval by latest
-    //     let payload = client.block_get(Query::Latest).await.unwrap();
-    //     match payload {
-    //         alto_client::consensus::Payload::Finalized(f) => {
-    //             assert_eq!(f.block.height, 1);
-    //         }
-    //         _ => panic!("Expected finalized block"),
-    //     }
-    //
-    //     // Test retrieval by index
-    //     let payload = client.block_get(Query::Index(1)).await.unwrap();
-    //     match payload {
-    //         alto_client::consensus::Payload::Finalized(f) => {
-    //             assert_eq!(f.block.height, 1);
-    //         }
-    //         _ => panic!("Expected finalized block"),
-    //     }
-    //
-    //     // Test retrieval by digest
-    //     let payload = client
-    //         .block_get(Query::Digest(block.digest()))
-    //         .await
-    //         .unwrap();
-    //     match payload {
-    //         alto_client::consensus::Payload::Block(b) => {
-    //             assert_eq!(b.digest(), block.digest());
-    //         }
-    //         _ => panic!("Expected block"),
-    //     }
-    // }
-    //
-    // #[tokio::test]
-    // async fn test_websocket_streaming() {
-    //     // Create network key
-    //     let mut rng = StdRng::seed_from_u64(0);
-    //     let (master_secret, identity) = ops::keypair::<_, MinSig>(&mut rng);
-    //
-    //     // Start server
-    //     let (addr, _handle) = start_test_server(identity).await;
-    //     let client = Client::new(&format!("http://{addr}"), identity);
-    //
-    //     // Start listening
-    //     let mut stream = client.listen().await.unwrap();
-    //
-    //     // Submit a seed while listening
-    //     let seed = create_test_seed(&master_secret, 1);
-    //     let client_clone = client.clone();
-    //     tokio::spawn(async move {
-    //         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-    //         client_clone.seed_upload(seed).await.unwrap();
-    //     });
-    //
-    //     // Wait for the seed message
-    //     use futures::StreamExt;
-    //     if let Some(Ok(msg)) = stream.next().await {
-    //         match msg {
-    //             alto_client::consensus::Message::Seed(s) => {
-    //                 assert_eq!(s.view(), 1);
-    //             }
-    //             _ => panic!("Expected seed message"),
-    //         }
-    //     } else {
-    //         panic!("Expected to receive a message");
-    //     }
-    // }
-    //
-    // #[tokio::test]
-    // async fn test_identity_verification() {
-    //     // Create two different identities
-    //     let mut rng = StdRng::seed_from_u64(0);
-    //     let (master_secret1, identity1) = ops::keypair::<_, MinSig>(&mut rng);
-    //     let (_, identity2) = ops::keypair::<_, MinSig>(&mut rng);
-    //
-    //     // Start server with identity1
-    //     let (addr, _handle) = start_test_server(identity1).await;
-    //
-    //     // Create client with identity2 (different from server)
-    //     let client = Client::new(&format!("http://{addr}"), identity2);
-    //
-    //     // Upload a seed signed by identity1 (server will accept it)
-    //     let seed = create_test_seed(&master_secret1, 1);
-    //     client.seed_upload(seed).await.unwrap(); // This succeeds - server accepts it
-    //
-    //     // Try to retrieve the seed - client will fail to verify since it expects identity2
-    //     let result = client.seed_get(IndexQuery::Latest).await;
-    //     assert!(result.is_err()); // Fails because client expects identity2 but seed is signed by identity1
-    // }
-    //
-    // #[tokio::test]
-    // async fn test_invalid_signature_rejection() {
-    //     // Create network key
-    //     let mut rng = StdRng::seed_from_u64(0);
-    //     let (_, identity) = ops::keypair::<_, MinSig>(&mut rng);
-    //
-    //     // Create a different master secret (wrong one)
-    //     let (wrong_master_secret, _) = ops::keypair::<_, MinSig>(&mut rng);
-    //
-    //     // Start server
-    //     let (addr, _handle) = start_test_server(identity).await;
-    //     let client = Client::new(&format!("http://{addr}"), identity);
-    //
-    //     // Create seed with wrong signature
-    //     let bad_seed = create_test_seed(&wrong_master_secret, 1);
-    //
-    //     // This should fail at the server because the signature doesn't match the identity
-    //     let result = client.seed_upload(bad_seed).await;
-    //     assert!(result.is_err());
-    // }
+    use super::*;
+    use alto_client::{Client, IndexQuery, Query};
+    use alto_types::{Identity, Seedable, EPOCH};
+    use commonware_consensus::{
+        simplex::{
+            scheme::bls12381_threshold,
+            types::{Finalization, Finalize, Notarization, Notarize, Proposal},
+        },
+        types::{Round, View},
+        Viewable,
+    };
+    use commonware_cryptography::{
+        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, Digestible, Hasher,
+        Sha256,
+    };
+    use rand::{rngs::StdRng, SeedableRng};
+    use std::net::SocketAddr;
+    use tokio::net::TcpListener;
+
+    /// Test context containing common setup for simulator tests.
+    struct TestContext {
+        schemes: Vec<Scheme>,
+        client: Client,
+    }
+
+    impl TestContext {
+        /// Create a new test context with a running server and client.
+        async fn new() -> Self {
+            let mut rng = StdRng::seed_from_u64(0);
+            let Fixture { schemes, .. } = bls12381_threshold::fixture::<MinSig, _>(&mut rng, 4);
+            let identity = *schemes[0].polynomial().public();
+
+            let (addr, _) = start_server(schemes[0].clone()).await;
+            let client = Client::new(&format!("http://{addr}"), identity);
+
+            Self { schemes, client }
+        }
+
+        /// Create a test block with standard parameters.
+        fn test_block(&self) -> Block {
+            Block::new(Sha256::hash(b"genesis"), 1, 1000)
+        }
+
+        /// Create a proposal for the given block at view 1.
+        fn proposal(&self, block: &Block) -> Proposal<commonware_cryptography::sha256::Digest> {
+            Proposal::new(
+                Round::new(EPOCH, View::new(1)),
+                View::new(0),
+                block.digest(),
+            )
+        }
+
+        /// Create a seed by first creating a notarization.
+        fn seed(&self) -> Seed {
+            let block = self.test_block();
+            let proposal = self.proposal(&block);
+            create_notarization(&self.schemes, proposal).seed()
+        }
+
+        /// Create a notarized block.
+        fn notarized(&self) -> Notarized {
+            let block = self.test_block();
+            let proposal = self.proposal(&block);
+            Notarized::new(create_notarization(&self.schemes, proposal), block)
+        }
+
+        /// Create a finalized block.
+        fn finalized(&self) -> Finalized {
+            let block = self.test_block();
+            let proposal = self.proposal(&block);
+            Finalized::new(create_finalization(&self.schemes, proposal), block)
+        }
+    }
+
+    fn create_notarization(
+        schemes: &[Scheme],
+        proposal: Proposal<commonware_cryptography::sha256::Digest>,
+    ) -> alto_types::Notarization {
+        let notarizes: Vec<_> = schemes
+            .iter()
+            .map(|scheme| Notarize::sign(scheme, NAMESPACE, proposal.clone()).unwrap())
+            .collect();
+        Notarization::from_notarizes(&schemes[0], &notarizes).unwrap()
+    }
+
+    fn create_finalization(
+        schemes: &[Scheme],
+        proposal: Proposal<commonware_cryptography::sha256::Digest>,
+    ) -> alto_types::Finalization {
+        let finalizes: Vec<_> = schemes
+            .iter()
+            .map(|scheme| Finalize::sign(scheme, NAMESPACE, proposal.clone()).unwrap())
+            .collect();
+        Finalization::from_finalizes(&schemes[0], &finalizes).unwrap()
+    }
+
+    async fn start_server(scheme: Scheme) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+        let simulator = Arc::new(Simulator::new(scheme));
+        let api = Api::new(simulator);
+        let app = api.router();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        // Give the server a moment to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        (addr, handle)
+    }
+
+    fn fixture(seed: u64) -> (Vec<Scheme>, Identity) {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let Fixture { schemes, .. } = bls12381_threshold::fixture::<MinSig, _>(&mut rng, 4);
+        let identity = *schemes[0].polynomial().public();
+        (schemes, identity)
+    }
+
+    #[tokio::test]
+    async fn test_seed_operations() {
+        let ctx = TestContext::new().await;
+        let seed = ctx.seed();
+
+        ctx.client.seed_upload(seed.clone()).await.unwrap();
+
+        let retrieved = ctx.client.seed_get(IndexQuery::Latest).await.unwrap();
+        assert_eq!(retrieved.view(), seed.view());
+
+        let retrieved = ctx.client.seed_get(IndexQuery::Index(1)).await.unwrap();
+        assert_eq!(retrieved.view().get(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_notarization_operations() {
+        let ctx = TestContext::new().await;
+        let notarized = ctx.notarized();
+
+        ctx.client.notarized_upload(notarized).await.unwrap();
+
+        let retrieved = ctx.client.notarized_get(IndexQuery::Latest).await.unwrap();
+        assert_eq!(retrieved.proof.view().get(), 1);
+
+        let retrieved = ctx
+            .client
+            .notarized_get(IndexQuery::Index(1))
+            .await
+            .unwrap();
+        assert_eq!(retrieved.proof.view().get(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_finalization_operations() {
+        let ctx = TestContext::new().await;
+        let finalized = ctx.finalized();
+
+        ctx.client.finalized_upload(finalized).await.unwrap();
+
+        let retrieved = ctx.client.finalized_get(IndexQuery::Latest).await.unwrap();
+        assert_eq!(retrieved.proof.view().get(), 1);
+
+        let retrieved = ctx
+            .client
+            .finalized_get(IndexQuery::Index(1))
+            .await
+            .unwrap();
+        assert_eq!(retrieved.proof.view().get(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_block_retrieval() {
+        let ctx = TestContext::new().await;
+        let block = ctx.test_block();
+        let finalized = ctx.finalized();
+
+        ctx.client.finalized_upload(finalized).await.unwrap();
+
+        // Test retrieval by latest
+        let payload = ctx.client.block_get(Query::Latest).await.unwrap();
+        match payload {
+            alto_client::consensus::Payload::Finalized(f) => {
+                assert_eq!(f.block.height, 1);
+            }
+            _ => panic!("Expected finalized block"),
+        }
+
+        // Test retrieval by index
+        let payload = ctx.client.block_get(Query::Index(1)).await.unwrap();
+        match payload {
+            alto_client::consensus::Payload::Finalized(f) => {
+                assert_eq!(f.block.height, 1);
+            }
+            _ => panic!("Expected finalized block"),
+        }
+
+        // Test retrieval by digest
+        let payload = ctx
+            .client
+            .block_get(Query::Digest(block.digest()))
+            .await
+            .unwrap();
+        match payload {
+            alto_client::consensus::Payload::Block(b) => {
+                assert_eq!(b.digest(), block.digest());
+            }
+            _ => panic!("Expected block"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_websocket_streaming() {
+        let ctx = TestContext::new().await;
+        let seed = ctx.seed();
+
+        let mut stream = ctx.client.listen().await.unwrap();
+
+        // Submit the seed while listening
+        let client = ctx.client.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            client.seed_upload(seed).await.unwrap();
+        });
+
+        // Wait for the seed message
+        use futures::StreamExt;
+        if let Some(Ok(msg)) = stream.next().await {
+            match msg {
+                alto_client::consensus::Message::Seed(s) => {
+                    assert_eq!(s.view().get(), 1);
+                }
+                _ => panic!("Expected seed message"),
+            }
+        } else {
+            panic!("Expected to receive a message");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_identity_verification() {
+        // Create two different fixtures
+        let (schemes1, _) = fixture(0);
+        let (_, identity2) = fixture(1);
+
+        // Start server with schemes1, but create client expecting identity2
+        let (addr, _handle) = start_server(schemes1[0].clone()).await;
+        let client = Client::new(&format!("http://{addr}"), identity2);
+
+        // Create a seed signed by schemes1
+        let block = Block::new(Sha256::hash(b"genesis"), 1, 1000);
+        let proposal = Proposal::new(
+            Round::new(EPOCH, View::new(1)),
+            View::new(0),
+            block.digest(),
+        );
+        let seed = create_notarization(&schemes1, proposal).seed();
+
+        // Server accepts it (signed by schemes1, which server uses)
+        client.seed_upload(seed).await.unwrap();
+
+        // Client fails to verify (expects identity2 but seed is signed by schemes1)
+        let result = client.seed_get(IndexQuery::Latest).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_invalid_signature_rejection() {
+        let ctx = TestContext::new().await;
+
+        // Create different schemes (wrong ones)
+        let (wrong_schemes, _) = fixture(1);
+
+        // Create a seed with wrong schemes
+        let block = ctx.test_block();
+        let proposal = ctx.proposal(&block);
+        let bad_seed = create_notarization(&wrong_schemes, proposal).seed();
+
+        // Server rejects it (signature doesn't match server's identity)
+        let result = ctx.client.seed_upload(bad_seed).await;
+        assert!(result.is_err());
+    }
 }

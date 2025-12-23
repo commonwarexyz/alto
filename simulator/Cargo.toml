@@ -33,3 +33,7 @@ path = "src/main.rs"
 [lib]
 name = "alto_simulator"
 path = "src/lib.rs"
+
+[dev-dependencies]
+commonware-cryptography = { workspace = true, features = ["mocks"] }
+commonware-consensus = { workspace = true, features = ["mocks"] }
