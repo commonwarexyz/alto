@@ -1,5 +1,5 @@
 use alto_simulator::{Api, Simulator};
-use alto_types::Identity;
+use alto_types::{Identity, Scheme};
 use clap::Parser;
 use commonware_codec::DecodeExt;
 use std::sync::Arc;
@@ -34,7 +34,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Identity::decode(&mut bytes.as_slice()).map_err(|_| "Failed to decode identity")?;
 
     // Initialize simulator
-    let simulator = Arc::new(Simulator::new(identity));
+    let certificate_verifier = Scheme::certificate_verifier(identity);
+    let simulator = Arc::new(Simulator::new(certificate_verifier));
     let api = Api::new(simulator);
     let app = api.router();
 

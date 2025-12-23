@@ -8,7 +8,7 @@ use thiserror::Error;
 pub mod consensus;
 pub mod utils;
 
-const LATEST: &str = "latest";
+pub const LATEST: &str = "latest";
 
 pub enum Query {
     Latest,
