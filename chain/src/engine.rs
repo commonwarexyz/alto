@@ -1,5 +1,5 @@
 use crate::{
-    application::AltoApp,
+    application::Application,
     indexer::{self, Indexer},
 };
 use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
@@ -81,9 +81,9 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub indexer: Option<I>,
 }
 
-type Marshaled<E> = ConsensusMarshaled<E, Scheme, AltoApp, Block, FixedEpocher>;
+type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpocher>;
 
-/// The engine that drives the [AltoApp].
+/// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
 pub struct Engine<
     E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
@@ -229,7 +229,7 @@ impl<
         .await;
 
         // Create the application
-        let app = AltoApp::new();
+        let app = Application::new();
         let marshaled = Marshaled::new(
             context.with_label("marshaled"),
             app,

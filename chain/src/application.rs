@@ -2,7 +2,7 @@ use alto_types::{Block, PublicKey, Scheme};
 use commonware_consensus::{
     marshal::{ingress::mailbox::AncestorStream, Update},
     simplex::types::Context,
-    Application, Block as _, Reporter, VerifyingApplication,
+    Block as _, Reporter,
 };
 use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256};
 use commonware_runtime::{Clock, Metrics, Spawner};
@@ -19,11 +19,11 @@ const GENESIS: &[u8] = b"commonware is neat";
 const SYNCHRONY_BOUND: u64 = 500;
 
 #[derive(Clone)]
-pub struct AltoApp {
+pub struct Application {
     genesis: Arc<Block>,
 }
 
-impl AltoApp {
+impl Application {
     pub fn new() -> Self {
         let genesis = Block::new(Sha256::hash(GENESIS), 0, 0);
         Self {
@@ -32,13 +32,13 @@ impl AltoApp {
     }
 }
 
-impl Default for AltoApp {
+impl Default for Application {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<E> Application<E> for AltoApp
+impl<E> commonware_consensus::Application<E> for Application
 where
     E: Rng + Spawner + Metrics + Clock,
 {
@@ -67,7 +67,7 @@ where
     }
 }
 
-impl<E> VerifyingApplication<E> for AltoApp
+impl<E> commonware_consensus::VerifyingApplication<E> for Application
 where
     E: Rng + Spawner + Metrics + Clock,
 {
@@ -100,7 +100,7 @@ where
     }
 }
 
-impl Reporter for AltoApp {
+impl Reporter for Application {
     type Activity = Update<Block>;
 
     async fn report(&mut self, activity: Self::Activity) {
