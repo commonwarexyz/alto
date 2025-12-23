@@ -18,32 +18,38 @@ _To run this example, you must first install [Rust](https://www.rust-lang.org/to
 #### Create Artifacts
 
 ```bash
-cargo run --bin setup -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --output test local --start-port 3000
+cargo run --bin setup -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --output test local --start-port 3000 --indexer-port 8080
 ```
 
 _If setup succeeds, you should see the following output:_
 
 ```
-2025-05-02T14:47:55.906379Z  INFO setup: generated network key identity=ab6284904e71efb665c42f7ab1f713bfc2c87e2bd937c4027514cea74ef588c05803a4592ddd1970def6bd261210b83b
-2025-05-02T14:47:55.907805Z  INFO setup: wrote peer configuration file path="4cf00f5c66ed27ba3e753f6a8b989b306eae5ce2d3f3c2db105aae2123a012c8.yaml"
-2025-05-02T14:47:55.908022Z  INFO setup: wrote peer configuration file path="95ce6a717dfc7b7dc8dcded623c4bc5ce7a6b4e9c986e923baa3acc5078d7a0f.yaml"
-2025-05-02T14:47:55.908239Z  INFO setup: wrote peer configuration file path="f79141801d52e8a1a7f16b639038032f1a402707ad51f6d7aa94098c8f07e068.yaml"
-2025-05-02T14:47:55.908458Z  INFO setup: wrote peer configuration file path="f79a65c60ac706e67dd964cf4cde9b804c89c15c330f00c9b0adc2ef51d6616c.yaml"
-2025-05-02T14:47:55.908669Z  INFO setup: wrote peer configuration file path="fa6fffb46bb3aceecde1324ac31d8cfddda6c0857a63567796ff8507fef1a965.yaml"
-2025-05-02T14:47:55.908677Z  INFO setup: setup complete bootstrappers=["fa6fffb46bb3aceecde1324ac31d8cfddda6c0857a63567796ff8507fef1a965"]
+2025-12-23T13:41:54.034863Z  INFO setup: generated network key identity=8b2c34e0356beb83874317f8f04fb211e4d3ed34640631a36ff191cb3fcd9768403b8749824b41ff770a92e40885174b15516db966816870ba9619a64b4d5b79ea7b4a73240710169ecc44da0951cdd60e2db65544cba5647f81ab19ca50cf4e
+2025-12-23T13:41:54.037106Z  INFO setup: wrote peer configuration file path="04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37.yaml"
+2025-12-23T13:41:54.037417Z  INFO setup: wrote peer configuration file path="0b2412d7eb2238b319920504f19b28447c7dbb3c58059c97d22cc0d27ea31e81.yaml"
+2025-12-23T13:41:54.037690Z  INFO setup: wrote peer configuration file path="71943989f39d485eb8a1f7c8f9909673caaa658d12a586c93f37575dae44438f.yaml"
+2025-12-23T13:41:54.037966Z  INFO setup: wrote peer configuration file path="c58244243f263ebc975640d5bb4e43e8e78e4b41361e4e7984cd8b027480558a.yaml"
+2025-12-23T13:41:54.038228Z  INFO setup: wrote peer configuration file path="f26a6d4f52c4d595b6cb659b643968b0e1fc9931b460c6407be10cebe4eeff2d.yaml"
+2025-12-23T13:41:54.038232Z  INFO setup: setup complete bootstrappers=["71943989f39d485eb8a1f7c8f9909673caaa658d12a586c93f37575dae44438f"]
+Indexer URL: http://localhost:3010 (pushed by 04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37)
+To start local indexer, run:
+cargo run --bin simulator -- --port 8080 --identity 8b2c34e0356beb83874317f8f04fb211e4d3ed34640631a36ff191cb3fcd9768403b8749824b41ff770a92e40885174b15516db966816870ba9619a64b4d5b79ea7b4a73240710169ecc44da0951cdd60e2db65544cba5647f81ab19ca50cf4e
 To start validators, run:
-4cf00f5c66ed27ba3e753f6a8b989b306eae5ce2d3f3c2db105aae2123a012c8: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/4cf00f5c66ed27ba3e753f6a8b989b306eae5ce2d3f3c2db105aae2123a012c8.yaml
-95ce6a717dfc7b7dc8dcded623c4bc5ce7a6b4e9c986e923baa3acc5078d7a0f: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/95ce6a717dfc7b7dc8dcded623c4bc5ce7a6b4e9c986e923baa3acc5078d7a0f.yaml
-f79141801d52e8a1a7f16b639038032f1a402707ad51f6d7aa94098c8f07e068: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/f79141801d52e8a1a7f16b639038032f1a402707ad51f6d7aa94098c8f07e068.yaml
-f79a65c60ac706e67dd964cf4cde9b804c89c15c330f00c9b0adc2ef51d6616c: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/f79a65c60ac706e67dd964cf4cde9b804c89c15c330f00c9b0adc2ef51d6616c.yaml
-fa6fffb46bb3aceecde1324ac31d8cfddda6c0857a63567796ff8507fef1a965: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/fa6fffb46bb3aceecde1324ac31d8cfddda6c0857a63567796ff8507fef1a965.yaml
+04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37.yaml
+0b2412d7eb2238b319920504f19b28447c7dbb3c58059c97d22cc0d27ea31e81: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/0b2412d7eb2238b319920504f19b28447c7dbb3c58059c97d22cc0d27ea31e81.yaml
+71943989f39d485eb8a1f7c8f9909673caaa658d12a586c93f37575dae44438f: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/71943989f39d485eb8a1f7c8f9909673caaa658d12a586c93f37575dae44438f.yaml
+c58244243f263ebc975640d5bb4e43e8e78e4b41361e4e7984cd8b027480558a: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/c58244243f263ebc975640d5bb4e43e8e78e4b41361e4e7984cd8b027480558a.yaml
+f26a6d4f52c4d595b6cb659b643968b0e1fc9931b460c6407be10cebe4eeff2d: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/f26a6d4f52c4d595b6cb659b643968b0e1fc9931b460c6407be10cebe4eeff2d.yaml
 To view metrics, run:
-4cf00f5c66ed27ba3e753f6a8b989b306eae5ce2d3f3c2db105aae2123a012c8: curl http://localhost:3001/metrics
-95ce6a717dfc7b7dc8dcded623c4bc5ce7a6b4e9c986e923baa3acc5078d7a0f: curl http://localhost:3003/metrics
-f79141801d52e8a1a7f16b639038032f1a402707ad51f6d7aa94098c8f07e068: curl http://localhost:3005/metrics
-f79a65c60ac706e67dd964cf4cde9b804c89c15c330f00c9b0adc2ef51d6616c: curl http://localhost:3007/metrics
-fa6fffb46bb3aceecde1324ac31d8cfddda6c0857a63567796ff8507fef1a965: curl http://localhost:3009/metrics
+04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37: curl http://localhost:3001/metrics
+0b2412d7eb2238b319920504f19b28447c7dbb3c58059c97d22cc0d27ea31e81: curl http://localhost:3003/metrics
+71943989f39d485eb8a1f7c8f9909673caaa658d12a586c93f37575dae44438f: curl http://localhost:3005/metrics
+c58244243f263ebc975640d5bb4e43e8e78e4b41361e4e7984cd8b027480558a: curl http://localhost:3007/metrics
+f26a6d4f52c4d595b6cb659b643968b0e1fc9931b460c6407be10cebe4eeff2d: curl http://localhost:3009/metrics
 ```
+
+> [!TIP]
+> The `--indexer-port` flag is optional; if provided, an indexer simulator command is emitted and the first validator is configured to push data to it.
 
 #### Start Validators
 

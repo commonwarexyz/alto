@@ -91,7 +91,12 @@ fn main() {
                             .required(true)
                             .value_parser(value_parser!(u16)),
                     )
-            )
+                    .arg(Arg::new("indexer_port")
+                        .long("indexer-port")
+                        .required(false)
+                        .value_parser(value_parser!(u16)),
+                    )
+                )
                 .subcommand(
                     Command::new("remote")
                         .about("Generate configuration files for `commonware-deployer`-managed deployment")
@@ -239,6 +244,7 @@ fn generate_local(
 ) {
     // Extract arguments
     let start_port = *sub_matches.get_one::<u16>("start_port").unwrap();
+    let indexer_port = sub_matches.get_one::<u16>("indexer_port").copied();
 
     // Construct output path
     let raw_current_dir = std::env::current_dir().unwrap();
@@ -317,6 +323,10 @@ fn generate_local(
         port += 2;
     }
 
+    // Ask the first participant to push to the indexer if specified.
+    let (_, _, first_config) = &mut configurations[0];
+    first_config.indexer = indexer_port.map(|port| format!("http://localhost:{}", port));
+
     // Create required output directories
     fs::create_dir_all(&output).unwrap();
     fs::create_dir_all(&storage_output).unwrap();
@@ -336,6 +346,16 @@ fn generate_local(
 
     // Emit start commands
     info!(?bootstrappers, "setup complete");
+    if let Some(indexer_port) = &indexer_port {
+        println!(
+            "Indexer URL: http://localhost:{port} (pushed by {})",
+            configurations[0].0
+        );
+
+        let command =
+            format!("cargo run --bin simulator -- --port {indexer_port} --identity {identity}",);
+        println!("To start local indexer, run:\n{command}");
+    }
     println!("To start validators, run:");
     for (name, peer_config_file, _) in &configurations {
         let path = format!("{output}/{peer_config_file}");
