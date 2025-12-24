@@ -38,9 +38,9 @@ const ACTIVITY_TIMEOUT: ViewDelta = ViewDelta::new(256);
 const SKIP_TIMEOUT: ViewDelta = ViewDelta::new(32);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(2);
 const FETCH_CONCURRENT: usize = 4;
-const MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
+const MAX_MESSAGE_SIZE: u32 = 1024 * 1024 * 16;
 const MAX_FETCH_COUNT: usize = 16;
-const MAX_FETCH_SIZE: usize = 512 * 1024;
+const MAX_FETCH_SIZE: usize = 512 * 1024 * 16;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 

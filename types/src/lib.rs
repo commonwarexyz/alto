@@ -92,7 +92,7 @@ mod tests {
 
         // Create a block
         let digest = Sha256::hash(b"hello world");
-        let block = Block::new(digest, 10, 100);
+        let block = Block::new(digest, 10, 100, Vec::new());
         let block = CodedBlock::<_, ReedSolomon<Sha256>>::new(block, coding_config, 1);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
@@ -131,7 +131,7 @@ mod tests {
 
         // Create a block
         let digest = Sha256::hash(b"hello world");
-        let block = Block::new(digest, 10, 100);
+        let block = Block::new(digest, 10, 100, Vec::new());
         let block = CodedBlock::<_, ReedSolomon<Sha256>>::new(block, coding_config, 1);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),

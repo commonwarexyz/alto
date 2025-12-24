@@ -29,7 +29,7 @@ pub struct Application {
 
 impl Application {
     pub fn new() -> Self {
-        let genesis = Block::new(Sha256::hash(GENESIS), 0, 0);
+        let genesis = Block::new(Sha256::hash(GENESIS), 0, 0, Vec::new());
         Self {
             genesis: Arc::new(genesis),
         }
@@ -56,7 +56,7 @@ where
 
     async fn propose<A: AncestryProvider<Block = Self::Block>>(
         &mut self,
-        (runtime_context, _context): (E, Self::Context),
+        (mut runtime_context, _context): (E, Self::Context),
         mut ancestry: AncestorStream<A, Self::Block>,
     ) -> Option<Self::Block> {
         let parent = ancestry.next().await?;
@@ -67,7 +67,16 @@ where
             current = parent.timestamp + 1;
         }
 
-        Some(Block::new(parent.digest(), parent.height + 1, current))
+        // Generate some junk data.
+        let mut junk = vec![0u8; 1024 * 1024 * 4];
+        runtime_context.fill_bytes(&mut junk[..]);
+
+        Some(Block::new(
+            parent.digest(),
+            parent.height + 1,
+            current,
+            junk,
+        ))
     }
 }
 
