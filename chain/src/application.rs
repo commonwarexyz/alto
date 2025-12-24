@@ -1,10 +1,14 @@
 use alto_types::{Block, PublicKey, Scheme};
 use commonware_consensus::{
-    marshal::{ingress::mailbox::AncestorStream, Update},
+    marshal::{
+        ancestry::{AncestorStream, AncestryProvider},
+        Update,
+    },
     simplex::types::Context,
+    types::CodingCommitment,
     Block as _, Reporter,
 };
-use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256};
+use commonware_cryptography::{Digestible, Hasher, Sha256};
 use commonware_runtime::{Clock, Metrics, Spawner};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
@@ -43,17 +47,17 @@ where
     E: Rng + Spawner + Metrics + Clock,
 {
     type SigningScheme = Scheme;
-    type Context = Context<Digest, PublicKey>;
+    type Context = Context<CodingCommitment, PublicKey>;
     type Block = Block;
 
     async fn genesis(&mut self) -> Self::Block {
         self.genesis.as_ref().clone()
     }
 
-    async fn propose(
+    async fn propose<A: AncestryProvider<Block = Self::Block>>(
         &mut self,
         (runtime_context, _context): (E, Self::Context),
-        mut ancestry: AncestorStream<Self::SigningScheme, Self::Block>,
+        mut ancestry: AncestorStream<A, Self::Block>,
     ) -> Option<Self::Block> {
         let parent = ancestry.next().await?;
 
@@ -71,10 +75,10 @@ impl<E> commonware_consensus::VerifyingApplication<E> for Application
 where
     E: Rng + Spawner + Metrics + Clock,
 {
-    async fn verify(
+    async fn verify<A: AncestryProvider<Block = Self::Block>>(
         &mut self,
         (runtime_context, _): (E, Self::Context),
-        mut ancestry: AncestorStream<Self::SigningScheme, Self::Block>,
+        mut ancestry: AncestorStream<A, Self::Block>,
     ) -> bool {
         let Some(block) = ancestry.next().await else {
             return false;

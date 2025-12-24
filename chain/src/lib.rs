@@ -55,7 +55,7 @@ mod tests {
         deterministic::{self, Runner},
         Clock, Metrics, Runner as _, Spawner,
     };
-    use commonware_utils::{ordered::Set, NZU32};
+    use commonware_utils::{ordered::Set, NZUsize, NZU32};
     use engine::{Config, Engine};
     use governor::Quota;
     use indexer::{Indexer, Mock};
@@ -229,6 +229,7 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: None,
+                    concurrency: NZUsize!(1),
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -413,6 +414,7 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: None,
+                    concurrency: NZUsize!(1),
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -516,6 +518,7 @@ mod tests {
                 fetch_concurrent: 10,
                 fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                 indexer: None,
+                concurrency: NZUsize!(1),
             };
             let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -662,6 +665,7 @@ mod tests {
                         fetch_concurrent: 10,
                         fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                         indexer: None,
+                        concurrency: NZUsize!(1),
                     };
                     let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -846,6 +850,7 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: Some(indexer.clone()),
+                    concurrency: NZUsize!(1),
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 

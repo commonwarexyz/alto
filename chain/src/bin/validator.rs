@@ -260,6 +260,7 @@ fn main() {
             indexer,
             polynomial,
             share,
+            concurrency: std::thread::available_parallelism().unwrap(),
         };
         let engine = engine::Engine::new(context.with_label("engine"), engine_cfg).await;
 

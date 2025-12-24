@@ -122,7 +122,7 @@ impl Read for Notarized {
         let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
-        if proof.proposal.payload != block.digest() {
+        if proof.proposal.payload.block_digest::<Digest>() != block.digest() {
             return Err(Error::Invalid(
                 "types::Notarized",
                 "Proof payload does not match block digest",
@@ -169,7 +169,7 @@ impl Read for Finalized {
         let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
-        if proof.proposal.payload != block.digest() {
+        if proof.proposal.payload.block_digest::<Digest>() != block.digest() {
             return Err(Error::Invalid(
                 "types::Finalized",
                 "Proof payload does not match block digest",

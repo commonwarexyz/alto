@@ -2,13 +2,22 @@ use crate::{
     application::Application,
     indexer::{self, Indexer},
 };
-use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
+use alto_types::{
+    Activity, Block, CodingScheme, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE,
+};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
-    application::marshaled::Marshaled as ConsensusMarshaled,
-    marshal::{self, ingress::handler},
+    marshal::{
+        coding::{
+            self as marshal, shards,
+            types::{Shard, StoredCodedBlock},
+            Marshaled as ConsensusMarshaled, MarshaledConfig,
+        },
+        resolver::handler,
+        Config as MarshalConfig,
+    },
     simplex::{self, elector::Random, Engine as Consensus},
-    types::{Epoch, FixedEpocher, ViewDelta},
+    types::{CodingCommitment, Epoch, FixedEpocher, ViewDelta},
     Reporters,
 };
 use commonware_cryptography::{
@@ -16,6 +25,7 @@ use commonware_cryptography::{
     certificate::{ConstantProvider, Scheme as _},
     ed25519::PublicKey,
     sha256::Digest,
+    Sha256,
 };
 use commonware_p2p::{Blocker, Receiver, Sender};
 use commonware_resolver::Resolver;
@@ -30,14 +40,30 @@ use governor::clock::Clock as GClock;
 use governor::Quota;
 use rand::{CryptoRng, Rng};
 use std::{
-    num::NonZero,
+    num::{NonZero, NonZeroUsize},
     time::{Duration, Instant},
 };
 use tracing::{error, info, warn};
 
 /// Reporter type for [simplex::Engine].
-type Reporter<E, I> =
-    Reporters<Activity, marshal::Mailbox<Scheme, Block>, Option<indexer::Pusher<E, I>>>;
+type Reporter<E, I> = Reporters<
+    Activity,
+    Reporters<
+        Activity,
+        marshal::Mailbox<Scheme, Block, CodingScheme>,
+        shards::Mailbox<Block, Scheme, CodingScheme, PublicKey>,
+    >,
+    Option<indexer::Pusher<E, I>>,
+>;
+
+type Marshaled<E> = ConsensusMarshaled<
+    E,
+    Application,
+    Block,
+    CodingScheme,
+    ConstantProvider<Scheme, Epoch>,
+    FixedEpocher,
+>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -66,6 +92,7 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub participants: Set<PublicKey>,
     pub mailbox_size: usize,
     pub deque_size: usize,
+    pub concurrency: NonZeroUsize,
 
     pub leader_timeout: Duration,
     pub notarization_timeout: Duration,
@@ -81,8 +108,6 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub indexer: Option<I>,
 }
 
-type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpocher>;
-
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
 pub struct Engine<
@@ -92,19 +117,30 @@ pub struct Engine<
 > {
     context: ContextCell<E>,
 
-    buffer: buffered::Engine<E, PublicKey, Block>,
-    buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
+    buffer: buffered::Engine<E, PublicKey, Shard<CodingScheme, Sha256>>,
+    shards: shards::Engine<E, Scheme, CodingScheme, Sha256, Block, PublicKey>,
+    shards_mailbox: shards::Mailbox<Block, Scheme, CodingScheme, PublicKey>,
     marshal: marshal::Actor<
         E,
         Block,
+        CodingScheme,
         ConstantProvider<Scheme, Epoch>,
         immutable::Archive<E, Digest, Finalization>,
-        immutable::Archive<E, Digest, Block>,
+        immutable::Archive<E, Digest, StoredCodedBlock<Block, CodingScheme>>,
         FixedEpocher,
     >,
     marshaled: Marshaled<E>,
 
-    consensus: Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>>,
+    consensus: Consensus<
+        E,
+        Scheme,
+        Random,
+        B,
+        CodingCommitment,
+        Marshaled<E>,
+        Marshaled<E>,
+        Reporter<E, I>,
+    >,
 }
 
 impl<
@@ -123,7 +159,9 @@ impl<
                 mailbox_size: cfg.mailbox_size,
                 deque_size: cfg.deque_size,
                 priority: true,
-                codec_config: (),
+                codec_config: commonware_coding::CodecConfig {
+                    maximum_shard_size: usize::MAX,
+                },
             },
         );
 
@@ -207,8 +245,8 @@ impl<
             context.with_label("marshal"),
             finalizations_by_height,
             finalized_blocks,
-            marshal::Config {
-                provider,
+            MarshalConfig {
+                provider: provider.clone(),
                 epocher: epocher.clone(),
                 partition_prefix: cfg.partition_prefix.clone(),
                 mailbox_size: cfg.mailbox_size,
@@ -224,22 +262,34 @@ impl<
                 block_codec_config: (),
                 max_repair: MAX_REPAIR,
                 buffer_pool: buffer_pool.clone(),
+                concurrency: cfg.concurrency.get(),
             },
         )
         .await;
 
-        // Create the application
-        let app = Application::new();
-        let marshaled = Marshaled::new(
-            context.with_label("marshaled"),
-            app,
-            marshal_mailbox.clone(),
-            epocher,
+        let (shards, shards_mailbox) = shards::Engine::new(
+            context.with_label("shards"),
+            buffer_mailbox,
+            (),
+            cfg.mailbox_size,
+            cfg.concurrency.get(),
         );
+
+        // Create the application
+        let marshaled_config = MarshaledConfig {
+            application: Application::new(),
+            marshal: marshal_mailbox.clone(),
+            shards: shards_mailbox.clone(),
+            scheme_provider: provider,
+            epocher,
+            concurrency: cfg.concurrency.get(),
+            partition_prefix: cfg.partition_prefix.clone(),
+        };
+        let marshaled = Marshaled::init(context.with_label("marshaled"), marshaled_config).await;
 
         // Create the reporter
         let reporter = (
-            marshal_mailbox.clone(),
+            Reporters::from((marshal_mailbox.clone(), shards_mailbox.clone())),
             cfg.indexer.map(|indexer| {
                 indexer::Pusher::new(
                     context.with_label("indexer"),
@@ -282,7 +332,8 @@ impl<
             context: ContextCell::new(context),
 
             buffer,
-            buffer_mailbox,
+            shards,
+            shards_mailbox,
             marshal,
             marshaled,
             consensus,
@@ -348,10 +399,13 @@ impl<
         // Start the buffer
         let buffer_handle = self.buffer.start(broadcast);
 
+        // Start the shard engine
+        let shard_handle = self.shards.start();
+
         // Start marshal
         let marshal_handle = self
             .marshal
-            .start(self.marshaled, self.buffer_mailbox, marshal);
+            .start(self.marshaled, self.shards_mailbox, marshal);
 
         // Start consensus
         //
@@ -360,7 +414,14 @@ impl<
         let consensus_handle = self.consensus.start(pending, recovered, resolver);
 
         // Wait for any actor to finish
-        if let Err(e) = try_join_all(vec![buffer_handle, marshal_handle, consensus_handle]).await {
+        if let Err(e) = try_join_all(vec![
+            buffer_handle,
+            shard_handle,
+            marshal_handle,
+            consensus_handle,
+        ])
+        .await
+        {
             error!(?e, "engine failed");
         } else {
             warn!("engine stopped");

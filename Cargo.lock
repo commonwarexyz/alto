@@ -52,6 +52,7 @@ dependencies = [
  "clap",
  "commonware-broadcast",
  "commonware-codec",
+ "commonware-coding",
  "commonware-consensus",
  "commonware-cryptography",
  "commonware-deployer",
@@ -118,6 +119,7 @@ version = "0.0.16"
 dependencies = [
  "bytes",
  "commonware-codec",
+ "commonware-coding",
  "commonware-consensus",
  "commonware-cryptography",
  "commonware-math",
@@ -523,8 +525,7 @@ checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 [[package]]
 name = "commonware-broadcast"
 version = "0.0.64"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "794f92dafaa8a6179ace6c7960ed4c3f866574ae4602891255e77e330ea4bddc"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -542,8 +543,7 @@ dependencies = [
 [[package]]
 name = "commonware-codec"
 version = "0.0.64"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0936ea935d5db5e55e31901ea6e4fe669564ba52a4f7501f14f1a58582caec0"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
 dependencies = [
  "bytes",
  "paste",
@@ -553,17 +553,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "commonware-coding"
+version = "0.0.64"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+dependencies = [
+ "bytes",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-math",
+ "commonware-storage",
+ "commonware-utils",
+ "futures",
+ "num-rational",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "rayon",
+ "reed-solomon-simd",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "commonware-consensus"
 version = "0.0.64"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4c79a1e4837b9b6ed8ef1793d5ff9c15961dfecc47ff24ea1b1bba320a2598a"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
 dependencies = [
  "bytes",
  "cfg-if",
  "commonware-broadcast",
  "commonware-codec",
+ "commonware-coding",
  "commonware-cryptography",
  "commonware-macros",
+ "commonware-math",
  "commonware-p2p",
  "commonware-resolver",
  "commonware-runtime",
@@ -573,7 +594,9 @@ dependencies = [
  "pin-project",
  "prometheus-client",
  "rand 0.8.5",
+ "rand_core 0.6.4",
  "rand_distr",
+ "rayon",
  "thiserror 2.0.12",
  "tracing",
 ]
@@ -581,8 +604,7 @@ dependencies = [
 [[package]]
 name = "commonware-cryptography"
 version = "0.0.64"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fea0ec94c9f4571cd795bb5273faa60e6cf6da68e4db51135f0cef28bf75a3df"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
 dependencies = [
  "anyhow",
  "blake3",
@@ -610,8 +632,7 @@ dependencies = [
 [[package]]
 name = "commonware-deployer"
 version = "0.0.64"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0bdddb3c55e3c70529065a3d357dc5aa78947c5837217fb37a8e5725681b3c1"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
 dependencies = [
  "cfg-if",
  "serde",
@@ -621,8 +642,7 @@ dependencies = [
 [[package]]
 name = "commonware-macros"
 version = "0.0.64"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12e904cbefa233d549e9557a047ae12bd5989153cb32bfa5abb25c65429eb338"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
 dependencies = [
  "futures",
  "proc-macro-crate",
@@ -637,8 +657,7 @@ dependencies = [
 [[package]]
 name = "commonware-math"
 version = "0.0.64"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e3e8944632cf5fb3880759edb59416f2c6e27e2d65986a80e721348b787a064"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -650,8 +669,7 @@ dependencies = [
 [[package]]
 name = "commonware-p2p"
 version = "0.0.64"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed7c998ba1807582062589f7b15725efe8380ddd8995199cc1b2d942a1436fb8"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -676,8 +694,7 @@ dependencies = [
 [[package]]
 name = "commonware-resolver"
 version = "0.0.64"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3eb39e3d8d86e88082ff8f9e0db39b624a0fb8aa4f8bacf97166a373777d2568"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -697,8 +714,7 @@ dependencies = [
 [[package]]
 name = "commonware-runtime"
 version = "0.0.64"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35d6565dd76ae8c14ba328a34c1b30e11ac3594edcd30840582d192c8734b238"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
 dependencies = [
  "async-lock",
  "axum",
@@ -730,8 +746,7 @@ dependencies = [
 [[package]]
 name = "commonware-storage"
 version = "0.0.64"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25a5236b20b3df71cfb0a9679d967b3fc47d364817497fbdf4f95e5b9e48abaa"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
 dependencies = [
  "anyhow",
  "bytes",
@@ -754,8 +769,7 @@ dependencies = [
 [[package]]
 name = "commonware-stream"
 version = "0.0.64"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2363c7ec2857bedb948f2cafbe4d446ab9d3166feefac6e06519986c146eb7a4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -775,8 +789,7 @@ dependencies = [
 [[package]]
 name = "commonware-utils"
 version = "0.0.64"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bb569927aa16e14e81ba6bb1d502e7b8f1f097248c6322a30e174ed351ce4dc"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -1156,6 +1169,12 @@ name = "fiat-crypto"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
+
+[[package]]
+name = "fixedbitset"
+version = "0.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
 name = "fnv"
@@ -1997,9 +2016,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.20.3"
+version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "945462a4b81e43c4e3ba96bd7b49d834c6f61198356aa858733bc4acf3cbe62e"
+checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "oorandom"
@@ -2494,12 +2513,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "readme-rustdocifier"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08ad765b21a08b1a8e5cdce052719188a23772bcbefb3c439f0baaf62c56ceac"
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b8c0c260b63a8219631167be35e6a988e9554dbd323f8bd08439c8ed1302bd1"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "reed-solomon-simd"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cffef0520d30fbd4151fb20e262947ae47fb0ab276a744a19b6398438105a072"
+dependencies = [
+ "cpufeatures",
+ "fixedbitset",
+ "once_cell",
+ "readme-rustdocifier",
 ]
 
 [[package]]

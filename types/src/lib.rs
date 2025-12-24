@@ -9,8 +9,8 @@ pub use block::{Block, Finalized, Notarized};
 
 mod consensus;
 pub use consensus::{
-    Activity, Evaluation, Finalization, Identity, Notarization, PublicKey, Scheme, Seed, Seedable,
-    Signature,
+    Activity, CodingScheme, Evaluation, Finalization, Identity, Notarization, PublicKey, Scheme,
+    Seed, Seedable, Signature,
 };
 
 pub mod wasm;
@@ -63,7 +63,9 @@ impl Kind {
 mod tests {
     use super::*;
     use commonware_codec::{DecodeExt, Encode};
+    use commonware_coding::{Config, ReedSolomon};
     use commonware_consensus::{
+        marshal::coding::types::CodedBlock,
         simplex::{
             scheme::bls12381_threshold,
             types::{Finalization, Finalize, Notarization, Notarize, Proposal},
@@ -71,7 +73,7 @@ mod tests {
         types::{Round, View},
     };
     use commonware_cryptography::{
-        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, Digestible, Hasher,
+        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, Committable, Hasher,
         Sha256,
     };
     use rand::{rngs::StdRng, SeedableRng};
@@ -83,13 +85,19 @@ mod tests {
         let n = 4;
         let Fixture { schemes, .. } = bls12381_threshold::fixture::<MinSig, _>(&mut rng, n);
 
+        let coding_config = Config {
+            minimum_shards: 1,
+            extra_shards: 3,
+        };
+
         // Create a block
         let digest = Sha256::hash(b"hello world");
         let block = Block::new(digest, 10, 100);
+        let block = CodedBlock::<_, ReedSolomon<Sha256>>::new(block, coding_config, 1);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
-            block.digest(),
+            block.commitment(),
         );
 
         // Create a notarization
@@ -98,7 +106,7 @@ mod tests {
             .map(|scheme| Notarize::sign(scheme, NAMESPACE, proposal.clone()).unwrap())
             .collect();
         let notarization = Notarization::from_notarizes(&schemes[0], &notarizes).unwrap();
-        let notarized = Notarized::new(notarization, block.clone());
+        let notarized = Notarized::new(notarization, block.inner().clone());
 
         // Serialize and deserialize
         let encoded = notarized.encode();
@@ -116,13 +124,19 @@ mod tests {
         let n = 4;
         let Fixture { schemes, .. } = bls12381_threshold::fixture::<MinSig, _>(&mut rng, n);
 
+        let coding_config = Config {
+            minimum_shards: 1,
+            extra_shards: 3,
+        };
+
         // Create a block
         let digest = Sha256::hash(b"hello world");
         let block = Block::new(digest, 10, 100);
+        let block = CodedBlock::<_, ReedSolomon<Sha256>>::new(block, coding_config, 1);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
-            block.digest(),
+            block.commitment(),
         );
 
         // Create a finalization
@@ -131,7 +145,7 @@ mod tests {
             .map(|scheme| Finalize::sign(scheme, NAMESPACE, proposal.clone()).unwrap())
             .collect();
         let finalization = Finalization::from_finalizes(&schemes[0], &finalizes).unwrap();
-        let finalized = Finalized::new(finalization, block.clone());
+        let finalized = Finalized::new(finalization, block.inner().clone());
 
         // Serialize and deserialize
         let encoded = finalized.encode();
