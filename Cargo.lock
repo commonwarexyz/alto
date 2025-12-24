@@ -525,7 +525,7 @@ checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 [[package]]
 name = "commonware-broadcast"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#34b3efc20066f1926faac69b849e9dfed5e43a71"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -543,7 +543,7 @@ dependencies = [
 [[package]]
 name = "commonware-codec"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#34b3efc20066f1926faac69b849e9dfed5e43a71"
 dependencies = [
  "bytes",
  "paste",
@@ -555,7 +555,7 @@ dependencies = [
 [[package]]
 name = "commonware-coding"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#34b3efc20066f1926faac69b849e9dfed5e43a71"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -575,7 +575,7 @@ dependencies = [
 [[package]]
 name = "commonware-consensus"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#34b3efc20066f1926faac69b849e9dfed5e43a71"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -604,7 +604,7 @@ dependencies = [
 [[package]]
 name = "commonware-cryptography"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#34b3efc20066f1926faac69b849e9dfed5e43a71"
 dependencies = [
  "anyhow",
  "blake3",
@@ -632,7 +632,7 @@ dependencies = [
 [[package]]
 name = "commonware-deployer"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#34b3efc20066f1926faac69b849e9dfed5e43a71"
 dependencies = [
  "cfg-if",
  "serde",
@@ -642,7 +642,7 @@ dependencies = [
 [[package]]
 name = "commonware-macros"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#34b3efc20066f1926faac69b849e9dfed5e43a71"
 dependencies = [
  "futures",
  "proc-macro-crate",
@@ -657,7 +657,7 @@ dependencies = [
 [[package]]
 name = "commonware-math"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#34b3efc20066f1926faac69b849e9dfed5e43a71"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -669,7 +669,7 @@ dependencies = [
 [[package]]
 name = "commonware-p2p"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#34b3efc20066f1926faac69b849e9dfed5e43a71"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -694,7 +694,7 @@ dependencies = [
 [[package]]
 name = "commonware-resolver"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#34b3efc20066f1926faac69b849e9dfed5e43a71"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -714,7 +714,7 @@ dependencies = [
 [[package]]
 name = "commonware-runtime"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#34b3efc20066f1926faac69b849e9dfed5e43a71"
 dependencies = [
  "async-lock",
  "axum",
@@ -746,7 +746,7 @@ dependencies = [
 [[package]]
 name = "commonware-storage"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#34b3efc20066f1926faac69b849e9dfed5e43a71"
 dependencies = [
  "anyhow",
  "bytes",
@@ -769,7 +769,7 @@ dependencies = [
 [[package]]
 name = "commonware-stream"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#34b3efc20066f1926faac69b849e9dfed5e43a71"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -789,7 +789,7 @@ dependencies = [
 [[package]]
 name = "commonware-utils"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#7421afe66c68b522b5260fdff208cfa935df8830"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fconsensus-coding-mk2#34b3efc20066f1926faac69b849e9dfed5e43a71"
 dependencies = [
  "bytes",
  "cfg-if",

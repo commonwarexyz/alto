@@ -176,7 +176,7 @@ mod tests {
             let (network, mut oracle) = Network::new(
                 context.with_label("network"),
                 simulated::Config {
-                    max_size: 1024 * 1024,
+                    max_size: 20 * 1024 * 1024,
                     disconnect_on_block: true,
                     tracked_peer_sets: Some(1),
                 },

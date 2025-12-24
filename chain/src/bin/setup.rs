@@ -337,12 +337,18 @@ fn generate_local(
     // Emit start commands
     info!(?bootstrappers, "setup complete");
     println!("To start validators, run:");
+    let mut mprocs = vec!["mprocs".to_string()];
     for (name, peer_config_file, _) in &configurations {
         let path = format!("{output}/{peer_config_file}");
         let command =
             format!("cargo run --bin {BINARY_NAME} -- --peers={peers_path} --config={path}");
+        mprocs.push(format!("\"{command}\""));
         println!("{name}: {command}");
     }
+
+    let mprocs = mprocs.join(" ");
+    println!("\n\n{mprocs}\n\n");
+
     println!("To view metrics, run:");
     for (name, _, peer_config) in configurations {
         println!(

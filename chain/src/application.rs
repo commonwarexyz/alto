@@ -68,7 +68,7 @@ where
         }
 
         // Generate some junk data.
-        let mut junk = vec![0u8; 1024 * 1024 * 4];
+        let mut junk = vec![0u8; 1024 * 1024];
         runtime_context.fill_bytes(&mut junk[..]);
 
         Some(Block::new(
