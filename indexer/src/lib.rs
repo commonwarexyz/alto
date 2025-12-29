@@ -25,6 +25,7 @@ pub struct State {
     seeds: BTreeMap<View, Seed>,
     notarizations: BTreeMap<View, Notarized>,
     finalizations: BTreeMap<View, Finalized>,
+    finalized_height_to_view: BTreeMap<u64, View>,
     blocks_by_digest: BTreeMap<Digest, Block>,
 }
 
@@ -59,8 +60,8 @@ impl Indexer {
         }
 
         // Broadcast seed
-        let mut data = Vec::with_capacity(u8::SIZE + seed.encode_size());
-        data.push(Kind::Seed as u8);
+        let mut data = vec![0u8; u8::SIZE + seed.encode_size()];
+        data[0] = Kind::Seed as u8;
         seed.write(&mut data[1..].as_mut());
         let _ = self.consensus_tx.send(data);
         Ok(())
@@ -142,6 +143,9 @@ impl Indexer {
         {
             return Ok(()); // Already exists
         }
+        state
+            .finalized_height_to_view
+            .insert(finalized.block.height, view);
 
         // Broadcast finalization
         let mut data = vec![Kind::Finalization as u8];
@@ -175,13 +179,12 @@ impl Indexer {
             // Try to parse as index (8 bytes)
             if raw.len() == u64::SIZE {
                 let index = u64::decode(raw.as_slice()).ok()?;
-                // Find finalized block with this height
-                for (_, finalized) in state.finalizations.iter() {
-                    if finalized.block.height == index {
-                        return Some(BlockResult::Finalized(finalized.clone()));
-                    }
-                }
-                None
+                state.finalized_height_to_view.get(&index).and_then(|view| {
+                    state
+                        .finalizations
+                        .get(view)
+                        .map(|f| BlockResult::Finalized(f.clone()))
+                })
             } else if raw.len() == Digest::SIZE {
                 let digest = Digest::decode(raw.as_slice()).ok()?;
                 state
@@ -359,6 +362,7 @@ mod tests {
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, Digestible, Hasher,
         Sha256,
     };
+    use futures::StreamExt;
     use rand::{rngs::StdRng, SeedableRng};
     use std::net::SocketAddr;
     use tokio::net::TcpListener;
@@ -570,7 +574,6 @@ mod tests {
         });
 
         // Wait for the seed message
-        use futures::StreamExt;
         if let Some(Ok(msg)) = stream.next().await {
             match msg {
                 alto_client::consensus::Message::Seed(s) => {
