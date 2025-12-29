@@ -1,7 +1,8 @@
 import * as globalConfig from './global_config';
 import * as usaConfig from './usa_config';
+import * as localConfig from './local_config';
 
-export type Cluster = 'global' | 'usa';
+export type Cluster = 'global' | 'usa' | 'local';
 
 export interface ClusterConfig {
     BACKEND_URL: string;
@@ -21,6 +22,11 @@ const configs: Record<Cluster, ClusterConfig> = {
         ...usaConfig,
         name: 'USA Cluster',
         description: `A cluster of <strong>50 validators</strong> running c7g.large (2 vCPU, 4GB RAM) nodes on AWS in <strong>4 regions</strong> (us-east-1, us-west-1, us-east-2, us-west-2).`,
+    },
+    local: {
+        ...localConfig,
+        name: 'Local Cluster',
+        description: `A local test cluster running on localhost.`,
     }
 };
 
