@@ -632,9 +632,8 @@ fn explorer_local(dir: String, backend_url: String) {
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex_formatted(&polynomial_hex).expect("invalid polynomial");
-    let polynomial =
-        Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(num_peers as u32))
-            .expect("polynomial is invalid");
+    let polynomial = Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(num_peers as u32))
+        .expect("polynomial is invalid");
     let identity = polynomial.public();
 
     // Generate config.ts with empty locations (explorer will hide map)
