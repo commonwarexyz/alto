@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { DivIcon, LatLng } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
-import { getClusterConfig, getClusters, Cluster, DEFAULT_CLUSTER } from "./config";
+import { getClusterConfig, getClusters, Cluster, DEFAULT_CLUSTER, MODE } from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, ViewData } from "./types";
 import { hexToUint8Array, hexUint8Array } from "./utils";
 import "./App.css";
@@ -169,7 +169,7 @@ const App: React.FC = () => {
   // Health check function
   const checkHealth = useCallback(async () => {
     try {
-      const protocol = BACKEND_URL.includes(':') ? 'http' : 'https';
+      const protocol = MODE === 'local' ? 'http' : 'https';
       const response = await fetch(`${protocol}://${BACKEND_URL}/health`, {
         method: "GET",
         headers: {
@@ -294,8 +294,8 @@ const App: React.FC = () => {
         // the location and signature information without changing timing
         const existingStatus = newViews[existingIndex].status;
         if (existingStatus === "finalized" || existingStatus === "notarized") {
-          // Only update location if LOCATIONS is defined
-          const locationIndex = LOCATIONS.length > 0 ? leader_index(seed, LOCATIONS.length) : -1;
+          // Only update location if in public mode
+          const locationIndex = MODE === 'public' ? leader_index(seed, LOCATIONS.length) : -1;
           const location = locationIndex >= 0 ? LOCATIONS[locationIndex][0] : undefined;
           const locationName = locationIndex >= 0 ? LOCATIONS[locationIndex][1] : undefined;
 
@@ -322,7 +322,7 @@ const App: React.FC = () => {
       }
 
       // Create the new view data
-      const locationIndex = LOCATIONS.length > 0 ? leader_index(seed, LOCATIONS.length) : -1;
+      const locationIndex = MODE === 'public' ? leader_index(seed, LOCATIONS.length) : -1;
       const location = locationIndex >= 0 ? LOCATIONS[locationIndex][0] : undefined;
       const locationName = locationIndex >= 0 ? LOCATIONS[locationIndex][1] : undefined;
       const newView: ViewData = {
@@ -634,7 +634,7 @@ const App: React.FC = () => {
 
       // Create new WebSocket connection
       const wsCreationTime = Date.now();
-      const protocol = BACKEND_URL.includes(':') ? 'ws' : 'wss';
+      const protocol = MODE === 'local' ? 'ws' : 'wss';
       const ws = new WebSocket(`${protocol}://${BACKEND_URL}/consensus/ws`);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
@@ -807,8 +807,8 @@ const App: React.FC = () => {
       </header>
 
       <main className="app-main">
-        {/* Map - only show if locations are defined */}
-        {LOCATIONS.length > 0 && (
+        {/* Map - only show in public mode */}
+        {MODE === 'public' && (
           <div className="map-container">
             <MapContainer key={selectedCluster} center={center} zoom={1} style={{ height: "100%", width: "100%" }} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false} dragging={false}>
               <TileLayer
