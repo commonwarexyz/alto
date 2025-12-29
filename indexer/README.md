@@ -5,6 +5,8 @@
 
 Serve `alto` activity.
 
+_This is a stateless indexer intended for local use. If you want to utilize in production, adapt the code to utilize a database for storage (rather than memory)._
+
 ## Status
 
 `alto-indexer` is **ALPHA** software and is not yet recommended for production use. Developers should expect breaking changes and occasional instability.

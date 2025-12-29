@@ -204,6 +204,7 @@ export function parse_finalized(identity, bytes) {
  * @returns {number}
  */
 export function leader_index(seed, participants) {
+    // ">>> 0" ensures the result is treated as an unsigned 32-bit integer
     const ret = wasm.leader_index(seed, participants);
     return ret >>> 0;
 }
