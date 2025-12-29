@@ -1,48 +1,108 @@
 # alto-explorer
 
-## Populate Configurations (Global and USA)
+The alto explorer can run in two modes: **public** (for deployed clusters) and **local** (for local development).
+
+## Modes
+
+### Public Mode (Default)
+
+Public mode is used for deployed clusters (e.g., Global and USA clusters on AWS). It shows:
+- A world map with validator locations
+- A cluster dropdown to switch between clusters
+- Full documentation about the deployed infrastructure
+
+To run in public mode:
+```bash
+npm start
+# or explicitly:
+REACT_APP_MODE=public npm start
+```
+
+### Local Mode
+
+Local mode is used for local development with a local indexer. It shows:
+- No map (since all validators are on localhost)
+- No cluster dropdown
+- Simplified documentation for local usage
+
+To run in local mode:
+```bash
+REACT_APP_MODE=local npm start
+```
+
+## Configuration
+
+### Public Mode Configuration
+
+For public mode, populate `src/global_config.ts` and `src/usa_config.ts` with the cluster configurations:
 
 ```typescript
-// TODO: Replace this with the backend URL
-export const BACKEND_URL = "localhost:4000";
+// Backend URL (without protocol - https:// is used automatically)
+export const BACKEND_URL = "global.alto.example.com";
 
-// TODO: Replace this with the consensus threshold key
-export const PUBLIC_KEY_HEX = "92b050b6fbe80695b5d56835e978918e37c8707a7fad09a01ae782d4c3170c9baa4c2c196b36eac6b78ceb210b287aeb0727ef1c60e48042142f7bcc8b6382305cd50c5a4542c44ec72a4de6640c194f8ef36bea1dbed168ab6fd8681d910d55";
+// Consensus threshold key (hex-encoded)
+export const PUBLIC_KEY_HEX = "92b050b6...";
 
-// TODO: Replace this with an ordered list of validator locations (sorted by validator public key)
+// Ordered list of validator locations (sorted by validator public key)
 export const LOCATIONS: [[number, number], string][] = [
     [[37.7749, -122.4194], "San Francisco"],
     [[51.5074, -0.1278], "London"],
-    [[35.6895, 139.6917], "Tokyo"],
-    [[-33.8688, 151.2093], "Sydney"],
-    [[55.7558, 37.6173], "Moscow"],
-    [[-23.5505, -46.6333], "Sao Paulo"],
-    [[28.6139, 77.2090], "New Delhi"],
-    [[40.7128, -74.0060], "New York"],
-    [[19.4326, -99.1332], "Mexico City"],
-    [[31.2304, 121.4737], "Shanghai"],
+    // ...
 ];
 ```
 
-### Using a Local Indexer
-
-A local indexer can be used to stream data to the explorer via [`alto-indexer`](../indexer). See ["local setup"](../chain/README.md#local) in the `alto-chain` README for instructions on setting up a local indexer.
-
-## Run the app
-
+You can generate these configurations using `setup explorer remote`:
 ```bash
-npm start
+cargo run --bin setup -- explorer --dir <config-dir> --backend-url <url> remote
 ```
 
-## Build the app
+### Local Mode Configuration
+
+For local mode, populate `src/local_config.ts`:
+
+```typescript
+// Backend URL (with port - http:// is used automatically for URLs with ports)
+export const BACKEND_URL = "localhost:8080";
+
+// Consensus threshold key (hex-encoded)
+export const PUBLIC_KEY_HEX = "82f8a77b...";
+
+// Empty locations array (map will be hidden)
+export const LOCATIONS: [[number, number], string][] = [];
+```
+
+You can generate this configuration using `setup explorer local`:
+```bash
+cargo run --bin setup -- explorer --dir <config-dir> --backend-url <url> local
+```
+
+Then copy the generated `config.ts` to `src/local_config.ts`.
+
+## Development
+
+### Run the app
 
 ```bash
+# Public mode (default)
+npm start
+
+# Local mode
+REACT_APP_MODE=local npm start
+```
+
+### Build the app
+
+```bash
+# Public mode (default)
 npm run build
+
+# Local mode
+REACT_APP_MODE=local npm run build
 ```
 
 _This will compile the WASM module from `alto-types` before building the React app._
 
-## Run the production app
+### Run the production build
 
 _Install `serve` if necessary: `npm install -g serve`._
 

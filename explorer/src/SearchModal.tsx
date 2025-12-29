@@ -141,7 +141,8 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
         }
 
         const { BACKEND_URL, PUBLIC_KEY_HEX } = clusterConfig;
-        const baseUrl = `https://${BACKEND_URL}`;
+        const protocol = BACKEND_URL.includes(':') ? 'http' : 'https';
+        const baseUrl = `${protocol}://${BACKEND_URL}`;
         const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
 
         let endpoint = '';

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Cluster, ClusterConfig } from './config';
+import { Cluster, ClusterConfig, MODE } from './config';
 
 // ViewData interface (no changes)
 export interface ViewData {
@@ -274,13 +274,15 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onC
         <div className="stats-card">
             <div className="stats-header">
                 <h2 className="stats-title">Latency</h2>
-                <div className="cluster-toggle">
-                    <Dropdown
-                        selectedCluster={selectedCluster}
-                        onClusterChange={onClusterChange}
-                        configs={configs}
-                    />
-                </div>
+                {MODE === 'public' && (
+                    <div className="cluster-toggle">
+                        <Dropdown
+                            selectedCluster={selectedCluster}
+                            onClusterChange={onClusterChange}
+                            configs={configs}
+                        />
+                    </div>
+                )}
             </div>
 
             <div className="stats-grid">

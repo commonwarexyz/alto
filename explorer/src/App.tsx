@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { DivIcon, LatLng } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
-import { getClusterConfig, getClusters, Cluster } from "./config";
+import { getClusterConfig, getClusters, Cluster, DEFAULT_CLUSTER } from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, ViewData } from "./types";
 import { hexToUint8Array, hexUint8Array } from "./utils";
 import "./App.css";
@@ -32,8 +32,8 @@ const getInitialCluster = (): Cluster => {
     return clusterFromUrl as Cluster;
   }
 
-  // Otherwise, use the global cluster
-  return 'global';
+  // Otherwise, use the default cluster
+  return DEFAULT_CLUSTER;
 };
 
 const SCALE_DURATION = 500; // 500ms
