@@ -151,30 +151,28 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         </p>
                     </section>
 
-                    {MODE === 'public' && (
-                        <section>
-                            <h3>Can I replay the stream?</h3>
-                            <p>
-                                Yes! You can replay the stream or fetch arbitrary data using the <a href="https://docs.rs/alto-inspector/latest/alto_inspector">alto-inspector</a>.
-                            </p>
-                            <p>
-                                To download the tool, run:
-                            </p>
-                            <pre className="code-block">
-                                <code>
-                                    cargo install alto-inspector
-                                </code>
-                            </pre>
-                            <p>
-                                And then, to fetch block 10, run:
-                            </p>
-                            <pre className="code-block">
-                                <code>
-                                    inspector get block 10
-                                </code>
-                            </pre>
-                        </section>
-                    )}
+                    <section>
+                        <h3>Can I replay the stream?</h3>
+                        <p>
+                            Yes! You can replay the stream or fetch arbitrary data using the <a href="https://docs.rs/alto-inspector/latest/alto_inspector">alto-inspector</a>.
+                        </p>
+                        <p>
+                            To download the tool, run:
+                        </p>
+                        <pre className="code-block">
+                            <code>
+                                cargo install alto-inspector
+                            </code>
+                        </pre>
+                        <p>
+                            And then, to fetch block 10, run:
+                        </p>
+                        <pre className="code-block">
+                            <code>
+                                inspector get block 10
+                            </code>
+                        </pre>
+                    </section>
 
                     <section>
                         <h3>Support</h3>
