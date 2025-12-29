@@ -94,7 +94,7 @@ dependencies = [
 
 [[package]]
 name = "alto-indexer"
-version = "0.0.14"
+version = "0.0.16"
 dependencies = [
  "alto-client",
  "alto-types",
