@@ -174,17 +174,38 @@ function passArray8ToWasm0(arg, malloc) {
     return ptr;
 }
 /**
+ * @param {Uint8Array} bytes
+ * @returns {any}
+ */
+export function parse_block(bytes) {
+    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.parse_block(ptr0, len0);
+    return ret;
+}
+
+/**
  * @param {Uint8Array} identity
  * @param {Uint8Array} bytes
  * @returns {any}
  */
-export function parse_seed(identity, bytes) {
+export function parse_finalized(identity, bytes) {
     const ptr0 = passArray8ToWasm0(identity, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.parse_seed(ptr0, len0, ptr1, len1);
+    const ret = wasm.parse_finalized(ptr0, len0, ptr1, len1);
     return ret;
+}
+
+/**
+ * @param {any} seed
+ * @param {number} participants
+ * @returns {number}
+ */
+export function leader_index(seed, participants) {
+    const ret = wasm.leader_index(seed, participants);
+    return ret >>> 0;
 }
 
 /**
@@ -206,34 +227,13 @@ export function parse_notarized(identity, bytes) {
  * @param {Uint8Array} bytes
  * @returns {any}
  */
-export function parse_finalized(identity, bytes) {
+export function parse_seed(identity, bytes) {
     const ptr0 = passArray8ToWasm0(identity, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.parse_finalized(ptr0, len0, ptr1, len1);
+    const ret = wasm.parse_seed(ptr0, len0, ptr1, len1);
     return ret;
-}
-
-/**
- * @param {Uint8Array} bytes
- * @returns {any}
- */
-export function parse_block(bytes) {
-    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.parse_block(ptr0, len0);
-    return ret;
-}
-
-/**
- * @param {any} seed
- * @param {number} participants
- * @returns {number}
- */
-export function leader_index(seed, participants) {
-    const ret = wasm.leader_index(seed, participants);
-    return ret >>> 0;
 }
 
 async function __wbg_load(module, imports) {

@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { MODE } from './config';
 
 interface AboutModalProps {
     isOpen: boolean;
@@ -32,12 +33,14 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         <h3>About</h3>
                         <p>
                             This explorer visualizes the performance of <a href="https://github.com/commonwarexyz/alto">alto</a>'s consensus, <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/simplex/index.html">simplex</a>,
-                            deployed on a cluster of globally distributed nodes.
+                            {MODE === 'public' ? ' deployed on a cluster of globally distributed nodes.' : ' running on your local machine.'}
                         </p>
-                        <p>
-                            <i>You can replicate this devnet in your own AWS account with <a href="https://docs.rs/commonware-deployer/latest/commonware_deployer/">deployer::ec2</a> by following the
-                                instructions <a href="https://github.com/commonwarexyz/alto/blob/main/chain/README.md">here</a>.</i>
-                        </p>
+                        {MODE === 'public' && (
+                            <p>
+                                <i>You can replicate this devnet in your own AWS account with <a href="https://docs.rs/commonware-deployer/latest/commonware_deployer/">deployer::ec2</a> by following the
+                                    instructions <a href="https://github.com/commonwarexyz/alto/blob/main/chain/README.md">here</a>.</i>
+                            </p>
+                        )}
                     </section>
 
                     <section>
@@ -77,8 +80,9 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                                     <div className="about-status-indicator" style={{ backgroundColor: "#0000eeff" }}></div>
                                     <strong>Seeded</strong>
                                 </div>
-                                Some leader has been elected to propose a block. The dot on the map (of the same color) is the region where the leader is located.
-                                A new leader is elected for each view.
+                                Some leader has been elected to propose a block.
+                                {MODE === 'public' && ' The dot on the map (of the same color) is the region where the leader is located.'}
+                                {' '}A new leader is elected for each view.
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">
@@ -103,17 +107,25 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
 
                     <section>
                         <h3>Where is the data coming from?</h3>
-                        <p>
-                            We deployed alto to a cluster of <strong>50 validators</strong> running c7g.large (2 vCPU, 4GB RAM) nodes on AWS in two separate clusters:
-                        </p>
-                        <ul>
-                            <li><strong>Global Cluster</strong>: 10 regions (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2).</li>
-                            <li><strong>USA Cluster</strong>: 4 regions (us-east-1, us-west-1, us-east-2, us-west-2).</li>
-                        </ul>
-                        <p>
-                            When you visit this page, however, you don't connect to any of those nodes. You connect to custom-built infrastructure (<a href="https://exoware.xyz">exoware::relay</a>) that streams consensus
-                            artifacts to your browser in real time.
-                        </p>
+                        {MODE === 'public' ? (
+                            <>
+                                <p>
+                                    We deployed alto to a cluster of <strong>50 validators</strong> running c7g.large (2 vCPU, 4GB RAM) nodes on AWS in two separate clusters:
+                                </p>
+                                <ul>
+                                    <li><strong>Global Cluster</strong>: 10 regions (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2).</li>
+                                    <li><strong>USA Cluster</strong>: 4 regions (us-east-1, us-west-1, us-east-2, us-west-2).</li>
+                                </ul>
+                                <p>
+                                    When you visit this page, however, you don't connect to any of those nodes. You connect to custom-built infrastructure (<a href="https://exoware.xyz">exoware::relay</a>) that streams consensus
+                                    artifacts to your browser in real time.
+                                </p>
+                            </>
+                        ) : (
+                            <p>
+                                The data is streamed from your local alto cluster via the <a href="https://github.com/commonwarexyz/alto/tree/main/indexer">alto-indexer</a>.
+                            </p>
+                        )}
                         <p>
                             Because each consensus artifact is accompanied by a threshold signature, your browser can (and does) verify each inbound message using <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> compiled to WASM.
                         </p>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './SearchModal.css';
-import { ClusterConfig } from './config';
+import { ClusterConfig, MODE } from './config';
 import { FinalizedJs, NotarizedJs, BlockJs, SearchType, SearchResult } from './types';
 import { hexToUint8Array, hexUint8Array, formatAge } from './utils';
 import init, { parse_seed, parse_notarized, parse_finalized, parse_block } from "./alto_types/alto_types.js";
@@ -141,7 +141,8 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
         }
 
         const { BACKEND_URL, PUBLIC_KEY_HEX } = clusterConfig;
-        const baseUrl = `https://${BACKEND_URL}`;
+        const protocol = MODE === 'local' ? 'http' : 'https';
+        const baseUrl = `${protocol}://${BACKEND_URL}`;
         const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
 
         let endpoint = '';

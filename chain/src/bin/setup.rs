@@ -16,7 +16,6 @@ use std::{
     collections::{BTreeMap, HashMap},
     fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    ops::AddAssign,
 };
 use tracing::{error, info};
 use uuid::Uuid;
@@ -136,29 +135,19 @@ fn main() {
                                 .long("dashboard")
                                 .required(true)
                                 .value_parser(value_parser!(String)),
+                        )
+                        .arg(
+                            Arg::new("indexer_url")
+                                .long("indexer-url")
+                                .required(false)
+                                .value_parser(value_parser!(String)),
+                        )
+                        .arg(
+                            Arg::new("indexer_count")
+                                .long("indexer-count")
+                                .required(false)
+                                .value_parser(value_parser!(usize)),
                         ),
-                ),
-        )
-        .subcommand(
-            Command::new("indexer")
-                .about("Add indexer support for an alto chain.")
-                .arg(
-                    Arg::new("count")
-                        .long("count")
-                        .required(true)
-                        .value_parser(value_parser!(usize)),
-                )
-                .arg(
-                    Arg::new("dir")
-                        .long("dir")
-                        .required(true)
-                        .value_parser(value_parser!(String)),
-                )
-                .arg(
-                    Arg::new("url")
-                        .long("url")
-                        .required(true)
-                        .value_parser(value_parser!(String)),
                 ),
         )
         .subcommand(
@@ -175,7 +164,9 @@ fn main() {
                         .long("backend-url")
                         .required(true)
                         .value_parser(value_parser!(String)),
-                ),
+                )
+                .subcommand(Command::new("local").about("Generate explorer config for local deployment"))
+                .subcommand(Command::new("remote").about("Generate explorer config for remote deployment")),
         );
 
     // Parse arguments
@@ -221,10 +212,23 @@ fn main() {
                 }
             }
         }
-        Some(("indexer", sub_matches)) => indexer(sub_matches),
-        Some(("explorer", sub_matches)) => explorer(sub_matches),
+        Some(("explorer", sub_matches)) => {
+            let dir = sub_matches.get_one::<String>("dir").unwrap().clone();
+            let backend_url = sub_matches
+                .get_one::<String>("backend-url")
+                .unwrap()
+                .clone();
+            match sub_matches.subcommand() {
+                Some(("local", _)) => explorer_local(dir, backend_url),
+                Some(("remote", _)) => explorer_remote(dir, backend_url),
+                _ => {
+                    eprintln!("Invalid subcommand. Use 'local' or 'remote'.");
+                    std::process::exit(1);
+                }
+            }
+        }
         _ => {
-            eprintln!("Invalid subcommand. Use 'generate' or 'indexer'.");
+            eprintln!("Invalid subcommand. Use 'generate' or 'explorer'.");
             std::process::exit(1);
         }
     }
@@ -404,6 +408,14 @@ fn generate_remote(
         .get_one::<i32>("monitoring_storage_size")
         .unwrap();
     let dashboard = sub_matches.get_one::<String>("dashboard").unwrap().clone();
+    let indexer_url = sub_matches.get_one::<String>("indexer_url").cloned();
+    let indexer_count = sub_matches.get_one::<usize>("indexer_count").copied();
+
+    // Validate indexer arguments
+    if indexer_url.is_some() != indexer_count.is_some() {
+        error!("--indexer-url and --indexer-count must be specified together");
+        std::process::exit(1);
+    }
 
     // Construct output path
     let raw_current_dir = std::env::current_dir().unwrap();
@@ -497,6 +509,58 @@ fn generate_remote(
         instance_configs.push(instance);
     }
 
+    // Configure indexers if specified
+    if let (Some(url), Some(count)) = (&indexer_url, indexer_count) {
+        assert!(count > 0, "indexer count must be greater than zero");
+        assert!(
+            count <= peer_configs.len(),
+            "indexer count exceeds number of peers"
+        );
+
+        // Group peers by region
+        let mut region_to_peers: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (idx, instance) in instance_configs.iter().enumerate() {
+            region_to_peers
+                .entry(instance.region.clone())
+                .or_default()
+                .push(idx);
+        }
+
+        // Sort peers within each region for deterministic selection
+        for peers in region_to_peers.values_mut() {
+            peers.sort();
+        }
+
+        // Get sorted list of regions for consistent iteration
+        let region_list: Vec<String> = region_to_peers.keys().cloned().collect();
+
+        // Select peers for indexers in a round-robin fashion across regions
+        let mut selected_indices = Vec::new();
+        let mut region_index = 0;
+        let mut assigned_regions: BTreeMap<&String, usize> = BTreeMap::new();
+        while selected_indices.len() < count && !region_to_peers.is_empty() {
+            let region = &region_list[region_index % region_list.len()];
+            if let Some(peers) = region_to_peers.get_mut(region) {
+                if !peers.is_empty() {
+                    let peer_idx = peers.remove(0);
+                    selected_indices.push(peer_idx);
+                    if peers.is_empty() {
+                        region_to_peers.remove(region);
+                    }
+                    *assigned_regions.entry(region).or_insert(0) += 1;
+                }
+            }
+            region_index += 1;
+        }
+
+        // Update selected peer configs
+        for idx in &selected_indices {
+            peer_configs[*idx].1.indexer = Some(url.clone());
+        }
+
+        info!(assignments = ?assigned_regions, "configured indexers");
+    }
+
     // Generate root config file
     let config = ec2::Config {
         tag,
@@ -533,120 +597,6 @@ fn generate_remote(
     info!(path = "config.yaml", "wrote configuration file");
 }
 
-fn indexer(sub_matches: &ArgMatches) {
-    // Extract arguments
-    let count = *sub_matches.get_one::<usize>("count").unwrap();
-    assert!(count > 0, "count must be greater than zero");
-    let dir = sub_matches.get_one::<String>("dir").unwrap().clone();
-    let url = sub_matches.get_one::<String>("url").unwrap().clone();
-
-    // Construct directory path
-    let raw_current_dir = std::env::current_dir().unwrap();
-    let current_dir = raw_current_dir.to_str().unwrap();
-    let dir = format!("{current_dir}/{dir}");
-
-    // Check if directory exists
-    if fs::metadata(&dir).is_err() {
-        error!("directory does not exist: {}", dir);
-        std::process::exit(1);
-    }
-
-    // Read config.yaml to get peer-to-region mappings
-    let config_path = format!("{dir}/config.yaml");
-    let config_content = fs::read_to_string(&config_path).expect("failed to read config.yaml");
-    let config: ec2::Config =
-        serde_yaml::from_str(&config_content).expect("failed to parse config.yaml");
-    assert!(
-        count <= config.instances.len(),
-        "count exceeds number of peers"
-    );
-
-    // Group peers by region
-    let mut region_to_peers: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for instance in &config.instances {
-        let peer_name = instance.name.clone();
-        let region = instance.region.clone();
-        region_to_peers.entry(region).or_default().push(peer_name);
-    }
-
-    // Sort peers within each region for deterministic selection
-    for peers in region_to_peers.values_mut() {
-        peers.sort();
-    }
-
-    // Get sorted list of regions for consistent iteration
-    let regions: Vec<String> = region_to_peers.keys().cloned().collect();
-
-    // Select peers for indexers in a round-robin fashion across regions
-    let mut selected = Vec::new();
-    let mut region_index = 0;
-    let mut assigned_regions = BTreeMap::new();
-    while selected.len() < count && !region_to_peers.is_empty() {
-        let region = &regions[region_index % regions.len()];
-        if let Some(peers) = region_to_peers.get_mut(region) {
-            if !peers.is_empty() {
-                let peer = peers.remove(0); // Take the first available peer
-                selected.push(peer);
-                if peers.is_empty() {
-                    region_to_peers.remove(region); // Remove region if no peers remain
-                }
-                assigned_regions.entry(region).or_insert(0).add_assign(1);
-            }
-        }
-        region_index += 1;
-    }
-
-    // Update configuration files for selected peers
-    for peer_name in &selected {
-        let config_file = format!("{dir}/{peer_name}.yaml");
-        let relative_path = format!("{peer_name}.yaml");
-        match fs::read_to_string(&config_file) {
-            Ok(content) => match serde_yaml::from_str::<Config>(&content) {
-                Ok(mut config) => {
-                    config.indexer = Some(url.clone());
-                    match serde_yaml::to_string(&config) {
-                        Ok(updated_content) => {
-                            if let Err(e) = fs::write(&config_file, updated_content) {
-                                error!(
-                                    path = ?relative_path,
-                                    error = ?e,
-                                    "failed to write"
-                                );
-                            } else {
-                                info!(path = ?relative_path, "updated");
-                            }
-                        }
-                        Err(e) => {
-                            error!(
-                                path = ?relative_path,
-                                error = ?e,
-                                "failed to serialize config"
-                            );
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!(
-                        path = ?relative_path,
-                        error = ?e,
-                        "failed to parse"
-                    );
-                }
-            },
-            Err(e) => {
-                error!(
-                    path = ?relative_path,
-                    error = ?e,
-                    "failed to read"
-                );
-            }
-        }
-    }
-
-    // Log assignment of indexers to regions
-    info!(assignments = ?assigned_regions, "configured indexers");
-}
-
 // Region-to-location mapping
 fn get_aws_location(region: &str) -> Option<([f64; 2], String)> {
     match region {
@@ -666,18 +616,45 @@ fn get_aws_location(region: &str) -> Option<([f64; 2], String)> {
     }
 }
 
-// Explorer subcommand implementation
-fn explorer(sub_matches: &ArgMatches) {
-    // Parse arguments
-    let dir = sub_matches.get_one::<String>("dir").unwrap().clone();
-    let backend_url = sub_matches
-        .get_one::<String>("backend-url")
-        .unwrap()
-        .clone();
+fn explorer_local(dir: String, backend_url: String) {
+    // Read peers.yaml to get participant count
+    let peers_path = format!("{dir}/peers.yaml");
+    let peers_content = fs::read_to_string(&peers_path).expect("failed to read peers.yaml");
+    let peers: Peers = serde_yaml::from_str(&peers_content).expect("failed to parse peers.yaml");
+    let num_peers = peers.addresses.len();
 
+    // Read polynomial from first peer config
+    let first_peer = peers.addresses.keys().next().expect("no peers found");
+    let peer_config_path = format!("{dir}/{first_peer}.yaml");
+    let peer_config_content =
+        fs::read_to_string(&peer_config_path).expect("failed to read peer config");
+    let peer_config: Config =
+        serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
+    let polynomial_hex = peer_config.polynomial;
+    let polynomial = from_hex_formatted(&polynomial_hex).expect("invalid polynomial");
+    let polynomial = Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(num_peers as u32))
+        .expect("polynomial is invalid");
+    let identity = polynomial.public();
+
+    // Generate config.ts with empty locations (explorer will hide map)
+    let config_ts = format!(
+        "export const BACKEND_URL = \"{}\";\n\
+        export const PUBLIC_KEY_HEX = \"{}\";\n\
+        export const LOCATIONS: [[number, number], string][] = [];",
+        backend_url,
+        hex(&identity.encode()),
+    );
+
+    // Write config.ts
+    let config_ts_path = format!("{dir}/config.ts");
+    fs::write(&config_ts_path, config_ts).expect("failed to write config.ts");
+    info!(path = "config.ts", "wrote explorer configuration file");
+}
+
+fn explorer_remote(dir: String, backend_url: String) {
     // Collect all locations
     let config_path = format!("{dir}/config.yaml");
-    let config_content = std::fs::read_to_string(&config_path).expect("failed to read config.yaml");
+    let config_content = fs::read_to_string(&config_path).expect("failed to read config.yaml");
     let config: ec2::Config =
         serde_yaml::from_str(&config_content).expect("failed to parse config.yaml");
     let mut participants = BTreeMap::new();
@@ -703,7 +680,7 @@ fn explorer(sub_matches: &ArgMatches) {
     let first_instance = &config.instances[0];
     let peer_config_path = format!("{}/{}", dir, first_instance.config);
     let peer_config_content =
-        std::fs::read_to_string(&peer_config_path).expect("failed to read peer config");
+        fs::read_to_string(&peer_config_path).expect("failed to read peer config");
     let peer_config: Config =
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
     let polynomial_hex = peer_config.polynomial;
@@ -723,6 +700,6 @@ fn explorer(sub_matches: &ArgMatches) {
 
     // Write config.ts
     let config_ts_path = format!("{dir}/config.ts");
-    std::fs::write(&config_ts_path, config_ts).expect("failed to write config.ts");
+    fs::write(&config_ts_path, config_ts).expect("failed to write config.ts");
     info!(path = "config.ts", "wrote explorer configuration file");
 }

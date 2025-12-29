@@ -3,7 +3,7 @@ name = "alto-indexer"
 version = "0.0.14"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "Serve alto activity locally."
+description = "Serve alto activity."
 
 [dependencies]
 alto-client = { workspace = true }
