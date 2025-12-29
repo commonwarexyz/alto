@@ -17,6 +17,8 @@ _To run this example, you must first install [Rust](https://www.rust-lang.org/to
 
 #### Create Artifacts
 
+_To configure indexer upload, add `--indexer-port <port>` to the `generate local` command. The first validator is configured to push data to it._
+
 ```bash
 cargo run --bin setup -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --output test local --start-port 3000 --indexer-port 8080
 ```
@@ -47,9 +49,6 @@ To view metrics, run:
 c58244243f263ebc975640d5bb4e43e8e78e4b41361e4e7984cd8b027480558a: curl http://localhost:3007/metrics
 f26a6d4f52c4d595b6cb659b643968b0e1fc9931b460c6407be10cebe4eeff2d: curl http://localhost:3009/metrics
 ```
-
-> [!TIP]
-> The `--indexer-port` flag is optional; if provided, an indexer command is emitted and the first validator is configured to push data to it.
 
 #### Start Validators
 
@@ -85,6 +84,8 @@ cargo install commonware-deployer
 
 #### Create Artifacts
 
+_To configure indexer upload, add `--indexer-url <URL> --indexer-count <count>` to the `generate remote` command. Indexers are selected in round-robin fashion across regions._
+
 ##### Global
 
 ```bash
@@ -100,14 +101,6 @@ cargo run --bin setup -- generate --peers 50 --bootstrappers 5 --worker-threads 
 ```
 
 _This configuration consumes ~30MB of disk space per hour per validator (~13 views per second). With 75GB of storage allocated, validators will exhaust available storage in ~3 months._
-
-#### [Optional] Configure Indexer Upload
-
-```bash
-cargo run --bin setup -- indexer --count <uploaders> --dir assets --url <indexer URL>
-```
-
-_The indexer URL is configured separately because it is typically only known after the threshold key is generated (derived in `setup generate`). The iteration order of this command is deterministic (re-running will update the same configuration files)._
 
 #### [Optional] Configure Explorer
 

@@ -16,7 +16,6 @@ use std::{
     collections::{BTreeMap, HashMap},
     fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    ops::AddAssign,
 };
 use tracing::{error, info};
 use uuid::Uuid;
@@ -136,29 +135,19 @@ fn main() {
                                 .long("dashboard")
                                 .required(true)
                                 .value_parser(value_parser!(String)),
+                        )
+                        .arg(
+                            Arg::new("indexer_url")
+                                .long("indexer-url")
+                                .required(false)
+                                .value_parser(value_parser!(String)),
+                        )
+                        .arg(
+                            Arg::new("indexer_count")
+                                .long("indexer-count")
+                                .required(false)
+                                .value_parser(value_parser!(usize)),
                         ),
-                ),
-        )
-        .subcommand(
-            Command::new("indexer")
-                .about("Add indexer support for an alto chain.")
-                .arg(
-                    Arg::new("count")
-                        .long("count")
-                        .required(true)
-                        .value_parser(value_parser!(usize)),
-                )
-                .arg(
-                    Arg::new("dir")
-                        .long("dir")
-                        .required(true)
-                        .value_parser(value_parser!(String)),
-                )
-                .arg(
-                    Arg::new("url")
-                        .long("url")
-                        .required(true)
-                        .value_parser(value_parser!(String)),
                 ),
         )
         .subcommand(
@@ -221,10 +210,9 @@ fn main() {
                 }
             }
         }
-        Some(("indexer", sub_matches)) => indexer(sub_matches),
         Some(("explorer", sub_matches)) => explorer(sub_matches),
         _ => {
-            eprintln!("Invalid subcommand. Use 'generate' or 'indexer'.");
+            eprintln!("Invalid subcommand. Use 'generate' or 'explorer'.");
             std::process::exit(1);
         }
     }
@@ -404,6 +392,14 @@ fn generate_remote(
         .get_one::<i32>("monitoring_storage_size")
         .unwrap();
     let dashboard = sub_matches.get_one::<String>("dashboard").unwrap().clone();
+    let indexer_url = sub_matches.get_one::<String>("indexer_url").cloned();
+    let indexer_count = sub_matches.get_one::<usize>("indexer_count").copied();
+
+    // Validate indexer arguments
+    if indexer_url.is_some() != indexer_count.is_some() {
+        error!("--indexer-url and --indexer-count must be specified together");
+        std::process::exit(1);
+    }
 
     // Construct output path
     let raw_current_dir = std::env::current_dir().unwrap();
@@ -497,6 +493,58 @@ fn generate_remote(
         instance_configs.push(instance);
     }
 
+    // Configure indexers if specified
+    if let (Some(url), Some(count)) = (&indexer_url, indexer_count) {
+        assert!(count > 0, "indexer count must be greater than zero");
+        assert!(
+            count <= peer_configs.len(),
+            "indexer count exceeds number of peers"
+        );
+
+        // Group peers by region
+        let mut region_to_peers: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (idx, instance) in instance_configs.iter().enumerate() {
+            region_to_peers
+                .entry(instance.region.clone())
+                .or_default()
+                .push(idx);
+        }
+
+        // Sort peers within each region for deterministic selection
+        for peers in region_to_peers.values_mut() {
+            peers.sort();
+        }
+
+        // Get sorted list of regions for consistent iteration
+        let region_list: Vec<String> = region_to_peers.keys().cloned().collect();
+
+        // Select peers for indexers in a round-robin fashion across regions
+        let mut selected_indices = Vec::new();
+        let mut region_index = 0;
+        let mut assigned_regions: BTreeMap<&String, usize> = BTreeMap::new();
+        while selected_indices.len() < count && !region_to_peers.is_empty() {
+            let region = &region_list[region_index % region_list.len()];
+            if let Some(peers) = region_to_peers.get_mut(region) {
+                if !peers.is_empty() {
+                    let peer_idx = peers.remove(0);
+                    selected_indices.push(peer_idx);
+                    if peers.is_empty() {
+                        region_to_peers.remove(region);
+                    }
+                    *assigned_regions.entry(region).or_insert(0) += 1;
+                }
+            }
+            region_index += 1;
+        }
+
+        // Update selected peer configs
+        for idx in &selected_indices {
+            peer_configs[*idx].1.indexer = Some(url.clone());
+        }
+
+        info!(assignments = ?assigned_regions, "configured indexers");
+    }
+
     // Generate root config file
     let config = ec2::Config {
         tag,
@@ -531,120 +579,6 @@ fn generate_remote(
     let file = fs::File::create(&path).unwrap();
     serde_yaml::to_writer(file, &config).unwrap();
     info!(path = "config.yaml", "wrote configuration file");
-}
-
-fn indexer(sub_matches: &ArgMatches) {
-    // Extract arguments
-    let count = *sub_matches.get_one::<usize>("count").unwrap();
-    assert!(count > 0, "count must be greater than zero");
-    let dir = sub_matches.get_one::<String>("dir").unwrap().clone();
-    let url = sub_matches.get_one::<String>("url").unwrap().clone();
-
-    // Construct directory path
-    let raw_current_dir = std::env::current_dir().unwrap();
-    let current_dir = raw_current_dir.to_str().unwrap();
-    let dir = format!("{current_dir}/{dir}");
-
-    // Check if directory exists
-    if fs::metadata(&dir).is_err() {
-        error!("directory does not exist: {}", dir);
-        std::process::exit(1);
-    }
-
-    // Read config.yaml to get peer-to-region mappings
-    let config_path = format!("{dir}/config.yaml");
-    let config_content = fs::read_to_string(&config_path).expect("failed to read config.yaml");
-    let config: ec2::Config =
-        serde_yaml::from_str(&config_content).expect("failed to parse config.yaml");
-    assert!(
-        count <= config.instances.len(),
-        "count exceeds number of peers"
-    );
-
-    // Group peers by region
-    let mut region_to_peers: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for instance in &config.instances {
-        let peer_name = instance.name.clone();
-        let region = instance.region.clone();
-        region_to_peers.entry(region).or_default().push(peer_name);
-    }
-
-    // Sort peers within each region for deterministic selection
-    for peers in region_to_peers.values_mut() {
-        peers.sort();
-    }
-
-    // Get sorted list of regions for consistent iteration
-    let regions: Vec<String> = region_to_peers.keys().cloned().collect();
-
-    // Select peers for indexers in a round-robin fashion across regions
-    let mut selected = Vec::new();
-    let mut region_index = 0;
-    let mut assigned_regions = BTreeMap::new();
-    while selected.len() < count && !region_to_peers.is_empty() {
-        let region = &regions[region_index % regions.len()];
-        if let Some(peers) = region_to_peers.get_mut(region) {
-            if !peers.is_empty() {
-                let peer = peers.remove(0); // Take the first available peer
-                selected.push(peer);
-                if peers.is_empty() {
-                    region_to_peers.remove(region); // Remove region if no peers remain
-                }
-                assigned_regions.entry(region).or_insert(0).add_assign(1);
-            }
-        }
-        region_index += 1;
-    }
-
-    // Update configuration files for selected peers
-    for peer_name in &selected {
-        let config_file = format!("{dir}/{peer_name}.yaml");
-        let relative_path = format!("{peer_name}.yaml");
-        match fs::read_to_string(&config_file) {
-            Ok(content) => match serde_yaml::from_str::<Config>(&content) {
-                Ok(mut config) => {
-                    config.indexer = Some(url.clone());
-                    match serde_yaml::to_string(&config) {
-                        Ok(updated_content) => {
-                            if let Err(e) = fs::write(&config_file, updated_content) {
-                                error!(
-                                    path = ?relative_path,
-                                    error = ?e,
-                                    "failed to write"
-                                );
-                            } else {
-                                info!(path = ?relative_path, "updated");
-                            }
-                        }
-                        Err(e) => {
-                            error!(
-                                path = ?relative_path,
-                                error = ?e,
-                                "failed to serialize config"
-                            );
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!(
-                        path = ?relative_path,
-                        error = ?e,
-                        "failed to parse"
-                    );
-                }
-            },
-            Err(e) => {
-                error!(
-                    path = ?relative_path,
-                    error = ?e,
-                    "failed to read"
-                );
-            }
-        }
-    }
-
-    // Log assignment of indexers to regions
-    info!(assignments = ?assigned_regions, "configured indexers");
 }
 
 // Region-to-location mapping
