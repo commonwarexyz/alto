@@ -347,13 +347,8 @@ fn generate_local(
     // Emit start commands
     info!(?bootstrappers, "setup complete");
     if let Some(indexer_port) = &indexer_port {
-        println!(
-            "Indexer URL: http://localhost:{port} (pushed by {})",
-            configurations[0].0
-        );
-
         let command =
-            format!("cargo run --bin simulator -- --port {indexer_port} --identity {identity}",);
+            format!("cargo run --bin indexer -- --port {indexer_port} --identity {identity}",);
         println!("To start local indexer, run:\n{command}");
     }
     println!("To start validators, run:");
@@ -362,6 +357,12 @@ fn generate_local(
         let command =
             format!("cargo run --bin {BINARY_NAME} -- --peers={peers_path} --config={path}");
         println!("{name}: {command}");
+    }
+    if let Some(indexer_port) = &indexer_port {
+        println!(
+            "Indexer URL: http://localhost:{indexer_port} (pushed by {})",
+            configurations[0].0
+        );
     }
     println!("To view metrics, run:");
     for (name, _, peer_config) in configurations {

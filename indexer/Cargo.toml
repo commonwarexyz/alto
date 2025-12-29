@@ -1,9 +1,9 @@
 [package]
-name = "alto-simulator"
+name = "alto-indexer"
 version = "0.0.14"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "Alto simulator for testing and development."
+description = "Serve alto activity locally."
 
 [dependencies]
 alto-client = { workspace = true }
@@ -27,11 +27,11 @@ reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 tokio-tungstenite = { workspace = true }
 
 [[bin]]
-name = "simulator"
+name = "indexer"
 path = "src/main.rs"
 
 [lib]
-name = "alto_simulator"
+name = "alto_indexer"
 path = "src/lib.rs"
 
 [dev-dependencies]

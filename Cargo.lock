@@ -93,27 +93,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "alto-inspector"
-version = "0.0.16"
-dependencies = [
- "alto-client",
- "alto-types",
- "bytes",
- "clap",
- "commonware-codec",
- "commonware-consensus",
- "commonware-cryptography",
- "commonware-utils",
- "futures",
- "rand 0.8.5",
- "thiserror 2.0.12",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "alto-simulator"
+name = "alto-indexer"
 version = "0.0.14"
 dependencies = [
  "alto-client",
@@ -133,6 +113,26 @@ dependencies = [
  "tokio-tungstenite",
  "tower",
  "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "alto-inspector"
+version = "0.0.16"
+dependencies = [
+ "alto-client",
+ "alto-types",
+ "bytes",
+ "clap",
+ "commonware-codec",
+ "commonware-consensus",
+ "commonware-cryptography",
+ "commonware-utils",
+ "futures",
+ "rand 0.8.5",
+ "thiserror 2.0.12",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]

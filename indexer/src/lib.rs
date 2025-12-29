@@ -8,9 +8,9 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use commonware_codec::{DecodeExt, Encode};
+use commonware_codec::{DecodeExt, Encode, EncodeSize, FixedSize, Write};
 use commonware_consensus::{types::View, Viewable};
-use commonware_cryptography::Digestible;
+use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_utils::from_hex;
 use futures::{SinkExt, StreamExt};
 use std::{
@@ -25,17 +25,17 @@ pub struct State {
     seeds: BTreeMap<View, Seed>,
     notarizations: BTreeMap<View, Notarized>,
     finalizations: BTreeMap<View, Finalized>,
-    blocks_by_digest: BTreeMap<commonware_cryptography::sha256::Digest, Block>,
+    blocks_by_digest: BTreeMap<Digest, Block>,
 }
 
 #[derive(Clone)]
-pub struct Simulator {
+pub struct Indexer {
     scheme: Scheme,
     state: Arc<RwLock<State>>,
     consensus_tx: broadcast::Sender<Vec<u8>>,
 }
 
-impl Simulator {
+impl Indexer {
     pub fn new(scheme: Scheme) -> Self {
         let (consensus_tx, _) = broadcast::channel(1024);
         let state = Arc::new(RwLock::new(State::default()));
@@ -59,8 +59,9 @@ impl Simulator {
         }
 
         // Broadcast seed
-        let mut data = vec![Kind::Seed as u8];
-        data.extend(seed.encode().to_vec());
+        let mut data = Vec::with_capacity(u8::SIZE + seed.encode_size());
+        data.push(Kind::Seed as u8);
+        seed.write(&mut data[1..].as_mut());
         let _ = self.consensus_tx.send(data);
         Ok(())
     }
@@ -72,7 +73,7 @@ impl Simulator {
         } else {
             // Parse as hex-encoded index
             let raw = from_hex(query)?;
-            let index = u64::from_be_bytes(raw.try_into().ok()?);
+            let index = u64::decode(raw.as_slice()).ok()?;
             state.seeds.get(&View::new(index)).cloned()
         }
     }
@@ -114,7 +115,7 @@ impl Simulator {
         } else {
             // Parse as hex-encoded index
             let raw = from_hex(query)?;
-            let index = u64::from_be_bytes(raw.try_into().ok()?);
+            let index = u64::decode(raw.as_slice()).ok()?;
             state.notarizations.get(&View::new(index)).cloned()
         }
     }
@@ -156,7 +157,7 @@ impl Simulator {
         } else {
             // Parse as hex-encoded index
             let raw = from_hex(query)?;
-            let index = u64::from_be_bytes(raw.try_into().ok()?);
+            let index = u64::decode(raw.as_slice()).ok()?;
             state.finalizations.get(&View::new(index)).cloned()
         }
     }
@@ -172,8 +173,8 @@ impl Simulator {
                 .map(|(_, f)| BlockResult::Finalized(f.clone()))
         } else if let Some(raw) = from_hex(query) {
             // Try to parse as index (8 bytes)
-            if raw.len() == 8 {
-                let index = u64::from_be_bytes(raw.try_into().ok()?);
+            if raw.len() == u64::SIZE {
+                let index = u64::decode(raw.as_slice()).ok()?;
                 // Find finalized block with this height
                 for (_, finalized) in state.finalizations.iter() {
                     if finalized.block.height == index {
@@ -181,10 +182,8 @@ impl Simulator {
                     }
                 }
                 None
-            } else if raw.len() == 32 {
-                // Try to parse as digest (32 bytes)
-                let digest_bytes: [u8; 32] = raw.try_into().ok()?;
-                let digest = commonware_cryptography::sha256::Digest::from(digest_bytes);
+            } else if raw.len() == Digest::SIZE {
+                let digest = Digest::decode(raw.as_slice()).ok()?;
                 state
                     .blocks_by_digest
                     .get(&digest)
@@ -209,15 +208,15 @@ pub enum BlockResult {
 }
 
 pub struct Api {
-    simulator: Arc<Simulator>,
+    indexer: Arc<Indexer>,
 }
 
 impl Api {
-    pub fn new(simulator: Arc<Simulator>) -> Self {
-        Self { simulator }
+    pub fn new(indexer: Arc<Indexer>) -> Self {
+        Self { indexer }
     }
 
-    pub fn router(&self) -> Router {
+    pub fn router(self) -> Router {
         Router::new()
             .route("/health", get(health_check))
             .route("/seed", post(seed_upload))
@@ -229,7 +228,7 @@ impl Api {
             .route("/block/{query}", get(block_get))
             .route("/consensus/ws", get(consensus_ws))
             .layer(CorsLayer::permissive())
-            .with_state(self.simulator.clone())
+            .with_state(self.indexer)
     }
 }
 
@@ -238,11 +237,11 @@ async fn health_check() -> impl IntoResponse {
 }
 
 async fn seed_upload(
-    AxumState(simulator): AxumState<Arc<Simulator>>,
+    AxumState(indexer): AxumState<Arc<Indexer>>,
     body: Bytes,
 ) -> impl IntoResponse {
     match Seed::decode(&mut body.as_ref()) {
-        Ok(seed) => match simulator.submit_seed(seed) {
+        Ok(seed) => match indexer.submit_seed(seed) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
         },
@@ -251,21 +250,21 @@ async fn seed_upload(
 }
 
 async fn seed_get(
-    AxumState(simulator): AxumState<Arc<Simulator>>,
+    AxumState(indexer): AxumState<Arc<Indexer>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
-    match simulator.get_seed(&query) {
+    match indexer.get_seed(&query) {
         Some(seed) => (StatusCode::OK, seed.encode().to_vec()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 async fn notarization_upload(
-    AxumState(simulator): AxumState<Arc<Simulator>>,
+    AxumState(indexer): AxumState<Arc<Indexer>>,
     body: Bytes,
 ) -> impl IntoResponse {
     match Notarized::decode(&mut body.as_ref()) {
-        Ok(notarized) => match simulator.submit_notarization(notarized) {
+        Ok(notarized) => match indexer.submit_notarization(notarized) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
         },
@@ -274,21 +273,21 @@ async fn notarization_upload(
 }
 
 async fn notarization_get(
-    AxumState(simulator): AxumState<Arc<Simulator>>,
+    AxumState(indexer): AxumState<Arc<Indexer>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
-    match simulator.get_notarization(&query) {
+    match indexer.get_notarization(&query) {
         Some(notarized) => (StatusCode::OK, notarized.encode().to_vec()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 async fn finalization_upload(
-    AxumState(simulator): AxumState<Arc<Simulator>>,
+    AxumState(indexer): AxumState<Arc<Indexer>>,
     body: Bytes,
 ) -> impl IntoResponse {
     match Finalized::decode(&mut body.as_ref()) {
-        Ok(finalized) => match simulator.submit_finalization(finalized) {
+        Ok(finalized) => match indexer.submit_finalization(finalized) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
         },
@@ -297,20 +296,20 @@ async fn finalization_upload(
 }
 
 async fn finalization_get(
-    AxumState(simulator): AxumState<Arc<Simulator>>,
+    AxumState(indexer): AxumState<Arc<Indexer>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
-    match simulator.get_finalization(&query) {
+    match indexer.get_finalization(&query) {
         Some(finalized) => (StatusCode::OK, finalized.encode().to_vec()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 async fn block_get(
-    AxumState(simulator): AxumState<Arc<Simulator>>,
+    AxumState(indexer): AxumState<Arc<Indexer>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
-    match simulator.get_block(&query) {
+    match indexer.get_block(&query) {
         Some(BlockResult::Block(block)) => {
             (StatusCode::OK, block.encode().to_vec()).into_response()
         }
@@ -322,15 +321,15 @@ async fn block_get(
 }
 
 async fn consensus_ws(
-    AxumState(simulator): AxumState<Arc<Simulator>>,
+    AxumState(indexer): AxumState<Arc<Indexer>>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_consensus_ws(socket, simulator))
+    ws.on_upgrade(move |socket| handle_consensus_ws(socket, indexer))
 }
 
-async fn handle_consensus_ws(socket: axum::extract::ws::WebSocket, simulator: Arc<Simulator>) {
+async fn handle_consensus_ws(socket: axum::extract::ws::WebSocket, indexer: Arc<Indexer>) {
     let (mut sender, _receiver) = socket.split();
-    let mut consensus = simulator.consensus_subscriber();
+    let mut consensus = indexer.consensus_subscriber();
 
     while let Ok(data) = consensus.recv().await {
         if sender
@@ -364,7 +363,7 @@ mod tests {
     use std::net::SocketAddr;
     use tokio::net::TcpListener;
 
-    /// Test context containing common setup for simulator tests.
+    /// Test context containing common setup for indexer tests.
     struct TestContext {
         schemes: Vec<Scheme>,
         client: Client,
@@ -389,7 +388,7 @@ mod tests {
         }
 
         /// Create a proposal for the given block at view 1.
-        fn proposal(&self, block: &Block) -> Proposal<commonware_cryptography::sha256::Digest> {
+        fn proposal(&self, block: &Block) -> Proposal<Digest> {
             Proposal::new(
                 Round::new(EPOCH, View::new(1)),
                 View::new(0),
@@ -421,7 +420,7 @@ mod tests {
 
     fn create_notarization(
         schemes: &[Scheme],
-        proposal: Proposal<commonware_cryptography::sha256::Digest>,
+        proposal: Proposal<Digest>,
     ) -> alto_types::Notarization {
         let notarizes: Vec<_> = schemes
             .iter()
@@ -432,7 +431,7 @@ mod tests {
 
     fn create_finalization(
         schemes: &[Scheme],
-        proposal: Proposal<commonware_cryptography::sha256::Digest>,
+        proposal: Proposal<Digest>,
     ) -> alto_types::Finalization {
         let finalizes: Vec<_> = schemes
             .iter()
@@ -442,8 +441,8 @@ mod tests {
     }
 
     async fn start_server(scheme: Scheme) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-        let simulator = Arc::new(Simulator::new(scheme));
-        let api = Api::new(simulator);
+        let indexer = Arc::new(Indexer::new(scheme));
+        let api = Api::new(indexer);
         let app = api.router();
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

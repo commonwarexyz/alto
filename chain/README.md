@@ -31,15 +31,15 @@ _If setup succeeds, you should see the following output:_
 2025-12-23T13:41:54.037966Z  INFO setup: wrote peer configuration file path="c58244243f263ebc975640d5bb4e43e8e78e4b41361e4e7984cd8b027480558a.yaml"
 2025-12-23T13:41:54.038228Z  INFO setup: wrote peer configuration file path="f26a6d4f52c4d595b6cb659b643968b0e1fc9931b460c6407be10cebe4eeff2d.yaml"
 2025-12-23T13:41:54.038232Z  INFO setup: setup complete bootstrappers=["71943989f39d485eb8a1f7c8f9909673caaa658d12a586c93f37575dae44438f"]
-Indexer URL: http://localhost:3010 (pushed by 04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37)
 To start local indexer, run:
-cargo run --bin simulator -- --port 8080 --identity 8b2c34e0356beb83874317f8f04fb211e4d3ed34640631a36ff191cb3fcd9768403b8749824b41ff770a92e40885174b15516db966816870ba9619a64b4d5b79ea7b4a73240710169ecc44da0951cdd60e2db65544cba5647f81ab19ca50cf4e
+cargo run --bin indexer -- --port 8080 --identity 8b2c34e0356beb83874317f8f04fb211e4d3ed34640631a36ff191cb3fcd9768403b8749824b41ff770a92e40885174b15516db966816870ba9619a64b4d5b79ea7b4a73240710169ecc44da0951cdd60e2db65544cba5647f81ab19ca50cf4e
 To start validators, run:
 04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37.yaml
 0b2412d7eb2238b319920504f19b28447c7dbb3c58059c97d22cc0d27ea31e81: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/0b2412d7eb2238b319920504f19b28447c7dbb3c58059c97d22cc0d27ea31e81.yaml
 71943989f39d485eb8a1f7c8f9909673caaa658d12a586c93f37575dae44438f: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/71943989f39d485eb8a1f7c8f9909673caaa658d12a586c93f37575dae44438f.yaml
 c58244243f263ebc975640d5bb4e43e8e78e4b41361e4e7984cd8b027480558a: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/c58244243f263ebc975640d5bb4e43e8e78e4b41361e4e7984cd8b027480558a.yaml
 f26a6d4f52c4d595b6cb659b643968b0e1fc9931b460c6407be10cebe4eeff2d: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/f26a6d4f52c4d595b6cb659b643968b0e1fc9931b460c6407be10cebe4eeff2d.yaml
+Indexer URL: http://localhost:8080 (pushed by 04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37)
 To view metrics, run:
 04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37: curl http://localhost:3001/metrics
 0b2412d7eb2238b319920504f19b28447c7dbb3c58059c97d22cc0d27ea31e81: curl http://localhost:3003/metrics
@@ -49,7 +49,7 @@ f26a6d4f52c4d595b6cb659b643968b0e1fc9931b460c6407be10cebe4eeff2d: curl http://lo
 ```
 
 > [!TIP]
-> The `--indexer-port` flag is optional; if provided, an indexer simulator command is emitted and the first validator is configured to push data to it.
+> The `--indexer-port` flag is optional; if provided, an indexer command is emitted and the first validator is configured to push data to it.
 
 #### Start Validators
 

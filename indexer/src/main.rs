@@ -1,4 +1,4 @@
-use alto_simulator::{Api, Simulator};
+use alto_indexer::{Api, Indexer};
 use alto_types::{Identity, Scheme};
 use clap::Parser;
 use commonware_codec::DecodeExt;
@@ -33,16 +33,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let identity: Identity =
         Identity::decode(&mut bytes.as_slice()).map_err(|_| "Failed to decode identity")?;
 
-    // Initialize simulator
+    // Initialize indexer
     let certificate_verifier = Scheme::certificate_verifier(identity);
-    let simulator = Arc::new(Simulator::new(certificate_verifier));
-    let api = Api::new(simulator);
+    let indexer = Arc::new(Indexer::new(certificate_verifier));
+    let api = Api::new(indexer);
     let app = api.router();
 
     // Start server
     let addr = format!("0.0.0.0:{}", args.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    info!(?identity, ?addr, "started simulator");
+    info!(?identity, ?addr, "started indexer");
     axum::serve(listener, app).await?;
 
     Ok(())

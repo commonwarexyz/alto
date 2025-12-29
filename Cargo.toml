@@ -3,7 +3,7 @@ members = [
     "chain",
     "client",
     "inspector",
-    "simulator",
+    "indexer",
     "types",
 ]
 resolver = "2"

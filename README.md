@@ -13,6 +13,7 @@ _Components are designed for deployment in adversarial environments. If you find
 * [client](./client/README.md): Client for interacting with `alto`.
 * [explorer](./explorer/README.md): Visualize `alto` activity.
 * [inspector](./inspector/README.md): Inspect `alto` activity.
+* [indexer](./indexer/README.md): Serve `alto` activity locally.
 * [types](./types/README.md): Common types used throughout `alto`.
 
 ## Licensing
