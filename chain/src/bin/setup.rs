@@ -164,7 +164,9 @@ fn main() {
                         .long("backend-url")
                         .required(true)
                         .value_parser(value_parser!(String)),
-                ),
+                )
+                .subcommand(Command::new("local").about("Generate explorer config for local deployment"))
+                .subcommand(Command::new("remote").about("Generate explorer config for remote deployment")),
         );
 
     // Parse arguments
@@ -210,7 +212,21 @@ fn main() {
                 }
             }
         }
-        Some(("explorer", sub_matches)) => explorer(sub_matches),
+        Some(("explorer", sub_matches)) => {
+            let dir = sub_matches.get_one::<String>("dir").unwrap().clone();
+            let backend_url = sub_matches
+                .get_one::<String>("backend-url")
+                .unwrap()
+                .clone();
+            match sub_matches.subcommand() {
+                Some(("local", _)) => explorer_local(dir, backend_url),
+                Some(("remote", _)) => explorer_remote(dir, backend_url),
+                _ => {
+                    eprintln!("Invalid subcommand. Use 'local' or 'remote'.");
+                    std::process::exit(1);
+                }
+            }
+        }
         _ => {
             eprintln!("Invalid subcommand. Use 'generate' or 'explorer'.");
             std::process::exit(1);
@@ -600,18 +616,46 @@ fn get_aws_location(region: &str) -> Option<([f64; 2], String)> {
     }
 }
 
-// Explorer subcommand implementation
-fn explorer(sub_matches: &ArgMatches) {
-    // Parse arguments
-    let dir = sub_matches.get_one::<String>("dir").unwrap().clone();
-    let backend_url = sub_matches
-        .get_one::<String>("backend-url")
-        .unwrap()
-        .clone();
+fn explorer_local(dir: String, backend_url: String) {
+    // Read peers.yaml to get participant count
+    let peers_path = format!("{dir}/peers.yaml");
+    let peers_content = fs::read_to_string(&peers_path).expect("failed to read peers.yaml");
+    let peers: Peers = serde_yaml::from_str(&peers_content).expect("failed to parse peers.yaml");
+    let num_peers = peers.addresses.len();
 
+    // Read polynomial from first peer config
+    let first_peer = peers.addresses.keys().next().expect("no peers found");
+    let peer_config_path = format!("{dir}/{first_peer}.yaml");
+    let peer_config_content =
+        fs::read_to_string(&peer_config_path).expect("failed to read peer config");
+    let peer_config: Config =
+        serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
+    let polynomial_hex = peer_config.polynomial;
+    let polynomial = from_hex_formatted(&polynomial_hex).expect("invalid polynomial");
+    let polynomial =
+        Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(num_peers as u32))
+            .expect("polynomial is invalid");
+    let identity = polynomial.public();
+
+    // Generate config.ts with empty locations (explorer will hide map)
+    let config_ts = format!(
+        "export const BACKEND_URL = \"{}\";\n\
+        export const PUBLIC_KEY_HEX = \"{}\";\n\
+        export const LOCATIONS: [[number, number], string][] = [];",
+        backend_url,
+        hex(&identity.encode()),
+    );
+
+    // Write config.ts
+    let config_ts_path = format!("{dir}/config.ts");
+    fs::write(&config_ts_path, config_ts).expect("failed to write config.ts");
+    info!(path = "config.ts", "wrote explorer configuration file");
+}
+
+fn explorer_remote(dir: String, backend_url: String) {
     // Collect all locations
     let config_path = format!("{dir}/config.yaml");
-    let config_content = std::fs::read_to_string(&config_path).expect("failed to read config.yaml");
+    let config_content = fs::read_to_string(&config_path).expect("failed to read config.yaml");
     let config: ec2::Config =
         serde_yaml::from_str(&config_content).expect("failed to parse config.yaml");
     let mut participants = BTreeMap::new();
@@ -637,7 +681,7 @@ fn explorer(sub_matches: &ArgMatches) {
     let first_instance = &config.instances[0];
     let peer_config_path = format!("{}/{}", dir, first_instance.config);
     let peer_config_content =
-        std::fs::read_to_string(&peer_config_path).expect("failed to read peer config");
+        fs::read_to_string(&peer_config_path).expect("failed to read peer config");
     let peer_config: Config =
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
     let polynomial_hex = peer_config.polynomial;
@@ -657,6 +701,6 @@ fn explorer(sub_matches: &ArgMatches) {
 
     // Write config.ts
     let config_ts_path = format!("{dir}/config.ts");
-    std::fs::write(&config_ts_path, config_ts).expect("failed to write config.ts");
+    fs::write(&config_ts_path, config_ts).expect("failed to write config.ts");
     info!(path = "config.ts", "wrote explorer configuration file");
 }

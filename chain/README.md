@@ -60,6 +60,12 @@ cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-
 
 _It is necessary to start at least one bootstrapper for any other peers to connect (used to exchange IPs to dial, not as a relay)._
 
+#### [Optional] Configure Explorer
+
+```bash
+cargo run --bin setup -- explorer --dir test --backend-url <backend URL> local
+```
+
 #### Debugging
 
 ##### Too Many Open Files
@@ -105,7 +111,7 @@ _This configuration consumes ~30MB of disk space per hour per validator (~13 vie
 #### [Optional] Configure Explorer
 
 ```bash
-cargo run --bin setup -- explorer --dir assets --backend-url <backend URL>
+cargo run --bin setup -- explorer --dir assets --backend-url <backend URL> remote
 ```
 
 #### Build Validator Binary

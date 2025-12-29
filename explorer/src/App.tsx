@@ -294,13 +294,16 @@ const App: React.FC = () => {
         // the location and signature information without changing timing
         const existingStatus = newViews[existingIndex].status;
         if (existingStatus === "finalized" || existingStatus === "notarized") {
-          const locationIndex = leader_index(seed, LOCATIONS.length);
+          // Only update location if LOCATIONS is defined
+          const locationIndex = LOCATIONS.length > 0 ? leader_index(seed, LOCATIONS.length) : -1;
+          const location = locationIndex >= 0 ? LOCATIONS[locationIndex][0] : undefined;
+          const locationName = locationIndex >= 0 ? LOCATIONS[locationIndex][1] : undefined;
 
           // Only update location and signature info, preserve all timing and status
           newViews[existingIndex] = {
             ...newViews[existingIndex],
-            location: LOCATIONS[locationIndex][0],
-            locationName: LOCATIONS[locationIndex][1],
+            location,
+            locationName,
             signature: seed.signature,
           };
 
@@ -319,11 +322,13 @@ const App: React.FC = () => {
       }
 
       // Create the new view data
-      const locationIndex = leader_index(seed, LOCATIONS.length);
+      const locationIndex = LOCATIONS.length > 0 ? leader_index(seed, LOCATIONS.length) : -1;
+      const location = locationIndex >= 0 ? LOCATIONS[locationIndex][0] : undefined;
+      const locationName = locationIndex >= 0 ? LOCATIONS[locationIndex][1] : undefined;
       const newView: ViewData = {
         view,
-        location: LOCATIONS[locationIndex][0],
-        locationName: LOCATIONS[locationIndex][1],
+        location,
+        locationName,
         status: "growing",
         startTime: adjustTime(Date.now()),
         signature: seed.signature,
@@ -353,8 +358,8 @@ const App: React.FC = () => {
           status: "growing",
           signature: seed.signature,
           timeoutId: timeoutId,
-          location: LOCATIONS[locationIndex][0],
-          locationName: LOCATIONS[locationIndex][1],
+          location,
+          locationName,
         };
       } else {
         // Add as new
@@ -802,37 +807,39 @@ const App: React.FC = () => {
       </header>
 
       <main className="app-main">
-        {/* Map */}
-        <div className="map-container">
-          <MapContainer key={selectedCluster} center={center} zoom={1} style={{ height: "100%", width: "100%" }} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false} dragging={false}>
-            <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
-              attribution='&copy; OSM | &copy; CARTO</a>'
-            />
-            {views.length > 0 && views[0].location !== undefined && (
-              <Marker
-                key={views[0].view}
-                position={views[0].location}
-                icon={markerIcon}
-              >
-                <Popup>
-                  <div>
-                    <strong>View: {views[0].view}</strong><br />
-                    Location: {views[0].locationName}<br />
-                    Status: {views[0].status}<br />
-                    {views[0].block && (
-                      <>Block Height: {views[0].block.height}<br /></>
-                    )}
-                    {views[0].startTime && (
-                      <>Start Time: {new Date(views[0].startTime).toLocaleTimeString()}<br /></>
-                    )}
-                  </div>
-                </Popup>
-              </Marker>
-            )}
-            <MapOverlay numValidators={LOCATIONS.length} />
-          </MapContainer>
-        </div>
+        {/* Map - only show if locations are defined */}
+        {LOCATIONS.length > 0 && (
+          <div className="map-container">
+            <MapContainer key={selectedCluster} center={center} zoom={1} style={{ height: "100%", width: "100%" }} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false} dragging={false}>
+              <TileLayer
+                url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
+                attribution='&copy; OSM | &copy; CARTO</a>'
+              />
+              {views.length > 0 && views[0].location !== undefined && (
+                <Marker
+                  key={views[0].view}
+                  position={views[0].location}
+                  icon={markerIcon}
+                >
+                  <Popup>
+                    <div>
+                      <strong>View: {views[0].view}</strong><br />
+                      Location: {views[0].locationName}<br />
+                      Status: {views[0].status}<br />
+                      {views[0].block && (
+                        <>Block Height: {views[0].block.height}<br /></>
+                      )}
+                      {views[0].startTime && (
+                        <>Start Time: {new Date(views[0].startTime).toLocaleTimeString()}<br /></>
+                      )}
+                    </div>
+                  </Popup>
+                </Marker>
+              )}
+              <MapOverlay numValidators={LOCATIONS.length} />
+            </MapContainer>
+          </div>
+        )}
 
         {/* Stats Section */}
         <StatsSection
