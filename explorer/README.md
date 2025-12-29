@@ -1,8 +1,14 @@
 # alto-explorer
 
-The alto explorer can run in two modes: **public** (for deployed clusters) and **local** (for local development).
+Visualize `alto` activity.
+
+## Status
+
+`alto-explorer` is **ALPHA** software and is not yet recommended for production use. Developers should expect breaking changes and occasional instability.
 
 ## Modes
+
+The alto explorer can run in two modes: **public** (for deployed clusters) and **local** (for local development).
 
 ### Public Mode (Default)
 
@@ -11,30 +17,7 @@ Public mode is used for deployed clusters (e.g., Global and USA clusters on AWS)
 - A cluster dropdown to switch between clusters
 - Full documentation about the deployed infrastructure
 
-To run in public mode:
-```bash
-npm start
-# or explicitly:
-REACT_APP_MODE=public npm start
-```
-
-### Local Mode
-
-Local mode is used for local development with a local indexer. It shows:
-- No map (since all validators are on localhost)
-- No cluster dropdown
-- Simplified documentation for local usage
-
-To run in local mode:
-```bash
-REACT_APP_MODE=local npm start
-```
-
-## Configuration
-
-### Public Mode Configuration
-
-For public mode, populate `src/global_config.ts` and `src/usa_config.ts` with the cluster configurations:
+Populate `src/global_config.ts` and `src/usa_config.ts` with the cluster configurations:
 
 ```typescript
 // Backend URL (without protocol - https:// is used automatically)
@@ -56,12 +39,24 @@ You can generate these configurations using `setup explorer remote`:
 cargo run --bin setup -- explorer --dir <config-dir> --backend-url <url> remote
 ```
 
-### Local Mode Configuration
+To run in public mode:
+```bash
+npm start
+# or explicitly:
+REACT_APP_MODE=public npm start
+```
 
-For local mode, populate `src/local_config.ts`:
+### Local Mode
+
+Local mode is used for local development with a local indexer. It shows:
+- No map (since all validators are on localhost)
+- No cluster dropdown
+- Simplified documentation for local usage
+
+Populate `src/local_config.ts`:
 
 ```typescript
-// Backend URL (with port - http:// is used automatically for URLs with ports)
+// Backend URL (http:// is used automatically in local mode)
 export const BACKEND_URL = "localhost:8080";
 
 // Consensus threshold key (hex-encoded)
@@ -78,17 +73,12 @@ cargo run --bin setup -- explorer --dir <config-dir> --backend-url <url> local
 
 Then copy the generated `config.ts` to `src/local_config.ts`.
 
-## Development
-
-### Run the app
-
+To run in local mode:
 ```bash
-# Public mode (default)
-npm start
-
-# Local mode
 REACT_APP_MODE=local npm start
 ```
+
+## Development
 
 ### Build the app
 
