@@ -24,6 +24,10 @@ export const LOCATIONS: [[number, number], string][] = [
 ];
 ```
 
+### Using a Local Indexer
+
+A local indexer can be used to stream data to the explorer via [`alto-indexer`](../indexer). See ["local setup"](../chain/README.md#local) in the `alto-chain` README for instructions on setting up a local indexer.
+
 ## Run the app
 
 ```bash
