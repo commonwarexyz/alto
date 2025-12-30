@@ -386,6 +386,7 @@ mod tests {
 
             let (addr, _) = start_server(schemes[0].clone()).await;
             let client = Client::new(&format!("http://{addr}"), identity);
+            wait_for_ready(&client).await;
 
             Self { schemes, client }
         }
@@ -460,16 +461,12 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        wait_for_server(&format!("http://{addr}")).await;
-
         (addr, handle)
     }
 
-    async fn wait_for_server(base_url: &str) {
-        let client = reqwest::Client::new();
-        let health_url = format!("{base_url}/health");
+    async fn wait_for_ready(client: &Client) {
         loop {
-            if client.get(&health_url).send().await.is_ok() {
+            if client.health().await.is_ok() {
                 return;
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -611,6 +608,7 @@ mod tests {
         // Start server with schemes1, but create client expecting identity2
         let (addr, _handle) = start_server(schemes1[0].clone()).await;
         let client = Client::new(&format!("http://{addr}"), identity2);
+        wait_for_ready(&client).await;
 
         // Create a seed signed by schemes1
         let block = Block::new(Sha256::hash(b"genesis"), 1, 1000);
@@ -702,24 +700,7 @@ mod tests {
             }
         });
 
-        wait_for_tls_server(&format!("https://{addr}"), cert_key).await;
-
         (addr, handle)
-    }
-
-    async fn wait_for_tls_server(base_url: &str, cert_key: &CertifiedKey<KeyPair>) {
-        let cert = reqwest::Certificate::from_der(cert_key.cert.der()).unwrap();
-        let client = reqwest::Client::builder()
-            .add_root_certificate(cert)
-            .build()
-            .unwrap();
-        let health_url = format!("{base_url}/health");
-        loop {
-            if client.get(&health_url).send().await.is_ok() {
-                return;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        }
     }
 
     fn create_tls_client(
@@ -742,6 +723,7 @@ mod tests {
 
         let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key).await;
         let client = create_tls_client(addr, identity, &cert_key);
+        wait_for_ready(&client).await;
 
         // Create and upload a seed
         let block = Block::new(Sha256::hash(b"genesis"), 1, 1000);
@@ -772,6 +754,7 @@ mod tests {
 
         let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key).await;
         let client = create_tls_client(addr, identity, &cert_key);
+        wait_for_ready(&client).await;
 
         // Create a seed
         let block = Block::new(Sha256::hash(b"genesis"), 1, 1000);
