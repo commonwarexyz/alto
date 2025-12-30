@@ -70,6 +70,13 @@ pub struct Client {
 }
 
 impl Client {
+    /// Create a new client for the given indexer URI.
+    ///
+    /// TLS is automatically configured using the system's root certificates.
+    /// For HTTPS/WSS endpoints with certificates signed by trusted CAs,
+    /// no additional configuration is needed.
+    ///
+    /// For self-signed certificates, use [`Client::new_with_tls`] instead.
     pub fn new(uri: &str, identity: Identity) -> Self {
         let uri = uri.to_string();
         let ws_uri = uri.replace("http", "ws");
@@ -86,7 +93,9 @@ impl Client {
 
     /// Create a new client with custom HTTP client and TLS connector.
     ///
-    /// This is useful for testing with self-signed certificates.
+    /// Use this for self-signed certificates where you need to explicitly
+    /// configure trust. Both the reqwest client and the WebSocket TLS connector
+    /// must be configured to trust the same certificate.
     pub fn new_with_tls(
         uri: &str,
         identity: Identity,
