@@ -654,10 +654,14 @@ mod tests {
             let cert_der = CertificateDer::from(cert_key.cert.der().to_vec());
             let key_der = PrivateKeyDer::try_from(cert_key.signing_key.serialize_der()).unwrap();
 
-            let server_config = rustls::ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(vec![cert_der], key_der)
-                .expect("Failed to create server config");
+            let server_config = rustls::ServerConfig::builder_with_provider(Arc::new(
+                rustls::crypto::aws_lc_rs::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert_der], key_der)
+            .expect("Failed to create server config");
             let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
 
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -707,17 +711,22 @@ mod tests {
             let cert_pem = cert_key.cert.pem();
             let cert = reqwest::Certificate::from_pem(cert_pem.as_bytes()).unwrap();
             let http_client = reqwest::Client::builder()
-                .add_root_certificate(cert.clone())
+                .add_root_certificate(cert)
                 .build()
                 .unwrap();
 
-            // Create a native-tls connector that trusts the self-signed cert
-            let native_cert = native_tls::Certificate::from_pem(cert_pem.as_bytes()).unwrap();
-            let tls_connector = native_tls::TlsConnector::builder()
-                .add_root_certificate(native_cert)
-                .build()
-                .unwrap();
-            let ws_connector = tokio_tungstenite::Connector::NativeTls(tls_connector);
+            // Create a rustls client config that trusts the self-signed cert
+            let cert_der = CertificateDer::from(cert_key.cert.der().to_vec());
+            let mut root_store = rustls::RootCertStore::empty();
+            root_store.add(cert_der).unwrap();
+            let client_config = rustls::ClientConfig::builder_with_provider(Arc::new(
+                rustls::crypto::aws_lc_rs::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+            let ws_connector = tokio_tungstenite::Connector::Rustls(Arc::new(client_config));
 
             Client::new_with_tls(
                 &format!("https://{addr}"),
