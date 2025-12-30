@@ -110,14 +110,13 @@ impl ClientBuilder {
                 let cert = rustls::pki_types::CertificateDer::from(cert_der.clone());
                 root_store.add(cert).expect("failed to add certificate");
             }
-            let provider = rustls::crypto::CryptoProvider::get_default()
-                .cloned()
-                .unwrap_or_else(|| Arc::new(rustls::crypto::ring::default_provider()));
-            let config = rustls::ClientConfig::builder_with_provider(provider)
-                .with_safe_default_protocol_versions()
-                .expect("failed to set protocol versions")
-                .with_root_certificates(root_store)
-                .with_no_client_auth();
+            let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+                rustls::crypto::aws_lc_rs::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .expect("failed to set protocol versions")
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
             Some(WsConnector::Rustls(Arc::new(config)))
         };
 
