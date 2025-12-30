@@ -56,6 +56,9 @@ pub enum Error {
     UnexpectedResponse,
 }
 
+/// TLS connector for WebSocket connections.
+pub type TlsConnector = tokio_tungstenite::Connector;
+
 #[derive(Clone)]
 pub struct Client {
     uri: String,
@@ -63,6 +66,7 @@ pub struct Client {
     certificate_verifier: Scheme,
 
     client: reqwest::Client,
+    tls_connector: Option<TlsConnector>,
 }
 
 impl Client {
@@ -76,6 +80,29 @@ impl Client {
             certificate_verifier,
 
             client: reqwest::Client::new(),
+            tls_connector: None,
+        }
+    }
+
+    /// Create a new client with custom HTTP client and TLS connector.
+    ///
+    /// This is useful for testing with self-signed certificates.
+    pub fn new_with_tls(
+        uri: &str,
+        identity: Identity,
+        client: reqwest::Client,
+        tls_connector: TlsConnector,
+    ) -> Self {
+        let uri = uri.to_string();
+        let ws_uri = uri.replace("http", "ws");
+        let certificate_verifier = Scheme::certificate_verifier(identity);
+        Self {
+            uri,
+            ws_uri,
+            certificate_verifier,
+
+            client,
+            tls_connector: Some(tls_connector),
         }
     }
 }

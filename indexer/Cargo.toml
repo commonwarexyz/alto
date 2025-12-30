@@ -42,3 +42,9 @@ path = "src/lib.rs"
 [dev-dependencies]
 commonware-cryptography = { workspace = true, features = ["mocks"] }
 commonware-consensus = { workspace = true, features = ["mocks"] }
+rcgen = { version = "0.14", features = ["crypto", "pem"] }
+rustls = "0.23"
+tokio-rustls = "0.26"
+hyper = "1.5"
+hyper-util = { version = "0.1", features = ["tokio", "server-auto"] }
+native-tls = "0.2"
