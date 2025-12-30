@@ -28,7 +28,7 @@ tokio = { workspace = true, features = ["full"] }
 axum = { workspace = true, features = ["ws"] }
 tower = { workspace = true }
 tower-http = { workspace = true, features = ["cors"] }
-reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+reqwest = { workspace = true, features = ["json", "native-tls"] }
 tokio-tungstenite = { workspace = true }
 
 [[bin]]
