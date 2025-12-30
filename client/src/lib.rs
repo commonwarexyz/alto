@@ -107,8 +107,12 @@ impl ClientBuilder {
         } else {
             // Start with native root certificates (matching reqwest's behavior)
             let mut root_store = rustls::RootCertStore::empty();
-            for cert in rustls_native_certs::load_native_certs().expect("failed to load native certs") {
-                root_store.add(cert).expect("failed to add native certificate");
+            for cert in
+                rustls_native_certs::load_native_certs().expect("failed to load native certs")
+            {
+                root_store
+                    .add(cert)
+                    .expect("failed to add native certificate");
             }
 
             // Add custom certificates
