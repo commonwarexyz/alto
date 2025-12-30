@@ -103,8 +103,9 @@ impl Indexer {
         }
 
         // Broadcast notarization
-        let mut data = vec![Kind::Notarization as u8];
-        data.extend(notarized.encode().to_vec());
+        let mut data = vec![0u8; u8::SIZE + notarized.encode_size()];
+        data[0] = Kind::Notarization as u8;
+        notarized.write(&mut data[1..].as_mut());
         let _ = self.consensus_tx.send(data);
         Ok(())
     }
@@ -148,8 +149,9 @@ impl Indexer {
             .insert(finalized.block.height, view);
 
         // Broadcast finalization
-        let mut data = vec![Kind::Finalization as u8];
-        data.extend(finalized.encode().to_vec());
+        let mut data = vec![0u8; u8::SIZE + finalized.encode_size()];
+        data[0] = Kind::Finalization as u8;
+        finalized.write(&mut data[1..].as_mut());
         let _ = self.consensus_tx.send(data);
         Ok(())
     }
