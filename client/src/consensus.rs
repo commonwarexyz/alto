@@ -56,7 +56,7 @@ pub enum Message {
 impl Client {
     pub async fn seed_upload(&self, seed: Seed) -> Result<(), Error> {
         let result = self
-            .client
+            .http_client
             .post(seed_upload_path(self.uri.clone()))
             .body(seed.encode().to_vec())
             .send()
@@ -71,7 +71,7 @@ impl Client {
     pub async fn seed_get(&self, query: IndexQuery) -> Result<Seed, Error> {
         // Get the seed
         let result = self
-            .client
+            .http_client
             .get(seed_get_path(self.uri.clone(), &query))
             .send()
             .await
@@ -99,7 +99,7 @@ impl Client {
 
     pub async fn notarized_upload(&self, notarized: Notarized) -> Result<(), Error> {
         let result = self
-            .client
+            .http_client
             .post(notarization_upload_path(self.uri.clone()))
             .body(notarized.encode().to_vec())
             .send()
@@ -114,7 +114,7 @@ impl Client {
     pub async fn notarized_get(&self, query: IndexQuery) -> Result<Notarized, Error> {
         // Get the notarization
         let result = self
-            .client
+            .http_client
             .get(notarization_get_path(self.uri.clone(), &query))
             .send()
             .await
@@ -142,7 +142,7 @@ impl Client {
 
     pub async fn finalized_upload(&self, finalized: Finalized) -> Result<(), Error> {
         let result = self
-            .client
+            .http_client
             .post(finalization_upload_path(self.uri.clone()))
             .body(finalized.encode().to_vec())
             .send()
@@ -157,7 +157,7 @@ impl Client {
     pub async fn finalized_get(&self, query: IndexQuery) -> Result<Finalized, Error> {
         // Get the finalization
         let result = self
-            .client
+            .http_client
             .get(finalization_get_path(self.uri.clone(), &query))
             .send()
             .await
@@ -186,7 +186,7 @@ impl Client {
     pub async fn block_get(&self, query: Query) -> Result<Payload, Error> {
         // Get the block
         let result = self
-            .client
+            .http_client
             .get(block_get_path(self.uri.clone(), &query))
             .send()
             .await
@@ -228,7 +228,7 @@ impl Client {
 
     pub async fn listen(&self) -> Result<impl Stream<Item = Result<Message, Error>>, Error> {
         // Connect to the websocket endpoint
-        let (stream, _) = match &self.tls_connector {
+        let (stream, _) = match &self.ws_connector {
             Some(connector) => {
                 connect_async_tls_with_config(
                     listen_path(self.ws_uri.clone()),

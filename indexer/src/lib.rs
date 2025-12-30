@@ -632,6 +632,7 @@ mod tests {
 
     mod tls {
         use super::*;
+        use alto_client::ClientBuilder;
         use rcgen::{generate_simple_self_signed, CertifiedKey, KeyPair};
         use rustls::pki_types::{CertificateDer, PrivateKeyDer};
         use std::sync::Arc;
@@ -707,33 +708,9 @@ mod tests {
             identity: Identity,
             cert_key: &CertifiedKey<KeyPair>,
         ) -> Client {
-            // Create a reqwest client that trusts the self-signed cert
-            let cert_pem = cert_key.cert.pem();
-            let cert = reqwest::Certificate::from_pem(cert_pem.as_bytes()).unwrap();
-            let http_client = reqwest::Client::builder()
-                .add_root_certificate(cert)
+            ClientBuilder::new(&format!("https://{addr}"), identity)
+                .with_tls_cert(cert_key.cert.der().to_vec())
                 .build()
-                .unwrap();
-
-            // Create a rustls client config that trusts the self-signed cert
-            let cert_der = CertificateDer::from(cert_key.cert.der().to_vec());
-            let mut root_store = rustls::RootCertStore::empty();
-            root_store.add(cert_der).unwrap();
-            let client_config = rustls::ClientConfig::builder_with_provider(Arc::new(
-                rustls::crypto::aws_lc_rs::default_provider(),
-            ))
-            .with_safe_default_protocol_versions()
-            .unwrap()
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
-            let ws_connector = tokio_tungstenite::Connector::Rustls(Arc::new(client_config));
-
-            Client::new_with_tls(
-                &format!("https://{addr}"),
-                identity,
-                http_client,
-                ws_connector,
-            )
         }
 
         #[tokio::test]

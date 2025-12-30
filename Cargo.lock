@@ -87,6 +87,7 @@ dependencies = [
  "futures",
  "rand 0.8.5",
  "reqwest",
+ "rustls",
  "thiserror 2.0.12",
  "tokio",
  "tokio-tungstenite",

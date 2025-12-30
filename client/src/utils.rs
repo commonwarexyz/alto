@@ -7,7 +7,7 @@ fn healthy_path(base: String) -> String {
 impl Client {
     pub async fn health(&self) -> Result<(), Error> {
         let result = self
-            .client
+            .http_client
             .get(healthy_path(self.uri.clone()))
             .send()
             .await
