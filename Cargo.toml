@@ -9,13 +9,13 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.0.16"
+version = "0.0.17"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-alto-client = { version = "0.0.16", path = "client" }
-alto-types = { version = "0.0.16", path = "types" }
+alto-client = { version = "0.0.17", path = "client" }
+alto-types = { version = "0.0.17", path = "types" }
 commonware-broadcast = "0.0.64"
 commonware-codec = "0.0.64"
 commonware-consensus = "0.0.64"
