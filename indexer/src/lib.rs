@@ -637,6 +637,7 @@ mod tests {
         use rustls::pki_types::{CertificateDer, PrivateKeyDer};
         use std::sync::Arc;
         use tokio_rustls::TlsAcceptor;
+        use tower::ServiceExt;
 
         fn generate_self_signed_cert() -> CertifiedKey<KeyPair> {
             let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string()];
@@ -683,10 +684,7 @@ mod tests {
                         let io = hyper_util::rt::TokioIo::new(tls_stream);
                         let service = hyper::service::service_fn(move |req| {
                             let app = app.clone();
-                            async move {
-                                use tower::ServiceExt;
-                                app.oneshot(req).await
-                            }
+                            async move { app.oneshot(req).await }
                         });
                         let _ = hyper_util::server::conn::auto::Builder::new(
                             hyper_util::rt::TokioExecutor::new(),
