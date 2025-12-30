@@ -101,34 +101,27 @@ impl ClientBuilder {
         }
         let http_client = http_builder.build().expect("failed to build HTTP client");
 
-        // Build WebSocket TLS connector (only if custom certs provided)
-        let ws_connector = if self.tls_certs.is_empty() {
-            None
-        } else {
-            // Start with native root certificates (matching reqwest's behavior)
-            let mut root_store = rustls::RootCertStore::empty();
-            for cert in
-                rustls_native_certs::load_native_certs().expect("failed to load native certs")
-            {
-                root_store
-                    .add(cert)
-                    .expect("failed to add native certificate");
-            }
-
-            // Add custom certificates
-            for cert_der in &self.tls_certs {
-                let cert = rustls::pki_types::CertificateDer::from(cert_der.clone());
-                root_store.add(cert).expect("failed to add certificate");
-            }
-            let config = rustls::ClientConfig::builder_with_provider(Arc::new(
-                rustls::crypto::aws_lc_rs::default_provider(),
-            ))
-            .with_safe_default_protocol_versions()
-            .expect("failed to set protocol versions")
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
-            Some(WsConnector::Rustls(Arc::new(config)))
-        };
+        // Build WebSocket TLS connector with native root certificates
+        let mut root_store = rustls::RootCertStore::empty();
+        for cert in
+            rustls_native_certs::load_native_certs().expect("failed to load native certs")
+        {
+            root_store
+                .add(cert)
+                .expect("failed to add native certificate");
+        }
+        for cert_der in &self.tls_certs {
+            let cert = rustls::pki_types::CertificateDer::from(cert_der.clone());
+            root_store.add(cert).expect("failed to add certificate");
+        }
+        let ws_config = rustls::ClientConfig::builder_with_provider(Arc::new(
+            rustls::crypto::aws_lc_rs::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .expect("failed to set protocol versions")
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+        let ws_connector = WsConnector::Rustls(Arc::new(ws_config));
 
         Client {
             uri: self.uri,
@@ -147,7 +140,7 @@ pub struct Client {
     certificate_verifier: Scheme,
 
     http_client: reqwest::Client,
-    ws_connector: Option<WsConnector>,
+    ws_connector: WsConnector,
 }
 
 impl Client {

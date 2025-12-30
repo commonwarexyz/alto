@@ -4,9 +4,7 @@ use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::Viewable;
 use commonware_cryptography::Digestible;
 use futures::{channel::mpsc::unbounded, Stream, StreamExt};
-use tokio_tungstenite::{
-    connect_async, connect_async_tls_with_config, tungstenite::Message as TMessage,
-};
+use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message as TMessage};
 
 fn seed_upload_path(base: String) -> String {
     format!("{base}/seed")
@@ -228,19 +226,14 @@ impl Client {
 
     pub async fn listen(&self) -> Result<impl Stream<Item = Result<Message, Error>>, Error> {
         // Connect to the websocket endpoint
-        let (stream, _) = match &self.ws_connector {
-            Some(connector) => connect_async_tls_with_config(
-                listen_path(self.ws_uri.clone()),
-                None,
-                false,
-                Some(connector.clone()),
-            )
-            .await
-            .map_err(Error::from)?,
-            None => connect_async(listen_path(self.ws_uri.clone()))
-                .await
-                .map_err(Error::from)?,
-        };
+        let (stream, _) = connect_async_tls_with_config(
+            listen_path(self.ws_uri.clone()),
+            None,
+            false,
+            Some(self.ws_connector.clone()),
+        )
+        .await
+        .map_err(Error::from)?;
         let (_, read) = stream.split();
 
         // Create an unbounded channel for streaming consensus messages
