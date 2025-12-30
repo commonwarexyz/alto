@@ -229,16 +229,14 @@ impl Client {
     pub async fn listen(&self) -> Result<impl Stream<Item = Result<Message, Error>>, Error> {
         // Connect to the websocket endpoint
         let (stream, _) = match &self.ws_connector {
-            Some(connector) => {
-                connect_async_tls_with_config(
-                    listen_path(self.ws_uri.clone()),
-                    None,
-                    false,
-                    Some(connector.clone()),
-                )
-                .await
-                .map_err(Error::from)?
-            }
+            Some(connector) => connect_async_tls_with_config(
+                listen_path(self.ws_uri.clone()),
+                None,
+                false,
+                Some(connector.clone()),
+            )
+            .await
+            .map_err(Error::from)?,
             None => connect_async(listen_path(self.ws_uri.clone()))
                 .await
                 .map_err(Error::from)?,
