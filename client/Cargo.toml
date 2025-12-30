@@ -21,5 +21,5 @@ rand = { workspace = true }
 thiserror = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
-tokio-tungstenite = { workspace = true }
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 tokio = { workspace = true, features = ["full"] }
