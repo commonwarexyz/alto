@@ -3,6 +3,7 @@
 use alto_types::{Identity, Scheme};
 use commonware_cryptography::sha256::Digest;
 use commonware_utils::hex;
+use std::sync::Arc;
 use thiserror::Error;
 
 pub mod consensus;
@@ -95,8 +96,7 @@ impl ClientBuilder {
         // Build HTTP client
         let mut http_builder = reqwest::Client::builder();
         for cert_der in &self.tls_certs {
-            let cert = reqwest::Certificate::from_der(cert_der)
-                .expect("invalid DER certificate");
+            let cert = reqwest::Certificate::from_der(cert_der).expect("invalid DER certificate");
             http_builder = http_builder.add_root_certificate(cert);
         }
         let http_client = http_builder.build().expect("failed to build HTTP client");
@@ -105,7 +105,6 @@ impl ClientBuilder {
         let ws_connector = if self.tls_certs.is_empty() {
             None
         } else {
-            use std::sync::Arc;
             let mut root_store = rustls::RootCertStore::empty();
             for cert_der in &self.tls_certs {
                 let cert = rustls::pki_types::CertificateDer::from(cert_der.clone());
