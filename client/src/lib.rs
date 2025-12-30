@@ -103,9 +103,7 @@ impl ClientBuilder {
 
         // Build WebSocket TLS connector with native root certificates
         let mut root_store = rustls::RootCertStore::empty();
-        for cert in
-            rustls_native_certs::load_native_certs().expect("failed to load native certs")
-        {
+        for cert in rustls_native_certs::load_native_certs().expect("failed to load native certs") {
             root_store
                 .add(cert)
                 .expect("failed to add native certificate");
