@@ -105,9 +105,11 @@ impl ClientBuilder {
         let ws_connector = if self.tls_certs.is_empty() {
             None
         } else {
-            // Start with system root certificates (matching reqwest's behavior)
+            // Start with native root certificates (matching reqwest's behavior)
             let mut root_store = rustls::RootCertStore::empty();
-            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            for cert in rustls_native_certs::load_native_certs().expect("failed to load native certs") {
+                root_store.add(cert).expect("failed to add native certificate");
+            }
 
             // Add custom certificates
             for cert_der in &self.tls_certs {

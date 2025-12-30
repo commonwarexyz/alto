@@ -20,8 +20,8 @@ bytes = { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
 futures = { workspace = true }
-reqwest = { workspace = true, features = ["rustls-tls-webpki-roots"] }
+reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
 rustls = { version = "0.23.23", default-features = false, features = ["std", "aws_lc_rs"] }
-tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
+rustls-native-certs = "0.8.2"
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 tokio = { workspace = true, features = ["full"] }
-webpki-roots = "0.26.11"
