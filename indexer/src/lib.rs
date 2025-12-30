@@ -348,7 +348,7 @@ async fn handle_consensus_ws(socket: axum::extract::ws::WebSocket, indexer: Arc<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alto_client::{Client, IndexQuery, Query};
+    use alto_client::{Client, ClientBuilder, IndexQuery, Query};
     use alto_types::{Identity, Seedable, EPOCH};
     use commonware_consensus::{
         simplex::{
@@ -364,8 +364,12 @@ mod tests {
     };
     use futures::StreamExt;
     use rand::{rngs::StdRng, SeedableRng};
+    use rcgen::{generate_simple_self_signed, CertifiedKey, KeyPair};
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use std::net::SocketAddr;
     use tokio::net::TcpListener;
+    use tokio_rustls::TlsAcceptor;
+    use tower::ServiceExt;
 
     /// Test context containing common setup for indexer tests.
     struct TestContext {
@@ -382,6 +386,7 @@ mod tests {
 
             let (addr, _) = start_server(schemes[0].clone()).await;
             let client = Client::new(&format!("http://{addr}"), identity);
+            wait_for_ready(&client).await;
 
             Self { schemes, client }
         }
@@ -456,10 +461,16 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        // Give the server a moment to start
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
         (addr, handle)
+    }
+
+    async fn wait_for_ready(client: &Client) {
+        loop {
+            if client.health().await.is_ok() {
+                return;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
     }
 
     fn fixture(seed: u64) -> (Vec<Scheme>, Identity) {
@@ -566,14 +577,16 @@ mod tests {
 
         let mut stream = ctx.client.listen().await.unwrap();
 
-        // Submit the seed while listening
+        // Signal that websocket is connected, then upload the seed
+        let (tx, rx) = tokio::sync::oneshot::channel();
         let client = ctx.client.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            rx.await.unwrap();
             client.seed_upload(seed).await.unwrap();
         });
 
-        // Wait for the seed message
+        // Signal ready and wait for the seed message
+        tx.send(()).unwrap();
         if let Some(Ok(msg)) = stream.next().await {
             match msg {
                 alto_client::consensus::Message::Seed(s) => {
@@ -595,6 +608,7 @@ mod tests {
         // Start server with schemes1, but create client expecting identity2
         let (addr, _handle) = start_server(schemes1[0].clone()).await;
         let client = Client::new(&format!("http://{addr}"), identity2);
+        wait_for_ready(&client).await;
 
         // Create a seed signed by schemes1
         let block = Block::new(Sha256::hash(b"genesis"), 1, 1000);
@@ -628,5 +642,153 @@ mod tests {
         // Server rejects it (signature doesn't match server's identity)
         let result = ctx.client.seed_upload(bad_seed).await;
         assert!(result.is_err());
+    }
+
+    fn generate_self_signed_cert() -> CertifiedKey<KeyPair> {
+        let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string()];
+        generate_simple_self_signed(subject_alt_names).unwrap()
+    }
+
+    async fn start_tls_server(
+        scheme: Scheme,
+        cert_key: &CertifiedKey<KeyPair>,
+    ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+        let indexer = Arc::new(Indexer::new(scheme));
+        let api = Api::new(indexer);
+        let app = api.router();
+
+        // Create rustls server config
+        let cert_der = CertificateDer::from(cert_key.cert.der().to_vec());
+        let key_der = PrivateKeyDer::try_from(cert_key.signing_key.serialize_der()).unwrap();
+
+        let server_config = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::aws_lc_rs::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert_der], key_der)
+        .expect("Failed to create server config");
+        let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                let tls_acceptor = tls_acceptor.clone();
+                let app = app.clone();
+
+                tokio::spawn(async move {
+                    let tls_stream = match tls_acceptor.accept(stream).await {
+                        Ok(s) => s,
+                        Err(_) => return,
+                    };
+
+                    let io = hyper_util::rt::TokioIo::new(tls_stream);
+                    let service = hyper::service::service_fn(move |req| {
+                        let app = app.clone();
+                        async move { app.oneshot(req).await }
+                    });
+                    let _ = hyper_util::server::conn::auto::Builder::new(
+                        hyper_util::rt::TokioExecutor::new(),
+                    )
+                    .serve_connection_with_upgrades(io, service)
+                    .await;
+                });
+            }
+        });
+
+        (addr, handle)
+    }
+
+    fn create_tls_client(
+        addr: SocketAddr,
+        identity: Identity,
+        cert_key: &CertifiedKey<KeyPair>,
+    ) -> Client {
+        ClientBuilder::new(&format!("https://{addr}"), identity)
+            .with_tls_cert(cert_key.cert.der().to_vec())
+            .build()
+    }
+
+    #[tokio::test]
+    async fn test_tls_https_connection() {
+        let cert_key = generate_self_signed_cert();
+
+        let mut rng = StdRng::seed_from_u64(0);
+        let Fixture { schemes, .. } = bls12381_threshold::fixture::<MinSig, _>(&mut rng, 4);
+        let identity = *schemes[0].polynomial().public();
+
+        let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key).await;
+        let client = create_tls_client(addr, identity, &cert_key);
+        wait_for_ready(&client).await;
+
+        // Create and upload a seed
+        let block = Block::new(Sha256::hash(b"genesis"), 1, 1000);
+        let proposal = Proposal::new(
+            Round::new(EPOCH, View::new(1)),
+            View::new(0),
+            block.digest(),
+        );
+        let seed = create_notarization(&schemes, proposal).seed();
+
+        // Test HTTPS POST
+        client.seed_upload(seed.clone()).await.unwrap();
+
+        // Test HTTPS GET
+        let retrieved = client.seed_get(IndexQuery::Latest).await.unwrap();
+        assert_eq!(retrieved.view(), seed.view());
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_tls_websocket_connection() {
+        let cert_key = generate_self_signed_cert();
+
+        let mut rng = StdRng::seed_from_u64(0);
+        let Fixture { schemes, .. } = bls12381_threshold::fixture::<MinSig, _>(&mut rng, 4);
+        let identity = *schemes[0].polynomial().public();
+
+        let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key).await;
+        let client = create_tls_client(addr, identity, &cert_key);
+        wait_for_ready(&client).await;
+
+        // Create a seed
+        let block = Block::new(Sha256::hash(b"genesis"), 1, 1000);
+        let proposal = Proposal::new(
+            Round::new(EPOCH, View::new(1)),
+            View::new(0),
+            block.digest(),
+        );
+        let seed = create_notarization(&schemes, proposal).seed();
+
+        // Connect to WebSocket over TLS
+        let mut stream = client.listen().await.unwrap();
+
+        // Signal that websocket is connected, then upload the seed
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let upload_client = client.clone();
+        tokio::spawn(async move {
+            rx.await.unwrap();
+            upload_client.seed_upload(seed).await.unwrap();
+        });
+
+        // Signal ready and wait for the seed message
+        tx.send(()).unwrap();
+        if let Some(Ok(msg)) = stream.next().await {
+            match msg {
+                alto_client::consensus::Message::Seed(s) => {
+                    assert_eq!(s.view().get(), 1);
+                }
+                _ => panic!("Expected seed message"),
+            }
+        } else {
+            panic!("Expected to receive a message");
+        }
+
+        handle.abort();
     }
 }

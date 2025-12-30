@@ -20,6 +20,8 @@ bytes = { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
 futures = { workspace = true }
-reqwest = { workspace = true }
-tokio-tungstenite = { workspace = true, features = ["native-tls"] }
+reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
+rustls = { version = "0.23.23", default-features = false, features = ["std", "aws_lc_rs"] }
+rustls-native-certs = "0.8.2"
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 tokio = { workspace = true, features = ["full"] }
