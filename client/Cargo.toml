@@ -24,3 +24,4 @@ reqwest = { workspace = true }
 rustls = { version = "0.23.23", default-features = false, features = ["std", "aws_lc_rs"] }
 tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 tokio = { workspace = true, features = ["full"] }
+webpki-roots = "0.26.11"
