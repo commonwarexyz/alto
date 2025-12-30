@@ -72,7 +72,13 @@ impl ClientBuilder {
     /// Create a new builder for the given indexer URI.
     pub fn new(uri: &str, identity: Identity) -> Self {
         let uri = uri.to_string();
-        let ws_uri = uri.replace("http", "ws");
+        let ws_uri = if let Some(rest) = uri.strip_prefix("https://") {
+            format!("wss://{rest}")
+        } else if let Some(rest) = uri.strip_prefix("http://") {
+            format!("ws://{rest}")
+        } else {
+            panic!("URI must start with http:// or https://");
+        };
         Self {
             uri,
             ws_uri,
