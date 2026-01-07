@@ -118,48 +118,77 @@ pub struct Config {
     /// Size of internal mailboxes
     #[serde(default = "default_mailbox_size")]
     pub mailbox_size: usize,
+
+    /// Whether to auto-checkpoint from the latest finalized block on first run.
+    /// When true (default), the follower will fetch the latest finalized block
+    /// from the indexer and set that as the starting floor, avoiding the need
+    /// to backfill all historical blocks.
+    #[serde(default = "default_auto_checkpoint")]
+    pub auto_checkpoint: bool,
 }
 
 fn default_mailbox_size() -> usize {
     1024
 }
 
+fn default_auto_checkpoint() -> bool {
+    true
+}
+
 /// HTTP-based resolver that fetches blocks from an indexer endpoint.
 ///
 /// This resolver is used by marshal to fetch missing blocks during backfill.
 /// It makes HTTP requests to the indexer to retrieve blocks by digest or height.
+/// 
+/// The resolver maintains caches by both digest and height to serve blocks
+/// that were received via WebSocket before they're available via REST API.
 #[derive(Clone)]
 pub struct HttpResolver {
     client: Client,
-    /// Cache of recently fetched blocks to avoid redundant requests
-    cache: Arc<RwLock<HashMap<Digest, Block>>>,
+    /// Cache of blocks by digest
+    cache_by_digest: Arc<RwLock<HashMap<Digest, Block>>>,
+    /// Cache of blocks by height (for finalized blocks)
+    cache_by_height: Arc<RwLock<HashMap<u64, Block>>>,
 }
 
 impl HttpResolver {
     pub fn new(client: Client) -> Self {
         Self {
             client,
-            cache: Arc::new(RwLock::new(HashMap::new())),
+            cache_by_digest: Arc::new(RwLock::new(HashMap::new())),
+            cache_by_height: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    /// Cache a block for future lookups
+    /// Cache a block for future lookups (by both digest and height)
     pub fn cache_block(&self, block: &Block) {
-        let mut cache = self.cache.write().unwrap();
-        cache.insert(block.digest(), block.clone());
+        {
+            let mut cache = self.cache_by_digest.write().unwrap();
+            cache.insert(block.digest(), block.clone());
+        }
+        {
+            let mut cache = self.cache_by_height.write().unwrap();
+            cache.insert(block.height, block.clone());
+        }
     }
 
-    /// Try to get a block from cache
-    fn get_cached(&self, digest: &Digest) -> Option<Block> {
-        let cache = self.cache.read().unwrap();
+    /// Try to get a block from cache by digest
+    fn get_cached_by_digest(&self, digest: &Digest) -> Option<Block> {
+        let cache = self.cache_by_digest.read().unwrap();
         cache.get(digest).cloned()
+    }
+
+    /// Try to get a block from cache by height
+    fn get_cached_by_height(&self, height: u64) -> Option<Block> {
+        let cache = self.cache_by_height.read().unwrap();
+        cache.get(&height).cloned()
     }
 
     /// Fetch a block by digest
     async fn fetch_block_by_digest(&self, digest: Digest) -> Option<Block> {
         // Check cache first
-        if let Some(block) = self.get_cached(&digest) {
-            debug!(?digest, "block found in cache");
+        if let Some(block) = self.get_cached_by_digest(&digest) {
+            debug!(?digest, "block found in digest cache");
             return Some(block);
         }
 
@@ -183,6 +212,13 @@ impl HttpResolver {
 
     /// Fetch a finalized block by height
     async fn fetch_finalized_by_height(&self, height: u64) -> Option<Block> {
+        // Check cache first - blocks from WebSocket may not be available via REST yet
+        if let Some(block) = self.get_cached_by_height(height) {
+            debug!(height, "block found in height cache");
+            return Some(block);
+        }
+
+        // Fetch from indexer
         debug!(height, "fetching finalized block by height from indexer");
         match self.client.block_get(Query::Index(height)).await {
             Ok(payload) => {
@@ -435,6 +471,10 @@ struct CertificateFeeder<E: Clock> {
     marshal_mailbox: marshal::Mailbox<Scheme, Block>,
     resolver: HttpResolver,
     ingress_tx: mpsc::Sender<handler::Message<Block>>,
+    /// Whether the floor has been set (happens on first finalization received)
+    floor_set: bool,
+    /// Whether to auto-checkpoint (set floor on first block)
+    auto_checkpoint: bool,
 }
 
 impl<E: Clock> CertificateFeeder<E> {
@@ -445,6 +485,7 @@ impl<E: Clock> CertificateFeeder<E> {
         marshal_mailbox: marshal::Mailbox<Scheme, Block>,
         resolver: HttpResolver,
         ingress_tx: mpsc::Sender<handler::Message<Block>>,
+        auto_checkpoint: bool,
     ) -> Self {
         let scheme = Scheme::certificate_verifier(identity);
         Self {
@@ -454,6 +495,8 @@ impl<E: Clock> CertificateFeeder<E> {
             marshal_mailbox,
             resolver,
             ingress_tx,
+            floor_set: false,
+            auto_checkpoint,
         }
     }
 
@@ -530,17 +573,28 @@ impl<E: Clock> CertificateFeeder<E> {
                     ));
                 }
 
+                // On first finalization, set the floor to this height so marshal
+                // doesn't try to backfill blocks before it.
+                if !self.floor_set && self.auto_checkpoint {
+                    info!(height, "setting checkpoint floor on first finalization");
+                    self.marshal_mailbox.set_floor(height).await;
+                    self.floor_set = true;
+                }
+
                 // Cache the block in the resolver
                 self.resolver.cache_block(&finalized.block);
 
-                // Deliver the block to marshal
-                let key = handler::Request::Finalized { height };
+                // Deliver the block to marshal using the block's digest as the key
+                // (Request::Finalized is for backfill requests, not new block delivery)
+                let digest = finalized.block.digest();
+                let key = handler::Request::Block(digest);
                 if !self.deliver_block(key, finalized.block.clone()).await {
                     warn!(height, "marshal did not accept finalized block");
                 }
 
                 // Hint to marshal about this finalization
-                // (marshal will use the resolver to fetch if needed)
+                // Marshal will process the finalization and may request the block
+                // from the resolver if it doesn't already have it
                 let dummy_target =
                     PublicKey::decode([0u8; 32].as_slice()).expect("failed to decode dummy key");
                 self.marshal_mailbox
@@ -643,6 +697,8 @@ fn main() {
         let engine_handle = engine.start(ingress_rx, resolver.clone());
 
         // Create and start the certificate feeder
+        // The feeder will set the checkpoint floor on the first finalization received
+        // (if auto_checkpoint is enabled), ensuring we start from exactly where we connect.
         let feeder = CertificateFeeder::new(
             context.clone(),
             client,
@@ -650,6 +706,7 @@ fn main() {
             marshal_mailbox,
             resolver,
             ingress_tx,
+            config.auto_checkpoint,
         );
         let feeder_handle = context.spawn(|_| feeder.run());
 
