@@ -65,7 +65,7 @@ use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZero,
     path::PathBuf,
@@ -135,20 +135,28 @@ fn default_auto_checkpoint() -> bool {
     true
 }
 
+/// Maximum number of blocks to keep in the resolver cache.
+/// This prevents unbounded memory growth as blocks stream in.
+const RESOLVER_CACHE_MAX_SIZE: usize = 1024;
+
 /// HTTP-based resolver that fetches blocks from an indexer endpoint.
 ///
 /// This resolver is used by marshal to fetch missing blocks during backfill.
 /// It makes HTTP requests to the indexer to retrieve blocks by digest or height.
 /// 
-/// The resolver maintains caches by both digest and height to serve blocks
+/// The resolver maintains bounded LRU-like caches by both digest and height to serve blocks
 /// that were received via WebSocket before they're available via REST API.
 #[derive(Clone)]
 pub struct HttpResolver {
     client: Client,
-    /// Cache of blocks by digest
+    /// Cache of blocks by digest (bounded)
     cache_by_digest: Arc<RwLock<HashMap<Digest, Block>>>,
-    /// Cache of blocks by height (for finalized blocks)
+    /// Cache of blocks by height (bounded)
     cache_by_height: Arc<RwLock<HashMap<u64, Block>>>,
+    /// Insertion order for digest cache (for eviction)
+    digest_order: Arc<RwLock<VecDeque<Digest>>>,
+    /// Insertion order for height cache (for eviction)  
+    height_order: Arc<RwLock<VecDeque<u64>>>,
 }
 
 impl HttpResolver {
@@ -157,18 +165,55 @@ impl HttpResolver {
             client,
             cache_by_digest: Arc::new(RwLock::new(HashMap::new())),
             cache_by_height: Arc::new(RwLock::new(HashMap::new())),
+            digest_order: Arc::new(RwLock::new(VecDeque::new())),
+            height_order: Arc::new(RwLock::new(VecDeque::new())),
         }
     }
 
-    /// Cache a block for future lookups (by both digest and height)
+    /// Cache a block for future lookups (by both digest and height).
+    /// Uses FIFO eviction when cache exceeds max size.
     pub fn cache_block(&self, block: &Block) {
+        let digest = block.digest();
+        let height = block.height;
+        
+        // Cache by digest
         {
             let mut cache = self.cache_by_digest.write().unwrap();
-            cache.insert(block.digest(), block.clone());
+            let mut order = self.digest_order.write().unwrap();
+            
+            // Only insert if not already present
+            if !cache.contains_key(&digest) {
+                // Evict oldest if at capacity
+                while cache.len() >= RESOLVER_CACHE_MAX_SIZE {
+                    if let Some(old_digest) = order.pop_front() {
+                        cache.remove(&old_digest);
+                    } else {
+                        break;
+                    }
+                }
+                cache.insert(digest, block.clone());
+                order.push_back(digest);
+            }
         }
+        
+        // Cache by height
         {
             let mut cache = self.cache_by_height.write().unwrap();
-            cache.insert(block.height, block.clone());
+            let mut order = self.height_order.write().unwrap();
+            
+            // Only insert if not already present
+            if !cache.contains_key(&height) {
+                // Evict oldest if at capacity
+                while cache.len() >= RESOLVER_CACHE_MAX_SIZE {
+                    if let Some(old_height) = order.pop_front() {
+                        cache.remove(&old_height);
+                    } else {
+                        break;
+                    }
+                }
+                cache.insert(height, block.clone());
+                order.push_back(height);
+            }
         }
     }
 
