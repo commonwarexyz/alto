@@ -46,3 +46,7 @@ path = "src/bin/validator.rs"
 [[bin]]
 name = "setup"
 path = "src/bin/setup.rs"
+
+[[bin]]
+name = "follower"
+path = "src/bin/follower.rs"
