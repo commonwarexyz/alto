@@ -6,6 +6,7 @@ use commonware_consensus::{
     Viewable,
 };
 use commonware_cryptography::{bls12381::primitives::variant::MinSig, Digestible};
+use commonware_parallel::Sequential;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -46,12 +47,12 @@ pub struct FinalizedJs {
 #[wasm_bindgen]
 pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = Scheme::certificate_verifier(identity);
+    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity, Sequential);
 
     let Ok(seed) = Seed::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
-    if !seed.verify(&certificate_verifier, NAMESPACE) {
+    if !seed.verify(&certificate_verifier) {
         return JsValue::NULL;
     }
     let seed_js = SeedJs {
@@ -64,12 +65,12 @@ pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 #[wasm_bindgen]
 pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = Scheme::certificate_verifier(identity);
+    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity, Sequential);
 
     let Ok(notarized) = Notarized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
-    if !notarized.verify(&certificate_verifier, NAMESPACE) {
+    if !notarized.verify(&certificate_verifier) {
         return JsValue::NULL;
     }
     let notarized_js = NotarizedJs {
@@ -81,7 +82,7 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
         },
         block: BlockJs {
             parent: notarized.block.parent.to_vec(),
-            height: notarized.block.height,
+            height: notarized.block.height.get(),
             timestamp: notarized.block.timestamp,
             digest: notarized.block.digest().to_vec(),
         },
@@ -92,11 +93,11 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 #[wasm_bindgen]
 pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = Scheme::certificate_verifier(identity);
+    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity, Sequential);
     let Ok(finalized) = Finalized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
-    if !finalized.verify(&certificate_verifier, NAMESPACE) {
+    if !finalized.verify(&certificate_verifier) {
         return JsValue::NULL;
     }
     let finalized_js = FinalizedJs {
@@ -108,7 +109,7 @@ pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
         },
         block: BlockJs {
             parent: finalized.block.parent.to_vec(),
-            height: finalized.block.height,
+            height: finalized.block.height.get(),
             timestamp: finalized.block.timestamp,
             digest: finalized.block.digest().to_vec(),
         },
@@ -123,7 +124,7 @@ pub fn parse_block(bytes: Vec<u8>) -> JsValue {
     };
     let block_js = BlockJs {
         parent: block.parent.to_vec(),
-        height: block.height,
+        height: block.height.get(),
         timestamp: block.timestamp,
         digest: block.digest().to_vec(),
     };

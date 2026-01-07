@@ -94,7 +94,7 @@ pub fn log_notarization(notarized: Notarized) {
     let age_str = format_age(age_ms);
     info!(
         view = %notarized.proof.view(),
-        height = notarized.block.height,
+        height = %notarized.block.height,
         timestamp = notarized.block.timestamp,
         age = %age_str,
         digest = ?notarized.block.digest(),
@@ -108,7 +108,7 @@ pub fn log_finalization(finalized: Finalized) {
     let age_str = format_age(age_ms);
     info!(
         view = %finalized.proof.view(),
-        height = finalized.block.height,
+        height = %finalized.block.height,
         timestamp = finalized.block.timestamp,
         age = %age_str,
         digest = ?finalized.block.digest(),
@@ -121,7 +121,7 @@ pub fn log_block(block: alto_types::Block) {
     let age_ms = now.saturating_sub(block.timestamp);
     let age_str = format_age(age_ms);
     info!(
-        height = block.height,
+        height = %block.height,
         timestamp = block.timestamp,
         age = %age_str,
         digest = ?block.digest(),

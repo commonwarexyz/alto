@@ -18,12 +18,14 @@ use commonware_cryptography::{
     sha256::Digest,
 };
 use commonware_p2p::{Blocker, Receiver, Sender};
+use commonware_parallel::Sequential;
 use commonware_resolver::Resolver;
 use commonware_runtime::{
-    buffer::PoolRef, spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
+    buffer::PoolRef, spawn_cell, Clock, ContextCell, Handle, Metrics, RayonPoolSpawner, Spawner,
+    Storage,
 };
 use commonware_storage::archive::immutable;
-use commonware_utils::ordered::Set;
+use commonware_utils::{ordered::Set, NZU16};
 use commonware_utils::{NZUsize, NZU64};
 use futures::{channel::mpsc, future::try_join_all};
 use governor::clock::Clock as GClock;
@@ -50,7 +52,7 @@ const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
-const BUFFER_POOL_PAGE_SIZE: NonZero<usize> = NZUsize!(4_096); // 4KB
+const BUFFER_POOL_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 
@@ -108,7 +110,7 @@ pub struct Engine<
 }
 
 impl<
-        E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+        E: Clock + GClock + Rng + CryptoRng + Spawner + RayonPoolSpawner + Storage + Metrics,
         B: Blocker<PublicKey = PublicKey>,
         I: Indexer,
     > Engine<E, B, I>
@@ -146,21 +148,27 @@ impl<
                 freezer_table_initial_size: cfg.finalized_freezer_table_initial_size,
                 freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
                 freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
-                freezer_journal_partition: format!(
-                    "{}-finalizations-by-height-freezer-journal",
+                freezer_key_partition: format!(
+                    "{}-finalizations-by-height-freezer-key-journal",
                     cfg.partition_prefix
                 ),
-                freezer_journal_target_size: FREEZER_JOURNAL_TARGET_SIZE,
-                freezer_journal_compression: FREEZER_JOURNAL_COMPRESSION,
-                freezer_journal_buffer_pool: buffer_pool.clone(),
+                freezer_key_buffer_pool: buffer_pool.clone(),
+                freezer_key_write_buffer: WRITE_BUFFER,
+                freezer_value_partition: format!(
+                    "{}-finalizations-by-height-freezer-value-journal",
+                    cfg.partition_prefix
+                ),
+                freezer_value_write_buffer: WRITE_BUFFER,
+                freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
+                freezer_value_compression: FREEZER_JOURNAL_COMPRESSION,
                 ordinal_partition: format!(
                     "{}-finalizations-by-height-ordinal",
                     cfg.partition_prefix
                 ),
+                ordinal_write_buffer: WRITE_BUFFER,
                 items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
                 codec_config: Scheme::certificate_codec_config_unbounded(),
                 replay_buffer: REPLAY_BUFFER,
-                write_buffer: WRITE_BUFFER,
             },
         )
         .await
@@ -180,18 +188,27 @@ impl<
                 freezer_table_initial_size: cfg.blocks_freezer_table_initial_size,
                 freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
                 freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
-                freezer_journal_partition: format!(
-                    "{}-finalized_blocks-freezer-journal",
+                freezer_key_partition: format!(
+                    "{}-finalized-blocks-freezer-key-journal",
                     cfg.partition_prefix
                 ),
-                freezer_journal_target_size: FREEZER_JOURNAL_TARGET_SIZE,
-                freezer_journal_compression: None,
-                freezer_journal_buffer_pool: buffer_pool.clone(),
-                ordinal_partition: format!("{}-finalized_blocks-ordinal", cfg.partition_prefix),
+                freezer_key_buffer_pool: buffer_pool.clone(),
+                freezer_key_write_buffer: WRITE_BUFFER,
+                freezer_value_partition: format!(
+                    "{}-finalized-blocks-freezer-value-journal",
+                    cfg.partition_prefix
+                ),
+                freezer_value_write_buffer: WRITE_BUFFER,
+                freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
+                freezer_value_compression: FREEZER_JOURNAL_COMPRESSION,
+                ordinal_partition: format!(
+                    "{}-finalized-blocks-ordinal",
+                    cfg.partition_prefix
+                ),
+                ordinal_write_buffer: WRITE_BUFFER,
                 items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
                 codec_config: (),
                 replay_buffer: REPLAY_BUFFER,
-                write_buffer: WRITE_BUFFER,
             },
         )
         .await
@@ -199,8 +216,14 @@ impl<
         info!(elapsed = ?start.elapsed(), "restored finalized blocks archive");
 
         // Create marshal
-        let scheme = Scheme::signer(cfg.participants, cfg.polynomial, cfg.share)
-            .expect("failed to create scheme");
+        let scheme = Scheme::signer(
+            NAMESPACE,
+            cfg.participants,
+            cfg.polynomial,
+            cfg.share,
+            Sequential,
+        )
+        .expect("failed to create scheme");
         let provider = ConstantProvider::new(scheme.clone());
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
         let (marshal, marshal_mailbox, _) = marshal::Actor::init(
@@ -217,10 +240,10 @@ impl<
                         .get()
                         .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
                 ),
-                namespace: NAMESPACE.to_vec(),
                 prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
                 replay_buffer: REPLAY_BUFFER,
-                write_buffer: WRITE_BUFFER,
+                key_write_buffer: WRITE_BUFFER,
+                value_write_buffer: WRITE_BUFFER,
                 block_codec_config: (),
                 max_repair: MAX_REPAIR,
                 buffer_pool: buffer_pool.clone(),
@@ -255,7 +278,6 @@ impl<
             context.with_label("consensus"),
             simplex::Config {
                 epoch: EPOCH,
-                namespace: NAMESPACE.to_vec(),
                 scheme,
                 automaton: marshaled.clone(),
                 relay: marshaled.clone(),

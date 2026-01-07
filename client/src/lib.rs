@@ -1,7 +1,8 @@
 //! Client for interacting with `alto`.
 
-use alto_types::{Identity, Scheme};
+use alto_types::{Identity, Scheme, NAMESPACE};
 use commonware_cryptography::sha256::Digest;
+use commonware_parallel::Sequential;
 use commonware_utils::hex;
 use std::sync::Arc;
 use thiserror::Error;
@@ -97,7 +98,8 @@ impl ClientBuilder {
 
     /// Build the client.
     pub fn build(self) -> Client {
-        let certificate_verifier = Scheme::certificate_verifier(self.identity);
+        let certificate_verifier =
+            Scheme::certificate_verifier(NAMESPACE, self.identity, Sequential);
 
         // Build HTTP client
         let mut http_builder = reqwest::Client::builder();

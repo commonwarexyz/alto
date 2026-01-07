@@ -1,5 +1,5 @@
 use alto_client::LATEST;
-use alto_types::{Block, Finalized, Kind, Notarized, Scheme, Seed, NAMESPACE};
+use alto_types::{Block, Finalized, Kind, Notarized, Scheme, Seed};
 use axum::{
     body::Bytes,
     extract::{ws::WebSocketUpgrade, Path, State as AxumState},
@@ -50,7 +50,7 @@ impl Indexer {
 
     pub fn submit_seed(&self, seed: Seed) -> Result<(), &'static str> {
         // Verify signature with identity
-        if !seed.verify(&self.scheme, NAMESPACE) {
+        if !seed.verify(&self.scheme) {
             return Err("Invalid seed signature");
         }
 
@@ -81,7 +81,7 @@ impl Indexer {
 
     pub fn submit_notarization(&self, notarized: Notarized) -> Result<(), &'static str> {
         // Verify signature with identity
-        if !notarized.verify(&self.scheme, NAMESPACE) {
+        if !notarized.verify(&self.scheme) {
             return Err("Invalid notarization signature");
         }
 
@@ -124,7 +124,7 @@ impl Indexer {
 
     pub fn submit_finalization(&self, finalized: Finalized) -> Result<(), &'static str> {
         // Verify signature with identity
-        if !finalized.verify(&self.scheme, NAMESPACE) {
+        if !finalized.verify(&self.scheme) {
             return Err("Invalid finalization signature");
         }
 
@@ -146,7 +146,7 @@ impl Indexer {
         }
         state
             .finalized_height_to_view
-            .insert(finalized.block.height, view);
+            .insert(finalized.block.height.get(), view);
 
         // Broadcast finalization
         let mut data = vec![0u8; u8::SIZE + finalized.encode_size()];
@@ -351,13 +351,13 @@ async fn handle_consensus_ws(socket: axum::extract::ws::WebSocket, indexer: Arc<
 mod tests {
     use super::*;
     use alto_client::{Client, ClientBuilder, IndexQuery, Query};
-    use alto_types::{Identity, Seedable, EPOCH};
+    use alto_types::{Identity, Seedable, EPOCH, NAMESPACE};
     use commonware_consensus::{
         simplex::{
             scheme::bls12381_threshold,
             types::{Finalization, Finalize, Notarization, Notarize, Proposal},
         },
-        types::{Round, View},
+        types::{Height, Round, View},
         Viewable,
     };
     use commonware_cryptography::{
@@ -383,7 +383,8 @@ mod tests {
         /// Create a new test context with a running server and client.
         async fn new() -> Self {
             let mut rng = StdRng::seed_from_u64(0);
-            let Fixture { schemes, .. } = bls12381_threshold::fixture::<MinSig, _>(&mut rng, 4);
+            let Fixture { schemes, .. } =
+                bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
             let identity = *schemes[0].polynomial().public();
 
             let (addr, _) = start_server(schemes[0].clone()).await;
@@ -395,7 +396,7 @@ mod tests {
 
         /// Create a test block with standard parameters.
         fn test_block(&self) -> Block {
-            Block::new(Sha256::hash(b"genesis"), 1, 1000)
+            Block::new(Sha256::hash(b"genesis"), Height::new(1), 1000)
         }
 
         /// Create a proposal for the given block at view 1.
@@ -435,7 +436,7 @@ mod tests {
     ) -> alto_types::Notarization {
         let notarizes: Vec<_> = schemes
             .iter()
-            .map(|scheme| Notarize::sign(scheme, NAMESPACE, proposal.clone()).unwrap())
+            .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
             .collect();
         Notarization::from_notarizes(&schemes[0], &notarizes).unwrap()
     }
@@ -446,7 +447,7 @@ mod tests {
     ) -> alto_types::Finalization {
         let finalizes: Vec<_> = schemes
             .iter()
-            .map(|scheme| Finalize::sign(scheme, NAMESPACE, proposal.clone()).unwrap())
+            .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
             .collect();
         Finalization::from_finalizes(&schemes[0], &finalizes).unwrap()
     }
@@ -477,7 +478,8 @@ mod tests {
 
     fn fixture(seed: u64) -> (Vec<Scheme>, Identity) {
         let mut rng = StdRng::seed_from_u64(seed);
-        let Fixture { schemes, .. } = bls12381_threshold::fixture::<MinSig, _>(&mut rng, 4);
+        let Fixture { schemes, .. } =
+            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
         let identity = *schemes[0].polynomial().public();
         (schemes, identity)
     }
@@ -544,7 +546,7 @@ mod tests {
         let payload = ctx.client.block_get(Query::Latest).await.unwrap();
         match payload {
             alto_client::consensus::Payload::Finalized(f) => {
-                assert_eq!(f.block.height, 1);
+                assert_eq!(f.block.height.get(), 1);
             }
             _ => panic!("Expected finalized block"),
         }
@@ -553,7 +555,7 @@ mod tests {
         let payload = ctx.client.block_get(Query::Index(1)).await.unwrap();
         match payload {
             alto_client::consensus::Payload::Finalized(f) => {
-                assert_eq!(f.block.height, 1);
+                assert_eq!(f.block.height.get(), 1);
             }
             _ => panic!("Expected finalized block"),
         }
@@ -613,7 +615,7 @@ mod tests {
         wait_for_ready(&client).await;
 
         // Create a seed signed by schemes1
-        let block = Block::new(Sha256::hash(b"genesis"), 1, 1000);
+        let block = Block::new(Sha256::hash(b"genesis"), Height::new(1), 1000);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),
@@ -720,7 +722,8 @@ mod tests {
         let cert_key = generate_self_signed_cert();
 
         let mut rng = StdRng::seed_from_u64(0);
-        let Fixture { schemes, .. } = bls12381_threshold::fixture::<MinSig, _>(&mut rng, 4);
+        let Fixture { schemes, .. } =
+            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
         let identity = *schemes[0].polynomial().public();
 
         let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key).await;
@@ -728,7 +731,7 @@ mod tests {
         wait_for_ready(&client).await;
 
         // Create and upload a seed
-        let block = Block::new(Sha256::hash(b"genesis"), 1, 1000);
+        let block = Block::new(Sha256::hash(b"genesis"), Height::new(1), 1000);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),
@@ -751,7 +754,8 @@ mod tests {
         let cert_key = generate_self_signed_cert();
 
         let mut rng = StdRng::seed_from_u64(0);
-        let Fixture { schemes, .. } = bls12381_threshold::fixture::<MinSig, _>(&mut rng, 4);
+        let Fixture { schemes, .. } =
+            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
         let identity = *schemes[0].polynomial().public();
 
         let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key).await;
@@ -759,7 +763,7 @@ mod tests {
         wait_for_ready(&client).await;
 
         // Create a seed
-        let block = Block::new(Sha256::hash(b"genesis"), 1, 1000);
+        let block = Block::new(Sha256::hash(b"genesis"), Height::new(1), 1000);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),

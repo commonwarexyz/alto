@@ -2,7 +2,8 @@ use alto_types::{Block, PublicKey, Scheme};
 use commonware_consensus::{
     marshal::{ingress::mailbox::AncestorStream, Update},
     simplex::types::Context,
-    Block as _, Reporter,
+    types::Height,
+    Heightable, Reporter,
 };
 use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256};
 use commonware_runtime::{Clock, Metrics, Spawner};
@@ -25,7 +26,7 @@ pub struct Application {
 
 impl Application {
     pub fn new() -> Self {
-        let genesis = Block::new(Sha256::hash(GENESIS), 0, 0);
+        let genesis = Block::new(Sha256::hash(GENESIS), Height::zero(), 0);
         Self {
             genesis: Arc::new(genesis),
         }
@@ -63,7 +64,7 @@ where
             current = parent.timestamp + 1;
         }
 
-        Some(Block::new(parent.digest(), parent.height + 1, current))
+        Some(Block::new(parent.digest(), parent.height.next(), current))
     }
 }
 
@@ -105,7 +106,7 @@ impl Reporter for Application {
 
     async fn report(&mut self, activity: Self::Activity) {
         if let Update::Block(block, ack_rx) = activity {
-            info!(height = block.height(), "finalized block");
+            info!(height = %block.height(), "finalized block");
             ack_rx.acknowledge();
         }
     }

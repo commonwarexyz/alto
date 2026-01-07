@@ -68,7 +68,7 @@ mod tests {
             scheme::bls12381_threshold,
             types::{Finalization, Finalize, Notarization, Notarize, Proposal},
         },
-        types::{Round, View},
+        types::{Height, Round, View},
     };
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, Digestible, Hasher,
@@ -81,11 +81,12 @@ mod tests {
         // Create network key
         let mut rng = StdRng::seed_from_u64(0);
         let n = 4;
-        let Fixture { schemes, .. } = bls12381_threshold::fixture::<MinSig, _>(&mut rng, n);
+        let Fixture { schemes, .. } =
+            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
 
         // Create a block
         let digest = Sha256::hash(b"hello world");
-        let block = Block::new(digest, 10, 100);
+        let block = Block::new(digest, Height::new(10), 100);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
@@ -95,7 +96,7 @@ mod tests {
         // Create a notarization
         let notarizes: Vec<_> = schemes
             .iter()
-            .map(|scheme| Notarize::sign(scheme, NAMESPACE, proposal.clone()).unwrap())
+            .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
             .collect();
         let notarization = Notarization::from_notarizes(&schemes[0], &notarizes).unwrap();
         let notarized = Notarized::new(notarization, block.clone());
@@ -106,7 +107,7 @@ mod tests {
         assert_eq!(notarized, decoded);
 
         // Verify notarized
-        assert!(notarized.verify(&schemes[0], NAMESPACE));
+        assert!(notarized.verify(&schemes[0]));
     }
 
     #[test]
@@ -114,11 +115,12 @@ mod tests {
         // Create network key
         let mut rng = StdRng::seed_from_u64(0);
         let n = 4;
-        let Fixture { schemes, .. } = bls12381_threshold::fixture::<MinSig, _>(&mut rng, n);
+        let Fixture { schemes, .. } =
+            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
 
         // Create a block
         let digest = Sha256::hash(b"hello world");
-        let block = Block::new(digest, 10, 100);
+        let block = Block::new(digest, Height::new(10), 100);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
@@ -128,7 +130,7 @@ mod tests {
         // Create a finalization
         let finalizes: Vec<_> = schemes
             .iter()
-            .map(|scheme| Finalize::sign(scheme, NAMESPACE, proposal.clone()).unwrap())
+            .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
             .collect();
         let finalization = Finalization::from_finalizes(&schemes[0], &finalizes).unwrap();
         let finalized = Finalized::new(finalization, block.clone());
@@ -139,6 +141,6 @@ mod tests {
         assert_eq!(finalized, decoded);
 
         // Verify finalized
-        assert!(finalized.verify(&schemes[0], NAMESPACE));
+        assert!(finalized.verify(&schemes[0]));
     }
 }

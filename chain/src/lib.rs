@@ -41,6 +41,7 @@ pub struct Peers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alto_types::NAMESPACE;
     use commonware_consensus::{marshal, simplex::scheme::bls12381_threshold, types::ViewDelta};
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519::PublicKey,
@@ -109,7 +110,7 @@ mod tests {
             .await;
         let mut registrations = HashMap::new();
         for validator in validators.iter() {
-            let mut oracle = oracle.control(validator.clone());
+            let oracle = oracle.control(validator.clone());
             let (pending_sender, pending_receiver) = oracle.register(0, TEST_QUOTA).await.unwrap();
             let (recovered_sender, recovered_receiver) =
                 oracle.register(1, TEST_QUOTA).await.unwrap();
@@ -191,7 +192,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, n);
+            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
             let participants_set = Set::from_iter_dedup(participants.clone());
 
@@ -363,7 +364,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, n);
+            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
             let participants_set = Set::from_iter_dedup(participants.clone());
 
@@ -592,7 +593,7 @@ mod tests {
 
         // Derive threshold
         let mut rng = StdRng::seed_from_u64(0);
-        let fixture = bls12381_threshold::fixture::<MinSig, _>(&mut rng, n);
+        let fixture = bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
 
         // Random restarts every x seconds
         let mut runs = 0;
@@ -797,7 +798,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, n);
+            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
             let participants_set = Set::from_iter_dedup(participants.clone());
 

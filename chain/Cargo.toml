@@ -26,6 +26,7 @@ commonware-storage = { workspace = true }
 commonware-stream = { workspace = true }
 commonware-utils = { workspace = true }
 commonware-math = { workspace = true }
+commonware-parallel = { workspace = true }
 bytes =  { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }

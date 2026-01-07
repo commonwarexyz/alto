@@ -1,5 +1,5 @@
 use crate::{Client, Error, IndexQuery, Query};
-use alto_types::{Block, Finalized, Kind, Notarized, Seed, NAMESPACE};
+use alto_types::{Block, Finalized, Kind, Notarized, Seed};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::Viewable;
 use commonware_cryptography::Digestible;
@@ -79,7 +79,7 @@ impl Client {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let seed = Seed::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !seed.verify(&self.certificate_verifier, NAMESPACE) {
+        if !seed.verify(&self.certificate_verifier) {
             return Err(Error::InvalidSignature);
         }
 
@@ -122,7 +122,7 @@ impl Client {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let notarized = Notarized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !notarized.verify(&self.certificate_verifier, NAMESPACE) {
+        if !notarized.verify(&self.certificate_verifier) {
             return Err(Error::InvalidSignature);
         }
 
@@ -165,7 +165,7 @@ impl Client {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let finalized = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !finalized.verify(&self.certificate_verifier, NAMESPACE) {
+        if !finalized.verify(&self.certificate_verifier) {
             return Err(Error::InvalidSignature);
         }
 
@@ -198,17 +198,17 @@ impl Client {
         let result = match query {
             Query::Latest => {
                 let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-                if !result.verify(&self.certificate_verifier, NAMESPACE) {
+                if !result.verify(&self.certificate_verifier) {
                     return Err(Error::InvalidSignature);
                 }
                 Payload::Finalized(Box::new(result))
             }
             Query::Index(index) => {
                 let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-                if !result.verify(&self.certificate_verifier, NAMESPACE) {
+                if !result.verify(&self.certificate_verifier) {
                     return Err(Error::InvalidSignature);
                 }
-                if result.block.height != index {
+                if result.block.height.get() != index {
                     return Err(Error::UnexpectedResponse);
                 }
                 Payload::Finalized(Box::new(result))
@@ -258,7 +258,7 @@ impl Client {
                                     let result = Seed::decode(data);
                                     match result {
                                         Ok(seed) => {
-                                            if !seed.verify(&certificate_verifier, NAMESPACE) {
+                                            if !seed.verify(&certificate_verifier) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;
@@ -275,7 +275,7 @@ impl Client {
                                     let result = Notarized::decode(data);
                                     match result {
                                         Ok(notarized) => {
-                                            if !notarized.verify(&certificate_verifier, NAMESPACE) {
+                                            if !notarized.verify(&certificate_verifier) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;
@@ -294,7 +294,7 @@ impl Client {
                                     let result = Finalized::decode(data);
                                     match result {
                                         Ok(finalized) => {
-                                            if !finalized.verify(&certificate_verifier, NAMESPACE) {
+                                            if !finalized.verify(&certificate_verifier) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;

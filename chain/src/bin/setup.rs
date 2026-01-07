@@ -1,4 +1,5 @@
 use alto_chain::{Config, Peers};
+use alto_types::NAMESPACE;
 use clap::{value_parser, Arg, ArgMatches, Command};
 use commonware_codec::{Decode, DecodeExt, Encode};
 use commonware_consensus::simplex::scheme::bls12381_threshold;
@@ -284,7 +285,8 @@ fn generate_local(
 
     // Generate consensus key
     let peers_u32 = peers as u32;
-    let Fixture { schemes, .. } = bls12381_threshold::fixture::<MinSig, _>(&mut OsRng, peers_u32);
+    let Fixture { schemes, .. } =
+        bls12381_threshold::fixture::<MinSig, _>(&mut OsRng, NAMESPACE, peers_u32);
 
     let identity = schemes[0].polynomial().public();
     info!(%identity, "generated network key");
@@ -303,7 +305,7 @@ fn generate_local(
         let peer_config_file = format!("{name}.yaml");
         let directory = format!("{storage_output}/{name}");
         let peer_config = Config {
-            private_key: signer.to_string(),
+            private_key: hex(&signer.encode()),
             share: hex(&scheme.share().unwrap().encode()),
             polynomial: hex(&scheme.polynomial().encode()),
 
@@ -454,7 +456,8 @@ fn generate_remote(
 
     // Generate consensus key
     let peers_u32 = peers as u32;
-    let Fixture { schemes, .. } = bls12381_threshold::fixture::<MinSig, _>(&mut OsRng, peers_u32);
+    let Fixture { schemes, .. } =
+        bls12381_threshold::fixture::<MinSig, _>(&mut OsRng, NAMESPACE, peers_u32);
 
     let identity = schemes[0].polynomial().public();
     info!(%identity, "generated network key");
@@ -471,7 +474,7 @@ fn generate_remote(
         let name = signer.public_key().to_string();
         let peer_config_file = format!("{name}.yaml");
         let peer_config = Config {
-            private_key: signer.to_string(),
+            private_key: hex(&signer.encode()),
             share: hex(&scheme.share().unwrap().encode()),
             polynomial: hex(&scheme.polynomial().encode()),
 
