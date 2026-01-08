@@ -5,12 +5,12 @@ use commonware_utils::{hex, NZU64};
 use std::num::NonZero;
 
 mod block;
-pub use block::{Block, Finalized, Notarized};
+pub use block::{Block, Finalized, FinalizedOf, Notarized, NotarizedOf};
 
 mod consensus;
 pub use consensus::{
-    Activity, Evaluation, Finalization, Identity, Notarization, PublicKey, Scheme, Seed, Seedable,
-    Signature,
+    Activity, ActivityOf, Evaluation, Finalization, FinalizationOf, Identity, Notarization,
+    NotarizationOf, PublicKey, Scheme, SchemeOf, Seed, Seedable, Signature,
 };
 
 pub mod wasm;

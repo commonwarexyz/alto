@@ -2,7 +2,9 @@ use crate::{
     application::Application,
     indexer::{self, Indexer},
 };
-use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
+use alto_types::{
+    ActivityOf, Block, FinalizationOf, SchemeOf, EPOCH, EPOCH_LENGTH, NAMESPACE,
+};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
     application::marshaled::Marshaled as ConsensusMarshaled,
@@ -13,12 +15,12 @@ use commonware_consensus::{
 };
 use commonware_cryptography::{
     bls12381::primitives::{group, sharing::Sharing, variant::MinSig},
-    certificate::{ConstantProvider, Scheme as _},
+    certificate::{ConstantProvider, Scheme as CertificateScheme},
     ed25519::PublicKey,
     sha256::Digest,
 };
 use commonware_p2p::{Blocker, Receiver, Sender};
-use commonware_parallel::Sequential;
+use commonware_parallel::Strategy;
 use commonware_resolver::Resolver;
 use commonware_runtime::{
     buffer::PoolRef, spawn_cell, Clock, ContextCell, Handle, Metrics, RayonPoolSpawner, Spawner,
@@ -38,8 +40,8 @@ use std::{
 use tracing::{error, info, warn};
 
 /// Reporter type for [simplex::Engine].
-type Reporter<E, I> =
-    Reporters<Activity, marshal::Mailbox<Scheme, Block>, Option<indexer::Pusher<E, I>>>;
+type Reporter<E, I, S> =
+    Reporters<ActivityOf<S>, marshal::Mailbox<SchemeOf<S>, Block>, Option<indexer::Pusher<E, I, S>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -57,7 +59,7 @@ const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 
 /// Configuration for the [Engine].
-pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
+pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer, S: Strategy> {
     pub blocker: B,
     pub partition_prefix: String,
     pub blocks_freezer_table_initial_size: u32,
@@ -81,9 +83,12 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub fetch_rate_per_peer: Quota,
 
     pub indexer: Option<I>,
+
+    /// Execution strategy for parallel cryptographic operations.
+    pub strategy: S,
 }
 
-type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpocher>;
+type Marshaled<E, S> = ConsensusMarshaled<E, SchemeOf<S>, Application<S>, Block, FixedEpocher>;
 
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
@@ -91,6 +96,7 @@ pub struct Engine<
     E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     I: Indexer,
+    S: Strategy,
 > {
     context: ContextCell<E>,
 
@@ -99,24 +105,25 @@ pub struct Engine<
     marshal: marshal::Actor<
         E,
         Block,
-        ConstantProvider<Scheme, Epoch>,
-        immutable::Archive<E, Digest, Finalization>,
+        ConstantProvider<SchemeOf<S>, Epoch>,
+        immutable::Archive<E, Digest, FinalizationOf<S>>,
         immutable::Archive<E, Digest, Block>,
         FixedEpocher,
     >,
-    marshaled: Marshaled<E>,
+    marshaled: Marshaled<E, S>,
 
-    consensus: Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>>,
+    consensus: Consensus<E, SchemeOf<S>, Random, B, Digest, Marshaled<E, S>, Marshaled<E, S>, Reporter<E, I, S>>,
 }
 
 impl<
         E: Clock + GClock + Rng + CryptoRng + Spawner + RayonPoolSpawner + Storage + Metrics,
         B: Blocker<PublicKey = PublicKey>,
         I: Indexer,
-    > Engine<E, B, I>
+        S: Strategy,
+    > Engine<E, B, I, S>
 {
     /// Create a new [Engine].
-    pub async fn new(context: E, cfg: Config<B, I>) -> Self {
+    pub async fn new(context: E, cfg: Config<B, I, S>) -> Self {
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
@@ -167,7 +174,7 @@ impl<
                 ),
                 ordinal_write_buffer: WRITE_BUFFER,
                 items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
-                codec_config: Scheme::certificate_codec_config_unbounded(),
+                codec_config: SchemeOf::<S>::certificate_codec_config_unbounded(),
                 replay_buffer: REPLAY_BUFFER,
             },
         )
@@ -213,12 +220,12 @@ impl<
         info!(elapsed = ?start.elapsed(), "restored finalized blocks archive");
 
         // Create marshal
-        let scheme = Scheme::signer(
+        let scheme = SchemeOf::<S>::signer(
             NAMESPACE,
             cfg.participants,
             cfg.polynomial,
             cfg.share,
-            Sequential,
+            cfg.strategy,
         )
         .expect("failed to create scheme");
         let provider = ConstantProvider::new(scheme.clone());

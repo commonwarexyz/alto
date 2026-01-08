@@ -1,9 +1,11 @@
-use crate::consensus::{Finalization, Notarization, Scheme};
+use crate::consensus::{FinalizationOf, NotarizationOf, SchemeOf};
 use bytes::{Buf, BufMut};
 use commonware_codec::{varint::UInt, EncodeSize, Error, Read, ReadExt, Write};
 use commonware_consensus::{types::Height, Heightable};
 use commonware_cryptography::{sha256::Digest, Committable, Digestible, Hasher, Sha256};
+use commonware_parallel::{Sequential, Strategy};
 use rand::rngs::OsRng;
+use std::marker::PhantomData;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
@@ -90,34 +92,48 @@ impl Committable for Block {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Notarized {
-    pub proof: Notarization,
+/// A notarized block, containing the notarization proof and the block.
+#[derive(Clone, Debug)]
+pub struct NotarizedOf<S: Strategy> {
+    pub proof: NotarizationOf<S>,
     pub block: Block,
+    _phantom: PhantomData<S>,
 }
 
-impl Notarized {
-    pub fn new(proof: Notarization, block: Block) -> Self {
-        Self { proof, block }
+impl<S: Strategy> PartialEq for NotarizedOf<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.proof == other.proof && self.block == other.block
+    }
+}
+
+impl<S: Strategy> Eq for NotarizedOf<S> {}
+
+impl<S: Strategy> NotarizedOf<S> {
+    pub fn new(proof: NotarizationOf<S>, block: Block) -> Self {
+        Self {
+            proof,
+            block,
+            _phantom: PhantomData,
+        }
     }
 
-    pub fn verify(&self, scheme: &Scheme) -> bool {
+    pub fn verify(&self, scheme: &SchemeOf<S>) -> bool {
         self.proof.verify(&mut OsRng, scheme)
     }
 }
 
-impl Write for Notarized {
+impl<S: Strategy> Write for NotarizedOf<S> {
     fn write(&self, buf: &mut impl BufMut) {
         self.proof.write(buf);
         self.block.write(buf);
     }
 }
 
-impl Read for Notarized {
+impl<S: Strategy> Read for NotarizedOf<S> {
     type Cfg = ();
 
     fn read_cfg(buf: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
-        let proof = Notarization::read(buf)?;
+        let proof = NotarizationOf::<S>::read(buf)?;
         let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
@@ -127,44 +143,65 @@ impl Read for Notarized {
                 "Proof payload does not match block digest",
             ));
         }
-        Ok(Self { proof, block })
+        Ok(Self {
+            proof,
+            block,
+            _phantom: PhantomData,
+        })
     }
 }
 
-impl EncodeSize for Notarized {
+impl<S: Strategy> EncodeSize for NotarizedOf<S> {
     fn encode_size(&self) -> usize {
         self.proof.encode_size() + self.block.encode_size()
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Finalized {
-    pub proof: Finalization,
+/// Default Notarized type using sequential execution.
+pub type Notarized = NotarizedOf<Sequential>;
+
+/// A finalized block, containing the finalization proof and the block.
+#[derive(Clone, Debug)]
+pub struct FinalizedOf<S: Strategy> {
+    pub proof: FinalizationOf<S>,
     pub block: Block,
+    _phantom: PhantomData<S>,
 }
 
-impl Finalized {
-    pub fn new(proof: Finalization, block: Block) -> Self {
-        Self { proof, block }
+impl<S: Strategy> PartialEq for FinalizedOf<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.proof == other.proof && self.block == other.block
+    }
+}
+
+impl<S: Strategy> Eq for FinalizedOf<S> {}
+
+impl<S: Strategy> FinalizedOf<S> {
+    pub fn new(proof: FinalizationOf<S>, block: Block) -> Self {
+        Self {
+            proof,
+            block,
+            _phantom: PhantomData,
+        }
     }
 
-    pub fn verify(&self, scheme: &Scheme) -> bool {
+    pub fn verify(&self, scheme: &SchemeOf<S>) -> bool {
         self.proof.verify(&mut OsRng, scheme)
     }
 }
 
-impl Write for Finalized {
+impl<S: Strategy> Write for FinalizedOf<S> {
     fn write(&self, buf: &mut impl BufMut) {
         self.proof.write(buf);
         self.block.write(buf);
     }
 }
 
-impl Read for Finalized {
+impl<S: Strategy> Read for FinalizedOf<S> {
     type Cfg = ();
 
     fn read_cfg(buf: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
-        let proof = Finalization::read(buf)?;
+        let proof = FinalizationOf::<S>::read(buf)?;
         let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
@@ -174,15 +211,22 @@ impl Read for Finalized {
                 "Proof payload does not match block digest",
             ));
         }
-        Ok(Self { proof, block })
+        Ok(Self {
+            proof,
+            block,
+            _phantom: PhantomData,
+        })
     }
 }
 
-impl EncodeSize for Finalized {
+impl<S: Strategy> EncodeSize for FinalizedOf<S> {
     fn encode_size(&self) -> usize {
         self.proof.encode_size() + self.block.encode_size()
     }
 }
+
+/// Default Finalized type using sequential execution.
+pub type Finalized = FinalizedOf<Sequential>;
 
 impl commonware_consensus::Block for Block {
     fn parent(&self) -> Digest {

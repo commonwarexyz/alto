@@ -1,4 +1,4 @@
-use alto_types::{Block, PublicKey, Scheme};
+use alto_types::{Block, PublicKey, SchemeOf};
 use commonware_consensus::{
     marshal::{ingress::mailbox::AncestorStream, Update},
     simplex::types::Context,
@@ -6,10 +6,12 @@ use commonware_consensus::{
     Heightable, Reporter,
 };
 use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256};
+use commonware_parallel::Strategy;
 use commonware_runtime::{Clock, Metrics, Spawner};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
 use rand::Rng;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use tracing::info;
 
@@ -20,30 +22,33 @@ const GENESIS: &[u8] = b"commonware is neat";
 const SYNCHRONY_BOUND: u64 = 500;
 
 #[derive(Clone)]
-pub struct Application {
+pub struct Application<S: Strategy> {
     genesis: Arc<Block>,
+    _phantom: PhantomData<S>,
 }
 
-impl Application {
+impl<S: Strategy> Application<S> {
     pub fn new() -> Self {
         let genesis = Block::new(Sha256::hash(GENESIS), Height::zero(), 0);
         Self {
             genesis: Arc::new(genesis),
+            _phantom: PhantomData,
         }
     }
 }
 
-impl Default for Application {
+impl<S: Strategy> Default for Application<S> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<E> commonware_consensus::Application<E> for Application
+impl<E, S> commonware_consensus::Application<E> for Application<S>
 where
     E: Rng + Spawner + Metrics + Clock,
+    S: Strategy,
 {
-    type SigningScheme = Scheme;
+    type SigningScheme = SchemeOf<S>;
     type Context = Context<Digest, PublicKey>;
     type Block = Block;
 
@@ -68,9 +73,10 @@ where
     }
 }
 
-impl<E> commonware_consensus::VerifyingApplication<E> for Application
+impl<E, S> commonware_consensus::VerifyingApplication<E> for Application<S>
 where
     E: Rng + Spawner + Metrics + Clock,
+    S: Strategy,
 {
     async fn verify(
         &mut self,
@@ -101,7 +107,7 @@ where
     }
 }
 
-impl Reporter for Application {
+impl<S: Strategy> Reporter for Application<S> {
     type Activity = Update<Block>;
 
     async fn report(&mut self, activity: Self::Activity) {

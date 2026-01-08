@@ -11,6 +11,7 @@ use commonware_cryptography::{
 };
 use commonware_deployer::ec2::Hosts;
 use commonware_p2p::{authenticated::discovery as authenticated, Ingress, Manager};
+use commonware_parallel::Rayon;
 use commonware_runtime::{tokio, Metrics, Runner};
 use commonware_utils::{from_hex_formatted, ordered::Set, union_unique, NZU32};
 use futures::future::try_join_all;
@@ -260,6 +261,10 @@ fn main() {
             indexer,
             polynomial,
             share,
+            strategy: Rayon::new(
+                std::thread::available_parallelism().expect("failed to get available parallelism"),
+            )
+            .expect("failed to create rayon thread pool"),
         };
         let engine = engine::Engine::new(context.with_label("engine"), engine_cfg).await;
 

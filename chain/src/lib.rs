@@ -52,6 +52,7 @@ mod tests {
         simulated::{self, Link, Network, Oracle, Receiver, Sender},
         Manager,
     };
+    use commonware_parallel::Sequential;
     use commonware_runtime::{
         deterministic::{self, Runner},
         Clock, Metrics, Runner as _, Spawner,
@@ -208,7 +209,7 @@ mod tests {
 
                 // Configure engine
                 let uid = format!("validator_{public_key}");
-                let config: Config<_, Mock> = engine::Config {
+                let config: Config<_, Mock, Sequential> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -230,6 +231,7 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: None,
+                    strategy: Sequential,
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -392,7 +394,7 @@ mod tests {
                 // Configure engine
                 let public_key = signer.public_key();
                 let uid = format!("validator_{public_key}");
-                let config: Config<_, Mock> = engine::Config {
+                let config: Config<_, Mock, Sequential> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -414,6 +416,7 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: None,
+                    strategy: Sequential,
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -495,7 +498,7 @@ mod tests {
             let share = schemes[0].share().cloned().unwrap();
             let public_key = signer.public_key();
             let uid = format!("validator_{public_key}");
-            let config: Config<_, Mock> = engine::Config {
+            let config: Config<_, Mock, Sequential> = engine::Config {
                 blocker: oracle.control(public_key.clone()),
                 partition_prefix: uid.clone(),
                 blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -517,6 +520,7 @@ mod tests {
                 fetch_concurrent: 10,
                 fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                 indexer: None,
+                strategy: Sequential,
             };
             let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -641,7 +645,7 @@ mod tests {
 
                     // Configure engine
                     let uid = format!("validator_{public_key}");
-                    let config: Config<_, Mock> = engine::Config {
+                    let config: Config<_, Mock, Sequential> = engine::Config {
                         blocker: oracle.control(public_key.clone()),
                         partition_prefix: uid.clone(),
                         blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -663,6 +667,7 @@ mod tests {
                         fetch_concurrent: 10,
                         fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                         indexer: None,
+                        strategy: Sequential,
                     };
                     let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -814,7 +819,7 @@ mod tests {
             let identity = *schemes[0].polynomial().public();
 
             // Define mock indexer
-            let indexer = Mock::new("", identity);
+            let indexer: Mock = Indexer::new("", identity);
 
             // Create instances
             let mut public_keys = HashSet::new();
@@ -825,7 +830,7 @@ mod tests {
 
                 // Configure engine
                 let uid = format!("validator_{public_key}");
-                let config: Config<_, Mock> = engine::Config {
+                let config: Config<_, Mock, Sequential> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -847,6 +852,7 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: Some(indexer.clone()),
+                    strategy: Sequential,
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
