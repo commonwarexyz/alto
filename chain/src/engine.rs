@@ -201,10 +201,7 @@ impl<
                 freezer_value_write_buffer: WRITE_BUFFER,
                 freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
                 freezer_value_compression: FREEZER_JOURNAL_COMPRESSION,
-                ordinal_partition: format!(
-                    "{}-finalized-blocks-ordinal",
-                    cfg.partition_prefix
-                ),
+                ordinal_partition: format!("{}-finalized-blocks-ordinal", cfg.partition_prefix),
                 ordinal_write_buffer: WRITE_BUFFER,
                 items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
                 codec_config: (),
