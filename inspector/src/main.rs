@@ -83,7 +83,8 @@ use alto_client::{
 use alto_types::Identity;
 use clap::{value_parser, Arg, Command};
 use commonware_codec::DecodeExt;
-use commonware_utils::from_hex_formatted;
+use commonware_parallel::Rayon;
+use commonware_utils::{from_hex_formatted, NZUsize};
 use futures::StreamExt;
 use tracing::{info, warn, Level};
 use utils::{
@@ -172,12 +173,14 @@ async fn main() {
     };
     tracing_subscriber::fmt().with_max_level(log_level).init();
 
+    let strategy = Rayon::new(NZUsize!(2)).unwrap();
+
     if let Some(matches) = matches.subcommand_matches("listen") {
         let indexer = matches.get_one::<String>("indexer").unwrap();
         let identity = matches.get_one::<String>("identity").unwrap();
         let identity = from_hex_formatted(identity).expect("Failed to decode identity");
         let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
-        let client = Client::new(indexer, identity);
+        let client = Client::new(indexer, identity, strategy);
 
         let mut stream = client.listen().await.expect("Failed to connect to indexer");
         info!("listening for consensus messages...");
@@ -196,7 +199,7 @@ async fn main() {
         let identity = matches.get_one::<String>("identity").unwrap();
         let identity = from_hex_formatted(identity).expect("Failed to decode identity");
         let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
-        let client = Client::new(indexer, identity);
+        let client = Client::new(indexer, identity, strategy);
         let prepare_flag = matches.get_flag("prepare");
 
         if prepare_flag {

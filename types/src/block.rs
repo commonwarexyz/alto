@@ -3,6 +3,7 @@ use bytes::{Buf, BufMut};
 use commonware_codec::{varint::UInt, EncodeSize, Error, Read, ReadExt, Write};
 use commonware_consensus::{types::Height, Heightable};
 use commonware_cryptography::{sha256::Digest, Committable, Digestible, Hasher, Sha256};
+use commonware_parallel::Strategy;
 use rand::rngs::OsRng;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -101,8 +102,8 @@ impl Notarized {
         Self { proof, block }
     }
 
-    pub fn verify(&self, scheme: &Scheme) -> bool {
-        self.proof.verify(&mut OsRng, scheme)
+    pub fn verify(&self, scheme: &Scheme, strategy: &impl Strategy) -> bool {
+        self.proof.verify(&mut OsRng, scheme, strategy)
     }
 }
 
@@ -148,8 +149,8 @@ impl Finalized {
         Self { proof, block }
     }
 
-    pub fn verify(&self, scheme: &Scheme) -> bool {
-        self.proof.verify(&mut OsRng, scheme)
+    pub fn verify(&self, scheme: &Scheme, strategy: &impl Strategy) -> bool {
+        self.proof.verify(&mut OsRng, scheme, strategy)
     }
 }
 

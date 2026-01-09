@@ -2,7 +2,7 @@
 
 use alto_types::{Identity, Scheme, NAMESPACE};
 use commonware_cryptography::sha256::Digest;
-use commonware_parallel::Sequential;
+use commonware_parallel::Strategy;
 use commonware_utils::hex;
 use std::sync::Arc;
 use thiserror::Error;
@@ -62,16 +62,17 @@ pub enum Error {
 type WsConnector = tokio_tungstenite::Connector;
 
 /// Builder for creating a [`Client`].
-pub struct ClientBuilder {
+pub struct ClientBuilder<S: Strategy> {
     uri: String,
     ws_uri: String,
     identity: Identity,
     tls_certs: Vec<Vec<u8>>,
+    strategy: S,
 }
 
-impl ClientBuilder {
+impl<S: Strategy> ClientBuilder<S> {
     /// Create a new builder for the given indexer URI.
-    pub fn new(uri: &str, identity: Identity) -> Self {
+    pub fn new(uri: &str, identity: Identity, strategy: S) -> Self {
         let uri = uri.to_string();
         let ws_uri = if let Some(rest) = uri.strip_prefix("https://") {
             format!("wss://{rest}")
@@ -85,6 +86,7 @@ impl ClientBuilder {
             ws_uri,
             identity,
             tls_certs: Vec::new(),
+            strategy,
         }
     }
 
@@ -97,9 +99,8 @@ impl ClientBuilder {
     }
 
     /// Build the client.
-    pub fn build(self) -> Client {
-        let certificate_verifier =
-            Scheme::certificate_verifier(NAMESPACE, self.identity, Sequential);
+    pub fn build(self) -> Client<S> {
+        let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, self.identity);
 
         // Build HTTP client
         let mut http_builder = reqwest::Client::builder();
@@ -135,21 +136,23 @@ impl ClientBuilder {
             certificate_verifier,
             http_client,
             ws_connector,
+            strategy: self.strategy,
         }
     }
 }
 
 #[derive(Clone)]
-pub struct Client {
+pub struct Client<S: Strategy> {
     uri: String,
     ws_uri: String,
     certificate_verifier: Scheme,
 
     http_client: reqwest::Client,
     ws_connector: WsConnector,
+    strategy: S,
 }
 
-impl Client {
+impl<S: Strategy> Client<S> {
     /// Create a new client for the given indexer URI.
     ///
     /// TLS is automatically configured using the system's root certificates.
@@ -158,7 +161,7 @@ impl Client {
     ///
     /// For custom TLS configuration (e.g., self-signed certificates),
     /// use [`ClientBuilder`] instead.
-    pub fn new(uri: &str, identity: Identity) -> Self {
-        ClientBuilder::new(uri, identity).build()
+    pub fn new(uri: &str, identity: Identity, strategy: S) -> Self {
+        ClientBuilder::new(uri, identity, strategy).build()
     }
 }

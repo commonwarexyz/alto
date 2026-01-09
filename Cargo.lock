@@ -138,6 +138,7 @@ dependencies = [
  "commonware-codec",
  "commonware-consensus",
  "commonware-cryptography",
+ "commonware-parallel",
  "commonware-utils",
  "futures",
  "rand 0.8.5",
@@ -651,7 +652,7 @@ checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 [[package]]
 name = "commonware-broadcast"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be#5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fimprove-consensus-parallel-api#283415549ccf6d86d30829cc3a4ae9e31208fd72"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -669,7 +670,7 @@ dependencies = [
 [[package]]
 name = "commonware-codec"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be#5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fimprove-consensus-parallel-api#283415549ccf6d86d30829cc3a4ae9e31208fd72"
 dependencies = [
  "bytes",
  "paste",
@@ -681,7 +682,7 @@ dependencies = [
 [[package]]
 name = "commonware-consensus"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be#5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fimprove-consensus-parallel-api#283415549ccf6d86d30829cc3a4ae9e31208fd72"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -708,7 +709,7 @@ dependencies = [
 [[package]]
 name = "commonware-cryptography"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be#5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fimprove-consensus-parallel-api#283415549ccf6d86d30829cc3a4ae9e31208fd72"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
@@ -739,7 +740,7 @@ dependencies = [
 [[package]]
 name = "commonware-deployer"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be#5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fimprove-consensus-parallel-api#283415549ccf6d86d30829cc3a4ae9e31208fd72"
 dependencies = [
  "cfg-if",
  "serde",
@@ -749,7 +750,7 @@ dependencies = [
 [[package]]
 name = "commonware-macros"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be#5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fimprove-consensus-parallel-api#283415549ccf6d86d30829cc3a4ae9e31208fd72"
 dependencies = [
  "futures",
  "proc-macro-crate",
@@ -764,7 +765,7 @@ dependencies = [
 [[package]]
 name = "commonware-math"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be#5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fimprove-consensus-parallel-api#283415549ccf6d86d30829cc3a4ae9e31208fd72"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -776,7 +777,7 @@ dependencies = [
 [[package]]
 name = "commonware-p2p"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be#5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fimprove-consensus-parallel-api#283415549ccf6d86d30829cc3a4ae9e31208fd72"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -802,7 +803,7 @@ dependencies = [
 [[package]]
 name = "commonware-parallel"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be#5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fimprove-consensus-parallel-api#283415549ccf6d86d30829cc3a4ae9e31208fd72"
 dependencies = [
  "cfg-if",
  "rayon",
@@ -811,7 +812,7 @@ dependencies = [
 [[package]]
 name = "commonware-resolver"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be#5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fimprove-consensus-parallel-api#283415549ccf6d86d30829cc3a4ae9e31208fd72"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -831,7 +832,7 @@ dependencies = [
 [[package]]
 name = "commonware-runtime"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be#5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fimprove-consensus-parallel-api#283415549ccf6d86d30829cc3a4ae9e31208fd72"
 dependencies = [
  "async-lock",
  "axum",
@@ -866,7 +867,7 @@ dependencies = [
 [[package]]
 name = "commonware-storage"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be#5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fimprove-consensus-parallel-api#283415549ccf6d86d30829cc3a4ae9e31208fd72"
 dependencies = [
  "anyhow",
  "bytes",
@@ -889,7 +890,7 @@ dependencies = [
 [[package]]
 name = "commonware-stream"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be#5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fimprove-consensus-parallel-api#283415549ccf6d86d30829cc3a4ae9e31208fd72"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -909,7 +910,7 @@ dependencies = [
 [[package]]
 name = "commonware-utils"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be#5ca1fb0bba4f2f04bf27d1da2b68ef034dca93be"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fimprove-consensus-parallel-api#283415549ccf6d86d30829cc3a4ae9e31208fd72"
 dependencies = [
  "bytes",
  "cfg-if",

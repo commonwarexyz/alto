@@ -11,8 +11,8 @@ use commonware_cryptography::{
 };
 use commonware_deployer::ec2::Hosts;
 use commonware_p2p::{authenticated::discovery as authenticated, Ingress, Manager};
-use commonware_runtime::{tokio, Metrics, Runner};
-use commonware_utils::{from_hex_formatted, ordered::Set, union_unique, NZU32};
+use commonware_runtime::{tokio, Metrics, RayonPoolSpawner, Runner};
+use commonware_utils::{from_hex_formatted, ordered::Set, union_unique, NZUsize, NZU32};
 use futures::future::try_join_all;
 use governor::Quota;
 use std::{
@@ -231,10 +231,12 @@ fn main() {
         // Create network
         let p2p = network.start();
 
+        let strategy = context.create_strategy(NZUsize!(2)).unwrap();
+
         // Create indexer
         let mut indexer = None;
         if let Some(uri) = config.indexer {
-            indexer = Some(Client::new(&uri, *identity));
+            indexer = Some(Client::new(&uri, *identity, strategy.clone()));
         }
 
         // Create engine
@@ -260,6 +262,7 @@ fn main() {
             indexer,
             polynomial,
             share,
+            strategy,
         };
         let engine = engine::Engine::new(context.with_label("engine"), engine_cfg).await;
 

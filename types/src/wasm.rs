@@ -47,7 +47,7 @@ pub struct FinalizedJs {
 #[wasm_bindgen]
 pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity, Sequential);
+    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity);
 
     let Ok(seed) = Seed::decode(bytes.as_ref()) else {
         return JsValue::NULL;
@@ -65,12 +65,12 @@ pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 #[wasm_bindgen]
 pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity, Sequential);
+    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity);
 
     let Ok(notarized) = Notarized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
-    if !notarized.verify(&certificate_verifier) {
+    if !notarized.verify(&certificate_verifier, &Sequential) {
         return JsValue::NULL;
     }
     let notarized_js = NotarizedJs {
@@ -93,11 +93,11 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 #[wasm_bindgen]
 pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity, Sequential);
+    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity);
     let Ok(finalized) = Finalized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
-    if !finalized.verify(&certificate_verifier) {
+    if !finalized.verify(&certificate_verifier, &Sequential) {
         return JsValue::NULL;
     }
     let finalized_js = FinalizedJs {
@@ -146,7 +146,8 @@ pub fn leader_index(seed: JsValue, participants: usize) -> usize {
 
     Random::select_leader::<MinSig>(
         round,
-        participants,
+        participants as u32,
         (round.view().get() != 1).then_some(seed.signature),
-    ) as usize
+    )
+    .get() as usize
 }

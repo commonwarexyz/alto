@@ -74,6 +74,7 @@ mod tests {
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, Digestible, Hasher,
         Sha256,
     };
+    use commonware_parallel::Sequential;
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
@@ -98,7 +99,8 @@ mod tests {
             .iter()
             .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
             .collect();
-        let notarization = Notarization::from_notarizes(&schemes[0], &notarizes).unwrap();
+        let notarization =
+            Notarization::from_notarizes(&schemes[0], &notarizes, &Sequential).unwrap();
         let notarized = Notarized::new(notarization, block.clone());
 
         // Serialize and deserialize
@@ -107,7 +109,7 @@ mod tests {
         assert_eq!(notarized, decoded);
 
         // Verify notarized
-        assert!(notarized.verify(&schemes[0]));
+        assert!(notarized.verify(&schemes[0], &Sequential));
     }
 
     #[test]
@@ -132,7 +134,8 @@ mod tests {
             .iter()
             .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
             .collect();
-        let finalization = Finalization::from_finalizes(&schemes[0], &finalizes).unwrap();
+        let finalization =
+            Finalization::from_finalizes(&schemes[0], &finalizes, &Sequential).unwrap();
         let finalized = Finalized::new(finalization, block.clone());
 
         // Serialize and deserialize
@@ -141,6 +144,6 @@ mod tests {
         assert_eq!(finalized, decoded);
 
         // Verify finalized
-        assert!(finalized.verify(&schemes[0]));
+        assert!(finalized.verify(&schemes[0], &Sequential));
     }
 }

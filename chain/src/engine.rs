@@ -18,7 +18,7 @@ use commonware_cryptography::{
     sha256::Digest,
 };
 use commonware_p2p::{Blocker, Receiver, Sender};
-use commonware_parallel::Sequential;
+use commonware_parallel::Strategy;
 use commonware_resolver::Resolver;
 use commonware_runtime::{
     buffer::PoolRef, spawn_cell, Clock, ContextCell, Handle, Metrics, RayonPoolSpawner, Spawner,
@@ -57,7 +57,7 @@ const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 
 /// Configuration for the [Engine].
-pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
+pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer, S: Strategy> {
     pub blocker: B,
     pub partition_prefix: String,
     pub blocks_freezer_table_initial_size: u32,
@@ -80,6 +80,8 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer> {
     pub fetch_concurrent: usize,
     pub fetch_rate_per_peer: Quota,
 
+    pub strategy: S,
+
     pub indexer: Option<I>,
 }
 
@@ -90,6 +92,7 @@ type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpoch
 pub struct Engine<
     E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
+    S: Strategy,
     I: Indexer,
 > {
     context: ContextCell<E>,
@@ -103,20 +106,23 @@ pub struct Engine<
         immutable::Archive<E, Digest, Finalization>,
         immutable::Archive<E, Digest, Block>,
         FixedEpocher,
+        S,
     >,
     marshaled: Marshaled<E>,
 
-    consensus: Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>>,
+    consensus:
+        Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
 }
 
 impl<
         E: Clock + GClock + Rng + CryptoRng + Spawner + RayonPoolSpawner + Storage + Metrics,
         B: Blocker<PublicKey = PublicKey>,
+        S: Strategy,
         I: Indexer,
-    > Engine<E, B, I>
+    > Engine<E, B, S, I>
 {
     /// Create a new [Engine].
-    pub async fn new(context: E, cfg: Config<B, I>) -> Self {
+    pub async fn new(context: E, cfg: Config<B, I, S>) -> Self {
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
@@ -213,14 +219,8 @@ impl<
         info!(elapsed = ?start.elapsed(), "restored finalized blocks archive");
 
         // Create marshal
-        let scheme = Scheme::signer(
-            NAMESPACE,
-            cfg.participants,
-            cfg.polynomial,
-            cfg.share,
-            Sequential,
-        )
-        .expect("failed to create scheme");
+        let scheme = Scheme::signer(NAMESPACE, cfg.participants, cfg.polynomial, cfg.share)
+            .expect("failed to create scheme");
         let provider = ConstantProvider::new(scheme.clone());
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
         let (marshal, marshal_mailbox, _) = marshal::Actor::init(
@@ -244,6 +244,7 @@ impl<
                 block_codec_config: (),
                 max_repair: MAX_REPAIR,
                 buffer_pool: buffer_pool.clone(),
+                strategy: cfg.strategy.clone(),
             },
         )
         .await;
@@ -293,6 +294,7 @@ impl<
                 blocker: cfg.blocker,
                 buffer_pool,
                 elector: Random,
+                strategy: cfg.strategy,
             },
         );
 

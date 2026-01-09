@@ -3,6 +3,7 @@ use alto_types::{Block, Finalized, Kind, Notarized, Seed};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::Viewable;
 use commonware_cryptography::Digestible;
+use commonware_parallel::Strategy;
 use futures::{channel::mpsc::unbounded, Stream, StreamExt};
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message as TMessage};
 
@@ -51,7 +52,7 @@ pub enum Message {
     Finalization(Finalized),
 }
 
-impl Client {
+impl<S: Strategy> Client<S> {
     pub async fn seed_upload(&self, seed: Seed) -> Result<(), Error> {
         let result = self
             .http_client
@@ -122,7 +123,7 @@ impl Client {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let notarized = Notarized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !notarized.verify(&self.certificate_verifier) {
+        if !notarized.verify(&self.certificate_verifier, &self.strategy) {
             return Err(Error::InvalidSignature);
         }
 
@@ -165,7 +166,7 @@ impl Client {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let finalized = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !finalized.verify(&self.certificate_verifier) {
+        if !finalized.verify(&self.certificate_verifier, &self.strategy) {
             return Err(Error::InvalidSignature);
         }
 
@@ -198,14 +199,14 @@ impl Client {
         let result = match query {
             Query::Latest => {
                 let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-                if !result.verify(&self.certificate_verifier) {
+                if !result.verify(&self.certificate_verifier, &self.strategy) {
                     return Err(Error::InvalidSignature);
                 }
                 Payload::Finalized(Box::new(result))
             }
             Query::Index(index) => {
                 let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-                if !result.verify(&self.certificate_verifier) {
+                if !result.verify(&self.certificate_verifier, &self.strategy) {
                     return Err(Error::InvalidSignature);
                 }
                 if result.block.height.get() != index {
@@ -240,6 +241,7 @@ impl Client {
         let (sender, receiver) = unbounded();
         tokio::spawn({
             let certificate_verifier = self.certificate_verifier.clone();
+            let strategy = self.strategy.clone();
             async move {
                 read.for_each(|message| async {
                     match message {
@@ -275,7 +277,7 @@ impl Client {
                                     let result = Notarized::decode(data);
                                     match result {
                                         Ok(notarized) => {
-                                            if !notarized.verify(&certificate_verifier) {
+                                            if !notarized.verify(&certificate_verifier, &strategy) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;
@@ -294,7 +296,7 @@ impl Client {
                                     let result = Finalized::decode(data);
                                     match result {
                                         Ok(finalized) => {
-                                            if !finalized.verify(&certificate_verifier) {
+                                            if !finalized.verify(&certificate_verifier, &strategy) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;

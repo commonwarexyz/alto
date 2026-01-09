@@ -11,6 +11,7 @@ use axum::{
 use commonware_codec::{DecodeExt, Encode, EncodeSize, FixedSize, Write};
 use commonware_consensus::{types::View, Viewable};
 use commonware_cryptography::{sha256::Digest, Digestible};
+use commonware_parallel::Strategy;
 use commonware_utils::from_hex;
 use futures::{SinkExt, StreamExt};
 use std::{
@@ -30,14 +31,15 @@ pub struct State {
 }
 
 #[derive(Clone)]
-pub struct Indexer {
+pub struct Indexer<S: Strategy> {
     scheme: Scheme,
     state: Arc<RwLock<State>>,
     consensus_tx: broadcast::Sender<Vec<u8>>,
+    strategy: S,
 }
 
-impl Indexer {
-    pub fn new(scheme: Scheme) -> Self {
+impl<S: Strategy> Indexer<S> {
+    pub fn new(scheme: Scheme, strategy: S) -> Self {
         let (consensus_tx, _) = broadcast::channel(1024);
         let state = Arc::new(RwLock::new(State::default()));
 
@@ -45,6 +47,7 @@ impl Indexer {
             scheme,
             state,
             consensus_tx,
+            strategy,
         }
     }
 
@@ -81,7 +84,7 @@ impl Indexer {
 
     pub fn submit_notarization(&self, notarized: Notarized) -> Result<(), &'static str> {
         // Verify signature with identity
-        if !notarized.verify(&self.scheme) {
+        if !notarized.verify(&self.scheme, &self.strategy) {
             return Err("Invalid notarization signature");
         }
 
@@ -124,7 +127,7 @@ impl Indexer {
 
     pub fn submit_finalization(&self, finalized: Finalized) -> Result<(), &'static str> {
         // Verify signature with identity
-        if !finalized.verify(&self.scheme) {
+        if !finalized.verify(&self.scheme, &self.strategy) {
             return Err("Invalid finalization signature");
         }
 
@@ -212,12 +215,12 @@ pub enum BlockResult {
     Finalized(Finalized),
 }
 
-pub struct Api {
-    indexer: Arc<Indexer>,
+pub struct Api<S: Strategy> {
+    indexer: Arc<Indexer<S>>,
 }
 
-impl Api {
-    pub fn new(indexer: Arc<Indexer>) -> Self {
+impl<S: Strategy> Api<S> {
+    pub fn new(indexer: Arc<Indexer<S>>) -> Self {
         Self { indexer }
     }
 
@@ -241,8 +244,8 @@ async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
 
-async fn seed_upload(
-    AxumState(indexer): AxumState<Arc<Indexer>>,
+async fn seed_upload<S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
     match Seed::decode(&mut body.as_ref()) {
@@ -254,8 +257,8 @@ async fn seed_upload(
     }
 }
 
-async fn seed_get(
-    AxumState(indexer): AxumState<Arc<Indexer>>,
+async fn seed_get<S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
     match indexer.get_seed(&query) {
@@ -264,8 +267,8 @@ async fn seed_get(
     }
 }
 
-async fn notarization_upload(
-    AxumState(indexer): AxumState<Arc<Indexer>>,
+async fn notarization_upload<S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
     match Notarized::decode(&mut body.as_ref()) {
@@ -277,8 +280,8 @@ async fn notarization_upload(
     }
 }
 
-async fn notarization_get(
-    AxumState(indexer): AxumState<Arc<Indexer>>,
+async fn notarization_get<S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
     match indexer.get_notarization(&query) {
@@ -287,8 +290,8 @@ async fn notarization_get(
     }
 }
 
-async fn finalization_upload(
-    AxumState(indexer): AxumState<Arc<Indexer>>,
+async fn finalization_upload<S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
     match Finalized::decode(&mut body.as_ref()) {
@@ -300,8 +303,8 @@ async fn finalization_upload(
     }
 }
 
-async fn finalization_get(
-    AxumState(indexer): AxumState<Arc<Indexer>>,
+async fn finalization_get<S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
     match indexer.get_finalization(&query) {
@@ -310,8 +313,8 @@ async fn finalization_get(
     }
 }
 
-async fn block_get(
-    AxumState(indexer): AxumState<Arc<Indexer>>,
+async fn block_get<S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
     match indexer.get_block(&query) {
@@ -325,14 +328,17 @@ async fn block_get(
     }
 }
 
-async fn consensus_ws(
-    AxumState(indexer): AxumState<Arc<Indexer>>,
+async fn consensus_ws<S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_consensus_ws(socket, indexer))
 }
 
-async fn handle_consensus_ws(socket: axum::extract::ws::WebSocket, indexer: Arc<Indexer>) {
+async fn handle_consensus_ws<S: Strategy>(
+    socket: axum::extract::ws::WebSocket,
+    indexer: Arc<Indexer<S>>,
+) {
     let (mut sender, _receiver) = socket.split();
     let mut consensus = indexer.consensus_subscriber();
 
@@ -364,6 +370,7 @@ mod tests {
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, Digestible, Hasher,
         Sha256,
     };
+    use commonware_parallel::Sequential;
     use futures::StreamExt;
     use rand::{rngs::StdRng, SeedableRng};
     use rcgen::{generate_simple_self_signed, CertifiedKey, KeyPair};
@@ -376,7 +383,7 @@ mod tests {
     /// Test context containing common setup for indexer tests.
     struct TestContext {
         schemes: Vec<Scheme>,
-        client: Client,
+        client: Client<Sequential>,
     }
 
     impl TestContext {
@@ -387,8 +394,8 @@ mod tests {
                 bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
             let identity = *schemes[0].polynomial().public();
 
-            let (addr, _) = start_server(schemes[0].clone()).await;
-            let client = Client::new(&format!("http://{addr}"), identity);
+            let (addr, _) = start_server(schemes[0].clone(), Sequential).await;
+            let client = Client::new(&format!("http://{addr}"), identity, Sequential);
             wait_for_ready(&client).await;
 
             Self { schemes, client }
@@ -438,7 +445,7 @@ mod tests {
             .iter()
             .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
             .collect();
-        Notarization::from_notarizes(&schemes[0], &notarizes).unwrap()
+        Notarization::from_notarizes(&schemes[0], &notarizes, &Sequential).unwrap()
     }
 
     fn create_finalization(
@@ -449,11 +456,14 @@ mod tests {
             .iter()
             .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
             .collect();
-        Finalization::from_finalizes(&schemes[0], &finalizes).unwrap()
+        Finalization::from_finalizes(&schemes[0], &finalizes, &Sequential).unwrap()
     }
 
-    async fn start_server(scheme: Scheme) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-        let indexer = Arc::new(Indexer::new(scheme));
+    async fn start_server(
+        scheme: Scheme,
+        strategy: impl Strategy,
+    ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+        let indexer = Arc::new(Indexer::new(scheme, strategy));
         let api = Api::new(indexer);
         let app = api.router();
 
@@ -467,7 +477,7 @@ mod tests {
         (addr, handle)
     }
 
-    async fn wait_for_ready(client: &Client) {
+    async fn wait_for_ready(client: &Client<Sequential>) {
         loop {
             if client.health().await.is_ok() {
                 return;
@@ -610,8 +620,8 @@ mod tests {
         let (_, identity2) = fixture(1);
 
         // Start server with schemes1, but create client expecting identity2
-        let (addr, _handle) = start_server(schemes1[0].clone()).await;
-        let client = Client::new(&format!("http://{addr}"), identity2);
+        let (addr, _handle) = start_server(schemes1[0].clone(), Sequential).await;
+        let client = Client::new(&format!("http://{addr}"), identity2, Sequential);
         wait_for_ready(&client).await;
 
         // Create a seed signed by schemes1
@@ -656,8 +666,9 @@ mod tests {
     async fn start_tls_server(
         scheme: Scheme,
         cert_key: &CertifiedKey<KeyPair>,
+        strategy: impl Strategy,
     ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-        let indexer = Arc::new(Indexer::new(scheme));
+        let indexer = Arc::new(Indexer::new(scheme, strategy));
         let api = Api::new(indexer);
         let app = api.router();
 
@@ -711,8 +722,8 @@ mod tests {
         addr: SocketAddr,
         identity: Identity,
         cert_key: &CertifiedKey<KeyPair>,
-    ) -> Client {
-        ClientBuilder::new(&format!("https://{addr}"), identity)
+    ) -> Client<Sequential> {
+        ClientBuilder::new(&format!("https://{addr}"), identity, Sequential)
             .with_tls_cert(cert_key.cert.der().to_vec())
             .build()
     }
@@ -726,7 +737,7 @@ mod tests {
             bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
         let identity = *schemes[0].polynomial().public();
 
-        let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key).await;
+        let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key, Sequential).await;
         let client = create_tls_client(addr, identity, &cert_key);
         wait_for_ready(&client).await;
 
@@ -758,7 +769,7 @@ mod tests {
             bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
         let identity = *schemes[0].polynomial().public();
 
-        let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key).await;
+        let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key, Sequential).await;
         let client = create_tls_client(addr, identity, &cert_key);
         wait_for_ready(&client).await;
 
