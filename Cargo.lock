@@ -623,7 +623,7 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 [[package]]
 name = "commonware-broadcast"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=b2cbf571275e4b6331ee2da9b3bf6b29c27587e4#b2cbf571275e4b6331ee2da9b3bf6b29c27587e4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=221f51dd83519a93d79e5d57da29253b70671463#221f51dd83519a93d79e5d57da29253b70671463"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -641,7 +641,7 @@ dependencies = [
 [[package]]
 name = "commonware-codec"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=b2cbf571275e4b6331ee2da9b3bf6b29c27587e4#b2cbf571275e4b6331ee2da9b3bf6b29c27587e4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=221f51dd83519a93d79e5d57da29253b70671463#221f51dd83519a93d79e5d57da29253b70671463"
 dependencies = [
  "bytes",
  "paste",
@@ -653,7 +653,7 @@ dependencies = [
 [[package]]
 name = "commonware-consensus"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=b2cbf571275e4b6331ee2da9b3bf6b29c27587e4#b2cbf571275e4b6331ee2da9b3bf6b29c27587e4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=221f51dd83519a93d79e5d57da29253b70671463#221f51dd83519a93d79e5d57da29253b70671463"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -680,7 +680,7 @@ dependencies = [
 [[package]]
 name = "commonware-cryptography"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=b2cbf571275e4b6331ee2da9b3bf6b29c27587e4#b2cbf571275e4b6331ee2da9b3bf6b29c27587e4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=221f51dd83519a93d79e5d57da29253b70671463#221f51dd83519a93d79e5d57da29253b70671463"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
@@ -711,7 +711,7 @@ dependencies = [
 [[package]]
 name = "commonware-deployer"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=b2cbf571275e4b6331ee2da9b3bf6b29c27587e4#b2cbf571275e4b6331ee2da9b3bf6b29c27587e4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=221f51dd83519a93d79e5d57da29253b70671463#221f51dd83519a93d79e5d57da29253b70671463"
 dependencies = [
  "cfg-if",
  "serde",
@@ -721,7 +721,7 @@ dependencies = [
 [[package]]
 name = "commonware-macros"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=b2cbf571275e4b6331ee2da9b3bf6b29c27587e4#b2cbf571275e4b6331ee2da9b3bf6b29c27587e4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=221f51dd83519a93d79e5d57da29253b70671463#221f51dd83519a93d79e5d57da29253b70671463"
 dependencies = [
  "futures",
  "proc-macro-crate",
@@ -736,7 +736,7 @@ dependencies = [
 [[package]]
 name = "commonware-math"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=b2cbf571275e4b6331ee2da9b3bf6b29c27587e4#b2cbf571275e4b6331ee2da9b3bf6b29c27587e4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=221f51dd83519a93d79e5d57da29253b70671463#221f51dd83519a93d79e5d57da29253b70671463"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -748,7 +748,7 @@ dependencies = [
 [[package]]
 name = "commonware-p2p"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=b2cbf571275e4b6331ee2da9b3bf6b29c27587e4#b2cbf571275e4b6331ee2da9b3bf6b29c27587e4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=221f51dd83519a93d79e5d57da29253b70671463#221f51dd83519a93d79e5d57da29253b70671463"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -774,7 +774,7 @@ dependencies = [
 [[package]]
 name = "commonware-parallel"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=b2cbf571275e4b6331ee2da9b3bf6b29c27587e4#b2cbf571275e4b6331ee2da9b3bf6b29c27587e4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=221f51dd83519a93d79e5d57da29253b70671463#221f51dd83519a93d79e5d57da29253b70671463"
 dependencies = [
  "cfg-if",
  "rayon",
@@ -783,7 +783,7 @@ dependencies = [
 [[package]]
 name = "commonware-resolver"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=b2cbf571275e4b6331ee2da9b3bf6b29c27587e4#b2cbf571275e4b6331ee2da9b3bf6b29c27587e4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=221f51dd83519a93d79e5d57da29253b70671463#221f51dd83519a93d79e5d57da29253b70671463"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -803,7 +803,7 @@ dependencies = [
 [[package]]
 name = "commonware-runtime"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=b2cbf571275e4b6331ee2da9b3bf6b29c27587e4#b2cbf571275e4b6331ee2da9b3bf6b29c27587e4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=221f51dd83519a93d79e5d57da29253b70671463#221f51dd83519a93d79e5d57da29253b70671463"
 dependencies = [
  "async-lock",
  "axum",
@@ -838,7 +838,7 @@ dependencies = [
 [[package]]
 name = "commonware-storage"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=b2cbf571275e4b6331ee2da9b3bf6b29c27587e4#b2cbf571275e4b6331ee2da9b3bf6b29c27587e4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=221f51dd83519a93d79e5d57da29253b70671463#221f51dd83519a93d79e5d57da29253b70671463"
 dependencies = [
  "anyhow",
  "bytes",
@@ -861,7 +861,7 @@ dependencies = [
 [[package]]
 name = "commonware-stream"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=b2cbf571275e4b6331ee2da9b3bf6b29c27587e4#b2cbf571275e4b6331ee2da9b3bf6b29c27587e4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=221f51dd83519a93d79e5d57da29253b70671463#221f51dd83519a93d79e5d57da29253b70671463"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -881,7 +881,7 @@ dependencies = [
 [[package]]
 name = "commonware-utils"
 version = "0.0.64"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=b2cbf571275e4b6331ee2da9b3bf6b29c27587e4#b2cbf571275e4b6331ee2da9b3bf6b29c27587e4"
+source = "git+https://github.com/commonwarexyz/monorepo.git?rev=221f51dd83519a93d79e5d57da29253b70671463#221f51dd83519a93d79e5d57da29253b70671463"
 dependencies = [
  "bytes",
  "cfg-if",
