@@ -1138,7 +1138,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "histogram_quantile(0.99, rate(engine_consensus_batcher_verify_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval]))",
+                    "expr": "histogram_quantile(0.75, rate(engine_consensus_batcher_verify_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval]))",
                     "fullMetaSearch": false,
                     "hide": false,
                     "includeNullMetadata": true,
@@ -1148,7 +1148,7 @@
                     "useBackend": false
                 }
             ],
-            "title": "Batch Verify Latency (p99)",
+            "title": "Batch Verify Latency (p75)",
             "type": "timeseries"
         },
         {
@@ -1241,7 +1241,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "histogram_quantile(0.99, rate(engine_consensus_batcher_recover_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval]))",
+                    "expr": "histogram_quantile(0.75, rate(engine_consensus_batcher_recover_latency_bucket{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval]))",
                     "fullMetaSearch": false,
                     "hide": false,
                     "includeNullMetadata": true,
@@ -1251,7 +1251,7 @@
                     "useBackend": false
                 }
             ],
-            "title": "Recover Latency (p99)",
+            "title": "Recover Latency (p75)",
             "type": "timeseries"
         },
         {
