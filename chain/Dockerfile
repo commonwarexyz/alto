@@ -19,8 +19,8 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # Set PKG_CONFIG_PATH for OpenSSL
 ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
 
-# Optimize for AWS Graviton3 (Neoverse V1 with LSE atomics, crypto, SVE2, and hardware RNG)
-ENV RUSTFLAGS="-C target-cpu=neoverse-v1 -C target-feature=+lse,+aes,+sha2,+sha3,+sve2,+crc,+rand"
+# Optimize for AWS Graviton4 (Neoverse V2)
+ENV RUSTFLAGS="-C target-cpu=neoverse-v2"
 
 # Install Rust target
 RUN rustup default stable

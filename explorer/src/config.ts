@@ -23,12 +23,12 @@ const publicConfigs: Record<'global' | 'usa', ClusterConfig> = {
     global: {
         ...globalConfig,
         name: 'Global Cluster',
-        description: `A cluster of <strong>50 validators</strong> running c7g.large (2 vCPU, 4GB RAM) nodes on AWS in <strong>10 regions</strong> (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2).`,
+        description: `A cluster of <strong>50 validators</strong> running c8g.large (2 vCPU, 4GB RAM) nodes on AWS in <strong>10 regions</strong> (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2).`,
     },
     usa: {
         ...usaConfig,
         name: 'USA Cluster',
-        description: `A cluster of <strong>50 validators</strong> running c7g.large (2 vCPU, 4GB RAM) nodes on AWS in <strong>4 regions</strong> (us-east-1, us-west-1, us-east-2, us-west-2).`,
+        description: `A cluster of <strong>50 validators</strong> running c8g.large (2 vCPU, 4GB RAM) nodes on AWS in <strong>4 regions</strong> (us-east-1, us-west-1, us-east-2, us-west-2).`,
     },
 };
 
