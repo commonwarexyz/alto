@@ -62,6 +62,10 @@ overflow-checks = true
 # To guard against unexpected behavior in production, we enable overflow checks in
 # "release" although they incur some performance penalty.
 overflow-checks = true
+# Use a single codegen unit for better optimization (slower compile, faster runtime)
+codegen-units = 1
+# Enable link-time optimization across all crates
+lto = true
 
 [profile.test]
 # Although overflow checks are enabled by default in "test", we explicitly
