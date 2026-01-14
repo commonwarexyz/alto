@@ -1,7 +1,7 @@
-use alto_types::{Activity, Block, Finalized, Identity, Notarized, Scheme, Seed, Seedable};
-use commonware_consensus::{marshal, Reporter, Viewable};
 #[cfg(test)]
-use commonware_parallel::Sequential;
+use alto_types::Identity;
+use alto_types::{Activity, Block, Finalized, Notarized, Scheme, Seed, Seedable};
+use commonware_consensus::{marshal, Reporter, Viewable};
 use commonware_parallel::Strategy;
 use commonware_runtime::{Metrics, Spawner};
 use std::future::Future;
@@ -11,11 +11,7 @@ use tracing::{debug, warn};
 
 /// Trait for interacting with an indexer.
 pub trait Indexer: Clone + Send + Sync + 'static {
-    type Strategy: Strategy;
     type Error: std::error::Error + Send + Sync + 'static;
-
-    /// Create a new indexer with the given URI, public key, and strategy.
-    fn new(uri: &str, public: Identity, strategy: Self::Strategy) -> Self;
 
     /// Upload a seed to the indexer.
     fn seed_upload(&self, seed: Seed) -> impl Future<Output = Result<(), Self::Error>> + Send;
@@ -43,17 +39,19 @@ pub struct Mock {
 }
 
 #[cfg(test)]
-impl Indexer for Mock {
-    type Strategy = Sequential;
-    type Error = std::io::Error;
-
-    fn new(_: &str, _: Identity, _: Self::Strategy) -> Self {
-        Mock {
+impl Mock {
+    pub fn new(_: &str, _: Identity) -> Self {
+        Self {
             seed_seen: Arc::new(AtomicBool::new(false)),
             notarization_seen: Arc::new(AtomicBool::new(false)),
             finalization_seen: Arc::new(AtomicBool::new(false)),
         }
     }
+}
+
+#[cfg(test)]
+impl Indexer for Mock {
+    type Error = std::io::Error;
 
     async fn seed_upload(&self, _: Seed) -> Result<(), Self::Error> {
         self.seed_seen
@@ -75,12 +73,7 @@ impl Indexer for Mock {
 }
 
 impl<S: Strategy> Indexer for alto_client::Client<S> {
-    type Strategy = S;
     type Error = alto_client::Error;
-
-    fn new(uri: &str, identity: Identity, strategy: S) -> Self {
-        Self::new(uri, identity, strategy)
-    }
 
     fn seed_upload(&self, seed: Seed) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.seed_upload(seed)

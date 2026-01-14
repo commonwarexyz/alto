@@ -1,6 +1,5 @@
-use commonware_parallel::Strategy;
-
 use crate::{Client, Error};
+use commonware_parallel::Strategy;
 
 fn healthy_path(base: String) -> String {
     format!("{base}/health")

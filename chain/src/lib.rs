@@ -60,7 +60,7 @@ mod tests {
     use commonware_utils::{ordered::Set, NZU32};
     use engine::{Config, Engine};
     use governor::Quota;
-    use indexer::{Indexer, Mock};
+    use indexer::Mock;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use std::{
         collections::{HashMap, HashSet},
@@ -819,7 +819,7 @@ mod tests {
             let identity = *schemes[0].polynomial().public();
 
             // Define mock indexer
-            let indexer = Mock::new("", identity, Sequential);
+            let indexer = Mock::new("", identity);
 
             // Create instances
             let mut public_keys = HashSet::new();
