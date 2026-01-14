@@ -231,7 +231,9 @@ fn main() {
         // Create network
         let p2p = network.start();
 
-        let strategy = context.create_strategy(NZUsize!(2)).unwrap();
+        let strategy = context
+            .create_strategy(NZUsize!(config.rayon_threads))
+            .unwrap();
 
         // Create indexer
         let mut indexer = None;

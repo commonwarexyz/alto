@@ -27,6 +27,8 @@ pub struct Config {
     pub mailbox_size: usize,
     pub deque_size: usize,
 
+    pub rayon_threads: usize,
+
     pub indexer: Option<String>,
 }
 
