@@ -67,10 +67,6 @@ codegen-units = 1
 # Enable link-time optimization across all crates
 lto = true
 
-[profile.release.package.alto-chain]
-# Keep debug symbols for profiling (does not affect runtime performance)
-debug = true
-
 [profile.test]
 # Although overflow checks are enabled by default in "test", we explicitly
 # enable them here for clarity.

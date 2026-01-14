@@ -19,8 +19,9 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # Set PKG_CONFIG_PATH for OpenSSL
 ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
 
-# Optimize for AWS Graviton4 (Neoverse V2)
-ENV RUSTFLAGS="-C target-cpu=neoverse-v2"
+# Optimize for AWS Graviton4 (Neoverse V2) and enable profiling (frame pointers + debug symbols)
+ENV RUSTFLAGS="-C target-cpu=neoverse-v2 -C force-frame-pointers=yes"
+ENV CARGO_PROFILE_RELEASE_DEBUG=true
 
 # Install Rust target
 RUN rustup default stable
@@ -29,6 +30,6 @@ RUN rustup target add aarch64-unknown-linux-gnu
 # Set the working directory
 WORKDIR /alto
 
-# Build the binary
+# Build the binary and create both debug and stripped versions
 ENTRYPOINT ["/bin/bash", "-c"]
-CMD ["cd chain && cargo build --release --bin validator --target aarch64-unknown-linux-gnu && cp ../target/aarch64-unknown-linux-gnu/release/validator assets"]
+CMD ["cd chain && cargo build --release --bin validator --target aarch64-unknown-linux-gnu && cp ../target/aarch64-unknown-linux-gnu/release/validator assets/validator-debug && strip -o assets/validator assets/validator-debug"]
