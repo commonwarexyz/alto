@@ -165,6 +165,16 @@ docker run -it -v ${PWD}/..:/alto validator-builder
 deployer ec2 update --config config.yaml
 ```
 
+#### [Optional] Profile Validator
+
+Collect a CPU profile from a running validator using `samply`:
+
+```bash
+deployer ec2 profile --config config.yaml --instance <instance-name> --binary validator-debug
+```
+
+The `validator-debug` binary contains debug symbols for symbolication. The profile will be saved locally and can be viewed in the [Firefox Profiler](https://profiler.firefox.com).
+
 #### Destroy Infrastructure
 
 ```bash
