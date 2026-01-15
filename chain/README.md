@@ -20,7 +20,7 @@ _To run this example, you must first install [Rust](https://www.rust-lang.org/to
 _To configure indexer upload, add `--indexer-port <port>` to the `generate local` command. The first validator is configured to push data to it._
 
 ```bash
-cargo run --bin setup -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --rayon-threads 2 --output test local --start-port 3000 --indexer-port 8080
+cargo run --bin setup -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --signature-threads 2 --output test local --start-port 3000 --indexer-port 8080
 ```
 
 _If setup succeeds, you should see the following output:_
@@ -95,7 +95,7 @@ _To configure indexer upload, add `--indexer-url <URL> --indexer-count <count>` 
 ##### Global
 
 ```bash
-cargo run --bin setup -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --rayon-threads 2 --output assets remote --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,eu-north-1,ap-south-1,sa-east-1,eu-central-1,ap-northeast-2,ap-southeast-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 25 --dashboard dashboard.json
+cargo run --bin setup -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --signature-threads 2 --output assets remote --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,eu-north-1,ap-south-1,sa-east-1,eu-central-1,ap-northeast-2,ap-southeast-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 25 --dashboard dashboard.json
 ```
 
 _This configuration consumes ~10MB of disk space per hour per validator (~5 views per second). With 25GB of storage allocated, validators will exhaust available storage in ~3 months._
@@ -103,7 +103,7 @@ _This configuration consumes ~10MB of disk space per hour per validator (~5 view
 ##### USA
 
 ```bash
-cargo run --bin setup -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --rayon-threads 2 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 75 --dashboard dashboard.json
+cargo run --bin setup -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --signature-threads 2 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 75 --dashboard dashboard.json
 ```
 
 _This configuration consumes ~30MB of disk space per hour per validator (~13 views per second). With 75GB of storage allocated, validators will exhaust available storage in ~3 months._

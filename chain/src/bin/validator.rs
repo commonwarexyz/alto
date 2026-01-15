@@ -232,7 +232,7 @@ fn main() {
         let p2p = network.start();
 
         let strategy = context
-            .create_strategy(NZUsize!(config.rayon_threads))
+            .create_strategy(NZUsize!(config.signature_threads))
             .unwrap();
 
         // Create indexer

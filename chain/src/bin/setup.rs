@@ -79,8 +79,8 @@ fn main() {
                         .value_parser(value_parser!(usize)),
                 )
                 .arg(
-                    Arg::new("rayon_threads")
-                        .long("rayon-threads")
+                    Arg::new("signature_threads")
+                        .long("signature-threads")
                         .required(true)
                         .value_parser(value_parser!(usize)),
                 )
@@ -189,7 +189,7 @@ fn main() {
             let message_backlog = *sub_matches.get_one::<usize>("message_backlog").unwrap();
             let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
             let deque_size = *sub_matches.get_one::<usize>("deque_size").unwrap();
-            let rayon_threads = *sub_matches.get_one::<usize>("rayon_threads").unwrap();
+            let signature_threads = *sub_matches.get_one::<usize>("signature_threads").unwrap();
             let output = sub_matches.get_one::<String>("output").unwrap().clone();
             match sub_matches.subcommand() {
                 Some(("local", sub_matches)) => generate_local(
@@ -201,7 +201,7 @@ fn main() {
                     message_backlog,
                     mailbox_size,
                     deque_size,
-                    rayon_threads,
+                    signature_threads,
                     output,
                 ),
                 Some(("remote", sub_matches)) => generate_remote(
@@ -213,7 +213,7 @@ fn main() {
                     message_backlog,
                     mailbox_size,
                     deque_size,
-                    rayon_threads,
+                    signature_threads,
                     output,
                 ),
                 _ => {
@@ -254,7 +254,7 @@ fn generate_local(
     message_backlog: usize,
     mailbox_size: usize,
     deque_size: usize,
-    rayon_threads: usize,
+    signature_threads: usize,
     output: String,
 ) {
     // Extract arguments
@@ -333,7 +333,7 @@ fn generate_local(
             mailbox_size,
             deque_size,
 
-            rayon_threads,
+            signature_threads,
 
             indexer: None,
         };
@@ -401,7 +401,7 @@ fn generate_remote(
     message_backlog: usize,
     mailbox_size: usize,
     deque_size: usize,
-    rayon_threads: usize,
+    signature_threads: usize,
     output: String,
 ) {
     // Extract arguments
@@ -505,7 +505,7 @@ fn generate_remote(
             mailbox_size,
             deque_size,
 
-            rayon_threads,
+            signature_threads,
 
             indexer: None,
         };
