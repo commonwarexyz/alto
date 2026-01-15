@@ -19,8 +19,8 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # Set PKG_CONFIG_PATH for OpenSSL
 ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
 
-# Optimize for AWS Graviton4 (Neoverse V2) and enable profiling (frame pointers + debug symbols)
-ENV RUSTFLAGS="-C target-cpu=neoverse-v2 -C force-frame-pointers=yes"
+# Optimize for AWS Graviton4 (Neoverse V2) and enable debug symbols (used for samply profiling)
+ENV RUSTFLAGS="-C target-cpu=neoverse-v2"
 ENV CARGO_PROFILE_RELEASE_DEBUG=true
 
 # Install Rust target
