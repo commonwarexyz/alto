@@ -146,7 +146,7 @@ pub fn leader_index(seed: JsValue, participants: usize) -> usize {
 
     Random::select_leader::<MinSig>(
         round,
-        participants as u32,
+        u32::try_from(participants).expect("too many participants"),
         (round.view().get() != 1).then_some(seed.signature),
     )
     .get() as usize
