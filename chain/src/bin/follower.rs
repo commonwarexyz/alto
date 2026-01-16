@@ -42,7 +42,7 @@ use commonware_broadcast::buffered;
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::{
     marshal::{self, ingress::handler, Update},
-    types::{FixedEpocher, ViewDelta},
+    types::{FixedEpocher, Height, ViewDelta},
     Viewable,
 };
 use commonware_cryptography::{
@@ -51,12 +51,13 @@ use commonware_cryptography::{
     sha256::Digest,
     Digestible,
 };
+use commonware_parallel::Sequential;
 use commonware_resolver::Resolver;
 use commonware_runtime::{
     buffer::PoolRef, tokio, Clock, Handle, Metrics, Runner, Spawner, Storage,
 };
 use commonware_storage::archive::immutable;
-use commonware_utils::{from_hex_formatted, vec::NonEmptyVec, Acknowledgement, NZUsize, NZU64};
+use commonware_utils::{from_hex_formatted, vec::NonEmptyVec, Acknowledgement, NZUsize, NZU16, NZU64};
 use futures::{
     channel::{mpsc, oneshot},
     SinkExt, StreamExt,
@@ -84,7 +85,7 @@ const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
-const BUFFER_POOL_PAGE_SIZE: NonZero<usize> = NZUsize!(4_096); // 4KB
+const BUFFER_POOL_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560); // 10x activity timeout
@@ -148,19 +149,19 @@ const RESOLVER_CACHE_MAX_SIZE: usize = 1024;
 /// that were received via WebSocket before they're available via REST API.
 #[derive(Clone)]
 pub struct HttpResolver {
-    client: Client,
+    client: Client<Sequential>,
     /// Cache of blocks by digest (bounded)
     cache_by_digest: Arc<RwLock<HashMap<Digest, Block>>>,
     /// Cache of blocks by height (bounded)
-    cache_by_height: Arc<RwLock<HashMap<u64, Block>>>,
+    cache_by_height: Arc<RwLock<HashMap<Height, Block>>>,
     /// Insertion order for digest cache (for eviction)
     digest_order: Arc<RwLock<VecDeque<Digest>>>,
     /// Insertion order for height cache (for eviction)  
-    height_order: Arc<RwLock<VecDeque<u64>>>,
+    height_order: Arc<RwLock<VecDeque<Height>>>,
 }
 
 impl HttpResolver {
-    pub fn new(client: Client) -> Self {
+    pub fn new(client: Client<Sequential>) -> Self {
         Self {
             client,
             cache_by_digest: Arc::new(RwLock::new(HashMap::new())),
@@ -224,7 +225,7 @@ impl HttpResolver {
     }
 
     /// Try to get a block from cache by height
-    fn get_cached_by_height(&self, height: u64) -> Option<Block> {
+    fn get_cached_by_height(&self, height: Height) -> Option<Block> {
         let cache = self.cache_by_height.read().unwrap();
         cache.get(&height).cloned()
     }
@@ -256,16 +257,16 @@ impl HttpResolver {
     }
 
     /// Fetch a finalized block by height
-    async fn fetch_finalized_by_height(&self, height: u64) -> Option<Block> {
+    async fn fetch_finalized_by_height(&self, height: Height) -> Option<Block> {
         // Check cache first - blocks from WebSocket may not be available via REST yet
         if let Some(block) = self.get_cached_by_height(height) {
-            debug!(height, "block found in height cache");
+            debug!(height = height.get(), "block found in height cache");
             return Some(block);
         }
 
         // Fetch from indexer
-        debug!(height, "fetching finalized block by height from indexer");
-        match self.client.block_get(Query::Index(height)).await {
+        debug!(height = height.get(), "fetching finalized block by height from indexer");
+        match self.client.block_get(Query::Index(height.get())).await {
             Ok(payload) => {
                 let block = match payload {
                     alto_client::consensus::Payload::Finalized(f) => f.block,
@@ -275,7 +276,7 @@ impl HttpResolver {
                 Some(block)
             }
             Err(e) => {
-                warn!(height, error=?e, "failed to fetch finalized block by height");
+                warn!(height = height.get(), error=?e, "failed to fetch finalized block by height");
                 None
             }
         }
@@ -348,6 +349,7 @@ where
         immutable::Archive<E, Digest, Finalization>,
         immutable::Archive<E, Digest, Block>,
         FixedEpocher,
+        Sequential,
     >,
     marshal_mailbox: marshal::Mailbox<Scheme, Block>,
 }
@@ -379,7 +381,7 @@ where
         let buffer_pool = PoolRef::new(BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
 
         // Initialize finalizations by height archive
-        let scheme = Scheme::certificate_verifier(identity);
+        let scheme = Scheme::certificate_verifier(NAMESPACE, identity);
         let finalizations_by_height = immutable::Archive::init(
             context.with_label("finalizations_by_height"),
             immutable::Config {
@@ -389,16 +391,20 @@ where
                 freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
                 freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
                 freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
-                freezer_journal_partition: "follower-finalizations-by-height-freezer-journal"
+                freezer_key_partition: "follower-finalizations-by-height-freezer-key-journal"
                     .to_string(),
-                freezer_journal_target_size: FREEZER_JOURNAL_TARGET_SIZE,
-                freezer_journal_compression: FREEZER_JOURNAL_COMPRESSION,
-                freezer_journal_buffer_pool: buffer_pool.clone(),
+                freezer_key_buffer_pool: buffer_pool.clone(),
+                freezer_key_write_buffer: WRITE_BUFFER,
+                freezer_value_partition: "follower-finalizations-by-height-freezer-value-journal"
+                    .to_string(),
+                freezer_value_write_buffer: WRITE_BUFFER,
+                freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
+                freezer_value_compression: FREEZER_JOURNAL_COMPRESSION,
                 ordinal_partition: "follower-finalizations-by-height-ordinal".to_string(),
+                ordinal_write_buffer: WRITE_BUFFER,
                 items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
                 codec_config: scheme.certificate_codec_config(),
                 replay_buffer: REPLAY_BUFFER,
-                write_buffer: WRITE_BUFFER,
             },
         )
         .await
@@ -414,15 +420,19 @@ where
                 freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
                 freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
                 freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
-                freezer_journal_partition: "follower-finalized_blocks-freezer-journal".to_string(),
-                freezer_journal_target_size: FREEZER_JOURNAL_TARGET_SIZE,
-                freezer_journal_compression: None,
-                freezer_journal_buffer_pool: buffer_pool.clone(),
-                ordinal_partition: "follower-finalized_blocks-ordinal".to_string(),
+                freezer_key_partition: "follower-finalized-blocks-freezer-key-journal".to_string(),
+                freezer_key_buffer_pool: buffer_pool.clone(),
+                freezer_key_write_buffer: WRITE_BUFFER,
+                freezer_value_partition: "follower-finalized-blocks-freezer-value-journal"
+                    .to_string(),
+                freezer_value_write_buffer: WRITE_BUFFER,
+                freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
+                freezer_value_compression: None,
+                ordinal_partition: "follower-finalized-blocks-ordinal".to_string(),
+                ordinal_write_buffer: WRITE_BUFFER,
                 items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
                 codec_config: (),
                 replay_buffer: REPLAY_BUFFER,
-                write_buffer: WRITE_BUFFER,
             },
         )
         .await
@@ -444,13 +454,14 @@ where
                 partition_prefix: "follower".to_string(),
                 mailbox_size,
                 view_retention_timeout: VIEW_RETENTION_TIMEOUT,
-                namespace: NAMESPACE.to_vec(),
                 prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
                 replay_buffer: REPLAY_BUFFER,
-                write_buffer: WRITE_BUFFER,
+                key_write_buffer: WRITE_BUFFER,
+                value_write_buffer: WRITE_BUFFER,
                 block_codec_config: (),
                 max_repair: MAX_REPAIR,
                 buffer_pool,
+                strategy: Sequential,
             },
         )
         .await;
@@ -500,7 +511,7 @@ impl commonware_consensus::Reporter for FollowerApplication {
     async fn report(&mut self, activity: Self::Activity) {
         if let Update::Block(block, ack_rx) = activity {
             info!(
-                height = block.height,
+                height = block.height.get(),
                 "finalized block processed by marshal"
             );
             ack_rx.acknowledge();
@@ -511,7 +522,7 @@ impl commonware_consensus::Reporter for FollowerApplication {
 /// Certificate feeder that consumes from exoware/indexer and feeds to marshal.
 struct CertificateFeeder<E: Clock> {
     context: E,
-    client: Client,
+    client: Client<Sequential>,
     scheme: Scheme,
     marshal_mailbox: marshal::Mailbox<Scheme, Block>,
     resolver: HttpResolver,
@@ -525,14 +536,14 @@ struct CertificateFeeder<E: Clock> {
 impl<E: Clock> CertificateFeeder<E> {
     fn new(
         context: E,
-        client: Client,
+        client: Client<Sequential>,
         identity: Identity,
         marshal_mailbox: marshal::Mailbox<Scheme, Block>,
         resolver: HttpResolver,
         ingress_tx: mpsc::Sender<handler::Message<Block>>,
         auto_checkpoint: bool,
     ) -> Self {
-        let scheme = Scheme::certificate_verifier(identity);
+        let scheme = Scheme::certificate_verifier(NAMESPACE, identity);
         Self {
             context,
             client,
@@ -608,20 +619,20 @@ impl<E: Clock> CertificateFeeder<E> {
                 let height = finalized.block.height;
                 let view = finalized.proof.view();
 
-                debug!(height, view = view.get(), "received finalization");
+                debug!(height = height.get(), view = view.get(), "received finalization");
 
                 // Verify the finalization proof
-                if !finalized.verify(&self.scheme, NAMESPACE) {
+                if !finalized.verify(&self.scheme, &Sequential) {
                     return Err(format!(
                         "invalid finalization signature for height {}",
-                        height
+                        height.get()
                     ));
                 }
 
                 // On first finalization, set the floor to this height so marshal
                 // doesn't try to backfill blocks before it.
                 if !self.floor_set && self.auto_checkpoint {
-                    info!(height, "setting checkpoint floor on first finalization");
+                    info!(height = height.get(), "setting checkpoint floor on first finalization");
                     self.marshal_mailbox.set_floor(height).await;
                     self.floor_set = true;
                 }
@@ -634,7 +645,7 @@ impl<E: Clock> CertificateFeeder<E> {
                 let digest = finalized.block.digest();
                 let key = handler::Request::Block(digest);
                 if !self.deliver_block(key, finalized.block.clone()).await {
-                    warn!(height, "marshal did not accept finalized block");
+                    warn!(height = height.get(), "marshal did not accept finalized block");
                 }
 
                 // Hint to marshal about this finalization
@@ -646,13 +657,13 @@ impl<E: Clock> CertificateFeeder<E> {
                     .hint_finalized(height, NonEmptyVec::new(dummy_target))
                     .await;
 
-                info!(height, view = view.get(), "processed finalization");
+                info!(height = height.get(), view = view.get(), "processed finalization");
             }
             Message::Notarization(notarized) => {
                 let height = notarized.block.height;
                 let view = notarized.proof.view();
 
-                debug!(height, view = view.get(), "received notarization");
+                debug!(height = height.get(), view = view.get(), "received notarization");
 
                 // Cache the block in case marshal needs it
                 self.resolver.cache_block(&notarized.block);
@@ -712,7 +723,7 @@ fn main() {
         info!(source = %config.source, "starting follower node");
 
         // Create the alto client for connecting to exoware/indexer
-        let client = Client::new(&config.source, identity);
+        let client = Client::new(&config.source, identity, Sequential);
 
         // Wait for the source to be healthy
         loop {
