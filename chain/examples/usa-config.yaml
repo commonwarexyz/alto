@@ -1,0 +1,30 @@
+# Example configuration for the alto follower node (USA cluster)
+#
+# This configuration connects to the USA alto exoware relay
+# and stores finalized blocks locally.
+#
+# NOTE: You need to replace the identity with the correct one for the USA cluster
+
+# URL of the exoware relay or indexer endpoint
+source: "https://usa.alto.exoware.xyz"
+
+# Hex-encoded BLS12-381 public key of the network identity
+# This is the threshold public key used to verify finalization signatures
+# TODO: Replace with actual USA cluster identity
+identity: "REPLACE_WITH_USA_CLUSTER_IDENTITY"
+
+# Directory for storing finalized blocks and state
+directory: "/tmp/alto-follower-usa"
+
+# Number of worker threads
+worker_threads: 4
+
+# Log level (trace, debug, info, warn, error)
+log_level: "info"
+
+# Port for Prometheus metrics endpoint
+metrics_port: 9092
+
+# Auto-checkpoint from the latest finalized block on first run
+# Set to false to start from genesis (requires backfilling all historical blocks)
+auto_checkpoint: true
