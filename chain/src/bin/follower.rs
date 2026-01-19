@@ -147,6 +147,9 @@ const RESOLVER_CACHE_MAX_SIZE: usize = 1024;
 /// 
 /// The resolver maintains bounded LRU-like caches by both digest and height to serve blocks
 /// that were received via WebSocket before they're available via REST API.
+/// 
+/// When fetching finalized blocks by height, the resolver also delivers them to marshal
+/// via the ingress channel and hints about the finalization.
 #[derive(Clone)]
 pub struct HttpResolver {
     client: Client<Sequential>,
@@ -158,16 +161,26 @@ pub struct HttpResolver {
     digest_order: Arc<RwLock<VecDeque<Digest>>>,
     /// Insertion order for height cache (for eviction)  
     height_order: Arc<RwLock<VecDeque<Height>>>,
+    /// Channel for delivering blocks to marshal
+    ingress_tx: mpsc::Sender<handler::Message<Block>>,
+    /// Mailbox for hinting finalizations to marshal
+    marshal_mailbox: marshal::Mailbox<Scheme, Block>,
 }
 
 impl HttpResolver {
-    pub fn new(client: Client<Sequential>) -> Self {
+    pub fn new(
+        client: Client<Sequential>,
+        ingress_tx: mpsc::Sender<handler::Message<Block>>,
+        marshal_mailbox: marshal::Mailbox<Scheme, Block>,
+    ) -> Self {
         Self {
             client,
             cache_by_digest: Arc::new(RwLock::new(HashMap::new())),
             cache_by_height: Arc::new(RwLock::new(HashMap::new())),
             digest_order: Arc::new(RwLock::new(VecDeque::new())),
             height_order: Arc::new(RwLock::new(VecDeque::new())),
+            ingress_tx,
+            marshal_mailbox,
         }
     }
 
@@ -176,6 +189,7 @@ impl HttpResolver {
     pub fn cache_block(&self, block: &Block) {
         let digest = block.digest();
         let height = block.height;
+        debug!(height = height.get(), ?digest, "caching block");
         
         // Cache by digest
         {
@@ -256,24 +270,65 @@ impl HttpResolver {
         }
     }
 
-    /// Fetch a finalized block by height
-    async fn fetch_finalized_by_height(&self, height: Height) -> Option<Block> {
+    /// Fetch a finalized block by height and deliver it to marshal.
+    /// 
+    /// This fetches the full finalization (block + proof) from the indexer,
+    /// verifies the signature, delivers the block via ingress channel, and
+    /// hints to marshal about the finalization.
+    async fn fetch_finalized_by_height(&mut self, height: Height) -> Option<Block> {
         // Check cache first - blocks from WebSocket may not be available via REST yet
         if let Some(block) = self.get_cached_by_height(height) {
             debug!(height = height.get(), "block found in height cache");
             return Some(block);
         }
 
-        // Fetch from indexer
+        // Fetch from indexer - this returns Finalized with verified signature
         debug!(height = height.get(), "fetching finalized block by height from indexer");
         match self.client.block_get(Query::Index(height.get())).await {
             Ok(payload) => {
-                let block = match payload {
-                    alto_client::consensus::Payload::Finalized(f) => f.block,
-                    alto_client::consensus::Payload::Block(b) => b,
-                };
-                self.cache_block(&block);
-                Some(block)
+                match payload {
+                    alto_client::consensus::Payload::Finalized(finalized) => {
+                        let block = finalized.block.clone();
+                        let block_height = block.height;
+                        
+                        // Cache the block
+                        self.cache_block(&block);
+                        
+                        // Deliver the block to marshal via ingress channel
+                        // Note: We don't wait for acknowledgment to avoid deadlock - marshal
+                        // might be waiting for this resolver call to complete.
+                        let digest = block.digest();
+                        let key = handler::Request::Block(digest);
+                        let (response_tx, _response_rx) = oneshot::channel();
+                        let message = handler::Message::Deliver {
+                            key,
+                            value: Bytes::from(block.encode().to_vec()),
+                            response: response_tx,
+                        };
+                        
+                        if self.ingress_tx.send(message).await.is_err() {
+                            warn!(height = height.get(), "failed to deliver fetched block to marshal");
+                            return Some(block);
+                        }
+                        
+                        // Hint to marshal about this finalization so it can process it
+                        // Note: We clone marshal_mailbox to avoid holding a mutable borrow
+                        let mut mailbox = self.marshal_mailbox.clone();
+                        let dummy_target = PublicKey::decode([0u8; 32].as_slice())
+                            .expect("failed to decode dummy key");
+                        mailbox
+                            .hint_finalized(block_height, NonEmptyVec::new(dummy_target))
+                            .await;
+                        
+                        info!(height = height.get(), "fetched and delivered finalization from indexer");
+                        Some(block)
+                    }
+                    alto_client::consensus::Payload::Block(block) => {
+                        // Shouldn't happen for height queries, but handle it
+                        self.cache_block(&block);
+                        Some(block)
+                    }
+                }
             }
             Err(e) => {
                 warn!(height = height.get(), error=?e, "failed to fetch finalized block by height");
@@ -743,11 +798,13 @@ fn main() {
         let engine = FollowerEngine::new(context.clone(), identity, config.mailbox_size).await;
         let marshal_mailbox = engine.mailbox();
 
-        // Create the HTTP resolver for backfilling
-        let resolver = HttpResolver::new(client.clone());
-
         // Create the ingress channel for delivering blocks to marshal
         let (ingress_tx, ingress_rx) = mpsc::channel(config.mailbox_size);
+
+        // Create the HTTP resolver for backfilling
+        // The resolver needs access to ingress_tx and marshal_mailbox to deliver
+        // fetched finalizations back to marshal during backfill
+        let resolver = HttpResolver::new(client.clone(), ingress_tx.clone(), marshal_mailbox.clone());
 
         // Start the follower engine (marshal)
         let engine_handle = engine.start(ingress_rx, resolver.clone());

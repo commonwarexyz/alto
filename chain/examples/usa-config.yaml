@@ -10,7 +10,6 @@ source: "https://usa.alto.exoware.xyz"
 
 # Hex-encoded BLS12-381 public key of the network identity
 # This is the threshold public key used to verify finalization signatures
-# TODO: Replace with actual USA cluster identity
 identity: "9165a52253f8c3605ae6337c72256750b934c405c54db019bbfd156e9c28049e637eb68a85115fcf3a05a9229b9e2e3e0ec974b3857dcaffda00b7cffa582a7bd2b19df6766e1dd4b4b695ff99bb7e0252348f5a46f6124a06246f1781e8f1fe"
 
 # Directory for storing finalized blocks and state
