@@ -67,7 +67,7 @@ use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZero,
     path::PathBuf,
@@ -164,6 +164,10 @@ pub struct HttpResolver {
     height_order: Arc<RwLock<VecDeque<Height>>>,
     /// Channel for delivering blocks to marshal
     ingress_tx: mpsc::Sender<handler::Message<Block>>,
+    /// Track in-flight requests by height to avoid duplicate fetches
+    in_flight_heights: Arc<RwLock<HashSet<Height>>>,
+    /// Track in-flight requests by digest to avoid duplicate fetches
+    in_flight_digests: Arc<RwLock<HashSet<Digest>>>,
 }
 
 impl HttpResolver {
@@ -178,6 +182,8 @@ impl HttpResolver {
             digest_order: Arc::new(RwLock::new(VecDeque::new())),
             height_order: Arc::new(RwLock::new(VecDeque::new())),
             ingress_tx,
+            in_flight_heights: Arc::new(RwLock::new(HashSet::new())),
+            in_flight_digests: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
@@ -249,9 +255,19 @@ impl HttpResolver {
             return Some(block);
         }
 
+        // Check if already in-flight (another request is fetching this)
+        {
+            let mut in_flight = self.in_flight_digests.write().unwrap();
+            if in_flight.contains(&digest) {
+                debug!(?digest, "request already in-flight, skipping duplicate");
+                return None;
+            }
+            in_flight.insert(digest);
+        }
+
         // Fetch from indexer
         debug!(?digest, "fetching block by digest from indexer");
-        match self.client.block_get(Query::Digest(digest)).await {
+        let result = match self.client.block_get(Query::Digest(digest)).await {
             Ok(payload) => {
                 let block = match payload {
                     alto_client::consensus::Payload::Block(b) => b,
@@ -264,7 +280,15 @@ impl HttpResolver {
                 warn!(?digest, error=?e, "failed to fetch block by digest");
                 None
             }
+        };
+
+        // Remove from in-flight set
+        {
+            let mut in_flight = self.in_flight_digests.write().unwrap();
+            in_flight.remove(&digest);
         }
+
+        result
     }
 
     /// Fetch a finalized block by height and deliver it to marshal.
@@ -279,9 +303,19 @@ impl HttpResolver {
             return Some(block);
         }
 
+        // Check if already in-flight (another request is fetching this)
+        {
+            let mut in_flight = self.in_flight_heights.write().unwrap();
+            if in_flight.contains(&height) {
+                debug!(height = height.get(), "request already in-flight, skipping duplicate");
+                return None;
+            }
+            in_flight.insert(height);
+        }
+
         // Fetch from indexer - this returns Finalized with verified signature
         debug!(height = height.get(), "fetching finalized block by height from indexer");
-        match self.client.block_get(Query::Index(height.get())).await {
+        let result = match self.client.block_get(Query::Index(height.get())).await {
             Ok(payload) => {
                 match payload {
                     alto_client::consensus::Payload::Finalized(finalized) => {
@@ -304,7 +338,13 @@ impl HttpResolver {
 
                         if self.ingress_tx.send(message).await.is_err() {
                             warn!(height = height.get(), "failed to deliver fetched block to marshal");
-                            return Some(block);
+                            // Still return the block even if delivery failed
+                            // (remove from in-flight will happen below)
+                            return {
+                                let mut in_flight = self.in_flight_heights.write().unwrap();
+                                in_flight.remove(&height);
+                                Some(block)
+                            };
                         }
 
                         // Note: We don't call hint_finalized here because marshal already
@@ -324,7 +364,15 @@ impl HttpResolver {
                 warn!(height = height.get(), error=?e, "failed to fetch finalized block by height");
                 None
             }
+        };
+
+        // Remove from in-flight set
+        {
+            let mut in_flight = self.in_flight_heights.write().unwrap();
+            in_flight.remove(&height);
         }
+
+        result
     }
 }
 
