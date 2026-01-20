@@ -60,6 +60,7 @@ use commonware_storage::archive::immutable;
 use commonware_utils::{from_hex_formatted, vec::NonEmptyVec, Acknowledgement, NZUsize, NZU16, NZU64};
 use futures::{
     channel::{mpsc, oneshot},
+    future::join_all,
     SinkExt, StreamExt,
 };
 use governor::clock::Clock as GClock;
@@ -84,10 +85,10 @@ const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // 3MB
 const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
-const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
+const WRITE_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB - larger buffer reduces flush frequency
 const BUFFER_POOL_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
-const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
+const MAX_REPAIR: NonZero<usize> = NZUsize!(100);
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560); // 10x activity timeout
 const DEQUE_SIZE: usize = 10;
 
@@ -129,7 +130,7 @@ pub struct Config {
 }
 
 fn default_mailbox_size() -> usize {
-    1024
+    110
 }
 
 fn default_auto_checkpoint() -> bool {
@@ -148,8 +149,8 @@ const RESOLVER_CACHE_MAX_SIZE: usize = 1024;
 /// The resolver maintains bounded LRU-like caches by both digest and height to serve blocks
 /// that were received via WebSocket before they're available via REST API.
 /// 
-/// When fetching finalized blocks by height, the resolver also delivers them to marshal
-/// via the ingress channel and hints about the finalization.
+/// When fetching finalized blocks by height, the resolver delivers them to marshal
+/// via the ingress channel.
 #[derive(Clone)]
 pub struct HttpResolver {
     client: Client<Sequential>,
@@ -163,15 +164,12 @@ pub struct HttpResolver {
     height_order: Arc<RwLock<VecDeque<Height>>>,
     /// Channel for delivering blocks to marshal
     ingress_tx: mpsc::Sender<handler::Message<Block>>,
-    /// Mailbox for hinting finalizations to marshal
-    marshal_mailbox: marshal::Mailbox<Scheme, Block>,
 }
 
 impl HttpResolver {
     pub fn new(
         client: Client<Sequential>,
         ingress_tx: mpsc::Sender<handler::Message<Block>>,
-        marshal_mailbox: marshal::Mailbox<Scheme, Block>,
     ) -> Self {
         Self {
             client,
@@ -180,7 +178,6 @@ impl HttpResolver {
             digest_order: Arc::new(RwLock::new(VecDeque::new())),
             height_order: Arc::new(RwLock::new(VecDeque::new())),
             ingress_tx,
-            marshal_mailbox,
         }
     }
 
@@ -190,12 +187,12 @@ impl HttpResolver {
         let digest = block.digest();
         let height = block.height;
         debug!(height = height.get(), ?digest, "caching block");
-        
+
         // Cache by digest
         {
             let mut cache = self.cache_by_digest.write().unwrap();
             let mut order = self.digest_order.write().unwrap();
-            
+
             // Only insert if not already present
             if !cache.contains_key(&digest) {
                 // Evict oldest if at capacity
@@ -210,12 +207,12 @@ impl HttpResolver {
                 order.push_back(digest);
             }
         }
-        
+
         // Cache by height
         {
             let mut cache = self.cache_by_height.write().unwrap();
             let mut order = self.height_order.write().unwrap();
-            
+
             // Only insert if not already present
             if !cache.contains_key(&height) {
                 // Evict oldest if at capacity
@@ -271,7 +268,7 @@ impl HttpResolver {
     }
 
     /// Fetch a finalized block by height and deliver it to marshal.
-    /// 
+    ///
     /// This fetches the full finalization (block + proof) from the indexer,
     /// verifies the signature, delivers the block via ingress channel, and
     /// hints to marshal about the finalization.
@@ -289,11 +286,10 @@ impl HttpResolver {
                 match payload {
                     alto_client::consensus::Payload::Finalized(finalized) => {
                         let block = finalized.block.clone();
-                        let block_height = block.height;
-                        
+
                         // Cache the block
                         self.cache_block(&block);
-                        
+
                         // Deliver the block to marshal via ingress channel
                         // Note: We don't wait for acknowledgment to avoid deadlock - marshal
                         // might be waiting for this resolver call to complete.
@@ -305,22 +301,16 @@ impl HttpResolver {
                             value: Bytes::from(block.encode().to_vec()),
                             response: response_tx,
                         };
-                        
+
                         if self.ingress_tx.send(message).await.is_err() {
                             warn!(height = height.get(), "failed to deliver fetched block to marshal");
                             return Some(block);
                         }
-                        
-                        // Hint to marshal about this finalization so it can process it
-                        // Note: We clone marshal_mailbox to avoid holding a mutable borrow
-                        let mut mailbox = self.marshal_mailbox.clone();
-                        let dummy_target = PublicKey::decode([0u8; 32].as_slice())
-                            .expect("failed to decode dummy key");
-                        mailbox
-                            .hint_finalized(block_height, NonEmptyVec::new(dummy_target))
-                            .await;
-                        
-                        info!(height = height.get(), "fetched and delivered finalization from indexer");
+
+                        // Note: We don't call hint_finalized here because marshal already
+                        // knows about this block - that's why it asked us to fetch it.
+                        // Calling hint_finalized would just flood marshal's mailbox.
+                        info!(height = height.get(), "fetched and delivered block from indexer");
                         Some(block)
                     }
                     alto_client::consensus::Payload::Block(block) => {
@@ -358,9 +348,18 @@ impl Resolver for HttpResolver {
     }
 
     async fn fetch_all(&mut self, keys: Vec<Self::Key>) {
-        for key in keys {
-            self.fetch(key).await;
-        }
+        // Fetch all keys in parallel for faster backfill
+        info!(count = keys.len(), "fetch_all called - parallel fetch");
+        let futures: Vec<_> = keys
+            .into_iter()
+            .map(|key| {
+                let mut resolver = self.clone();
+                async move {
+                    resolver.fetch(key).await;
+                }
+            })
+            .collect();
+        join_all(futures).await;
     }
 
     async fn fetch_targeted(&mut self, key: Self::Key, _targets: NonEmptyVec<Self::PublicKey>) {
@@ -372,9 +371,17 @@ impl Resolver for HttpResolver {
         &mut self,
         requests: Vec<(Self::Key, NonEmptyVec<Self::PublicKey>)>,
     ) {
-        for (key, _) in requests {
-            self.fetch(key).await;
-        }
+        // Fetch all in parallel
+        let futures: Vec<_> = requests
+            .into_iter()
+            .map(|(key, _)| {
+                let mut resolver = self.clone();
+                async move {
+                    resolver.fetch(key).await;
+                }
+            })
+            .collect();
+        join_all(futures).await;
     }
 
     async fn cancel(&mut self, _key: Self::Key) {
@@ -802,9 +809,8 @@ fn main() {
         let (ingress_tx, ingress_rx) = mpsc::channel(config.mailbox_size);
 
         // Create the HTTP resolver for backfilling
-        // The resolver needs access to ingress_tx and marshal_mailbox to deliver
-        // fetched finalizations back to marshal during backfill
-        let resolver = HttpResolver::new(client.clone(), ingress_tx.clone(), marshal_mailbox.clone());
+        // The resolver needs access to ingress_tx to deliver fetched blocks to marshal
+        let resolver = HttpResolver::new(client.clone(), ingress_tx.clone());
 
         // Start the follower engine (marshal)
         let engine_handle = engine.start(ingress_rx, resolver.clone());
