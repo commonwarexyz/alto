@@ -34,11 +34,11 @@
 //! - `metrics_port`: Port for Prometheus metrics
 //! - `mailbox_size`: Size of internal mailboxes
 
-use alto_client::{consensus::Message, Client, Query};
+use alto_client::{consensus::Message, Client, IndexQuery, Query};
 use alto_types::{Block, Finalization, Identity, Scheme, EPOCH_LENGTH, NAMESPACE};
 use bytes::Bytes;
 use clap::{Arg, Command};
-use commonware_broadcast::buffered;
+use commonware_broadcast::{buffered, Broadcaster};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::{
     Reporter, Viewable, marshal::{self, Update, ingress::handler}, simplex::types::Activity, types::{FixedEpocher, Height, ViewDelta}
@@ -54,7 +54,7 @@ use commonware_runtime::{
     buffer::PoolRef, tokio, Clock, Handle, Metrics, Runner, Spawner, Storage,
 };
 use commonware_storage::archive::immutable;
-use commonware_utils::{from_hex_formatted, futures::Pool, vec::NonEmptyVec, Acknowledgement, NZUsize, NZU16, NZU64};
+use commonware_utils::{from_hex_formatted, futures::{AbortablePool, Aborter}, vec::NonEmptyVec, Acknowledgement, NZUsize, NZU16, NZU64};
 use commonware_macros::select;
 use futures::{
     channel::mpsc,
@@ -64,13 +64,14 @@ use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZero,
     path::PathBuf,
     str::FromStr,
     time::Duration,
 };
-use tracing::{debug, error, info, warn, Level};
+use tracing::{Level, debug, error, info, trace, warn};
 
 // Storage constants
 const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
@@ -83,7 +84,7 @@ const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB - larger buffer reduces flush frequency
 const BUFFER_POOL_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
-const MAX_REPAIR: NonZero<usize> = NZUsize!(100); // Smaller batches so marshal can keep up
+const MAX_REPAIR: NonZero<usize> = NZUsize!(1000);
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560); // 10x activity timeout
 const DEQUE_SIZE: usize = 10;
 
@@ -113,32 +114,23 @@ pub struct Config {
     pub metrics_port: u16,
 
     /// Size of internal mailboxes
-    #[serde(default = "default_mailbox_size")]
     pub mailbox_size: usize,
 
     /// Whether to auto-checkpoint from the latest finalized block on first run.
     /// When true (default), the follower will fetch the latest finalized block
     /// from the indexer and set that as the starting floor, avoiding the need
     /// to backfill all historical blocks.
-    #[serde(default = "default_auto_checkpoint")]
     pub auto_checkpoint: bool,
 }
 
-fn default_mailbox_size() -> usize {
-    // Large mailbox size to support backfill from genesis without blocking
-    // on report calls when marshal is busy processing
-    1024
-}
-
-fn default_auto_checkpoint() -> bool {
-    true
-}
-
 /// Messages processed by the HttpResolver actor.
-#[derive(Debug)]
 enum ResolverMessage {
     /// Fetch a block or finalization by key
     Fetch(handler::Request<Block>),
+    /// Cancel an in-flight request
+    Cancel(handler::Request<Block>),
+    /// Clear all in-flight requests
+    Clear,
 }
 
 /// HTTP-based resolver handle that sends fetch requests to the actor.
@@ -185,24 +177,33 @@ impl Resolver for HttpResolver {
         }
     }
 
-    async fn cancel(&mut self, _key: Self::Key) {
-        // No-op: HTTP requests are fire-and-forget
+    async fn cancel(&mut self, key: Self::Key) {
+        let msg = ResolverMessage::Cancel(key);
+        if let Err(e) = self.mailbox_tx.clone().send(msg).await {
+            warn!(error = ?e, "failed to send cancel request to resolver actor");
+        }
     }
 
     async fn clear(&mut self) {
-        // No-op: nothing to clear
+        let msg = ResolverMessage::Clear;
+        if let Err(e) = self.mailbox_tx.clone().send(msg).await {
+            warn!(error = ?e, "failed to send clear request to resolver actor");
+        }
     }
 
     async fn retain(&mut self, _f: impl Fn(&Self::Key) -> bool + Send + 'static) {
-        // No-op: nothing to retain
+        // TODO: not implemented
     }
 }
 
 /// HTTP resolver actor that processes fetch requests in parallel.
 ///
 /// The actor runs in a loop, receiving messages from its mailbox and managing
-/// in-flight HTTP requests using a futures Pool. This allows multiple REST
+/// in-flight HTTP requests using an AbortablePool. This allows multiple REST
 /// requests to be in-flight simultaneously without blocking the message loop.
+///
+/// The actor tracks in-flight requests by key to avoid duplicate requests and
+/// supports cancellation of individual requests or clearing all requests.
 ///
 /// The actor makes REST requests to the indexer and forwards responses directly
 /// to marshal - no caching is performed.
@@ -214,7 +215,9 @@ pub struct HttpResolverActor {
     /// Handler for delivering blocks to marshal's ingress
     handler: handler::Handler<Block>,
     /// Pool of in-flight HTTP request futures
-    in_flight: Pool<()>,
+    in_flight: AbortablePool<handler::Request<Block>>,
+    /// Map of in-flight request keys to their abort handles
+    in_flight_keys: HashMap<handler::Request<Block>, Aborter>,
 }
 
 impl HttpResolverActor {
@@ -230,7 +233,8 @@ impl HttpResolverActor {
             client,
             mailbox_rx,
             handler: handler::Handler::new(ingress_tx),
-            in_flight: Pool::default(),
+            in_flight: AbortablePool::default(),
+            in_flight_keys: HashMap::new(),
         };
 
         let handle = HttpResolver { mailbox_tx };
@@ -245,23 +249,50 @@ impl HttpResolverActor {
         loop {
             select! {
                 // Handle completed futures from the pool
-                _ = self.in_flight.next_completed() => {
-                    // Future completed - work is already done inside the future
+                result = self.in_flight.next_completed() => {
+                    let Ok(key) = result else {
+                        // Aborted futures are removed from tracking when we drop their Aborter
+                        continue;
+                    };
+                    // Remove the completed key from our tracking map
+                    self.in_flight_keys.remove(&key);
                 },
-                // Handle new fetch requests from the mailbox
+                // Handle messages from the mailbox
                 msg = self.mailbox_rx.next() => {
-                    let Some(ResolverMessage::Fetch(key)) = msg else {
+                    let Some(msg) = msg else {
                         // Mailbox closed
                         warn!("mailbox closed");
                         break;
                     };
-                    // Create a future for this fetch and add it to the pool
-                    let future = Self::process_fetch(
-                        key,
-                        self.client.clone(),
-                        self.handler.clone(),
-                    );
-                    self.in_flight.push(future);
+                    match msg {
+                        ResolverMessage::Fetch(key) => {
+                            // Skip if already in-flight
+                            if self.in_flight_keys.contains_key(&key) {
+                                trace!(?key, "skipping duplicate fetch request");
+                                continue;
+                            }
+                            // Create a future for this fetch and add it to the pool
+                            let future = Self::process_fetch(
+                                key.clone(),
+                                self.client.clone(),
+                                self.handler.clone(),
+                            );
+                            let aborter = self.in_flight.push(future);
+                            self.in_flight_keys.insert(key, aborter);
+                        }
+                        ResolverMessage::Cancel(key) => {
+                            // Remove from tracking - dropping the Aborter aborts the future
+                            if self.in_flight_keys.remove(&key).is_some() {
+                                debug!(?key, "cancelled in-flight request");
+                            }
+                        }
+                        ResolverMessage::Clear => {
+                            // Clear all in-flight requests
+                            let count = self.in_flight_keys.len();
+                            self.in_flight_keys.clear();
+                            debug!(count, "cleared all in-flight requests");
+                        }
+                    }
                 },
             };
         }
@@ -270,23 +301,25 @@ impl HttpResolverActor {
     }
 
     /// Process a single fetch request by making a REST request and forwarding to marshal.
+    /// Returns the key so we can track which request completed.
     async fn process_fetch(
         key: handler::Request<Block>,
         client: Client<Sequential>,
         handler: handler::Handler<Block>,
-    ) {
-        match key {
+    ) -> handler::Request<Block> {
+        match &key {
             handler::Request::Block(digest) => {
-                Self::fetch_block_by_digest(digest, client, handler).await;
+                Self::fetch_block_by_digest(*digest, client, handler).await;
             }
             handler::Request::Finalized { height } => {
-                Self::fetch_finalized_by_height(height, client, handler).await;
+                Self::fetch_finalized_by_height(*height, client, handler).await;
             }
             handler::Request::Notarized { round } => {
                 // For notarized blocks, we don't have a direct query - skip for now
                 warn!(?round, "notarized block request (not implemented for HTTP)");
             }
         }
+        key
     }
 
     /// Fetch a block by digest from the indexer and forward to marshal.
@@ -305,6 +338,8 @@ impl HttpResolverActor {
                 if !handler.deliver(key, value).await {
                     warn!(?digest, "failed to deliver block to marshal");
                 }
+
+                info!(?digest, "RESOLVER: fetched block by digest");
             }
             Ok(_) => {
                 warn!(?digest, "wrong payload returned for block by digest");
@@ -334,7 +369,7 @@ impl HttpResolverActor {
                     warn!(height = height.get(), "failed to deliver finalized block to marshal");
                 }
 
-                info!(height = height.get(), "fetched and delivered finalized block");
+                info!(height = height.get(), "RESOLVER: fetched finalized block by height");
             }
             Ok(_) => {
                 // No payload - should be impossible
@@ -491,6 +526,11 @@ where
         self.marshal_mailbox.clone()
     }
 
+    /// Get a clone of the buffer mailbox for caching blocks.
+    pub fn buffer(&self) -> buffered::Mailbox<PublicKey, Block> {
+        self.buffer_mailbox.clone()
+    }
+
     /// Start the follower engine with marshal.
     pub fn start(
         self,
@@ -524,7 +564,7 @@ impl commonware_consensus::Reporter for FollowerApplication {
         if let Update::Block(block, ack_rx) = activity {
             info!(
                 height = block.height.get(),
-                "finalized block processed by marshal"
+                "APPLICATION: reported block"
             );
             ack_rx.acknowledge();
         }
@@ -537,10 +577,7 @@ struct CertificateFeeder<E: Clock> {
     client: Client<Sequential>,
     scheme: Scheme,
     marshal_mailbox: marshal::Mailbox<Scheme, Block>,
-    /// Whether the floor has been set (happens on first finalization received)
-    floor_set: bool,
-    /// Whether to auto-checkpoint (set floor on first block)
-    auto_checkpoint: bool,
+    buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
 }
 
 impl<E: Clock> CertificateFeeder<E> {
@@ -549,7 +586,7 @@ impl<E: Clock> CertificateFeeder<E> {
         client: Client<Sequential>,
         identity: Identity,
         marshal_mailbox: marshal::Mailbox<Scheme, Block>,
-        auto_checkpoint: bool,
+        buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
     ) -> Self {
         let scheme = Scheme::certificate_verifier(NAMESPACE, identity);
         Self {
@@ -557,8 +594,7 @@ impl<E: Clock> CertificateFeeder<E> {
             client,
             scheme,
             marshal_mailbox,
-            floor_set: false,
-            auto_checkpoint,
+            buffer_mailbox,
         }
     }
 
@@ -611,30 +647,25 @@ impl<E: Clock> CertificateFeeder<E> {
                     ));
                 }
 
-                // On first finalization, set the floor to this height so marshal
-                // doesn't try to backfill blocks before it.
-                if !self.floor_set && self.auto_checkpoint {
-                    info!(height = height.get(), "setting checkpoint floor on first finalization");
-                    self.marshal_mailbox.set_floor(height).await;
-                    self.floor_set = true;
-                }
+                // Cache the block in the buffer (so marshal can find it without fetching via resolver)
+                let _ = self.buffer_mailbox.broadcast(commonware_p2p::Recipients::Some(vec![]), finalized.block.clone()).await;
 
                 // Report the finalization to marshal so it can request missing ancestors.
                 self.marshal_mailbox
                     .report(Activity::Finalization(finalized.proof.clone()))
                     .await;
 
-                info!(height = height.get(), view = view.get(), "processed finalization");
+                info!(height = height.get(), view = view.get(), "FEEDER: reported finalization");
             }
             Message::Notarization(notarized) => {
                 let height = notarized.block.height;
                 let view = notarized.proof.view();
 
-                debug!(height = height.get(), view = view.get(), "received notarization");
+                trace!(height = height.get(), view = view.get(), "received notarization");
                 // Notarizations are ignored - we only follow finalized state
             }
             Message::Seed(seed) => {
-                debug!(view = seed.view().get(), "received seed");
+                trace!(view = seed.view().get(), "received seed");
                 // Seeds are not needed for following finalized state
             }
         }
@@ -706,7 +737,22 @@ fn main() {
 
         // Create the follower engine with marshal
         let engine = FollowerEngine::new(context.clone(), identity, config.mailbox_size).await;
-        let marshal_mailbox = engine.mailbox();
+        let mut marshal_mailbox = engine.mailbox();
+
+        // If auto_checkpoint is enabled, fetch the latest finalized block and set as floor
+        // This avoids backfilling all historical blocks
+        if config.auto_checkpoint {
+            match client.finalized_get(IndexQuery::Latest).await {
+                Ok(finalized) => {
+                    let height = finalized.block.height;
+                    info!(height = height.get(), "setting checkpoint floor from latest finalized block");
+                    marshal_mailbox.set_floor(height).await;
+                }
+                Err(e) => {
+                    warn!(error = ?e, "failed to fetch latest finalized block for checkpoint, will backfill from genesis");
+                }
+            }
+        }
 
         // Create the ingress channel for delivering blocks to marshal
         let (ingress_tx, ingress_rx) = mpsc::channel(config.mailbox_size);
@@ -723,18 +769,19 @@ fn main() {
         // Spawn the resolver actor
         let resolver_handle = context.clone().spawn(|_| resolver_actor.run());
 
+        // Get buffer mailbox before starting engine (which consumes it)
+        let buffer_mailbox = engine.buffer();
+
         // Start the follower engine (marshal)
         let engine_handle = engine.start(ingress_rx, resolver.clone());
 
         // Create and start the certificate feeder
-        // The feeder will set the checkpoint floor on the first finalization received
-        // (if auto_checkpoint is enabled), ensuring we start from exactly where we connect.
         let feeder = CertificateFeeder::new(
             context.clone(),
             client,
             identity,
             marshal_mailbox,
-            config.auto_checkpoint,
+            buffer_mailbox,
         );
         let feeder_handle = context.spawn(|_| feeder.run());
 

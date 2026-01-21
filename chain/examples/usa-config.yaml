@@ -19,11 +19,14 @@ directory: "/tmp/alto-follower-usa"
 worker_threads: 4
 
 # Log level (trace, debug, info, warn, error)
-log_level: "debug"
+log_level: "info"
 
 # Port for Prometheus metrics endpoint
 metrics_port: 9092
 
+# Size of internal mailboxes
+mailbox_size: 1024
+
 # Auto-checkpoint from the latest finalized block on first run
 # Set to false to start from genesis (requires backfilling all historical blocks)
-auto_checkpoint: false
+auto_checkpoint: true
