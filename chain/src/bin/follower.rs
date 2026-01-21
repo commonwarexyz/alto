@@ -41,38 +41,33 @@ use clap::{Arg, Command};
 use commonware_broadcast::buffered;
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::{
-    marshal::{self, ingress::handler, Update},
-    types::{FixedEpocher, Height, ViewDelta},
-    Viewable,
+    Reporter, Viewable, marshal::{self, Update, ingress::handler}, simplex::types::Activity, types::{FixedEpocher, Height, ViewDelta}
 };
 use commonware_cryptography::{
     certificate::{ConstantProvider, Scheme as CertScheme},
     ed25519::PublicKey,
     sha256::Digest,
-    Digestible,
 };
 use commonware_parallel::Sequential;
-use commonware_resolver::Resolver;
+use commonware_resolver::{Consumer, Resolver};
 use commonware_runtime::{
     buffer::PoolRef, tokio, Clock, Handle, Metrics, Runner, Spawner, Storage,
 };
 use commonware_storage::archive::immutable;
-use commonware_utils::{from_hex_formatted, vec::NonEmptyVec, Acknowledgement, NZUsize, NZU16, NZU64};
+use commonware_utils::{from_hex_formatted, futures::Pool, vec::NonEmptyVec, Acknowledgement, NZUsize, NZU16, NZU64};
+use commonware_macros::select;
 use futures::{
-    channel::{mpsc, oneshot},
-    future::join_all,
+    channel::mpsc,
     SinkExt, StreamExt,
 };
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZero,
     path::PathBuf,
     str::FromStr,
-    sync::{Arc, RwLock},
     time::Duration,
 };
 use tracing::{debug, error, info, warn, Level};
@@ -88,7 +83,7 @@ const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB - larger buffer reduces flush frequency
 const BUFFER_POOL_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
-const MAX_REPAIR: NonZero<usize> = NZUsize!(100);
+const MAX_REPAIR: NonZero<usize> = NZUsize!(100); // Smaller batches so marshal can keep up
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560); // 10x activity timeout
 const DEQUE_SIZE: usize = 10;
 
@@ -130,250 +125,31 @@ pub struct Config {
 }
 
 fn default_mailbox_size() -> usize {
-    110
+    // Large mailbox size to support backfill from genesis without blocking
+    // on report calls when marshal is busy processing
+    1024
 }
 
 fn default_auto_checkpoint() -> bool {
     true
 }
 
-/// Maximum number of blocks to keep in the resolver cache.
-/// This prevents unbounded memory growth as blocks stream in.
-const RESOLVER_CACHE_MAX_SIZE: usize = 1024;
-
-/// HTTP-based resolver that fetches blocks from an indexer endpoint.
-///
-/// This resolver is used by marshal to fetch missing blocks during backfill.
-/// It makes HTTP requests to the indexer to retrieve blocks by digest or height.
-/// 
-/// The resolver maintains bounded LRU-like caches by both digest and height to serve blocks
-/// that were received via WebSocket before they're available via REST API.
-/// 
-/// When fetching finalized blocks by height, the resolver delivers them to marshal
-/// via the ingress channel.
-#[derive(Clone)]
-pub struct HttpResolver {
-    client: Client<Sequential>,
-    /// Cache of blocks by digest (bounded)
-    cache_by_digest: Arc<RwLock<HashMap<Digest, Block>>>,
-    /// Cache of blocks by height (bounded)
-    cache_by_height: Arc<RwLock<HashMap<Height, Block>>>,
-    /// Insertion order for digest cache (for eviction)
-    digest_order: Arc<RwLock<VecDeque<Digest>>>,
-    /// Insertion order for height cache (for eviction)  
-    height_order: Arc<RwLock<VecDeque<Height>>>,
-    /// Channel for delivering blocks to marshal
-    ingress_tx: mpsc::Sender<handler::Message<Block>>,
-    /// Track in-flight requests by height to avoid duplicate fetches
-    in_flight_heights: Arc<RwLock<HashSet<Height>>>,
-    /// Track in-flight requests by digest to avoid duplicate fetches
-    in_flight_digests: Arc<RwLock<HashSet<Digest>>>,
+/// Messages processed by the HttpResolver actor.
+#[derive(Debug)]
+enum ResolverMessage {
+    /// Fetch a block or finalization by key
+    Fetch(handler::Request<Block>),
 }
 
-impl HttpResolver {
-    pub fn new(
-        client: Client<Sequential>,
-        ingress_tx: mpsc::Sender<handler::Message<Block>>,
-    ) -> Self {
-        Self {
-            client,
-            cache_by_digest: Arc::new(RwLock::new(HashMap::new())),
-            cache_by_height: Arc::new(RwLock::new(HashMap::new())),
-            digest_order: Arc::new(RwLock::new(VecDeque::new())),
-            height_order: Arc::new(RwLock::new(VecDeque::new())),
-            ingress_tx,
-            in_flight_heights: Arc::new(RwLock::new(HashSet::new())),
-            in_flight_digests: Arc::new(RwLock::new(HashSet::new())),
-        }
-    }
-
-    /// Cache a block for future lookups (by both digest and height).
-    /// Uses FIFO eviction when cache exceeds max size.
-    pub fn cache_block(&self, block: &Block) {
-        let digest = block.digest();
-        let height = block.height;
-        debug!(height = height.get(), ?digest, "caching block");
-
-        // Cache by digest
-        {
-            let mut cache = self.cache_by_digest.write().unwrap();
-            let mut order = self.digest_order.write().unwrap();
-
-            // Only insert if not already present
-            if !cache.contains_key(&digest) {
-                // Evict oldest if at capacity
-                while cache.len() >= RESOLVER_CACHE_MAX_SIZE {
-                    if let Some(old_digest) = order.pop_front() {
-                        cache.remove(&old_digest);
-                    } else {
-                        break;
-                    }
-                }
-                cache.insert(digest, block.clone());
-                order.push_back(digest);
-            }
-        }
-
-        // Cache by height
-        {
-            let mut cache = self.cache_by_height.write().unwrap();
-            let mut order = self.height_order.write().unwrap();
-
-            // Only insert if not already present
-            if !cache.contains_key(&height) {
-                // Evict oldest if at capacity
-                while cache.len() >= RESOLVER_CACHE_MAX_SIZE {
-                    if let Some(old_height) = order.pop_front() {
-                        cache.remove(&old_height);
-                    } else {
-                        break;
-                    }
-                }
-                cache.insert(height, block.clone());
-                order.push_back(height);
-            }
-        }
-    }
-
-    /// Try to get a block from cache by digest
-    fn get_cached_by_digest(&self, digest: &Digest) -> Option<Block> {
-        let cache = self.cache_by_digest.read().unwrap();
-        cache.get(digest).cloned()
-    }
-
-    /// Try to get a block from cache by height
-    fn get_cached_by_height(&self, height: Height) -> Option<Block> {
-        let cache = self.cache_by_height.read().unwrap();
-        cache.get(&height).cloned()
-    }
-
-    /// Fetch a block by digest
-    async fn fetch_block_by_digest(&self, digest: Digest) -> Option<Block> {
-        // Check cache first
-        if let Some(block) = self.get_cached_by_digest(&digest) {
-            debug!(?digest, "block found in digest cache");
-            return Some(block);
-        }
-
-        // Check if already in-flight (another request is fetching this)
-        {
-            let mut in_flight = self.in_flight_digests.write().unwrap();
-            if in_flight.contains(&digest) {
-                debug!(?digest, "request already in-flight, skipping duplicate");
-                return None;
-            }
-            in_flight.insert(digest);
-        }
-
-        // Fetch from indexer
-        debug!(?digest, "fetching block by digest from indexer");
-        let result = match self.client.block_get(Query::Digest(digest)).await {
-            Ok(payload) => {
-                let block = match payload {
-                    alto_client::consensus::Payload::Block(b) => b,
-                    alto_client::consensus::Payload::Finalized(f) => f.block,
-                };
-                self.cache_block(&block);
-                Some(block)
-            }
-            Err(e) => {
-                warn!(?digest, error=?e, "failed to fetch block by digest");
-                None
-            }
-        };
-
-        // Remove from in-flight set
-        {
-            let mut in_flight = self.in_flight_digests.write().unwrap();
-            in_flight.remove(&digest);
-        }
-
-        result
-    }
-
-    /// Fetch a finalized block by height and deliver it to marshal.
-    ///
-    /// This fetches the full finalization (block + proof) from the indexer,
-    /// verifies the signature, delivers the block via ingress channel, and
-    /// hints to marshal about the finalization.
-    async fn fetch_finalized_by_height(&mut self, height: Height) -> Option<Block> {
-        // Check cache first - blocks from WebSocket may not be available via REST yet
-        if let Some(block) = self.get_cached_by_height(height) {
-            debug!(height = height.get(), "block found in height cache");
-            return Some(block);
-        }
-
-        // Check if already in-flight (another request is fetching this)
-        {
-            let mut in_flight = self.in_flight_heights.write().unwrap();
-            if in_flight.contains(&height) {
-                debug!(height = height.get(), "request already in-flight, skipping duplicate");
-                return None;
-            }
-            in_flight.insert(height);
-        }
-
-        // Fetch from indexer - this returns Finalized with verified signature
-        debug!(height = height.get(), "fetching finalized block by height from indexer");
-        let result = match self.client.block_get(Query::Index(height.get())).await {
-            Ok(payload) => {
-                match payload {
-                    alto_client::consensus::Payload::Finalized(finalized) => {
-                        let block = finalized.block.clone();
-
-                        // Cache the block
-                        self.cache_block(&block);
-
-                        // Deliver the block to marshal via ingress channel
-                        // Note: We don't wait for acknowledgment to avoid deadlock - marshal
-                        // might be waiting for this resolver call to complete.
-                        let digest = block.digest();
-                        let key = handler::Request::Block(digest);
-                        let (response_tx, _response_rx) = oneshot::channel();
-                        let message = handler::Message::Deliver {
-                            key,
-                            value: Bytes::from(block.encode().to_vec()),
-                            response: response_tx,
-                        };
-
-                        if self.ingress_tx.send(message).await.is_err() {
-                            warn!(height = height.get(), "failed to deliver fetched block to marshal");
-                            // Still return the block even if delivery failed
-                            // (remove from in-flight will happen below)
-                            return {
-                                let mut in_flight = self.in_flight_heights.write().unwrap();
-                                in_flight.remove(&height);
-                                Some(block)
-                            };
-                        }
-
-                        // Note: We don't call hint_finalized here because marshal already
-                        // knows about this block - that's why it asked us to fetch it.
-                        // Calling hint_finalized would just flood marshal's mailbox.
-                        info!(height = height.get(), "fetched and delivered block from indexer");
-                        Some(block)
-                    }
-                    alto_client::consensus::Payload::Block(block) => {
-                        // Shouldn't happen for height queries, but handle it
-                        self.cache_block(&block);
-                        Some(block)
-                    }
-                }
-            }
-            Err(e) => {
-                warn!(height = height.get(), error=?e, "failed to fetch finalized block by height");
-                None
-            }
-        };
-
-        // Remove from in-flight set
-        {
-            let mut in_flight = self.in_flight_heights.write().unwrap();
-            in_flight.remove(&height);
-        }
-
-        result
-    }
+/// HTTP-based resolver handle that sends fetch requests to the actor.
+///
+/// This is the handle that implements the `Resolver` trait. It sends messages
+/// to the `HttpResolverActor` which processes them in parallel by making
+/// REST requests to the indexer and forwarding responses to marshal.
+#[derive(Clone)]
+pub struct HttpResolver {
+    /// Sender for messages to the actor
+    mailbox_tx: mpsc::Sender<ResolverMessage>,
 }
 
 impl Resolver for HttpResolver {
@@ -381,37 +157,21 @@ impl Resolver for HttpResolver {
     type PublicKey = PublicKey;
 
     async fn fetch(&mut self, key: Self::Key) {
-        match key {
-            handler::Request::Block(digest) => {
-                let _ = self.fetch_block_by_digest(digest).await;
-            }
-            handler::Request::Finalized { height } => {
-                let _ = self.fetch_finalized_by_height(height).await;
-            }
-            handler::Request::Notarized { round } => {
-                // For notarized blocks, we don't have a direct query - skip for now
-                debug!(?round, "notarized block request (not implemented for HTTP)");
-            }
+        let msg = ResolverMessage::Fetch(key);
+        if let Err(e) = self.mailbox_tx.clone().send(msg).await {
+            warn!(error = ?e, "failed to send fetch request to resolver actor");
         }
     }
 
     async fn fetch_all(&mut self, keys: Vec<Self::Key>) {
-        // Fetch all keys in parallel for faster backfill
-        info!(count = keys.len(), "fetch_all called - parallel fetch");
-        let futures: Vec<_> = keys
-            .into_iter()
-            .map(|key| {
-                let mut resolver = self.clone();
-                async move {
-                    resolver.fetch(key).await;
-                }
-            })
-            .collect();
-        join_all(futures).await;
+        // Send all fetch requests to the actor - it will process them in parallel
+        for key in keys {
+            self.fetch(key).await;
+        }
     }
 
     async fn fetch_targeted(&mut self, key: Self::Key, _targets: NonEmptyVec<Self::PublicKey>) {
-        // For HTTP-based resolver, we ignore targets and just fetch directly
+        // Ignore targets - just use the indexer
         self.fetch(key).await;
     }
 
@@ -419,17 +179,10 @@ impl Resolver for HttpResolver {
         &mut self,
         requests: Vec<(Self::Key, NonEmptyVec<Self::PublicKey>)>,
     ) {
-        // Fetch all in parallel
-        let futures: Vec<_> = requests
-            .into_iter()
-            .map(|(key, _)| {
-                let mut resolver = self.clone();
-                async move {
-                    resolver.fetch(key).await;
-                }
-            })
-            .collect();
-        join_all(futures).await;
+        // Ignore targets - just use the indexer
+        for (key, _) in requests {
+            self.fetch(key).await;
+        }
     }
 
     async fn cancel(&mut self, _key: Self::Key) {
@@ -442,6 +195,155 @@ impl Resolver for HttpResolver {
 
     async fn retain(&mut self, _f: impl Fn(&Self::Key) -> bool + Send + 'static) {
         // No-op: nothing to retain
+    }
+}
+
+/// HTTP resolver actor that processes fetch requests in parallel.
+///
+/// The actor runs in a loop, receiving messages from its mailbox and managing
+/// in-flight HTTP requests using a futures Pool. This allows multiple REST
+/// requests to be in-flight simultaneously without blocking the message loop.
+///
+/// The actor makes REST requests to the indexer and forwards responses directly
+/// to marshal - no caching is performed.
+pub struct HttpResolverActor {
+    /// Client for making REST requests to the indexer
+    client: Client<Sequential>,
+    /// Receiver for messages from the handle
+    mailbox_rx: mpsc::Receiver<ResolverMessage>,
+    /// Handler for delivering blocks to marshal's ingress
+    handler: handler::Handler<Block>,
+    /// Pool of in-flight HTTP request futures
+    in_flight: Pool<()>,
+}
+
+impl HttpResolverActor {
+    /// Create a new HttpResolver actor and its handle.
+    pub fn new(
+        client: Client<Sequential>,
+        ingress_tx: mpsc::Sender<handler::Message<Block>>,
+        mailbox_size: usize,
+    ) -> (Self, HttpResolver) {
+        let (mailbox_tx, mailbox_rx) = mpsc::channel(mailbox_size);
+
+        let actor = Self {
+            client,
+            mailbox_rx,
+            handler: handler::Handler::new(ingress_tx),
+            in_flight: Pool::default(),
+        };
+
+        let handle = HttpResolver { mailbox_tx };
+
+        (actor, handle)
+    }
+
+    /// Run the actor loop, processing messages and managing in-flight requests.
+    pub async fn run(mut self) {
+        info!("HttpResolver actor started");
+
+        loop {
+            select! {
+                // Handle completed futures from the pool
+                _ = self.in_flight.next_completed() => {
+                    // Future completed - work is already done inside the future
+                },
+                // Handle new fetch requests from the mailbox
+                msg = self.mailbox_rx.next() => {
+                    let Some(ResolverMessage::Fetch(key)) = msg else {
+                        // Mailbox closed
+                        warn!("mailbox closed");
+                        break;
+                    };
+                    // Create a future for this fetch and add it to the pool
+                    let future = Self::process_fetch(
+                        key,
+                        self.client.clone(),
+                        self.handler.clone(),
+                    );
+                    self.in_flight.push(future);
+                },
+            };
+        }
+
+        info!("HttpResolver actor stopped");
+    }
+
+    /// Process a single fetch request by making a REST request and forwarding to marshal.
+    async fn process_fetch(
+        key: handler::Request<Block>,
+        client: Client<Sequential>,
+        handler: handler::Handler<Block>,
+    ) {
+        match key {
+            handler::Request::Block(digest) => {
+                Self::fetch_block_by_digest(digest, client, handler).await;
+            }
+            handler::Request::Finalized { height } => {
+                Self::fetch_finalized_by_height(height, client, handler).await;
+            }
+            handler::Request::Notarized { round } => {
+                // For notarized blocks, we don't have a direct query - skip for now
+                warn!(?round, "notarized block request (not implemented for HTTP)");
+            }
+        }
+    }
+
+    /// Fetch a block by digest from the indexer and forward to marshal.
+    async fn fetch_block_by_digest(
+        digest: Digest,
+        client: Client<Sequential>,
+        mut handler: handler::Handler<Block>,
+    ) {
+        debug!(?digest, "fetching block by digest from indexer");
+
+        match client.block_get(Query::Digest(digest)).await {
+            Ok(alto_client::consensus::Payload::Block(block)) => {
+                // Deliver to marshal
+                let key = handler::Request::Block(digest);
+                let value = Bytes::from(block.encode().to_vec());
+                if !handler.deliver(key, value).await {
+                    warn!(?digest, "failed to deliver block to marshal");
+                }
+            }
+            Ok(_) => {
+                warn!(?digest, "wrong payload returned for block by digest");
+            }
+            Err(e) => {
+                warn!(?digest, error=?e, "failed to fetch block by digest");
+            }
+        }
+    }
+
+    /// Fetch a finalized block by height from the indexer and forward to marshal.
+    async fn fetch_finalized_by_height(
+        height: Height,
+        client: Client<Sequential>,
+        mut handler: handler::Handler<Block>,
+    ) {
+        debug!(height = height.get(), "fetching finalized block by height from indexer");
+
+        match client.block_get(Query::Index(height.get())).await {
+            Ok(alto_client::consensus::Payload::Finalized(finalized)) => {
+                // Deliver the block to marshal
+                let key = handler::Request::Finalized { height };
+                let finalization = finalized.proof.clone();
+                let block = finalized.block.clone();
+                let value = Bytes::from((finalization, block).encode().to_vec());
+                if !handler.deliver(key, value).await {
+                    warn!(height = height.get(), "failed to deliver finalized block to marshal");
+                }
+
+                info!(height = height.get(), "fetched and delivered finalized block");
+            }
+            Ok(_) => {
+                // No payload - should be impossible
+                warn!(height = height.get(), "wrong payload returned for finalized block by height");
+            }
+            Err(e) => {
+                warn!(height = height.get(), error=?e, "failed to fetch finalized block by height");
+            }
+        }
     }
 }
 
@@ -635,8 +537,6 @@ struct CertificateFeeder<E: Clock> {
     client: Client<Sequential>,
     scheme: Scheme,
     marshal_mailbox: marshal::Mailbox<Scheme, Block>,
-    resolver: HttpResolver,
-    ingress_tx: mpsc::Sender<handler::Message<Block>>,
     /// Whether the floor has been set (happens on first finalization received)
     floor_set: bool,
     /// Whether to auto-checkpoint (set floor on first block)
@@ -649,8 +549,6 @@ impl<E: Clock> CertificateFeeder<E> {
         client: Client<Sequential>,
         identity: Identity,
         marshal_mailbox: marshal::Mailbox<Scheme, Block>,
-        resolver: HttpResolver,
-        ingress_tx: mpsc::Sender<handler::Message<Block>>,
         auto_checkpoint: bool,
     ) -> Self {
         let scheme = Scheme::certificate_verifier(NAMESPACE, identity);
@@ -659,34 +557,8 @@ impl<E: Clock> CertificateFeeder<E> {
             client,
             scheme,
             marshal_mailbox,
-            resolver,
-            ingress_tx,
             floor_set: false,
             auto_checkpoint,
-        }
-    }
-
-    /// Deliver a block to marshal via the ingress channel.
-    async fn deliver_block(&mut self, key: handler::Request<Block>, block: Block) -> bool {
-        let (response_tx, response_rx) = oneshot::channel();
-        let message = handler::Message::Deliver {
-            key,
-            value: Bytes::from(block.encode().to_vec()),
-            response: response_tx,
-        };
-
-        if self.ingress_tx.send(message).await.is_err() {
-            warn!("failed to send block to marshal ingress");
-            return false;
-        }
-
-        // Wait for marshal to acknowledge
-        match response_rx.await {
-            Ok(success) => success,
-            Err(_) => {
-                warn!("marshal did not respond to block delivery");
-                false
-            }
         }
     }
 
@@ -747,24 +619,9 @@ impl<E: Clock> CertificateFeeder<E> {
                     self.floor_set = true;
                 }
 
-                // Cache the block in the resolver
-                self.resolver.cache_block(&finalized.block);
-
-                // Deliver the block to marshal using the block's digest as the key
-                // (Request::Finalized is for backfill requests, not new block delivery)
-                let digest = finalized.block.digest();
-                let key = handler::Request::Block(digest);
-                if !self.deliver_block(key, finalized.block.clone()).await {
-                    warn!(height = height.get(), "marshal did not accept finalized block");
-                }
-
-                // Hint to marshal about this finalization
-                // Marshal will process the finalization and may request the block
-                // from the resolver if it doesn't already have it
-                let dummy_target =
-                    PublicKey::decode([0u8; 32].as_slice()).expect("failed to decode dummy key");
+                // Report the finalization to marshal so it can request missing ancestors.
                 self.marshal_mailbox
-                    .hint_finalized(height, NonEmptyVec::new(dummy_target))
+                    .report(Activity::Finalization(finalized.proof.clone()))
                     .await;
 
                 info!(height = height.get(), view = view.get(), "processed finalization");
@@ -774,9 +631,7 @@ impl<E: Clock> CertificateFeeder<E> {
                 let view = notarized.proof.view();
 
                 debug!(height = height.get(), view = view.get(), "received notarization");
-
-                // Cache the block in case marshal needs it
-                self.resolver.cache_block(&notarized.block);
+                // Notarizations are ignored - we only follow finalized state
             }
             Message::Seed(seed) => {
                 debug!(view = seed.view().get(), "received seed");
@@ -856,9 +711,17 @@ fn main() {
         // Create the ingress channel for delivering blocks to marshal
         let (ingress_tx, ingress_rx) = mpsc::channel(config.mailbox_size);
 
-        // Create the HTTP resolver for backfilling
-        // The resolver needs access to ingress_tx to deliver fetched blocks to marshal
-        let resolver = HttpResolver::new(client.clone(), ingress_tx.clone());
+        // Create the HTTP resolver actor for backfilling
+        // The actor processes fetch requests in parallel using a futures pool
+        // and delivers results to marshal
+        let (resolver_actor, resolver) = HttpResolverActor::new(
+            client.clone(),
+            ingress_tx.clone(),
+            config.mailbox_size,
+        );
+
+        // Spawn the resolver actor
+        let resolver_handle = context.clone().spawn(|_| resolver_actor.run());
 
         // Start the follower engine (marshal)
         let engine_handle = engine.start(ingress_rx, resolver.clone());
@@ -871,14 +734,16 @@ fn main() {
             client,
             identity,
             marshal_mailbox,
-            resolver,
-            ingress_tx,
             config.auto_checkpoint,
         );
         let feeder_handle = context.spawn(|_| feeder.run());
 
-        // Wait for either to finish (which indicates an error)
-        futures::future::select(engine_handle, feeder_handle).await;
+        // Wait for any of the handles to finish (which indicates an error)
+        futures::future::select(
+            futures::future::select(engine_handle, feeder_handle),
+            resolver_handle,
+        )
+        .await;
         error!("follower stopped unexpectedly");
     });
 }

@@ -19,7 +19,7 @@ directory: "/tmp/alto-follower-usa"
 worker_threads: 4
 
 # Log level (trace, debug, info, warn, error)
-log_level: "info"
+log_level: "debug"
 
 # Port for Prometheus metrics endpoint
 metrics_port: 9092
