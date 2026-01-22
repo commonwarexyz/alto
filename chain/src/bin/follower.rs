@@ -33,6 +33,7 @@
 //! - `log_level`: Log level (e.g., "info", "debug")
 //! - `metrics_port`: Port for Prometheus metrics
 //! - `mailbox_size`: Size of internal mailboxes
+//! - `auto_checkpoint`: Whether to start from the latest finalized block (default: true)
 
 use alto_client::{consensus::Message, Client, IndexQuery, Query};
 use alto_types::{Block, Finalization, Identity, Scheme, EPOCH_LENGTH, NAMESPACE};
@@ -77,7 +78,7 @@ use tracing::{Level, debug, error, info, trace, warn};
 const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
 const IMMUTABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
 const FREEZER_TABLE_RESIZE_FREQUENCY: u8 = 4;
-const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // 3MB
+const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // 64KB
 const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
@@ -87,10 +88,8 @@ const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const MAX_REPAIR: NonZero<usize> = NZUsize!(1000);
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560); // 10x activity timeout
 const DEQUE_SIZE: usize = 10;
-
-// Default freezer table sizes
-const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
-const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
+const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 2MB
+const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 2MB
 
 /// Configuration for the follower node.
 #[derive(Deserialize, Serialize)]
@@ -131,6 +130,8 @@ enum ResolverMessage {
     Cancel(handler::Request<Block>),
     /// Clear all in-flight requests
     Clear,
+    /// Retain only requests matching the predicate
+    Retain(Box<dyn Fn(&handler::Request<Block>) -> bool + Send>),
 }
 
 /// HTTP-based resolver handle that sends fetch requests to the actor.
@@ -191,8 +192,11 @@ impl Resolver for HttpResolver {
         }
     }
 
-    async fn retain(&mut self, _f: impl Fn(&Self::Key) -> bool + Send + 'static) {
-        // TODO: not implemented
+    async fn retain(&mut self, f: impl Fn(&Self::Key) -> bool + Send + 'static) {
+        let msg = ResolverMessage::Retain(Box::new(f));
+        if let Err(e) = self.mailbox_tx.clone().send(msg).await {
+            warn!(error = ?e, "failed to send retain request to resolver actor");
+        }
     }
 }
 
@@ -292,6 +296,14 @@ impl HttpResolverActor {
                             self.in_flight_keys.clear();
                             debug!(count, "cleared all in-flight requests");
                         }
+                        ResolverMessage::Retain(f) => {
+                            // Retain only requests matching the predicate
+                            // Dropping the Aborter aborts the future
+                            let before = self.in_flight_keys.len();
+                            self.in_flight_keys.retain(|key, _| f(key));
+                            let removed = before - self.in_flight_keys.len();
+                            debug!(removed, remaining = self.in_flight_keys.len(), "retained in-flight requests");
+                        }
                     }
                 },
             };
@@ -372,7 +384,7 @@ impl HttpResolverActor {
                 info!(height = height.get(), "RESOLVER: fetched finalized block by height");
             }
             Ok(_) => {
-                // No payload - should be impossible
+                // Unexpected payload type returned
                 warn!(height = height.get(), "wrong payload returned for finalized block by height");
             }
             Err(e) => {
@@ -407,8 +419,8 @@ where
 {
     /// Create a new follower engine.
     pub async fn new(context: E, identity: Identity, mailbox_size: usize) -> Self {
-        // Create a dummy public key for the buffer (not used for actual networking)
-        // Use a valid ed25519 public key (all zeros is not valid, so we decode from hex)
+        // Create a dummy public key for the buffer (not used for actual networking).
+        // The key value doesn't matter since we never use it for cryptographic operations.
         let dummy_key =
             PublicKey::decode([0u8; 32].as_slice()).expect("failed to decode dummy public key");
 
@@ -601,34 +613,32 @@ impl<E: Clock> CertificateFeeder<E> {
     /// Start feeding certificates from the WebSocket stream to marshal.
     async fn run(mut self) {
         loop {
-            match self.client.listen().await {
-                Ok(mut stream) => {
-                    info!("connected to certificate stream");
-
-                    while let Some(result) = stream.next().await {
-                        match result {
-                            Ok(message) => {
-                                if let Err(e) = self.handle_message(message).await {
-                                    error!(error = ?e, "failed to handle message");
-                                }
-                            }
-                            Err(e) => {
-                                error!(error = ?e, "stream error");
-                                break;
-                            }
-                        }
-                    }
-
-                    warn!("certificate stream disconnected, reconnecting...");
-                }
-                Err(e) => {
-                    error!(error = ?e, "failed to connect to certificate stream");
-                }
+            if let Err(e) = self.process_stream().await {
+                error!(error = ?e, "stream error");
             }
-
-            // Wait before reconnecting
             self.context.sleep(Duration::from_secs(1)).await;
         }
+    }
+
+    /// Process the certificate stream until disconnection or error.
+    async fn process_stream(&mut self) -> Result<(), String> {
+        let mut stream = self
+            .client
+            .listen()
+            .await
+            .map_err(|e| format!("failed to connect: {e}"))?;
+
+        info!("connected to certificate stream");
+
+        while let Some(result) = stream.next().await {
+            let message = result.map_err(|e| format!("stream error: {e}"))?;
+            if let Err(e) = self.handle_message(message).await {
+                error!(error = ?e, "failed to handle message");
+            }
+        }
+
+        warn!("certificate stream disconnected, reconnecting...");
+        Ok(())
     }
 
     async fn handle_message(&mut self, message: Message) -> Result<(), String> {
@@ -648,7 +658,8 @@ impl<E: Clock> CertificateFeeder<E> {
                 }
 
                 // Cache the block in the buffer (so marshal can find it without fetching via resolver)
-                let _ = self.buffer_mailbox.broadcast(commonware_p2p::Recipients::Some(vec![]), finalized.block.clone()).await;
+                let no_peers = commonware_p2p::Recipients::Some(vec![]);
+                let _ = self.buffer_mailbox.broadcast(no_peers, finalized.block.clone()).await;
 
                 // Report the finalization to marshal so it can request missing ancestors.
                 self.marshal_mailbox
@@ -681,9 +692,11 @@ fn main() {
         .get_matches();
 
     // Load config
-    let config_file = matches.get_one::<String>("config").unwrap();
-    let config_file = std::fs::read_to_string(config_file).expect("Could not read config file");
-    let config: Config = serde_yaml::from_str(&config_file).expect("Could not parse config file");
+    let config: Config = {
+        let config_path = matches.get_one::<String>("config").unwrap();
+        let config_file = std::fs::read_to_string(config_path).expect("Could not read config file");
+        serde_yaml::from_str(&config_file).expect("Could not parse config file")
+    };
 
     // Parse identity
     let identity_bytes =
@@ -721,19 +734,13 @@ fn main() {
         // Create the alto client for connecting to exoware/indexer
         let client = Client::new(&config.source, identity, Sequential);
 
-        // Wait for the source to be healthy
-        loop {
-            match client.health().await {
-                Ok(_) => {
-                    info!("connected to certificate source");
-                    break;
-                }
-                Err(e) => {
-                    warn!(error = ?e, "waiting for certificate source to be available...");
-                    context.sleep(Duration::from_secs(1)).await;
-                }
-            }
+        // Connect to the certificate source
+        while let Err(e) = client.health().await {
+            // Wait for the source to be healthy
+            warn!(error = ?e, "waiting for certificate source to be available...");
+            context.sleep(Duration::from_secs(1)).await;
         }
+        info!("connected to certificate source");
 
         // Create the follower engine with marshal
         let engine = FollowerEngine::new(context.clone(), identity, config.mailbox_size).await;
@@ -762,7 +769,7 @@ fn main() {
         // and delivers results to marshal
         let (resolver_actor, resolver) = HttpResolverActor::new(
             client.clone(),
-            ingress_tx.clone(),
+            ingress_tx,
             config.mailbox_size,
         );
 
@@ -773,7 +780,7 @@ fn main() {
         let buffer_mailbox = engine.buffer();
 
         // Start the follower engine (marshal)
-        let engine_handle = engine.start(ingress_rx, resolver.clone());
+        let engine_handle = engine.start(ingress_rx, resolver);
 
         // Create and start the certificate feeder
         let feeder = CertificateFeeder::new(
