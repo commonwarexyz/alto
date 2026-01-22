@@ -26,7 +26,7 @@
 //! # Configuration
 //!
 //! The configuration file should contain:
-//! - `source`: URL of the exoware relay or indexer (e.g., "https://global.alto.exoware.xyz")
+//! - `source`: URL of the exoware relay or indexer (e.g., "<https://global.alto.exoware.xyz>")
 //! - `identity`: Hex-encoded BLS12-381 public key of the network
 //! - `directory`: Path to store data
 //! - `worker_threads`: Number of worker threads
@@ -42,25 +42,30 @@ use clap::{Arg, Command};
 use commonware_broadcast::{buffered, Broadcaster};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::{
-    Reporter, Viewable, marshal::{self, Update, ingress::handler}, simplex::types::Activity, types::{FixedEpocher, Height, ViewDelta}
+    marshal::{self, ingress::handler, Update},
+    simplex::types::Activity,
+    types::{FixedEpocher, Height, ViewDelta},
+    Reporter, Viewable,
 };
 use commonware_cryptography::{
     certificate::{ConstantProvider, Scheme as CertScheme},
     ed25519::PublicKey,
     sha256::Digest,
 };
+use commonware_macros::select;
 use commonware_parallel::Sequential;
 use commonware_resolver::{Consumer, Resolver};
 use commonware_runtime::{
     buffer::PoolRef, tokio, Clock, Handle, Metrics, Runner, Spawner, Storage,
 };
 use commonware_storage::archive::immutable;
-use commonware_utils::{from_hex_formatted, futures::{AbortablePool, Aborter}, vec::NonEmptyVec, Acknowledgement, NZUsize, NZU16, NZU64};
-use commonware_macros::select;
-use futures::{
-    channel::mpsc,
-    SinkExt, StreamExt,
+use commonware_utils::{
+    from_hex_formatted,
+    futures::{AbortablePool, Aborter},
+    vec::NonEmptyVec,
+    Acknowledgement, NZUsize, NZU16, NZU64,
 };
+use futures::{channel::mpsc, SinkExt, StreamExt};
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
@@ -72,7 +77,7 @@ use std::{
     str::FromStr,
     time::Duration,
 };
-use tracing::{Level, debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn, Level};
 
 // Storage constants
 const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
@@ -123,6 +128,7 @@ pub struct Config {
 }
 
 /// Messages processed by the HttpResolver actor.
+#[allow(clippy::type_complexity)]
 enum ResolverMessage {
     /// Fetch a block or finalization by key
     Fetch(handler::Request<Block>),
@@ -368,7 +374,10 @@ impl HttpResolverActor {
         client: Client<Sequential>,
         mut handler: handler::Handler<Block>,
     ) {
-        debug!(height = height.get(), "fetching finalized block by height from indexer");
+        debug!(
+            height = height.get(),
+            "fetching finalized block by height from indexer"
+        );
 
         match client.block_get(Query::Index(height.get())).await {
             Ok(alto_client::consensus::Payload::Finalized(finalized)) => {
@@ -378,14 +387,23 @@ impl HttpResolverActor {
                 let block = finalized.block.clone();
                 let value = Bytes::from((finalization, block).encode().to_vec());
                 if !handler.deliver(key, value).await {
-                    warn!(height = height.get(), "failed to deliver finalized block to marshal");
+                    warn!(
+                        height = height.get(),
+                        "failed to deliver finalized block to marshal"
+                    );
                 }
 
-                info!(height = height.get(), "RESOLVER: fetched finalized block by height");
+                info!(
+                    height = height.get(),
+                    "RESOLVER: fetched finalized block by height"
+                );
             }
             Ok(_) => {
                 // Unexpected payload type returned
-                warn!(height = height.get(), "wrong payload returned for finalized block by height");
+                warn!(
+                    height = height.get(),
+                    "wrong payload returned for finalized block by height"
+                );
             }
             Err(e) => {
                 warn!(height = height.get(), error=?e, "failed to fetch finalized block by height");
@@ -395,6 +413,7 @@ impl HttpResolverActor {
 }
 
 /// Engine that runs marshal standalone for following consensus.
+#[allow(clippy::type_complexity)]
 pub struct FollowerEngine<E>
 where
     E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
@@ -574,10 +593,7 @@ impl commonware_consensus::Reporter for FollowerApplication {
 
     async fn report(&mut self, activity: Self::Activity) {
         if let Update::Block(block, ack_rx) = activity {
-            info!(
-                height = block.height.get(),
-                "APPLICATION: reported block"
-            );
+            info!(height = block.height.get(), "APPLICATION: reported block");
             ack_rx.acknowledge();
         }
     }
@@ -647,7 +663,11 @@ impl<E: Clock> CertificateFeeder<E> {
                 let height = finalized.block.height;
                 let view = finalized.proof.view();
 
-                debug!(height = height.get(), view = view.get(), "received finalization");
+                debug!(
+                    height = height.get(),
+                    view = view.get(),
+                    "received finalization"
+                );
 
                 // Verify the finalization proof
                 if !finalized.verify(&self.scheme, &Sequential) {
@@ -659,20 +679,31 @@ impl<E: Clock> CertificateFeeder<E> {
 
                 // Cache the block in the buffer (so marshal can find it without fetching via resolver)
                 let no_peers = commonware_p2p::Recipients::Some(vec![]);
-                let _ = self.buffer_mailbox.broadcast(no_peers, finalized.block.clone()).await;
+                _ = self
+                    .buffer_mailbox
+                    .broadcast(no_peers, finalized.block.clone())
+                    .await;
 
                 // Report the finalization to marshal so it can request missing ancestors.
                 self.marshal_mailbox
                     .report(Activity::Finalization(finalized.proof.clone()))
                     .await;
 
-                info!(height = height.get(), view = view.get(), "FEEDER: reported finalization");
+                info!(
+                    height = height.get(),
+                    view = view.get(),
+                    "FEEDER: reported finalization"
+                );
             }
             Message::Notarization(notarized) => {
                 let height = notarized.block.height;
                 let view = notarized.proof.view();
 
-                trace!(height = height.get(), view = view.get(), "received notarization");
+                trace!(
+                    height = height.get(),
+                    view = view.get(),
+                    "received notarization"
+                );
                 // Notarizations are ignored - we only follow finalized state
             }
             Message::Seed(seed) => {
