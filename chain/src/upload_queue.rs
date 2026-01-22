@@ -6,7 +6,8 @@
 
 use crate::indexer::Indexer;
 use alto_types::{Finalized, Notarized, Seed};
-use commonware_codec::{DecodeExt, Encode};
+use bytes::{Buf, BufMut};
+use commonware_codec::{DecodeExt, Encode, EncodeSize, Error, Read, ReadExt, Write};
 use commonware_runtime::{Blob, Clock, Metrics, Spawner, Storage};
 use std::sync::Arc;
 use std::sync::{
@@ -16,29 +17,63 @@ use std::sync::{
 use std::time::{Duration, SystemTime};
 use tracing::{debug, error, info, warn};
 
-/// The kind of upload (determines which endpoint to use).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UploadKind {
-    Seed,
-    Notarization,
-    Finalization,
+/// A queued upload with its type encoded in the data.
+#[derive(Clone)]
+pub enum QueuedUpload {
+    Seed(Seed),
+    Notarization(Notarized),
+    Finalization(Finalized),
 }
 
-impl UploadKind {
-    fn as_str(&self) -> &'static str {
+impl QueuedUpload {
+    fn kind_str(&self) -> &'static str {
         match self {
-            UploadKind::Seed => "seed",
-            UploadKind::Notarization => "notarization",
-            UploadKind::Finalization => "finalization",
+            QueuedUpload::Seed(_) => "seed",
+            QueuedUpload::Notarization(_) => "notarization",
+            QueuedUpload::Finalization(_) => "finalization",
         }
     }
+}
 
-    fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "seed" => Some(UploadKind::Seed),
-            "notarization" => Some(UploadKind::Notarization),
-            "finalization" => Some(UploadKind::Finalization),
-            _ => None,
+impl Write for QueuedUpload {
+    fn write(&self, writer: &mut impl BufMut) {
+        match self {
+            QueuedUpload::Seed(seed) => {
+                0u8.write(writer);
+                seed.write(writer);
+            }
+            QueuedUpload::Notarization(notarized) => {
+                1u8.write(writer);
+                notarized.write(writer);
+            }
+            QueuedUpload::Finalization(finalized) => {
+                2u8.write(writer);
+                finalized.write(writer);
+            }
+        }
+    }
+}
+
+impl Read for QueuedUpload {
+    type Cfg = ();
+
+    fn read_cfg(reader: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
+        let tag = u8::read(reader)?;
+        match tag {
+            0 => Ok(QueuedUpload::Seed(Seed::read(reader)?)),
+            1 => Ok(QueuedUpload::Notarization(Notarized::read(reader)?)),
+            2 => Ok(QueuedUpload::Finalization(Finalized::read(reader)?)),
+            _ => Err(Error::Invalid("QueuedUpload", "unknown tag")),
+        }
+    }
+}
+
+impl EncodeSize for QueuedUpload {
+    fn encode_size(&self) -> usize {
+        1 + match self {
+            QueuedUpload::Seed(seed) => seed.encode_size(),
+            QueuedUpload::Notarization(notarized) => notarized.encode_size(),
+            QueuedUpload::Finalization(finalized) => finalized.encode_size(),
         }
     }
 }
@@ -111,7 +146,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
     }
 
     /// Generate a unique blob name for an upload.
-    fn generate_name(&self, kind: UploadKind) -> Vec<u8> {
+    fn generate_name(&self) -> Vec<u8> {
         let timestamp = self
             .context
             .current()
@@ -119,69 +154,62 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             .unwrap_or_default()
             .as_nanos();
         let counter = self.counter.fetch_add(1, Ordering::Relaxed);
-        format!("{}-{}-{}", timestamp, counter, kind.as_str()).into_bytes()
-    }
-
-    /// Parse the kind from a blob name.
-    fn parse_name(name: &[u8]) -> Option<UploadKind> {
-        let name_str = std::str::from_utf8(name).ok()?;
-        // Format: {timestamp}-{counter}-{kind}
-        let kind_str = name_str.rsplit('-').next()?;
-        UploadKind::from_str(kind_str)
+        format!("{}-{}", timestamp, counter).into_bytes()
     }
 
     /// Enqueue a seed for upload.
     pub async fn enqueue_seed(&self, seed: Seed) {
-        let name = self.generate_name(UploadKind::Seed);
-        let data = seed.encode().to_vec();
-        self.enqueue_raw(&name, data).await;
+        self.enqueue(QueuedUpload::Seed(seed)).await;
     }
 
     /// Enqueue a notarization for upload.
     pub async fn enqueue_notarization(&self, notarized: Notarized) {
-        let name = self.generate_name(UploadKind::Notarization);
-        let data = notarized.encode().to_vec();
-        self.enqueue_raw(&name, data).await;
+        self.enqueue(QueuedUpload::Notarization(notarized)).await;
     }
 
     /// Enqueue a finalization for upload.
     pub async fn enqueue_finalization(&self, finalized: Finalized) {
-        let name = self.generate_name(UploadKind::Finalization);
-        let data = finalized.encode().to_vec();
-        self.enqueue_raw(&name, data).await;
+        self.enqueue(QueuedUpload::Finalization(finalized)).await;
+    }
+
+    /// Enqueue an upload.
+    async fn enqueue(&self, upload: QueuedUpload) {
+        let name = self.generate_name();
+        let data = upload.encode().to_vec();
+        self.enqueue_raw(&name, data, upload.kind_str()).await;
     }
 
     /// Write raw data to the queue as a blob.
-    async fn enqueue_raw(&self, name: &[u8], data: Vec<u8>) {
+    async fn enqueue_raw(&self, name: &[u8], data: Vec<u8>, kind: &str) {
         let name_str = String::from_utf8_lossy(name);
 
         // Open/create the blob
         let (blob, _) = match self.context.open(&self.config.partition, name).await {
             Ok(b) => b,
             Err(e) => {
-                error!(?e, name = %name_str, "failed to open blob for enqueue");
+                error!(?e, name = %name_str, kind, "failed to open blob for enqueue");
                 return;
             }
         };
 
         // Resize and write
         if let Err(e) = blob.resize(data.len() as u64).await {
-            error!(?e, name = %name_str, "failed to resize blob");
+            error!(?e, name = %name_str, kind, "failed to resize blob");
             return;
         }
 
         if let Err(e) = blob.write_at(data, 0).await {
-            error!(?e, name = %name_str, "failed to write blob");
+            error!(?e, name = %name_str, kind, "failed to write blob");
             return;
         }
 
         // Sync to ensure durability
         if let Err(e) = blob.sync().await {
-            error!(?e, name = %name_str, "failed to sync blob");
+            error!(?e, name = %name_str, kind, "failed to sync blob");
             return;
         }
 
-        debug!(name = %name_str, "enqueued upload");
+        debug!(name = %name_str, kind, "enqueued upload");
     }
 
     /// Remove a completed upload from the queue.
@@ -275,13 +303,6 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         for name in pending {
             let name_str = String::from_utf8_lossy(&name).to_string();
 
-            // Parse the kind from blob name
-            let Some(kind) = Self::parse_name(&name) else {
-                error!(name = %name_str, "invalid upload blob name, removing");
-                self.dequeue(&name).await;
-                continue;
-            };
-
             // Read the data
             let Some(data) = self.read_pending(&name).await else {
                 error!(name = %name_str, "failed to read pending upload, removing");
@@ -289,48 +310,41 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
                 continue;
             };
 
+            // Decode the queued upload (type is encoded in the data)
+            let upload = match QueuedUpload::decode(data.as_slice()) {
+                Ok(upload) => upload,
+                Err(e) => {
+                    error!(?e, name = %name_str, "failed to decode queued upload, removing");
+                    self.dequeue(&name).await;
+                    continue;
+                }
+            };
+
+            let kind = upload.kind_str();
+
             // Attempt upload
-            let result = match kind {
-                UploadKind::Seed => match Seed::decode(data.as_slice()) {
-                    Ok(seed) => indexer.seed_upload(seed).await.map_err(|e| e.to_string()),
-                    Err(e) => {
-                        error!(?e, name = %name_str, "failed to decode seed, removing");
-                        self.dequeue(&name).await;
-                        continue;
-                    }
-                },
-                UploadKind::Notarization => match Notarized::decode(data.as_slice()) {
-                    Ok(notarized) => indexer
-                        .notarized_upload(notarized)
-                        .await
-                        .map_err(|e| e.to_string()),
-                    Err(e) => {
-                        error!(?e, name = %name_str, "failed to decode notarization, removing");
-                        self.dequeue(&name).await;
-                        continue;
-                    }
-                },
-                UploadKind::Finalization => match Finalized::decode(data.as_slice()) {
-                    Ok(finalized) => indexer
-                        .finalized_upload(finalized)
-                        .await
-                        .map_err(|e| e.to_string()),
-                    Err(e) => {
-                        error!(?e, name = %name_str, "failed to decode finalization, removing");
-                        self.dequeue(&name).await;
-                        continue;
-                    }
-                },
+            let result = match upload {
+                QueuedUpload::Seed(seed) => {
+                    indexer.seed_upload(seed).await.map_err(|e| e.to_string())
+                }
+                QueuedUpload::Notarization(notarized) => indexer
+                    .notarized_upload(notarized)
+                    .await
+                    .map_err(|e| e.to_string()),
+                QueuedUpload::Finalization(finalized) => indexer
+                    .finalized_upload(finalized)
+                    .await
+                    .map_err(|e| e.to_string()),
             };
 
             match result {
                 Ok(()) => {
-                    debug!(name = %name_str, "upload succeeded");
+                    debug!(name = %name_str, kind, "upload succeeded");
                     self.dequeue(&name).await;
                     had_success = true;
                 }
                 Err(e) => {
-                    warn!(?e, name = %name_str, "upload failed");
+                    warn!(?e, name = %name_str, kind, "upload failed");
                     had_failure = true;
                     // On first failure, enter backoff and stop processing this cycle
                     break;
