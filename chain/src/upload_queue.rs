@@ -1,8 +1,9 @@
 //! A disk-backed upload queue for reliable delivery to the indexer.
 //!
-//! This module provides crash-safe, fully async upload delivery. Uploads are
-//! persisted to disk before being sent, and a background worker retries until
-//! the indexer acknowledges receipt.
+//! This module provides crash-safe upload delivery. Uploads are persisted to
+//! disk (with sync) before the enqueue call returns, ensuring no data loss on
+//! crash. A background worker continuously retries uploads until the indexer
+//! acknowledges receipt.
 
 use crate::indexer::Indexer;
 use alto_types::{Finalized, Notarized, Seed};
@@ -336,16 +337,12 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         let queue = self.clone();
         self.context
             .with_label("upload_worker")
-            .spawn(move |context| {
-                let queue = queue.clone();
-                let indexer = indexer.clone();
-                async move {
-                    info!("upload queue worker started");
+            .spawn(move |context| async move {
+                info!("upload queue worker started");
 
-                    loop {
-                        queue.process_queue(&indexer).await;
-                        context.sleep(queue.config.scan_interval).await;
-                    }
+                loop {
+                    queue.process_queue(&indexer).await;
+                    context.sleep(queue.config.scan_interval).await;
                 }
             });
     }

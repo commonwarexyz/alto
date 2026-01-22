@@ -96,11 +96,11 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
     }
 }
 
-/// An implementation of [Indexer] for the [Reporter] trait.
+/// A [Reporter] implementation that uploads consensus activity to an indexer.
 ///
-/// This version uses a disk-backed upload queue for reliable delivery.
-/// Uploads are persisted to disk before returning, and a background worker
-/// retries until the indexer acknowledges receipt.
+/// Uses a disk-backed upload queue for reliable delivery. Uploads are persisted
+/// to disk before returning, and a background worker retries until the indexer
+/// acknowledges receipt.
 #[derive(Clone)]
 pub struct Pusher<E: Spawner + Clock + Storage + Metrics> {
     context: E,
