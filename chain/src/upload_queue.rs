@@ -9,6 +9,7 @@ use alto_types::{Finalized, Notarized, Seed};
 use bytes::{Buf, BufMut};
 use commonware_codec::{DecodeExt, Encode, EncodeSize, Error, Read, ReadExt, Write};
 use commonware_runtime::{Blob, Clock, Metrics, Spawner, Storage};
+use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
 use std::sync::{
     atomic::{AtomicU32, AtomicU64, Ordering},
     Arc,
@@ -77,6 +78,61 @@ impl EncodeSize for QueuedUpload {
     }
 }
 
+/// Metrics for the upload queue.
+#[derive(Clone)]
+struct QueueMetrics {
+    /// Current number of pending uploads in the queue.
+    queue_depth: Gauge,
+    /// Total number of uploads enqueued.
+    uploads_enqueued: Counter,
+    /// Total number of successful uploads.
+    uploads_succeeded: Counter,
+    /// Total number of failed upload attempts (includes retries).
+    uploads_failed: Counter,
+    /// Number of times we entered backoff due to failures.
+    backoff_events: Counter,
+}
+
+impl QueueMetrics {
+    fn new<E: Metrics>(context: &E) -> Self {
+        let metrics = Self {
+            queue_depth: Gauge::default(),
+            uploads_enqueued: Counter::default(),
+            uploads_succeeded: Counter::default(),
+            uploads_failed: Counter::default(),
+            backoff_events: Counter::default(),
+        };
+
+        context.register(
+            "queue_depth",
+            "Current number of pending uploads",
+            metrics.queue_depth.clone(),
+        );
+        context.register(
+            "uploads_enqueued",
+            "Total number of uploads enqueued",
+            metrics.uploads_enqueued.clone(),
+        );
+        context.register(
+            "uploads_succeeded",
+            "Total number of successful uploads",
+            metrics.uploads_succeeded.clone(),
+        );
+        context.register(
+            "uploads_failed",
+            "Total number of failed upload attempts",
+            metrics.uploads_failed.clone(),
+        );
+        context.register(
+            "backoff_events",
+            "Number of times backoff was triggered",
+            metrics.backoff_events.clone(),
+        );
+
+        metrics
+    }
+}
+
 /// Configuration for the upload queue.
 #[derive(Clone)]
 pub struct Config {
@@ -110,6 +166,7 @@ impl Default for Config {
 pub struct UploadQueue<E: Spawner + Clock + Storage + Metrics> {
     context: E,
     config: Config,
+    metrics: QueueMetrics,
     counter: AtomicU64,
     /// Global retry state - consecutive failures and next retry time (millis since epoch).
     consecutive_failures: AtomicU32,
@@ -121,6 +178,9 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
     ///
     /// This will scan for any pending uploads from previous runs.
     pub async fn new(context: E, config: Config) -> Self {
+        // Initialize metrics
+        let metrics = QueueMetrics::new(&context);
+
         // Count existing pending uploads
         let pending_count = match context.scan(&config.partition).await {
             Ok(blobs) => blobs.len(),
@@ -133,11 +193,14 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
                 partition = config.partition,
                 "found pending uploads from previous run"
             );
+            // Set initial queue depth from recovered uploads
+            metrics.queue_depth.set(pending_count as i64);
         }
 
         Self {
             context,
             config,
+            metrics,
             counter: AtomicU64::new(0),
             consecutive_failures: AtomicU32::new(0),
             next_retry_ms: AtomicU64::new(0),
@@ -208,6 +271,10 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             return;
         }
 
+        // Update metrics
+        self.metrics.uploads_enqueued.inc();
+        self.metrics.queue_depth.inc();
+
         debug!(name = %name_str, kind, "enqueued upload");
     }
 
@@ -222,6 +289,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         {
             warn!(?e, name = %name_str, "failed to dequeue upload");
         } else {
+            self.metrics.queue_depth.dec();
             debug!(name = %name_str, "dequeued upload");
         }
     }
@@ -340,11 +408,13 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             match result {
                 Ok(()) => {
                     debug!(name = %name_str, kind, "upload succeeded");
+                    self.metrics.uploads_succeeded.inc();
                     self.dequeue(&name).await;
                     had_success = true;
                 }
                 Err(e) => {
                     warn!(?e, name = %name_str, kind, "upload failed");
+                    self.metrics.uploads_failed.inc();
                     had_failure = true;
                     // On first failure, enter backoff and stop processing this cycle
                     break;
@@ -358,6 +428,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             let backoff = self.calculate_backoff(failures);
             let next_retry_ms = now_ms + backoff.as_millis() as u64;
             self.next_retry_ms.store(next_retry_ms, Ordering::Relaxed);
+            self.metrics.backoff_events.inc();
             warn!(
                 consecutive_failures = failures,
                 backoff_ms = backoff.as_millis(),
@@ -385,39 +456,23 @@ impl<E: Spawner + Clock + Storage + Metrics> QueueHandle<E> {
     }
 
     /// Enqueue a seed for upload.
-    pub fn enqueue_seed(&self, seed: Seed) {
-        let queue = self.queue.clone();
-        // Spawn the async enqueue operation
-        self.queue.context.with_label("enqueue_seed").spawn({
-            move |_| async move {
-                queue.enqueue_seed(seed).await;
-            }
-        });
+    ///
+    /// This awaits the disk write to ensure crash safety.
+    pub async fn enqueue_seed(&self, seed: Seed) {
+        self.queue.enqueue_seed(seed).await;
     }
 
     /// Enqueue a notarization for upload.
-    pub fn enqueue_notarization(&self, notarized: Notarized) {
-        let queue = self.queue.clone();
-        self.queue
-            .context
-            .with_label("enqueue_notarization")
-            .spawn({
-                move |_| async move {
-                    queue.enqueue_notarization(notarized).await;
-                }
-            });
+    ///
+    /// This awaits the disk write to ensure crash safety.
+    pub async fn enqueue_notarization(&self, notarized: Notarized) {
+        self.queue.enqueue_notarization(notarized).await;
     }
 
     /// Enqueue a finalization for upload.
-    pub fn enqueue_finalization(&self, finalized: Finalized) {
-        let queue = self.queue.clone();
-        self.queue
-            .context
-            .with_label("enqueue_finalization")
-            .spawn({
-                move |_| async move {
-                    queue.enqueue_finalization(finalized).await;
-                }
-            });
+    ///
+    /// This awaits the disk write to ensure crash safety.
+    pub async fn enqueue_finalization(&self, finalized: Finalized) {
+        self.queue.enqueue_finalization(finalized).await;
     }
 }
