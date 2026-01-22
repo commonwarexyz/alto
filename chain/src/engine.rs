@@ -1,6 +1,7 @@
 use crate::{
     application::Application,
     indexer::{self, Indexer},
+    upload_queue::{self, QueueHandle, UploadQueue},
 };
 use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
 use commonware_broadcast::buffered;
@@ -32,6 +33,7 @@ use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use governor::Quota;
 use rand::{CryptoRng, Rng};
+use std::sync::Arc;
 use std::{
     num::NonZero,
     time::{Duration, Instant},
@@ -39,8 +41,7 @@ use std::{
 use tracing::{error, info, warn};
 
 /// Reporter type for [simplex::Engine].
-type Reporter<E, I> =
-    Reporters<Activity, marshal::Mailbox<Scheme, Block>, Option<indexer::Pusher<E, I>>>;
+type Reporter<E> = Reporters<Activity, marshal::Mailbox<Scheme, Block>, Option<indexer::Pusher<E>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -84,19 +85,23 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer, S: Strategy> {
 
     pub strategy: S,
 
+    /// The indexer client for uploading blocks.
+    /// If provided, a reliable upload queue will be created.
     pub indexer: Option<I>,
+
+    /// Configuration for the upload queue (uses defaults if not specified).
+    pub upload_queue_config: Option<upload_queue::Config>,
 }
 
 type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpocher>;
 
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
-pub struct Engine<E, B, S, I>
+pub struct Engine<E, B, S>
 where
     E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     S: Strategy,
-    I: Indexer,
 {
     context: ContextCell<E>,
 
@@ -113,19 +118,17 @@ where
     >,
     marshaled: Marshaled<E>,
 
-    consensus:
-        Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
+    consensus: Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E>, S>,
 }
 
-impl<E, B, S, I> Engine<E, B, S, I>
+impl<E, B, S> Engine<E, B, S>
 where
     E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + ThreadPooler + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     S: Strategy,
-    I: Indexer,
 {
     /// Create a new [Engine].
-    pub async fn new(context: E, cfg: Config<B, I, S>) -> Self {
+    pub async fn new<I: Indexer>(context: E, cfg: Config<B, I, S>) -> Self {
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
@@ -262,16 +265,39 @@ where
             epocher,
         );
 
-        // Create the reporter
+        // Create the reporter with reliable upload queue
         let reporter = (
             marshal_mailbox.clone(),
-            cfg.indexer.map(|indexer| {
-                indexer::Pusher::new(
+            if let Some(indexer) = cfg.indexer {
+                // Create upload queue with config (use defaults if not provided)
+                let queue_config =
+                    cfg.upload_queue_config
+                        .unwrap_or_else(|| upload_queue::Config {
+                            queue_dir: std::path::PathBuf::from(format!(
+                                "{}-upload-queue",
+                                cfg.partition_prefix
+                            )),
+                            ..Default::default()
+                        });
+
+                let queue = Arc::new(UploadQueue::new(
+                    context.with_label("upload_queue"),
+                    queue_config,
+                ));
+
+                // Start the background worker that processes the queue
+                queue.clone().start_worker(indexer);
+
+                // Create pusher with queue handle
+                let queue_handle = QueueHandle::new(queue);
+                Some(indexer::Pusher::new(
                     context.with_label("indexer"),
-                    indexer,
+                    queue_handle,
                     marshal_mailbox.clone(),
-                )
-            }),
+                ))
+            } else {
+                None
+            },
         )
             .into();
 
