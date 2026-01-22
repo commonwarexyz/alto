@@ -9,10 +9,9 @@ use alto_types::{Finalized, Notarized, Seed};
 use bytes::{Buf, BufMut};
 use commonware_codec::{DecodeExt, Encode, EncodeSize, Error, Read, ReadExt, Write};
 use commonware_runtime::{Blob, Clock, Metrics, Spawner, Storage};
-use std::sync::Arc;
 use std::sync::{
     atomic::{AtomicU32, AtomicU64, Ordering},
-    Mutex,
+    Arc,
 };
 use std::time::{Duration, SystemTime};
 use tracing::{debug, error, info, warn};
@@ -112,9 +111,9 @@ pub struct UploadQueue<E: Spawner + Clock + Storage + Metrics> {
     context: E,
     config: Config,
     counter: AtomicU64,
-    /// Global retry state - consecutive failures and next retry time.
+    /// Global retry state - consecutive failures and next retry time (millis since epoch).
     consecutive_failures: AtomicU32,
-    next_retry: Mutex<SystemTime>,
+    next_retry_ms: AtomicU64,
 }
 
 impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
@@ -141,7 +140,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             config,
             counter: AtomicU64::new(0),
             consecutive_failures: AtomicU32::new(0),
-            next_retry: Mutex::new(SystemTime::UNIX_EPOCH),
+            next_retry_ms: AtomicU64::new(0),
         }
     }
 
@@ -286,14 +285,15 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
     /// Process all pending uploads in the queue.
     async fn process_queue<I: Indexer>(&self, indexer: &I) {
         let now = self.context.current();
+        let now_ms = now
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
 
         // Check global backoff - if we're in backoff period, skip this cycle
-        {
-            if let Ok(next_retry) = self.next_retry.lock() {
-                if now < *next_retry {
-                    return; // Still in backoff period
-                }
-            }
+        let next_retry_ms = self.next_retry_ms.load(Ordering::Relaxed);
+        if now_ms < next_retry_ms {
+            return; // Still in backoff period
         }
 
         let pending = self.list_pending().await;
@@ -356,9 +356,8 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         if had_failure {
             let failures = self.consecutive_failures.fetch_add(1, Ordering::Relaxed) + 1;
             let backoff = self.calculate_backoff(failures);
-            if let Ok(mut next_retry) = self.next_retry.lock() {
-                *next_retry = now + backoff;
-            }
+            let next_retry_ms = now_ms + backoff.as_millis() as u64;
+            self.next_retry_ms.store(next_retry_ms, Ordering::Relaxed);
             warn!(
                 consecutive_failures = failures,
                 backoff_ms = backoff.as_millis(),
