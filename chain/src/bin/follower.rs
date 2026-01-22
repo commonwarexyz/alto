@@ -437,7 +437,7 @@ where
     E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
 {
     /// Create a new follower engine.
-    pub async fn new(context: E, identity: Identity, mailbox_size: usize) -> Self {
+    pub async fn new(context: E, scheme: Scheme, mailbox_size: usize) -> Self {
         // Create a dummy public key for the buffer (not used for actual networking).
         // The key value doesn't matter since we never use it for cryptographic operations.
         let dummy_key =
@@ -459,7 +459,6 @@ where
         let buffer_pool = PoolRef::new(BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
 
         // Initialize finalizations by height archive
-        let scheme = Scheme::certificate_verifier(NAMESPACE, identity);
         let finalizations_by_height = immutable::Archive::init(
             context.with_label("finalizations_by_height"),
             immutable::Config {
@@ -612,11 +611,10 @@ impl<E: Clock> CertificateFeeder<E> {
     fn new(
         context: E,
         client: Client<Sequential>,
-        identity: Identity,
+        scheme: Scheme,
         marshal_mailbox: marshal::Mailbox<Scheme, Block>,
         buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
     ) -> Self {
-        let scheme = Scheme::certificate_verifier(NAMESPACE, identity);
         Self {
             context,
             client,
@@ -762,6 +760,9 @@ fn main() {
 
         info!(source = %config.source, "starting follower node");
 
+        // Create the certificate verifier scheme (used for all signature verification)
+        let scheme = Scheme::certificate_verifier(NAMESPACE, identity);
+
         // Create the alto client for connecting to exoware/indexer
         let client = Client::new(&config.source, identity, Sequential);
 
@@ -774,7 +775,7 @@ fn main() {
         info!("connected to certificate source");
 
         // Create the follower engine with marshal
-        let engine = FollowerEngine::new(context.clone(), identity, config.mailbox_size).await;
+        let engine = FollowerEngine::new(context.clone(), scheme.clone(), config.mailbox_size).await;
         let mut marshal_mailbox = engine.mailbox();
 
         // If auto_checkpoint is enabled, fetch the latest finalized block and set as floor
@@ -782,9 +783,14 @@ fn main() {
         if config.auto_checkpoint {
             match client.finalized_get(IndexQuery::Latest).await {
                 Ok(finalized) => {
-                    let height = finalized.block.height;
-                    info!(height = height.get(), "setting checkpoint floor from latest finalized block");
-                    marshal_mailbox.set_floor(height).await;
+                    // Verify the finalization signature before trusting it
+                    if !finalized.verify(&scheme, &Sequential) {
+                        warn!("failed to verify finalization signature for checkpoint, will backfill from genesis");
+                    } else {
+                        let height = finalized.block.height;
+                        info!(height = height.get(), "setting checkpoint floor from latest finalized block");
+                        marshal_mailbox.set_floor(height).await;
+                    }
                 }
                 Err(e) => {
                     warn!(error = ?e, "failed to fetch latest finalized block for checkpoint, will backfill from genesis");
@@ -817,7 +823,7 @@ fn main() {
         let feeder = CertificateFeeder::new(
             context.clone(),
             client,
-            identity,
+            scheme,
             marshal_mailbox,
             buffer_mailbox,
         );
