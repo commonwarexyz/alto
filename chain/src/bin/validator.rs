@@ -262,6 +262,7 @@ fn main() {
             fetch_concurrent: FETCH_CONCURRENT,
             fetch_rate_per_peer: resolver_limit,
             indexer,
+            upload_queue_config: None, // Use defaults (queue_dir derived from partition_prefix)
             polynomial,
             share,
             strategy,
