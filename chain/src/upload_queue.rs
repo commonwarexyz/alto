@@ -116,7 +116,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             .context
             .current()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_nanos();
         let counter = self.counter.fetch_add(1, Ordering::Relaxed);
         format!("{}-{}-{}", timestamp, counter, kind.as_str()).into_bytes()
@@ -220,9 +220,13 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         Some(result.into())
     }
 
-    /// Calculate backoff duration for a given attempt count.
-    fn calculate_backoff(&self, attempts: u32) -> Duration {
-        let backoff = self.config.initial_backoff * 2u32.saturating_pow(attempts);
+    /// Calculate backoff duration for a given failure count.
+    ///
+    /// Backoff sequence: initial, initial*2, initial*4, ... up to max_backoff.
+    fn calculate_backoff(&self, failures: u32) -> Duration {
+        // failures=1 → initial, failures=2 → initial*2, etc.
+        let multiplier = 2u32.saturating_pow(failures.saturating_sub(1));
+        let backoff = self.config.initial_backoff * multiplier;
         backoff.min(self.config.max_backoff)
     }
 
@@ -273,13 +277,15 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
 
             // Parse the kind from blob name
             let Some(kind) = Self::parse_name(&name) else {
-                warn!(name = %name_str, "invalid upload blob name, skipping");
+                error!(name = %name_str, "invalid upload blob name, removing");
+                self.dequeue(&name).await;
                 continue;
             };
 
             // Read the data
             let Some(data) = self.read_pending(&name).await else {
-                warn!(name = %name_str, "failed to read pending upload");
+                error!(name = %name_str, "failed to read pending upload, removing");
+                self.dequeue(&name).await;
                 continue;
             };
 
