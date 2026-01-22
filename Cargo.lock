@@ -51,6 +51,7 @@ dependencies = [
  "commonware-utils",
  "futures",
  "governor",
+ "prometheus-client",
  "rand 0.8.5",
  "serde",
  "serde_yaml",
