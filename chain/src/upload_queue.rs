@@ -9,14 +9,11 @@ use alto_types::{Finalized, Notarized, Seed};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_runtime::{Blob, Clock, Metrics, Spawner, Storage};
 use std::sync::Arc;
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Mutex,
-    },
-    time::{Duration, SystemTime},
+use std::sync::{
+    atomic::{AtomicU32, AtomicU64, Ordering},
+    Mutex,
 };
+use std::time::{Duration, SystemTime};
 use tracing::{debug, error, info, warn};
 
 /// The kind of upload (determines which endpoint to use).
@@ -71,12 +68,6 @@ impl Default for Config {
     }
 }
 
-/// Tracks retry state for a pending upload.
-struct RetryState {
-    attempts: u32,
-    next_retry: SystemTime,
-}
-
 /// A disk-backed queue for reliable upload delivery.
 ///
 /// Uploads are persisted to disk as individual blobs within a storage partition.
@@ -86,8 +77,9 @@ pub struct UploadQueue<E: Spawner + Clock + Storage + Metrics> {
     context: E,
     config: Config,
     counter: AtomicU64,
-    /// Tracks retry state for pending uploads (keyed by blob name).
-    retry_state: Mutex<HashMap<String, RetryState>>,
+    /// Global retry state - consecutive failures and next retry time.
+    consecutive_failures: AtomicU32,
+    next_retry: Mutex<SystemTime>,
 }
 
 impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
@@ -113,7 +105,8 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             context,
             config,
             counter: AtomicU64::new(0),
-            retry_state: Mutex::new(HashMap::new()),
+            consecutive_failures: AtomicU32::new(0),
+            next_retry: Mutex::new(SystemTime::UNIX_EPOCH),
         }
     }
 
@@ -202,10 +195,6 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         {
             warn!(?e, name = %name_str, "failed to dequeue upload");
         } else {
-            // Clean up retry state
-            if let Ok(mut state) = self.retry_state.lock() {
-                state.remove(name_str.as_ref());
-            }
             debug!(name = %name_str, "dequeued upload");
         }
     }
@@ -264,22 +253,23 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
 
     /// Process all pending uploads in the queue.
     async fn process_queue<I: Indexer>(&self, indexer: &I) {
-        let pending = self.list_pending().await;
         let now = self.context.current();
+
+        // Check global backoff - if we're in backoff period, skip this cycle
+        {
+            if let Ok(next_retry) = self.next_retry.lock() {
+                if now < *next_retry {
+                    return; // Still in backoff period
+                }
+            }
+        }
+
+        let pending = self.list_pending().await;
+        let mut had_success = false;
+        let mut had_failure = false;
 
         for name in pending {
             let name_str = String::from_utf8_lossy(&name).to_string();
-
-            // Check if we should retry this upload yet
-            {
-                if let Ok(state) = self.retry_state.lock() {
-                    if let Some(rs) = state.get(&name_str) {
-                        if now < rs.next_retry {
-                            continue; // Not ready to retry yet
-                        }
-                    }
-                }
-            }
 
             // Parse the kind from blob name
             let Some(kind) = Self::parse_name(&name) else {
@@ -331,28 +321,32 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
                 Ok(()) => {
                     debug!(name = %name_str, "upload succeeded");
                     self.dequeue(&name).await;
+                    had_success = true;
                 }
                 Err(e) => {
-                    // Update retry state
-                    if let Ok(mut state) = self.retry_state.lock() {
-                        let rs = state.entry(name_str.clone()).or_insert(RetryState {
-                            attempts: 0,
-                            next_retry: now,
-                        });
-                        rs.attempts += 1;
-                        let backoff = self.calculate_backoff(rs.attempts);
-                        rs.next_retry = now + backoff;
-
-                        warn!(
-                            ?e,
-                            name = %name_str,
-                            attempts = rs.attempts,
-                            next_retry_ms = backoff.as_millis(),
-                            "upload failed, will retry"
-                        );
-                    }
+                    warn!(?e, name = %name_str, "upload failed");
+                    had_failure = true;
+                    // On first failure, enter backoff and stop processing this cycle
+                    break;
                 }
             }
+        }
+
+        // Update global backoff state
+        if had_failure {
+            let failures = self.consecutive_failures.fetch_add(1, Ordering::Relaxed) + 1;
+            let backoff = self.calculate_backoff(failures);
+            if let Ok(mut next_retry) = self.next_retry.lock() {
+                *next_retry = now + backoff;
+            }
+            warn!(
+                consecutive_failures = failures,
+                backoff_ms = backoff.as_millis(),
+                "entering backoff after upload failure"
+            );
+        } else if had_success {
+            // Reset backoff on success
+            self.consecutive_failures.store(0, Ordering::Relaxed);
         }
     }
 }
