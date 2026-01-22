@@ -1,11 +1,10 @@
-use alto_types::{Block, PublicKey, Scheme};
+use alto_types::{Block, Context, Scheme, EPOCH};
 use commonware_consensus::{
     marshal::{ingress::mailbox::AncestorStream, Update},
-    simplex::types::Context,
-    types::Height,
+    types::{Height, Round, View},
     Heightable, Reporter,
 };
-use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256};
+use commonware_cryptography::{ed25519, sha256, Digest, Digestible, Hasher, Sha256, Signer};
 use commonware_runtime::{Clock, Metrics, Spawner};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
@@ -26,7 +25,12 @@ pub struct Application {
 
 impl Application {
     pub fn new() -> Self {
-        let genesis = Block::new(Sha256::hash(GENESIS), Height::zero(), 0);
+        let genesis_context = Context {
+            round: Round::new(EPOCH, View::zero()),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::zero(), sha256::Digest::EMPTY),
+        };
+        let genesis = Block::new(genesis_context, Sha256::hash(GENESIS), Height::zero(), 0);
         Self {
             genesis: Arc::new(genesis),
         }
@@ -44,7 +48,7 @@ where
     E: Rng + Spawner + Metrics + Clock,
 {
     type SigningScheme = Scheme;
-    type Context = Context<Digest, PublicKey>;
+    type Context = Context;
     type Block = Block;
 
     async fn genesis(&mut self) -> Self::Block {
@@ -53,7 +57,7 @@ where
 
     async fn propose(
         &mut self,
-        (runtime_context, _context): (E, Self::Context),
+        (runtime_context, context): (E, Self::Context),
         mut ancestry: AncestorStream<Self::SigningScheme, Self::Block>,
     ) -> Option<Self::Block> {
         let parent = ancestry.next().await?;
@@ -64,7 +68,7 @@ where
             current = parent.timestamp + 1;
         }
 
-        Some(Block::new(parent.digest(), parent.height.next(), current))
+        Some(Block::new(context, parent.digest(), parent.height.next(), current))
     }
 }
 
@@ -74,7 +78,7 @@ where
 {
     async fn verify(
         &mut self,
-        (runtime_context, _): (E, Self::Context),
+        (runtime_context, _): (E, Context),
         mut ancestry: AncestorStream<Self::SigningScheme, Self::Block>,
     ) -> bool {
         let Some(block) = ancestry.next().await else {
