@@ -3,11 +3,13 @@ use alto_types::Identity;
 use alto_types::{Activity, Block, Finalized, Notarized, Scheme, Seed, Seedable};
 use commonware_consensus::{marshal, Reporter, Viewable};
 use commonware_parallel::Strategy;
-use commonware_runtime::{Metrics, Spawner};
+use commonware_runtime::{Clock, Metrics, Spawner};
 use std::future::Future;
 #[cfg(test)]
 use std::{sync::atomic::AtomicBool, sync::Arc};
 use tracing::{debug, warn};
+
+use crate::upload_queue::QueueHandle;
 
 /// Trait for interacting with an indexer.
 pub trait Indexer: Clone + Send + Sync + 'static {
@@ -95,48 +97,48 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
 }
 
 /// An implementation of [Indexer] for the [Reporter] trait.
+///
+/// This version uses a disk-backed upload queue for reliable delivery.
+/// Uploads are persisted to disk before returning, and a background worker
+/// retries until the indexer acknowledges receipt.
 #[derive(Clone)]
-pub struct Pusher<E: Spawner + Metrics, I: Indexer> {
+pub struct Pusher<E: Spawner + Clock + Metrics> {
     context: E,
-    indexer: I,
+    queue: QueueHandle<E>,
     marshal: marshal::Mailbox<Scheme, Block>,
 }
 
-impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
-    /// Create a new [Pusher].
-    pub fn new(context: E, indexer: I, marshal: marshal::Mailbox<Scheme, Block>) -> Self {
+impl<E: Spawner + Clock + Metrics> Pusher<E> {
+    /// Create a new [Pusher] with a queue handle.
+    pub fn new(
+        context: E,
+        queue: QueueHandle<E>,
+        marshal: marshal::Mailbox<Scheme, Block>,
+    ) -> Self {
         Self {
             context,
-            indexer,
+            queue,
             marshal,
         }
     }
 }
 
-impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
+impl<E: Spawner + Clock + Metrics> Reporter for Pusher<E> {
     type Activity = Activity;
 
     async fn report(&mut self, activity: Self::Activity) {
         match activity {
             Activity::Notarization(notarization) => {
-                // Upload seed to indexer
                 let view = notarization.view();
-                self.context.with_label("notarized_seed").spawn({
-                    let indexer = self.indexer.clone();
-                    let seed = notarization.seed();
-                    move |_| async move {
-                        let result = indexer.seed_upload(seed).await;
-                        if let Err(e) = result {
-                            warn!(?e, "failed to upload seed");
-                            return;
-                        }
-                        debug!(%view, "seed uploaded to indexer");
-                    }
-                });
 
-                // Upload block to indexer (once we have it)
+                // Enqueue seed immediately (persisted to disk, sync operation)
+                let seed = notarization.seed();
+                self.queue.enqueue_seed(seed);
+                debug!(%view, "seed enqueued for upload");
+
+                // Spawn task to wait for block and enqueue notarization
                 self.context.with_label("notarized_block").spawn({
-                    let indexer = self.indexer.clone();
+                    let queue = self.queue.clone();
                     let mut marshal = self.marshal.clone();
                     move |_| async move {
                         // Wait for block
@@ -149,38 +151,27 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                             return;
                         };
 
-                        // Upload to indexer once we have it
+                        // Enqueue notarization (persisted to disk, sync operation)
                         let notarization = Notarized::new(notarization, block);
-                        let result = indexer.notarized_upload(notarization).await;
-                        if let Err(e) = result {
-                            warn!(?e, "failed to upload notarization");
-                            return;
-                        }
-                        debug!(%view, "notarization uploaded to indexer");
+                        queue.enqueue_notarization(notarization);
+                        debug!(%view, "notarization enqueued for upload");
                     }
                 });
             }
             Activity::Finalization(finalization) => {
-                // Upload seed to indexer
                 let view = finalization.view();
-                self.context.with_label("finalized_seed").spawn({
-                    let indexer = self.indexer.clone();
-                    let seed = finalization.seed();
-                    move |_| async move {
-                        let result = indexer.seed_upload(seed).await;
-                        if let Err(e) = result {
-                            warn!(?e, "failed to upload seed");
-                            return;
-                        }
-                        debug!(%view, "seed uploaded to indexer");
-                    }
-                });
 
-                // Upload block to indexer (once we have it)
+                // Enqueue seed immediately (persisted to disk, sync operation)
+                let seed = finalization.seed();
+                self.queue.enqueue_seed(seed);
+                debug!(%view, "seed enqueued for upload");
+
+                // Spawn task to wait for block and enqueue finalization
                 self.context.with_label("finalized_block").spawn({
-                    let indexer = self.indexer.clone();
+                    let queue = self.queue.clone();
                     let mut marshal = self.marshal.clone();
                     move |_| async move {
+                        // Wait for block
                         let block = marshal
                             .subscribe(Some(finalization.round()), finalization.proposal.payload)
                             .await
@@ -190,14 +181,10 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                             return;
                         };
 
-                        // Upload to indexer once we have it
+                        // Enqueue finalization (persisted to disk, sync operation)
                         let finalization = Finalized::new(finalization, block);
-                        let result = indexer.finalized_upload(finalization).await;
-                        if let Err(e) = result {
-                            warn!(?e, "failed to upload finalization");
-                            return;
-                        }
-                        debug!(%view, "finalization uploaded to indexer");
+                        queue.enqueue_finalization(finalization);
+                        debug!(%view, "finalization enqueued for upload");
                     }
                 });
             }
