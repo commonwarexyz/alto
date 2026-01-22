@@ -3,7 +3,7 @@ use alto_types::Identity;
 use alto_types::{Activity, Block, Finalized, Notarized, Scheme, Seed, Seedable};
 use commonware_consensus::{marshal, Reporter, Viewable};
 use commonware_parallel::Strategy;
-use commonware_runtime::{Clock, Metrics, Spawner};
+use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use std::future::Future;
 #[cfg(test)]
 use std::{sync::atomic::AtomicBool, sync::Arc};
@@ -102,13 +102,13 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
 /// Uploads are persisted to disk before returning, and a background worker
 /// retries until the indexer acknowledges receipt.
 #[derive(Clone)]
-pub struct Pusher<E: Spawner + Clock + Metrics> {
+pub struct Pusher<E: Spawner + Clock + Storage + Metrics> {
     context: E,
     queue: QueueHandle<E>,
     marshal: marshal::Mailbox<Scheme, Block>,
 }
 
-impl<E: Spawner + Clock + Metrics> Pusher<E> {
+impl<E: Spawner + Clock + Storage + Metrics> Pusher<E> {
     /// Create a new [Pusher] with a queue handle.
     pub fn new(
         context: E,
@@ -123,7 +123,7 @@ impl<E: Spawner + Clock + Metrics> Pusher<E> {
     }
 }
 
-impl<E: Spawner + Clock + Metrics> Reporter for Pusher<E> {
+impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
     type Activity = Activity;
 
     async fn report(&mut self, activity: Self::Activity) {

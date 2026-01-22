@@ -269,17 +269,13 @@ impl<
                 let queue_config =
                     cfg.upload_queue_config
                         .unwrap_or_else(|| upload_queue::Config {
-                            queue_dir: std::path::PathBuf::from(format!(
-                                "{}-upload-queue",
-                                cfg.partition_prefix
-                            )),
+                            partition: format!("{}-upload-queue", cfg.partition_prefix),
                             ..Default::default()
                         });
 
-                let queue = Arc::new(UploadQueue::new(
-                    context.with_label("upload_queue"),
-                    queue_config,
-                ));
+                let queue = Arc::new(
+                    UploadQueue::new(context.with_label("upload_queue"), queue_config).await,
+                );
 
                 // Start the background worker that processes the queue
                 queue.clone().start_worker(indexer);
