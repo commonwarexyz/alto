@@ -159,6 +159,16 @@ impl Default for Config {
     }
 }
 
+/// Result of attempting to read a pending upload.
+enum ReadPendingResult {
+    /// Successfully read the data.
+    Ok(Vec<u8>),
+    /// Blob exists but has size 0 (likely still being written).
+    EmptyBlob,
+    /// Failed to open or read the blob.
+    Error,
+}
+
 /// A disk-backed queue for reliable upload delivery.
 ///
 /// Uploads are persisted to disk as individual blobs within a storage partition.
@@ -304,16 +314,21 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
     }
 
     /// Read a pending upload's data.
-    async fn read_pending(&self, name: &[u8]) -> Option<Vec<u8>> {
-        let (blob, size) = self.context.open(&self.config.partition, name).await.ok()?;
+    async fn read_pending(&self, name: &[u8]) -> ReadPendingResult {
+        let (blob, size) = match self.context.open(&self.config.partition, name).await {
+            Ok(b) => b,
+            Err(_) => return ReadPendingResult::Error,
+        };
 
         if size == 0 {
-            return None;
+            return ReadPendingResult::EmptyBlob;
         }
 
         let buf = vec![0u8; size as usize];
-        let result = blob.read_at(buf, 0).await.ok()?;
-        Some(result.into())
+        match blob.read_at(buf, 0).await {
+            Ok(data) => ReadPendingResult::Ok(data.into()),
+            Err(_) => ReadPendingResult::Error,
+        }
     }
 
     /// Calculate backoff duration for a given failure count.
@@ -369,10 +384,20 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             let name_str = String::from_utf8_lossy(&name).to_string();
 
             // Read the data
-            let Some(data) = self.read_pending(&name).await else {
-                error!(name = %name_str, "failed to read pending upload, removing");
-                self.dequeue(&name).await;
-                continue;
+            let data = match self.read_pending(&name).await {
+                ReadPendingResult::Ok(data) => data,
+                ReadPendingResult::EmptyBlob => {
+                    // Blob has size=0, likely still being written by enqueue_raw.
+                    // Skip it and let the next scan pick it up once complete.
+                    debug!(name = %name_str, "skipping empty blob (likely being written)");
+                    continue;
+                }
+                ReadPendingResult::Error => {
+                    // Failed to open or read the blob. Skip rather than delete to
+                    // avoid data loss in case this is a transient error.
+                    warn!(name = %name_str, "failed to read pending upload, skipping");
+                    continue;
+                }
             };
 
             // Decode the queued upload (type is encoded in the data)
