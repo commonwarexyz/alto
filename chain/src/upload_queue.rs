@@ -15,7 +15,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Mutex,
     },
-    time::{Duration, Instant},
+    time::{Duration, SystemTime},
 };
 use tracing::{debug, error, info, warn};
 
@@ -74,7 +74,7 @@ impl Default for Config {
 /// Tracks retry state for a pending upload.
 struct RetryState {
     attempts: u32,
-    next_retry: Instant,
+    next_retry: SystemTime,
 }
 
 /// A disk-backed queue for reliable upload delivery.
@@ -119,8 +119,10 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
 
     /// Generate a unique blob name for an upload.
     fn generate_name(&self, kind: UploadKind) -> Vec<u8> {
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let timestamp = self
+            .context
+            .current()
+            .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let counter = self.counter.fetch_add(1, Ordering::Relaxed);
@@ -263,7 +265,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
     /// Process all pending uploads in the queue.
     async fn process_queue<I: Indexer>(&self, indexer: &I) {
         let pending = self.list_pending().await;
-        let now = Instant::now();
+        let now = self.context.current();
 
         for name in pending {
             let name_str = String::from_utf8_lossy(&name).to_string();
