@@ -131,9 +131,9 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
             Activity::Notarization(notarization) => {
                 let view = notarization.view();
 
-                // Enqueue seed immediately (persisted to disk, sync operation)
+                // Enqueue seed (awaits disk write for crash safety)
                 let seed = notarization.seed();
-                self.queue.enqueue_seed(seed);
+                self.queue.enqueue_seed(seed).await;
                 debug!(%view, "seed enqueued for upload");
 
                 // Spawn task to wait for block and enqueue notarization
@@ -151,9 +151,9 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
                             return;
                         };
 
-                        // Enqueue notarization (persisted to disk, sync operation)
+                        // Enqueue notarization (awaits disk write for crash safety)
                         let notarization = Notarized::new(notarization, block);
-                        queue.enqueue_notarization(notarization);
+                        queue.enqueue_notarization(notarization).await;
                         debug!(%view, "notarization enqueued for upload");
                     }
                 });
@@ -161,9 +161,9 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
             Activity::Finalization(finalization) => {
                 let view = finalization.view();
 
-                // Enqueue seed immediately (persisted to disk, sync operation)
+                // Enqueue seed (awaits disk write for crash safety)
                 let seed = finalization.seed();
-                self.queue.enqueue_seed(seed);
+                self.queue.enqueue_seed(seed).await;
                 debug!(%view, "seed enqueued for upload");
 
                 // Spawn task to wait for block and enqueue finalization
@@ -181,9 +181,9 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
                             return;
                         };
 
-                        // Enqueue finalization (persisted to disk, sync operation)
+                        // Enqueue finalization (awaits disk write for crash safety)
                         let finalization = Finalized::new(finalization, block);
-                        queue.enqueue_finalization(finalization);
+                        queue.enqueue_finalization(finalization).await;
                         debug!(%view, "finalization enqueued for upload");
                     }
                 });
