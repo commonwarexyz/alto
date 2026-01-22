@@ -7,14 +7,13 @@
 use crate::indexer::Indexer;
 use alto_types::{Finalized, Notarized, Seed};
 use commonware_codec::{DecodeExt, Encode};
-use commonware_runtime::{Clock, Metrics, Spawner};
+use commonware_runtime::{Blob, Clock, Metrics, Spawner, Storage};
+use std::sync::Arc;
 use std::{
     collections::HashMap,
-    fs,
-    path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Mutex,
     },
     time::{Duration, Instant},
 };
@@ -50,8 +49,9 @@ impl UploadKind {
 /// Configuration for the upload queue.
 #[derive(Clone)]
 pub struct Config {
-    /// Directory where pending uploads are stored.
-    pub queue_dir: PathBuf,
+    /// Partition name for storing pending uploads.
+    /// This will be created within the validator's configured storage directory.
+    pub partition: String,
     /// Initial backoff duration for retries.
     pub initial_backoff: Duration,
     /// Maximum backoff duration for retries.
@@ -63,7 +63,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            queue_dir: PathBuf::from("upload_queue"),
+            partition: "upload-queue".to_string(),
             initial_backoff: Duration::from_millis(100),
             max_backoff: Duration::from_secs(30),
             scan_interval: Duration::from_millis(50),
@@ -79,35 +79,32 @@ struct RetryState {
 
 /// A disk-backed queue for reliable upload delivery.
 ///
-/// Uploads are persisted to disk as individual files. A background worker
-/// continuously processes the queue, retrying failed uploads with exponential
-/// backoff.
-pub struct UploadQueue<E: Spawner + Clock + Metrics> {
+/// Uploads are persisted to disk as individual blobs within a storage partition.
+/// A background worker continuously processes the queue, retrying failed uploads
+/// with exponential backoff.
+pub struct UploadQueue<E: Spawner + Clock + Storage + Metrics> {
     context: E,
     config: Config,
     counter: AtomicU64,
-    /// Tracks retry state for pending uploads (keyed by filename).
+    /// Tracks retry state for pending uploads (keyed by blob name).
     retry_state: Mutex<HashMap<String, RetryState>>,
 }
 
-impl<E: Spawner + Clock + Metrics> UploadQueue<E> {
+impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
     /// Create a new upload queue.
     ///
-    /// This will create the queue directory if it doesn't exist.
-    pub fn new(context: E, config: Config) -> Self {
-        // Create queue directory if it doesn't exist
-        if let Err(e) = fs::create_dir_all(&config.queue_dir) {
-            warn!(?e, path = ?config.queue_dir, "failed to create queue directory");
-        }
-
+    /// This will scan for any pending uploads from previous runs.
+    pub async fn new(context: E, config: Config) -> Self {
         // Count existing pending uploads
-        let pending_count = fs::read_dir(&config.queue_dir)
-            .map(|entries| entries.count())
-            .unwrap_or(0);
+        let pending_count = match context.scan(&config.partition).await {
+            Ok(blobs) => blobs.len(),
+            Err(_) => 0, // Partition doesn't exist yet, no pending uploads
+        };
 
         if pending_count > 0 {
             info!(
                 count = pending_count,
+                partition = config.partition,
                 "found pending uploads from previous run"
             );
         }
@@ -120,83 +117,116 @@ impl<E: Spawner + Clock + Metrics> UploadQueue<E> {
         }
     }
 
-    /// Generate a unique filename for an upload.
-    fn generate_filename(&self, kind: UploadKind) -> String {
+    /// Generate a unique blob name for an upload.
+    fn generate_name(&self, kind: UploadKind) -> Vec<u8> {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let counter = self.counter.fetch_add(1, Ordering::Relaxed);
-        format!("{}-{}-{}", timestamp, counter, kind.as_str())
+        format!("{}-{}-{}", timestamp, counter, kind.as_str()).into_bytes()
     }
 
-    /// Parse the kind from a filename.
-    fn parse_filename(filename: &str) -> Option<UploadKind> {
+    /// Parse the kind from a blob name.
+    fn parse_name(name: &[u8]) -> Option<UploadKind> {
+        let name_str = std::str::from_utf8(name).ok()?;
         // Format: {timestamp}-{counter}-{kind}
-        let kind_str = filename.rsplit('-').next()?;
+        let kind_str = name_str.rsplit('-').next()?;
         UploadKind::from_str(kind_str)
     }
 
     /// Enqueue a seed for upload.
-    pub fn enqueue_seed(&self, seed: Seed) {
-        let filename = self.generate_filename(UploadKind::Seed);
+    pub async fn enqueue_seed(&self, seed: Seed) {
+        let name = self.generate_name(UploadKind::Seed);
         let data = seed.encode().to_vec();
-        self.enqueue_raw(&filename, data);
+        self.enqueue_raw(&name, data).await;
     }
 
     /// Enqueue a notarization for upload.
-    pub fn enqueue_notarization(&self, notarized: Notarized) {
-        let filename = self.generate_filename(UploadKind::Notarization);
+    pub async fn enqueue_notarization(&self, notarized: Notarized) {
+        let name = self.generate_name(UploadKind::Notarization);
         let data = notarized.encode().to_vec();
-        self.enqueue_raw(&filename, data);
+        self.enqueue_raw(&name, data).await;
     }
 
     /// Enqueue a finalization for upload.
-    pub fn enqueue_finalization(&self, finalized: Finalized) {
-        let filename = self.generate_filename(UploadKind::Finalization);
+    pub async fn enqueue_finalization(&self, finalized: Finalized) {
+        let name = self.generate_name(UploadKind::Finalization);
         let data = finalized.encode().to_vec();
-        self.enqueue_raw(&filename, data);
+        self.enqueue_raw(&name, data).await;
     }
 
-    /// Write raw data to the queue.
-    fn enqueue_raw(&self, filename: &str, data: Vec<u8>) {
-        let path = self.config.queue_dir.join(filename);
-        if let Err(e) = fs::write(&path, data) {
-            error!(?e, ?path, "failed to enqueue upload");
-        } else {
-            debug!(?path, "enqueued upload");
+    /// Write raw data to the queue as a blob.
+    async fn enqueue_raw(&self, name: &[u8], data: Vec<u8>) {
+        let name_str = String::from_utf8_lossy(name);
+
+        // Open/create the blob
+        let (blob, _) = match self.context.open(&self.config.partition, name).await {
+            Ok(b) => b,
+            Err(e) => {
+                error!(?e, name = %name_str, "failed to open blob for enqueue");
+                return;
+            }
+        };
+
+        // Resize and write
+        if let Err(e) = blob.resize(data.len() as u64).await {
+            error!(?e, name = %name_str, "failed to resize blob");
+            return;
         }
+
+        if let Err(e) = blob.write_at(data, 0).await {
+            error!(?e, name = %name_str, "failed to write blob");
+            return;
+        }
+
+        // Sync to ensure durability
+        if let Err(e) = blob.sync().await {
+            error!(?e, name = %name_str, "failed to sync blob");
+            return;
+        }
+
+        debug!(name = %name_str, "enqueued upload");
     }
 
     /// Remove a completed upload from the queue.
-    fn dequeue(&self, filename: &str) {
-        let path = self.config.queue_dir.join(filename);
-        if let Err(e) = fs::remove_file(&path) {
-            warn!(?e, ?path, "failed to dequeue upload");
+    async fn dequeue(&self, name: &[u8]) {
+        let name_str = String::from_utf8_lossy(name);
+
+        if let Err(e) = self
+            .context
+            .remove(&self.config.partition, Some(name))
+            .await
+        {
+            warn!(?e, name = %name_str, "failed to dequeue upload");
         } else {
             // Clean up retry state
             if let Ok(mut state) = self.retry_state.lock() {
-                state.remove(filename);
+                state.remove(name_str.as_ref());
             }
-            debug!(?path, "dequeued upload");
+            debug!(name = %name_str, "dequeued upload");
         }
     }
 
-    /// Get all pending upload filenames.
-    fn list_pending(&self) -> Vec<String> {
-        match fs::read_dir(&self.config.queue_dir) {
-            Ok(entries) => entries
-                .filter_map(|e| e.ok())
-                .filter_map(|e| e.file_name().into_string().ok())
-                .collect(),
-            Err(_) => Vec::new(),
-        }
+    /// Get all pending upload blob names.
+    async fn list_pending(&self) -> Vec<Vec<u8>> {
+        self.context
+            .scan(&self.config.partition)
+            .await
+            .unwrap_or_default()
     }
 
     /// Read a pending upload's data.
-    fn read_pending(&self, filename: &str) -> Option<Vec<u8>> {
-        let path = self.config.queue_dir.join(filename);
-        fs::read(&path).ok()
+    async fn read_pending(&self, name: &[u8]) -> Option<Vec<u8>> {
+        let (blob, size) = self.context.open(&self.config.partition, name).await.ok()?;
+
+        if size == 0 {
+            return None;
+        }
+
+        let buf = vec![0u8; size as usize];
+        let result = blob.read_at(buf, 0).await.ok()?;
+        Some(result.into())
     }
 
     /// Calculate backoff duration for a given attempt count.
@@ -232,14 +262,16 @@ impl<E: Spawner + Clock + Metrics> UploadQueue<E> {
 
     /// Process all pending uploads in the queue.
     async fn process_queue<I: Indexer>(&self, indexer: &I) {
-        let pending = self.list_pending();
+        let pending = self.list_pending().await;
         let now = Instant::now();
 
-        for filename in pending {
+        for name in pending {
+            let name_str = String::from_utf8_lossy(&name).to_string();
+
             // Check if we should retry this upload yet
             {
                 if let Ok(state) = self.retry_state.lock() {
-                    if let Some(rs) = state.get(&filename) {
+                    if let Some(rs) = state.get(&name_str) {
                         if now < rs.next_retry {
                             continue; // Not ready to retry yet
                         }
@@ -247,15 +279,15 @@ impl<E: Spawner + Clock + Metrics> UploadQueue<E> {
                 }
             }
 
-            // Parse the kind from filename
-            let Some(kind) = Self::parse_filename(&filename) else {
-                warn!(filename, "invalid upload filename, skipping");
+            // Parse the kind from blob name
+            let Some(kind) = Self::parse_name(&name) else {
+                warn!(name = %name_str, "invalid upload blob name, skipping");
                 continue;
             };
 
             // Read the data
-            let Some(data) = self.read_pending(&filename) else {
-                warn!(filename, "failed to read pending upload");
+            let Some(data) = self.read_pending(&name).await else {
+                warn!(name = %name_str, "failed to read pending upload");
                 continue;
             };
 
@@ -264,8 +296,8 @@ impl<E: Spawner + Clock + Metrics> UploadQueue<E> {
                 UploadKind::Seed => match Seed::decode(data.as_slice()) {
                     Ok(seed) => indexer.seed_upload(seed).await.map_err(|e| e.to_string()),
                     Err(e) => {
-                        error!(?e, filename, "failed to decode seed, removing");
-                        self.dequeue(&filename);
+                        error!(?e, name = %name_str, "failed to decode seed, removing");
+                        self.dequeue(&name).await;
                         continue;
                     }
                 },
@@ -275,8 +307,8 @@ impl<E: Spawner + Clock + Metrics> UploadQueue<E> {
                         .await
                         .map_err(|e| e.to_string()),
                     Err(e) => {
-                        error!(?e, filename, "failed to decode notarization, removing");
-                        self.dequeue(&filename);
+                        error!(?e, name = %name_str, "failed to decode notarization, removing");
+                        self.dequeue(&name).await;
                         continue;
                     }
                 },
@@ -286,8 +318,8 @@ impl<E: Spawner + Clock + Metrics> UploadQueue<E> {
                         .await
                         .map_err(|e| e.to_string()),
                     Err(e) => {
-                        error!(?e, filename, "failed to decode finalization, removing");
-                        self.dequeue(&filename);
+                        error!(?e, name = %name_str, "failed to decode finalization, removing");
+                        self.dequeue(&name).await;
                         continue;
                     }
                 },
@@ -295,13 +327,13 @@ impl<E: Spawner + Clock + Metrics> UploadQueue<E> {
 
             match result {
                 Ok(()) => {
-                    debug!(filename, "upload succeeded");
-                    self.dequeue(&filename);
+                    debug!(name = %name_str, "upload succeeded");
+                    self.dequeue(&name).await;
                 }
                 Err(e) => {
                     // Update retry state
                     if let Ok(mut state) = self.retry_state.lock() {
-                        let rs = state.entry(filename.clone()).or_insert(RetryState {
+                        let rs = state.entry(name_str.clone()).or_insert(RetryState {
                             attempts: 0,
                             next_retry: now,
                         });
@@ -311,7 +343,7 @@ impl<E: Spawner + Clock + Metrics> UploadQueue<E> {
 
                         warn!(
                             ?e,
-                            filename,
+                            name = %name_str,
                             attempts = rs.attempts,
                             next_retry_ms = backoff.as_millis(),
                             "upload failed, will retry"
@@ -327,11 +359,11 @@ impl<E: Spawner + Clock + Metrics> UploadQueue<E> {
 ///
 /// This is a lightweight clone of the queue that can be passed around.
 #[derive(Clone)]
-pub struct QueueHandle<E: Spawner + Clock + Metrics> {
+pub struct QueueHandle<E: Spawner + Clock + Storage + Metrics> {
     queue: Arc<UploadQueue<E>>,
 }
 
-impl<E: Spawner + Clock + Metrics> QueueHandle<E> {
+impl<E: Spawner + Clock + Storage + Metrics> QueueHandle<E> {
     /// Create a new queue handle.
     pub fn new(queue: Arc<UploadQueue<E>>) -> Self {
         Self { queue }
@@ -339,16 +371,38 @@ impl<E: Spawner + Clock + Metrics> QueueHandle<E> {
 
     /// Enqueue a seed for upload.
     pub fn enqueue_seed(&self, seed: Seed) {
-        self.queue.enqueue_seed(seed);
+        let queue = self.queue.clone();
+        // Spawn the async enqueue operation
+        self.queue.context.with_label("enqueue_seed").spawn({
+            move |_| async move {
+                queue.enqueue_seed(seed).await;
+            }
+        });
     }
 
     /// Enqueue a notarization for upload.
     pub fn enqueue_notarization(&self, notarized: Notarized) {
-        self.queue.enqueue_notarization(notarized);
+        let queue = self.queue.clone();
+        self.queue
+            .context
+            .with_label("enqueue_notarization")
+            .spawn({
+                move |_| async move {
+                    queue.enqueue_notarization(notarized).await;
+                }
+            });
     }
 
     /// Enqueue a finalization for upload.
     pub fn enqueue_finalization(&self, finalized: Finalized) {
-        self.queue.enqueue_finalization(finalized);
+        let queue = self.queue.clone();
+        self.queue
+            .context
+            .with_label("enqueue_finalization")
+            .spawn({
+                move |_| async move {
+                    queue.enqueue_finalization(finalized).await;
+                }
+            });
     }
 }
