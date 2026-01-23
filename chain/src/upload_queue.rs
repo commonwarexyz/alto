@@ -23,7 +23,7 @@ use commonware_storage::journal::{
     contiguous::variable::{Config as JournalConfig, Journal},
     Error as JournalError,
 };
-use commonware_utils::{NZU16, NZU64, NZUsize};
+use commonware_utils::{NZUsize, NZU16, NZU64};
 use futures::lock::Mutex;
 use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
 use std::collections::HashSet;
@@ -242,9 +242,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         if pending > 0 {
             info!(
                 oldest_retained = oldest,
-                journal_size,
-                pending,
-                "recovered upload queue state (may re-upload on restart)"
+                journal_size, pending, "recovered upload queue state (may re-upload on restart)"
             );
         }
 
@@ -391,13 +389,6 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         self.metrics.uploads_failed.inc();
     }
 
-    /// Read an item from the journal.
-    async fn read_item(&self, position: u64) -> Result<QueuedUpload, Error> {
-        let journal: futures::lock::MutexGuard<'_, Journal<E, QueuedUpload>> =
-            self.journal.lock().await;
-        Ok(journal.read(position).await?)
-    }
-
     /// Prune completed items from the journal.
     /// This is called automatically after processing batches.
     pub async fn prune(&self) -> Result<(), Error> {
@@ -430,13 +421,32 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         // Mark them as in-flight
         self.mark_in_flight(&positions).await;
 
-        // Process positions in parallel
+        // Read all items first (holding lock once), then upload in parallel
+        let items: Vec<_> = {
+            let journal = self.journal.lock().await;
+            let mut items = Vec::with_capacity(positions.len());
+            for &pos in &positions {
+                match journal.read(pos).await {
+                    Ok(item) => items.push((pos, Some(item))),
+                    Err(e) => {
+                        warn!(?e, pos, "failed to read item from journal");
+                        items.push((pos, None));
+                    }
+                }
+            }
+            items
+        };
+
+        // Upload in parallel (no lock held)
         let mut any_succeeded = false;
         let mut any_failed = false;
-        let futures: Vec<_> = positions
-            .iter()
-            .map(|&position| async move {
-                let result = self.upload_item(indexer, position).await;
+        let futures: Vec<_> = items
+            .into_iter()
+            .map(|(position, item)| async move {
+                let result = match item {
+                    Some(item) => self.do_upload(indexer, position, item).await,
+                    None => Err("failed to read from journal".into()),
+                };
                 (position, result)
             })
             .collect();
@@ -476,13 +486,13 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         }
     }
 
-    /// Upload a single item to the indexer.
-    async fn upload_item<I: Indexer>(
+    /// Upload a single item to the indexer (item already read from journal).
+    async fn do_upload<I: Indexer>(
         &self,
         indexer: &I,
         position: u64,
+        item: QueuedUpload,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let item = self.read_item(position).await?;
         let kind = item.kind_str();
 
         match item {
