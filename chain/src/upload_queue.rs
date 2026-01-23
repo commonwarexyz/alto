@@ -1,32 +1,29 @@
 //! A disk-backed upload queue for reliable delivery to the indexer.
 //!
 //! This module provides crash-safe upload delivery using a journal for storing
-//! upload items and metadata for tracking the cursor position. Uploads are
-//! appended atomically to the journal, and a background worker processes them
-//! with parallel upload support.
+//! upload items. Uploads are appended atomically to the journal, and a background
+//! worker processes them with parallel upload support.
 //!
 //! ## Design
 //!
 //! - **Journal**: Stores upload items in an append-only log with atomic appends
-//! - **Metadata**: Persists the cursor (oldest unprocessed position) for crash recovery
 //! - **Parallel uploads**: Multiple items can be uploaded concurrently
-//! - **Out-of-order completion**: Items ahead of cursor are tracked in memory
+//! - **Idempotent uploads**: Assumes indexer can handle duplicate uploads safely
+//! - **Pruning**: Completed items are pruned from the journal to reclaim space
 //!
-//! On crash recovery, we replay from the persisted cursor position.
+//! On restart, processing resumes from `oldest_retained_pos()`. Since the indexer
+//! is idempotent, re-uploading items after a crash is safe.
 
 use crate::indexer::Indexer;
 use alto_types::{Finalized, Notarized, Seed};
 use bytes::{Buf, BufMut};
 use commonware_codec::{EncodeSize, Error as CodecError, Read, ReadExt, Write};
 use commonware_runtime::{buffer::PoolRef, Clock, Metrics, Spawner, Storage};
-use commonware_storage::{
-    journal::{
-        contiguous::variable::{Config as JournalConfig, Journal},
-        Error as JournalError,
-    },
-    metadata::{Config as MetadataConfig, Error as MetadataError, Metadata},
+use commonware_storage::journal::{
+    contiguous::variable::{Config as JournalConfig, Journal},
+    Error as JournalError,
 };
-use commonware_utils::{sequence::U64, NZU16, NZU64, NZUsize};
+use commonware_utils::{NZU16, NZU64, NZUsize};
 use futures::lock::Mutex;
 use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
 use std::collections::HashSet;
@@ -40,8 +37,6 @@ use tracing::{debug, error, info, warn};
 pub enum Error {
     #[error("journal error: {0}")]
     Journal(#[from] JournalError),
-    #[error("metadata error: {0}")]
-    Metadata(#[from] MetadataError),
 }
 
 /// A queued upload with its type encoded in the data.
@@ -104,8 +99,6 @@ impl EncodeSize for QueuedUpload {
         }
     }
 }
-
-// QueuedUpload implements Codec automatically via the Read + Write + EncodeSize impls
 
 /// Metrics for the upload queue.
 #[derive(Clone)]
@@ -197,16 +190,11 @@ impl Default for Config {
     }
 }
 
-/// Metadata key for the cursor position.
-const CURSOR_KEY: U64 = U64::new(0);
-
-/// Type alias for cursor metadata storage (key = U64, value = Vec<u8>).
-type CursorMetadata<E> = Metadata<E, U64, Vec<u8>>;
-
 /// A disk-backed queue for reliable upload delivery.
 ///
-/// Uses a journal for atomic appends and metadata for cursor tracking.
-/// Supports parallel uploads with out-of-order completion.
+/// Uses a journal for atomic appends. On successful upload, items are pruned.
+/// On restart, processing resumes from `oldest_retained_pos()` since the
+/// indexer is idempotent and can handle duplicate uploads.
 pub struct UploadQueue<E: Spawner + Clock + Storage + Metrics> {
     context: E,
     config: Config,
@@ -215,18 +203,10 @@ pub struct UploadQueue<E: Spawner + Clock + Storage + Metrics> {
     /// The journal storing upload items.
     journal: Mutex<Journal<E, QueuedUpload>>,
 
-    /// Metadata storing the cursor position.
-    metadata: Mutex<CursorMetadata<E>>,
-
-    /// Current cursor position (oldest unprocessed item).
-    /// Items at positions < cursor have been successfully uploaded.
-    cursor: Mutex<u64>,
-
     /// Positions currently being uploaded (in-flight).
     in_flight: Mutex<HashSet<u64>>,
 
-    /// Positions that completed but are ahead of cursor.
-    /// These are held until cursor catches up.
+    /// Positions that completed successfully, waiting for contiguous pruning.
     completed: Mutex<HashSet<u64>>,
 }
 
@@ -246,41 +226,24 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         };
         let journal: Journal<E, QueuedUpload> =
             Journal::init(context.clone(), journal_config).await?;
+
+        // Calculate pending count from journal state
         let journal_size = journal.size();
-
-        // Initialize metadata
-        let metadata_config = MetadataConfig {
-            partition: format!("{}-metadata", config.partition),
-            // U64 key config: range of valid keys, value codec config
-            codec_config: ((0..=0).into(), ()),
-        };
-        let metadata: CursorMetadata<E> = Metadata::init(context.clone(), metadata_config).await?;
-
-        // Recover cursor from metadata, default to 0
-        let cursor = metadata
-            .get(&CURSOR_KEY)
-            .map(|v: &Vec<u8>| {
-                if v.len() >= 8 {
-                    u64::from_le_bytes(v[..8].try_into().unwrap())
-                } else {
-                    0
-                }
-            })
-            .unwrap_or(0);
-
-        // Calculate pending count
-        let pending = journal_size.saturating_sub(cursor);
+        let oldest = journal.oldest_retained_pos().unwrap_or(journal_size);
+        let pending = journal_size.saturating_sub(oldest);
 
         if pending > 0 {
             info!(
-                cursor,
-                journal_size, pending, "recovered upload queue state"
+                oldest_retained = oldest,
+                journal_size,
+                pending,
+                "recovered upload queue state (may re-upload on restart)"
             );
         }
 
         // Update metrics
         metrics.queue_depth.set(pending as i64);
-        metrics.cursor_position.set(cursor as i64);
+        metrics.cursor_position.set(oldest as i64);
         metrics.journal_size.set(journal_size as i64);
 
         Ok(Self {
@@ -288,8 +251,6 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             config,
             metrics,
             journal: Mutex::new(journal),
-            metadata: Mutex::new(metadata),
-            cursor: Mutex::new(cursor),
             in_flight: Mutex::new(HashSet::new()),
             completed: Mutex::new(HashSet::new()),
         })
@@ -329,73 +290,75 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
 
     /// Mark a position as successfully uploaded.
     async fn mark_complete(&self, position: u64) {
-        let mut cursor: futures::lock::MutexGuard<'_, u64> = self.cursor.lock().await;
-        let mut completed: futures::lock::MutexGuard<'_, HashSet<u64>> =
-            self.completed.lock().await;
-        let mut in_flight: futures::lock::MutexGuard<'_, HashSet<u64>> =
-            self.in_flight.lock().await;
-
         // Remove from in-flight
-        in_flight.remove(&position);
-
-        if position == *cursor {
-            // This is the cursor position - advance it
-            *cursor += 1;
-
-            // Advance through any contiguous completed positions
-            while completed.remove(&*cursor) {
-                *cursor += 1;
-            }
-
-            // Persist the new cursor
-            drop(in_flight);
-            drop(completed);
-            let new_cursor = *cursor;
-            drop(cursor);
-
-            self.persist_cursor(new_cursor).await;
-            self.metrics.cursor_position.set(new_cursor as i64);
-
-            debug!(cursor = new_cursor, "advanced cursor");
-        } else if position > *cursor {
-            // Ahead of cursor - remember for later
-            completed.insert(position);
-            debug!(
-                position,
-                cursor = *cursor,
-                "completed ahead of cursor, waiting"
-            );
+        {
+            let mut in_flight: futures::lock::MutexGuard<'_, HashSet<u64>> =
+                self.in_flight.lock().await;
+            in_flight.remove(&position);
         }
-        // position < cursor means duplicate completion (ignore)
+
+        // Add to completed set
+        {
+            let mut completed: futures::lock::MutexGuard<'_, HashSet<u64>> =
+                self.completed.lock().await;
+            completed.insert(position);
+        }
 
         self.metrics.uploads_succeeded.inc();
         self.metrics.queue_depth.dec();
+
+        debug!(position, "marked upload complete");
     }
 
-    /// Persist the cursor position to metadata.
-    async fn persist_cursor(&self, cursor: u64) {
-        let mut metadata: futures::lock::MutexGuard<'_, CursorMetadata<E>> =
-            self.metadata.lock().await;
-        metadata.put(CURSOR_KEY, cursor.to_le_bytes().to_vec());
-        if let Err(e) = metadata.sync().await {
-            error!(?e, cursor, "failed to persist cursor");
+    /// Try to prune contiguous completed positions from the journal.
+    ///
+    /// This finds the highest contiguous completed position starting from
+    /// the current pruning boundary and prunes up to that point.
+    async fn try_prune(&self) -> Result<(), Error> {
+        let mut journal: futures::lock::MutexGuard<'_, Journal<E, QueuedUpload>> =
+            self.journal.lock().await;
+        let mut completed: futures::lock::MutexGuard<'_, HashSet<u64>> =
+            self.completed.lock().await;
+
+        let boundary = journal.pruning_boundary();
+        let mut prune_to = boundary;
+
+        // Find contiguous completed positions from boundary
+        while completed.remove(&prune_to) {
+            prune_to += 1;
         }
+
+        if prune_to > boundary {
+            journal.prune(prune_to).await?;
+            journal.sync().await?;
+            self.metrics.cursor_position.set(prune_to as i64);
+            debug!(
+                old_boundary = boundary,
+                new_boundary = prune_to,
+                "pruned journal"
+            );
+        }
+
+        Ok(())
     }
 
     /// Get the next positions to process (up to max_concurrent).
     async fn get_positions_to_process(&self) -> Vec<u64> {
-        let cursor = *self.cursor.lock().await;
-        let journal = self.journal.lock().await;
+        let journal: futures::lock::MutexGuard<'_, Journal<E, QueuedUpload>> =
+            self.journal.lock().await;
         let journal_size = journal.size();
+        let start = journal.oldest_retained_pos().unwrap_or(journal_size);
         drop(journal);
 
-        let in_flight = self.in_flight.lock().await;
+        let in_flight: futures::lock::MutexGuard<'_, HashSet<u64>> = self.in_flight.lock().await;
+        let completed: futures::lock::MutexGuard<'_, HashSet<u64>> = self.completed.lock().await;
 
         let mut positions = Vec::new();
-        let mut pos = cursor;
+        let mut pos = start;
 
         while positions.len() < self.config.max_concurrent_uploads && pos < journal_size {
-            if !in_flight.contains(&pos) {
+            // Skip if already in-flight or completed (waiting for prune)
+            if !in_flight.contains(&pos) && !completed.contains(&pos) {
                 positions.push(pos);
             }
             pos += 1;
@@ -427,17 +390,9 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
     }
 
     /// Prune completed items from the journal.
-    /// Call this periodically to reclaim disk space.
-    pub async fn prune(&self) -> Result<bool, Error> {
-        let cursor = *self.cursor.lock().await;
-        let mut journal: futures::lock::MutexGuard<'_, Journal<E, QueuedUpload>> =
-            self.journal.lock().await;
-        let pruned = journal.prune(cursor).await?;
-        if pruned {
-            journal.sync().await?;
-            debug!(cursor, "pruned journal");
-        }
-        Ok(pruned)
+    /// This is called automatically after processing batches.
+    pub async fn prune(&self) -> Result<(), Error> {
+        self.try_prune().await
     }
 
     /// Start the background worker that processes the queue.
@@ -518,21 +473,22 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
 
     /// Get queue statistics.
     pub async fn stats(&self) -> QueueStats {
-        let cursor = *self.cursor.lock().await;
-        let journal = self.journal.lock().await;
+        let journal: futures::lock::MutexGuard<'_, Journal<E, QueuedUpload>> =
+            self.journal.lock().await;
         let journal_size = journal.size();
         let oldest_retained = journal.oldest_retained_pos();
+        let pruning_boundary = journal.pruning_boundary();
         drop(journal);
 
         let in_flight = self.in_flight.lock().await.len();
-        let completed_ahead = self.completed.lock().await.len();
+        let completed_pending_prune = self.completed.lock().await.len();
 
         QueueStats {
-            cursor,
+            pruning_boundary,
             journal_size,
-            pending: journal_size.saturating_sub(cursor),
+            pending: journal_size.saturating_sub(oldest_retained.unwrap_or(journal_size)),
             in_flight,
-            completed_ahead,
+            completed_pending_prune,
             oldest_retained,
         }
     }
@@ -541,17 +497,17 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
 /// Statistics about the upload queue.
 #[derive(Debug, Clone)]
 pub struct QueueStats {
-    /// Current cursor position.
-    pub cursor: u64,
+    /// Position before which all items have been pruned.
+    pub pruning_boundary: u64,
     /// Total items appended to journal.
     pub journal_size: u64,
-    /// Number of pending uploads.
+    /// Number of pending uploads (not yet completed).
     pub pending: u64,
     /// Number of uploads currently in-flight.
     pub in_flight: usize,
-    /// Number of completed uploads ahead of cursor.
-    pub completed_ahead: usize,
-    /// Oldest retained position in journal.
+    /// Number of completed uploads waiting to be pruned.
+    pub completed_pending_prune: usize,
+    /// Oldest retained position in journal (None if empty/fully pruned).
     pub oldest_retained: Option<u64>,
 }
 
