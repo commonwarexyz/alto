@@ -44,7 +44,7 @@ pub struct Peers {
 mod tests {
     use super::*;
     use alto_types::NAMESPACE;
-    use commonware_consensus::{marshal, simplex::scheme::bls12381_threshold, types::ViewDelta};
+    use commonware_consensus::{marshal, simplex::scheme::bls12381_threshold::vrf as bls12381_threshold, types::ViewDelta};
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519::PublicKey,
         Signer,

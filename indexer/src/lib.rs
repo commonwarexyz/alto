@@ -357,18 +357,18 @@ async fn handle_consensus_ws<S: Strategy>(
 mod tests {
     use super::*;
     use alto_client::{Client, ClientBuilder, IndexQuery, Query};
-    use alto_types::{Identity, Seedable, EPOCH, NAMESPACE};
+    use alto_types::{Context, Identity, Seedable, EPOCH, NAMESPACE};
     use commonware_consensus::{
         simplex::{
-            scheme::bls12381_threshold,
+            scheme::bls12381_threshold::vrf as bls12381_threshold,
             types::{Finalization, Finalize, Notarization, Notarize, Proposal},
         },
         types::{Height, Round, View},
         Viewable,
     };
     use commonware_cryptography::{
-        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, Digestible, Hasher,
-        Sha256,
+        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519, sha256,
+        Digest, Digestible, Hasher, Sha256, Signer,
     };
     use commonware_parallel::Sequential;
     use futures::StreamExt;
@@ -403,11 +403,16 @@ mod tests {
 
         /// Create a test block with standard parameters.
         fn test_block(&self) -> Block {
-            Block::new(Sha256::hash(b"genesis"), Height::new(1), 1000)
+            let context = Context {
+                round: Round::new(EPOCH, View::new(1)),
+                leader: ed25519::PrivateKey::from_seed(0).public_key(),
+                parent: (View::new(0), sha256::Digest::EMPTY),
+            };
+            Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000)
         }
 
         /// Create a proposal for the given block at view 1.
-        fn proposal(&self, block: &Block) -> Proposal<Digest> {
+        fn proposal(&self, block: &Block) -> Proposal<sha256::Digest> {
             Proposal::new(
                 Round::new(EPOCH, View::new(1)),
                 View::new(0),
@@ -439,7 +444,7 @@ mod tests {
 
     fn create_notarization(
         schemes: &[Scheme],
-        proposal: Proposal<Digest>,
+        proposal: Proposal<sha256::Digest>,
     ) -> alto_types::Notarization {
         let notarizes: Vec<_> = schemes
             .iter()
@@ -450,7 +455,7 @@ mod tests {
 
     fn create_finalization(
         schemes: &[Scheme],
-        proposal: Proposal<Digest>,
+        proposal: Proposal<sha256::Digest>,
     ) -> alto_types::Finalization {
         let finalizes: Vec<_> = schemes
             .iter()
@@ -625,7 +630,12 @@ mod tests {
         wait_for_ready(&client).await;
 
         // Create a seed signed by schemes1
-        let block = Block::new(Sha256::hash(b"genesis"), Height::new(1), 1000);
+        let context = Context {
+            round: Round::new(EPOCH, View::new(1)),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::new(0), sha256::Digest::EMPTY),
+        };
+        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),
@@ -742,7 +752,12 @@ mod tests {
         wait_for_ready(&client).await;
 
         // Create and upload a seed
-        let block = Block::new(Sha256::hash(b"genesis"), Height::new(1), 1000);
+        let context = Context {
+            round: Round::new(EPOCH, View::new(1)),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::new(0), sha256::Digest::EMPTY),
+        };
+        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),
@@ -774,7 +789,12 @@ mod tests {
         wait_for_ready(&client).await;
 
         // Create a seed
-        let block = Block::new(Sha256::hash(b"genesis"), Height::new(1), 1000);
+        let context = Context {
+            round: Round::new(EPOCH, View::new(1)),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::new(0), sha256::Digest::EMPTY),
+        };
+        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),
