@@ -273,20 +273,26 @@ impl<
                             ..Default::default()
                         });
 
-                let queue = Arc::new(
-                    UploadQueue::new(context.with_label("upload_queue"), queue_config).await,
-                );
+                match UploadQueue::new(context.with_label("upload_queue"), queue_config).await {
+                    Ok(queue) => {
+                        let queue = Arc::new(queue);
 
-                // Start the background worker that processes the queue
-                queue.clone().start_worker(indexer);
+                        // Start the background worker that processes the queue
+                        queue.clone().start_worker(indexer);
 
-                // Create pusher with queue handle
-                let queue_handle = QueueHandle::new(queue);
-                Some(indexer::Pusher::new(
-                    context.with_label("indexer"),
-                    queue_handle,
-                    marshal_mailbox.clone(),
-                ))
+                        // Create pusher with queue handle
+                        let queue_handle = QueueHandle::new(queue);
+                        Some(indexer::Pusher::new(
+                            context.with_label("indexer"),
+                            queue_handle,
+                            marshal_mailbox.clone(),
+                        ))
+                    }
+                    Err(e) => {
+                        error!(?e, "failed to create upload queue, indexer disabled");
+                        None
+                    }
+                }
             } else {
                 None
             },
