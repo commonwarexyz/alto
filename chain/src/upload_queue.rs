@@ -111,8 +111,8 @@ struct QueueMetrics {
     uploads_succeeded: Counter,
     /// Total number of failed upload attempts (includes retries).
     uploads_failed: Counter,
-    /// Current cursor position.
-    cursor_position: Gauge,
+    /// Current pruning boundary (items before this have been uploaded and pruned).
+    pruning_boundary: Gauge,
     /// Current journal size.
     journal_size: Gauge,
 }
@@ -124,7 +124,7 @@ impl QueueMetrics {
             uploads_enqueued: Counter::default(),
             uploads_succeeded: Counter::default(),
             uploads_failed: Counter::default(),
-            cursor_position: Gauge::default(),
+            pruning_boundary: Gauge::default(),
             journal_size: Gauge::default(),
         };
 
@@ -149,9 +149,9 @@ impl QueueMetrics {
             metrics.uploads_failed.clone(),
         );
         context.register(
-            "cursor_position",
-            "Current cursor position (oldest unprocessed)",
-            metrics.cursor_position.clone(),
+            "pruning_boundary",
+            "Items before this position have been uploaded and pruned",
+            metrics.pruning_boundary.clone(),
         );
         context.register(
             "journal_size",
@@ -242,8 +242,9 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         }
 
         // Update metrics
+        let pruning_boundary = journal.pruning_boundary();
         metrics.queue_depth.set(pending as i64);
-        metrics.cursor_position.set(oldest as i64);
+        metrics.pruning_boundary.set(pruning_boundary as i64);
         metrics.journal_size.set(journal_size as i64);
 
         Ok(Self {
@@ -331,7 +332,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         if prune_to > boundary {
             journal.prune(prune_to).await?;
             journal.sync().await?;
-            self.metrics.cursor_position.set(prune_to as i64);
+            self.metrics.pruning_boundary.set(prune_to as i64);
             debug!(
                 old_boundary = boundary,
                 new_boundary = prune_to,
@@ -421,12 +422,19 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         // Mark them as in-flight
         self.mark_in_flight(&positions).await;
 
-        // Process each position
-        // Note: We process sequentially here for simplicity, but this could be
-        // parallelized with futures::join_all or similar
-        for position in positions {
-            let result = self.upload_item(indexer, position).await;
+        // Process positions in parallel
+        let mut any_failed = false;
+        let futures: Vec<_> = positions
+            .iter()
+            .map(|&position| async move {
+                let result = self.upload_item(indexer, position).await;
+                (position, result)
+            })
+            .collect();
 
+        let results = futures::future::join_all(futures).await;
+
+        for (position, result) in results {
             match result {
                 Ok(()) => {
                     self.mark_complete(position).await;
@@ -434,13 +442,17 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
                 Err(e) => {
                     warn!(?e, position, "upload failed, will retry");
                     self.mark_failed(position).await;
-                    // On failure, wait before continuing to avoid hammering the indexer
-                    self.context.sleep(self.config.retry_delay).await;
+                    any_failed = true;
                 }
             }
         }
 
-        // Periodically prune old entries
+        // If any uploads failed, wait before next batch to avoid hammering indexer
+        if any_failed {
+            self.context.sleep(self.config.retry_delay).await;
+        }
+
+        // Prune completed entries
         if let Err(e) = self.prune().await {
             warn!(?e, "failed to prune journal");
         }
