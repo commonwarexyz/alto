@@ -27,6 +27,7 @@ use commonware_utils::{NZU16, NZU64, NZUsize};
 use futures::lock::Mutex;
 use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
@@ -172,8 +173,10 @@ pub struct Config {
     pub max_concurrent_uploads: usize,
     /// How often to check for new items to process.
     pub poll_interval: Duration,
-    /// How long to wait before retrying after a failure.
+    /// Base delay before retrying after a failure.
     pub retry_delay: Duration,
+    /// Maximum delay between retries (caps exponential backoff).
+    pub max_retry_delay: Duration,
     /// Number of items per journal section.
     pub items_per_section: u64,
 }
@@ -185,6 +188,7 @@ impl Default for Config {
             max_concurrent_uploads: 8,
             poll_interval: Duration::from_millis(50),
             retry_delay: Duration::from_millis(500),
+            max_retry_delay: Duration::from_secs(30),
             items_per_section: 1024,
         }
     }
@@ -208,6 +212,9 @@ pub struct UploadQueue<E: Spawner + Clock + Storage + Metrics> {
 
     /// Positions that completed successfully, waiting for contiguous pruning.
     completed: Mutex<HashSet<u64>>,
+
+    /// Consecutive batch failures for exponential backoff.
+    consecutive_failures: AtomicU32,
 }
 
 impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
@@ -254,6 +261,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             journal: Mutex::new(journal),
             in_flight: Mutex::new(HashSet::new()),
             completed: Mutex::new(HashSet::new()),
+            consecutive_failures: AtomicU32::new(0),
         })
     }
 
@@ -423,6 +431,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         self.mark_in_flight(&positions).await;
 
         // Process positions in parallel
+        let mut any_succeeded = false;
         let mut any_failed = false;
         let futures: Vec<_> = positions
             .iter()
@@ -438,6 +447,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             match result {
                 Ok(()) => {
                     self.mark_complete(position).await;
+                    any_succeeded = true;
                 }
                 Err(e) => {
                     warn!(?e, position, "upload failed, will retry");
@@ -447,9 +457,17 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             }
         }
 
-        // If any uploads failed, wait before next batch to avoid hammering indexer
+        // Update backoff state and sleep if needed
+        if any_succeeded {
+            self.consecutive_failures.store(0, Ordering::Relaxed);
+        }
         if any_failed {
-            self.context.sleep(self.config.retry_delay).await;
+            let failures = self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
+            // Cap exponent at 6 (64x multiplier) to avoid overflow
+            let multiplier = 1u32 << failures.min(6);
+            let delay = (self.config.retry_delay * multiplier).min(self.config.max_retry_delay);
+            debug!(failures = failures + 1, ?delay, "backing off after failure");
+            self.context.sleep(delay).await;
         }
 
         // Prune completed entries
@@ -495,10 +513,16 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         let in_flight = self.in_flight.lock().await.len();
         let completed_pending_prune = self.completed.lock().await.len();
 
+        // Items retained in journal (not yet pruned)
+        let retained = journal_size.saturating_sub(oldest_retained.unwrap_or(journal_size));
+        // Items actually needing upload = retained - completed - in_flight
+        let pending = retained.saturating_sub((completed_pending_prune + in_flight) as u64);
+
         QueueStats {
             pruning_boundary,
             journal_size,
-            pending: journal_size.saturating_sub(oldest_retained.unwrap_or(journal_size)),
+            retained,
+            pending,
             in_flight,
             completed_pending_prune,
             oldest_retained,
@@ -513,7 +537,9 @@ pub struct QueueStats {
     pub pruning_boundary: u64,
     /// Total items appended to journal.
     pub journal_size: u64,
-    /// Number of pending uploads (not yet completed).
+    /// Items retained in journal (not yet pruned).
+    pub retained: u64,
+    /// Items needing upload (retained - completed - in_flight).
     pub pending: u64,
     /// Number of uploads currently in-flight.
     pub in_flight: usize,
