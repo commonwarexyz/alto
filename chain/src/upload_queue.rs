@@ -11,8 +11,9 @@
 //! - **Idempotent uploads**: Assumes indexer can handle duplicate uploads safely
 //! - **Pruning**: Completed items are pruned from the journal to reclaim space
 //!
-//! On restart, processing resumes from `oldest_retained_pos()`. Since the indexer
-//! is idempotent, re-uploading items after a crash is safe.
+//! On restart, processing resumes from the logical pruning boundary. The journal
+//! uses section-based pruning, so items may be re-uploaded if their section hasn't
+//! been fully reclaimed. Since the indexer is idempotent, this is safe.
 
 use crate::indexer::Indexer;
 use alto_types::{Finalized, Notarized, Seed};
@@ -197,8 +198,9 @@ impl Default for Config {
 /// A disk-backed queue for reliable upload delivery.
 ///
 /// Uses a journal for atomic appends. On successful upload, items are pruned.
-/// On restart, processing resumes from `oldest_retained_pos()` since the
-/// indexer is idempotent and can handle duplicate uploads.
+/// On restart, processing resumes from the logical pruning boundary. Items may
+/// be re-uploaded if the journal hasn't physically reclaimed their section yet,
+/// which is safe since the indexer is idempotent.
 pub struct UploadQueue<E: Spawner + Clock + Storage + Metrics> {
     context: E,
     config: Config,
@@ -243,9 +245,11 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         let pruning_boundary = journal.pruning_boundary();
         let oldest_retained = journal.oldest_retained_pos();
 
-        // Use the max of pruning_boundary and oldest_retained for restart recovery
-        // pruning_boundary may not persist, but oldest_retained reflects actual storage
-        let effective_boundary = oldest_retained.unwrap_or(pruning_boundary).max(pruning_boundary);
+        // Use the max of pruning_boundary and oldest_retained for restart recovery.
+        // pruning_boundary may not persist across restarts, but oldest_retained reflects
+        // what's actually on disk.
+        let effective_boundary =
+            oldest_retained.map_or(pruning_boundary, |pos| pos.max(pruning_boundary));
         let pending = journal_size.saturating_sub(effective_boundary);
 
         debug!(
@@ -300,8 +304,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
     async fn enqueue(&self, upload: QueuedUpload) -> Result<u64, Error> {
         let kind = upload.kind_str();
 
-        let mut journal: futures::lock::MutexGuard<'_, Journal<E, QueuedUpload>> =
-            self.journal.lock().await;
+        let mut journal = self.journal.lock().await;
         let position = journal.append(upload).await?;
         journal.sync().await?;
 
@@ -315,19 +318,8 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
 
     /// Mark a position as successfully uploaded.
     async fn mark_complete(&self, position: u64) {
-        // Remove from in-flight
-        {
-            let mut in_flight: futures::lock::MutexGuard<'_, HashSet<u64>> =
-                self.in_flight.lock().await;
-            in_flight.remove(&position);
-        }
-
-        // Add to completed set
-        {
-            let mut completed: futures::lock::MutexGuard<'_, HashSet<u64>> =
-                self.completed.lock().await;
-            completed.insert(position);
-        }
+        self.in_flight.lock().await.remove(&position);
+        self.completed.lock().await.insert(position);
 
         self.metrics.uploads_succeeded.inc();
         self.metrics.queue_depth.dec();
@@ -340,10 +332,8 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
     /// This finds the highest contiguous completed position starting from
     /// the current pruning boundary and prunes up to that point.
     async fn try_prune(&self) -> Result<(), Error> {
-        let mut journal: futures::lock::MutexGuard<'_, Journal<E, QueuedUpload>> =
-            self.journal.lock().await;
-        let mut completed: futures::lock::MutexGuard<'_, HashSet<u64>> =
-            self.completed.lock().await;
+        let mut journal = self.journal.lock().await;
+        let mut completed = self.completed.lock().await;
 
         // Use our logical boundary which updates immediately after prune
         let boundary = self.logical_pruning_boundary.load(Ordering::Acquire);
@@ -373,16 +363,13 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
 
     /// Get the next positions to process (up to max_concurrent).
     async fn get_positions_to_process(&self) -> Vec<u64> {
-        let journal: futures::lock::MutexGuard<'_, Journal<E, QueuedUpload>> =
-            self.journal.lock().await;
-        let journal_size = journal.size();
-        drop(journal);
+        let journal_size = self.journal.lock().await.size();
 
         // Start from our logical pruning boundary - items before this have been successfully uploaded
         let start = self.logical_pruning_boundary.load(Ordering::Acquire);
 
-        let in_flight: futures::lock::MutexGuard<'_, HashSet<u64>> = self.in_flight.lock().await;
-        let completed: futures::lock::MutexGuard<'_, HashSet<u64>> = self.completed.lock().await;
+        let in_flight = self.in_flight.lock().await;
+        let completed = self.completed.lock().await;
 
         let mut positions = Vec::new();
         let mut pos = start;
@@ -408,15 +395,8 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
 
     /// Mark a position as failed (remove from in-flight so it can be retried).
     async fn mark_failed(&self, position: u64) {
-        let mut in_flight = self.in_flight.lock().await;
-        in_flight.remove(&position);
+        self.in_flight.lock().await.remove(&position);
         self.metrics.uploads_failed.inc();
-    }
-
-    /// Prune completed items from the journal.
-    /// This is called automatically after processing batches.
-    pub async fn prune(&self) -> Result<(), Error> {
-        self.try_prune().await
     }
 
     /// Start the background worker that processes the queue.
@@ -491,7 +471,8 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             }
         }
 
-        // Update backoff state and sleep if needed
+        // Update backoff state and sleep if needed.
+        // Reset on any success; sleep on any failure (even partial success triggers delay).
         if any_succeeded {
             self.consecutive_failures.store(0, Ordering::Relaxed);
         }
@@ -505,7 +486,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         }
 
         // Prune completed entries
-        if let Err(e) = self.prune().await {
+        if let Err(e) = self.try_prune().await {
             warn!(?e, "failed to prune journal");
         }
     }
@@ -775,14 +756,20 @@ mod tests {
 
             // Phase 1: Enqueue items but don't process them (no worker started)
             {
-                let queue = UploadQueue::new(context.clone(), config.clone()).await.unwrap();
+                let queue = UploadQueue::new(context.clone(), config.clone())
+                    .await
+                    .unwrap();
 
                 for seed in &seeds {
                     queue.enqueue_seed(seed.clone()).await.unwrap();
                 }
 
                 let stats = queue.stats().await;
-                assert_eq!(stats.retained, seeds.len() as u64, "items should be in journal");
+                assert_eq!(
+                    stats.retained,
+                    seeds.len() as u64,
+                    "items should be in journal"
+                );
                 assert_eq!(stats.pending, seeds.len() as u64, "items should be pending");
 
                 // Queue is dropped here (simulates crash)
@@ -860,7 +847,10 @@ mod tests {
 
                 // Enqueue notarizations (may or may not upload before "crash")
                 for notarization in &notarizations {
-                    queue.enqueue_notarization(notarization.clone()).await.unwrap();
+                    queue
+                        .enqueue_notarization(notarization.clone())
+                        .await
+                        .unwrap();
                 }
 
                 // Small delay - some notarizations might upload
@@ -953,7 +943,10 @@ mod tests {
                 }
 
                 let stats = queue.stats().await;
-                assert_eq!(stats.retained, 0, "logical boundary should show all items pruned");
+                assert_eq!(
+                    stats.retained, 0,
+                    "logical boundary should show all items pruned"
+                );
             }
 
             // Phase 2: Restart - items may be re-uploaded since journal uses
