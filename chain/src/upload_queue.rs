@@ -27,7 +27,7 @@ use commonware_utils::{NZUsize, NZU16, NZU64};
 use futures::lock::Mutex;
 use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
@@ -215,6 +215,10 @@ pub struct UploadQueue<E: Spawner + Clock + Storage + Metrics> {
 
     /// Consecutive batch failures for exponential backoff.
     consecutive_failures: AtomicU32,
+
+    /// Logical pruning boundary - tracks what we've pruned (may differ from journal's
+    /// reported boundary which updates asynchronously).
+    logical_pruning_boundary: AtomicU64,
 }
 
 impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
@@ -236,20 +240,33 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
 
         // Calculate pending count from journal state
         let journal_size = journal.size();
-        let oldest = journal.oldest_retained_pos().unwrap_or(journal_size);
-        let pending = journal_size.saturating_sub(oldest);
+        let pruning_boundary = journal.pruning_boundary();
+        let oldest_retained = journal.oldest_retained_pos();
+
+        // Use the max of pruning_boundary and oldest_retained for restart recovery
+        // pruning_boundary may not persist, but oldest_retained reflects actual storage
+        let effective_boundary = oldest_retained.unwrap_or(pruning_boundary).max(pruning_boundary);
+        let pending = journal_size.saturating_sub(effective_boundary);
+
+        debug!(
+            pruning_boundary,
+            ?oldest_retained,
+            effective_boundary,
+            journal_size,
+            pending,
+            "journal state on init"
+        );
 
         if pending > 0 {
             info!(
-                oldest_retained = oldest,
+                effective_boundary,
                 journal_size, pending, "recovered upload queue state (may re-upload on restart)"
             );
         }
 
         // Update metrics
-        let pruning_boundary = journal.pruning_boundary();
         metrics.queue_depth.set(pending as i64);
-        metrics.pruning_boundary.set(pruning_boundary as i64);
+        metrics.pruning_boundary.set(effective_boundary as i64);
         metrics.journal_size.set(journal_size as i64);
 
         Ok(Self {
@@ -260,6 +277,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             in_flight: Mutex::new(HashSet::new()),
             completed: Mutex::new(HashSet::new()),
             consecutive_failures: AtomicU32::new(0),
+            logical_pruning_boundary: AtomicU64::new(effective_boundary),
         })
     }
 
@@ -327,7 +345,8 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         let mut completed: futures::lock::MutexGuard<'_, HashSet<u64>> =
             self.completed.lock().await;
 
-        let boundary = journal.pruning_boundary();
+        // Use our logical boundary which updates immediately after prune
+        let boundary = self.logical_pruning_boundary.load(Ordering::Acquire);
         let mut prune_to = boundary;
 
         // Find contiguous completed positions from boundary
@@ -338,6 +357,9 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         if prune_to > boundary {
             journal.prune(prune_to).await?;
             journal.sync().await?;
+            // Update our logical boundary immediately (journal's boundary updates async)
+            self.logical_pruning_boundary
+                .store(prune_to, Ordering::Release);
             self.metrics.pruning_boundary.set(prune_to as i64);
             debug!(
                 old_boundary = boundary,
@@ -354,8 +376,10 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         let journal: futures::lock::MutexGuard<'_, Journal<E, QueuedUpload>> =
             self.journal.lock().await;
         let journal_size = journal.size();
-        let start = journal.oldest_retained_pos().unwrap_or(journal_size);
         drop(journal);
+
+        // Start from our logical pruning boundary - items before this have been successfully uploaded
+        let start = self.logical_pruning_boundary.load(Ordering::Acquire);
 
         let in_flight: futures::lock::MutexGuard<'_, HashSet<u64>> = self.in_flight.lock().await;
         let completed: futures::lock::MutexGuard<'_, HashSet<u64>> = self.completed.lock().await;
@@ -511,52 +535,30 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         Ok(())
     }
 
-    /// Get queue statistics.
-    pub async fn stats(&self) -> QueueStats {
-        let journal: futures::lock::MutexGuard<'_, Journal<E, QueuedUpload>> =
-            self.journal.lock().await;
-        let journal_size = journal.size();
-        let oldest_retained = journal.oldest_retained_pos();
-        let pruning_boundary = journal.pruning_boundary();
-        drop(journal);
-
+    /// Get queue statistics (test-only).
+    #[cfg(test)]
+    async fn stats(&self) -> QueueStats {
+        let journal_size = self.journal.lock().await.size();
+        let pruning_boundary = self.logical_pruning_boundary.load(Ordering::Acquire);
         let in_flight = self.in_flight.lock().await.len();
         let completed_pending_prune = self.completed.lock().await.len();
 
         // Items retained in journal (not yet pruned)
-        let retained = journal_size.saturating_sub(oldest_retained.unwrap_or(journal_size));
+        let retained = journal_size.saturating_sub(pruning_boundary);
         // Items actually needing upload = retained - completed - in_flight
         let pending = retained.saturating_sub((completed_pending_prune + in_flight) as u64);
 
-        QueueStats {
-            pruning_boundary,
-            journal_size,
-            retained,
-            pending,
-            in_flight,
-            completed_pending_prune,
-            oldest_retained,
-        }
+        QueueStats { retained, pending }
     }
 }
 
-/// Statistics about the upload queue.
-#[derive(Debug, Clone)]
-pub struct QueueStats {
-    /// Position before which all items have been pruned.
-    pub pruning_boundary: u64,
-    /// Total items appended to journal.
-    pub journal_size: u64,
+/// Statistics about the upload queue (test-only).
+#[cfg(test)]
+struct QueueStats {
     /// Items retained in journal (not yet pruned).
-    pub retained: u64,
+    retained: u64,
     /// Items needing upload (retained - completed - in_flight).
-    pub pending: u64,
-    /// Number of uploads currently in-flight.
-    pub in_flight: usize,
-    /// Number of completed uploads waiting to be pruned.
-    pub completed_pending_prune: usize,
-    /// Oldest retained position in journal (None if empty/fully pruned).
-    pub oldest_retained: Option<u64>,
+    pending: u64,
 }
 
 /// A handle to the upload queue for enqueueing uploads.
@@ -598,5 +600,399 @@ impl<E: Spawner + Clock + Storage + Metrics> QueueHandle<E> {
         if let Err(e) = self.queue.enqueue_finalization(finalized).await {
             error!(?e, "failed to enqueue finalization");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alto_types::{Block, Seedable};
+    use commonware_consensus::{
+        simplex::{
+            scheme::bls12381_threshold,
+            types::{Finalize, Notarize, Proposal},
+        },
+        types::{Epoch, Height, Round, View},
+    };
+    use commonware_cryptography::{
+        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, Digestible, Hasher,
+        Sha256,
+    };
+    use commonware_macros::test_traced;
+    use commonware_parallel::Sequential;
+    use commonware_runtime::{
+        deterministic::{self, Runner},
+        Runner as _,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+    const EPOCH: Epoch = Epoch::new(0);
+
+    /// Test indexer that tracks upload counts.
+    #[derive(Clone)]
+    struct TestIndexer {
+        seed_count: Arc<AtomicUsize>,
+        notarization_count: Arc<AtomicUsize>,
+        finalization_count: Arc<AtomicUsize>,
+    }
+
+    impl TestIndexer {
+        fn new() -> Self {
+            Self {
+                seed_count: Arc::new(AtomicUsize::new(0)),
+                notarization_count: Arc::new(AtomicUsize::new(0)),
+                finalization_count: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+
+        fn total_uploads(&self) -> usize {
+            self.seed_count.load(AtomicOrdering::SeqCst)
+                + self.notarization_count.load(AtomicOrdering::SeqCst)
+                + self.finalization_count.load(AtomicOrdering::SeqCst)
+        }
+    }
+
+    impl Indexer for TestIndexer {
+        type Error = std::io::Error;
+
+        async fn seed_upload(&self, _: Seed) -> Result<(), Self::Error> {
+            self.seed_count.fetch_add(1, AtomicOrdering::SeqCst);
+            Ok(())
+        }
+
+        async fn notarized_upload(&self, _: Notarized) -> Result<(), Self::Error> {
+            self.notarization_count.fetch_add(1, AtomicOrdering::SeqCst);
+            Ok(())
+        }
+
+        async fn finalized_upload(&self, _: Finalized) -> Result<(), Self::Error> {
+            self.finalization_count.fetch_add(1, AtomicOrdering::SeqCst);
+            Ok(())
+        }
+    }
+
+    /// Create test fixtures for seeds/notarizations/finalizations.
+    fn create_test_fixtures(
+        context: &mut deterministic::Context,
+    ) -> (Vec<Seed>, Vec<Notarized>, Vec<Finalized>) {
+        let Fixture { schemes, .. } =
+            bls12381_threshold::fixture::<MinSig, _>(context, alto_types::NAMESPACE, 4);
+
+        let mut seeds = Vec::new();
+        let mut notarizations = Vec::new();
+        let mut finalizations = Vec::new();
+
+        for i in 0u64..3 {
+            // Create a block
+            let parent = Sha256::hash(&i.to_be_bytes());
+            let block = Block::new(parent, Height::new(i + 1), 1000 + i);
+            let proposal = Proposal::new(
+                Round::new(EPOCH, View::new(i)),
+                View::new(i.saturating_sub(1)),
+                block.digest(),
+            );
+
+            // Create notarization
+            let notarizes: Vec<_> = schemes
+                .iter()
+                .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
+                .collect();
+            let notarization =
+                alto_types::Notarization::from_notarizes(&schemes[0], &notarizes, &Sequential)
+                    .unwrap();
+
+            // Create finalization
+            let finalizes: Vec<_> = schemes
+                .iter()
+                .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
+                .collect();
+            let finalization =
+                alto_types::Finalization::from_finalizes(&schemes[0], &finalizes, &Sequential)
+                    .unwrap();
+
+            seeds.push(notarization.seed());
+            notarizations.push(Notarized::new(notarization, block.clone()));
+            finalizations.push(Finalized::new(finalization, block));
+        }
+
+        (seeds, notarizations, finalizations)
+    }
+
+    fn test_config() -> Config {
+        Config {
+            partition: "test-queue".to_string(),
+            max_concurrent_uploads: 4,
+            poll_interval: Duration::from_millis(10),
+            retry_delay: Duration::from_millis(50),
+            max_retry_delay: Duration::from_millis(200),
+            items_per_section: 16,
+        }
+    }
+
+    #[test_traced]
+    fn test_basic_upload() {
+        // Test that enqueued items are uploaded
+        let cfg = deterministic::Config::default().with_seed(42);
+        let executor = Runner::from(cfg);
+        executor.start(|mut context| async move {
+            let (seeds, _, _) = create_test_fixtures(&mut context);
+            let indexer = TestIndexer::new();
+            let config = test_config();
+
+            // Create queue and start worker
+            let queue = Arc::new(UploadQueue::new(context.clone(), config).await.unwrap());
+            queue.clone().start_worker(indexer.clone());
+
+            // Enqueue seeds
+            for seed in &seeds {
+                queue.enqueue_seed(seed.clone()).await.unwrap();
+            }
+
+            // Wait for uploads to complete
+            for _ in 0..100 {
+                context.sleep(Duration::from_millis(10)).await;
+                if indexer.seed_count.load(AtomicOrdering::SeqCst) >= seeds.len() {
+                    break;
+                }
+            }
+
+            assert_eq!(
+                indexer.seed_count.load(AtomicOrdering::SeqCst),
+                seeds.len(),
+                "all seeds should be uploaded"
+            );
+        });
+    }
+
+    #[test_traced]
+    fn test_restart_recovery() {
+        // Test that items enqueued before "crash" are uploaded after restart
+        let cfg = deterministic::Config::default().with_seed(123);
+        let executor = Runner::from(cfg);
+        executor.start(|mut context| async move {
+            let (seeds, _, _) = create_test_fixtures(&mut context);
+            let config = test_config();
+
+            // Phase 1: Enqueue items but don't process them (no worker started)
+            {
+                let queue = UploadQueue::new(context.clone(), config.clone()).await.unwrap();
+
+                for seed in &seeds {
+                    queue.enqueue_seed(seed.clone()).await.unwrap();
+                }
+
+                let stats = queue.stats().await;
+                assert_eq!(stats.retained, seeds.len() as u64, "items should be in journal");
+                assert_eq!(stats.pending, seeds.len() as u64, "items should be pending");
+
+                // Queue is dropped here (simulates crash)
+            }
+
+            // Phase 2: Restart - create new queue with same partition, start worker
+            let indexer = TestIndexer::new();
+            {
+                let queue = Arc::new(
+                    UploadQueue::new(context.clone(), config.clone())
+                        .await
+                        .unwrap(),
+                );
+
+                // Verify items recovered
+                let stats = queue.stats().await;
+                assert_eq!(
+                    stats.retained,
+                    seeds.len() as u64,
+                    "items should be recovered from journal"
+                );
+
+                // Start worker and wait for uploads
+                queue.clone().start_worker(indexer.clone());
+
+                for _ in 0..100 {
+                    context.sleep(Duration::from_millis(10)).await;
+                    if indexer.seed_count.load(AtomicOrdering::SeqCst) >= seeds.len() {
+                        break;
+                    }
+                }
+
+                assert_eq!(
+                    indexer.seed_count.load(AtomicOrdering::SeqCst),
+                    seeds.len(),
+                    "all seeds should be uploaded after restart"
+                );
+            }
+        });
+    }
+
+    #[test_traced]
+    fn test_partial_upload_then_restart() {
+        // Test: upload some items, "crash", restart, verify all items eventually uploaded
+        let cfg = deterministic::Config::default().with_seed(456);
+        let executor = Runner::from(cfg);
+        executor.start(|mut context| async move {
+            let (seeds, notarizations, _) = create_test_fixtures(&mut context);
+            let config = test_config();
+
+            let indexer = TestIndexer::new();
+            let total_items = seeds.len() + notarizations.len();
+
+            // Phase 1: Enqueue all, upload some
+            {
+                let queue = Arc::new(
+                    UploadQueue::new(context.clone(), config.clone())
+                        .await
+                        .unwrap(),
+                );
+                queue.clone().start_worker(indexer.clone());
+
+                // Enqueue seeds
+                for seed in &seeds {
+                    queue.enqueue_seed(seed.clone()).await.unwrap();
+                }
+
+                // Wait for seeds to upload
+                for _ in 0..50 {
+                    context.sleep(Duration::from_millis(10)).await;
+                    if indexer.seed_count.load(AtomicOrdering::SeqCst) >= seeds.len() {
+                        break;
+                    }
+                }
+
+                // Enqueue notarizations (may or may not upload before "crash")
+                for notarization in &notarizations {
+                    queue.enqueue_notarization(notarization.clone()).await.unwrap();
+                }
+
+                // Small delay - some notarizations might upload
+                context.sleep(Duration::from_millis(20)).await;
+
+                // Queue dropped here (simulates crash)
+            }
+
+            let uploads_before_crash = indexer.total_uploads();
+            info!(uploads_before_crash, "uploads before simulated crash");
+
+            // Phase 2: Restart and verify remaining items upload
+            // Note: Some items may be re-uploaded (idempotent), that's okay
+            {
+                let queue = Arc::new(
+                    UploadQueue::new(context.clone(), config.clone())
+                        .await
+                        .unwrap(),
+                );
+                queue.clone().start_worker(indexer.clone());
+
+                // Wait for all items to upload
+                for _ in 0..200 {
+                    context.sleep(Duration::from_millis(10)).await;
+                    let total = indexer.total_uploads();
+                    // At minimum, we need total_items uploads (possibly more due to re-uploads)
+                    if total >= total_items {
+                        break;
+                    }
+                }
+
+                let final_uploads = indexer.total_uploads();
+                assert!(
+                    final_uploads >= total_items,
+                    "all items should be uploaded (got {}, expected at least {})",
+                    final_uploads,
+                    total_items
+                );
+            }
+        });
+    }
+
+    #[test_traced]
+    fn test_restart_recovery_with_pruning() {
+        // Test that the queue handles restart correctly.
+        // Note: The journal uses section-based pruning, so items may be re-uploaded
+        // after restart if their section hasn't been fully reclaimed. This is safe
+        // because the indexer is idempotent (as documented in the module header).
+        let cfg = deterministic::Config::default().with_seed(789);
+        let executor = Runner::from(cfg);
+        executor.start(|mut context| async move {
+            let (seeds, _, _) = create_test_fixtures(&mut context);
+            let config = test_config();
+            let indexer = TestIndexer::new();
+
+            // Phase 1: Upload all items and mark them as pruned
+            {
+                let queue = Arc::new(
+                    UploadQueue::new(context.clone(), config.clone())
+                        .await
+                        .unwrap(),
+                );
+                queue.clone().start_worker(indexer.clone());
+
+                for seed in &seeds {
+                    queue.enqueue_seed(seed.clone()).await.unwrap();
+                }
+
+                // Wait for uploads to complete
+                for _ in 0..200 {
+                    context.sleep(Duration::from_millis(10)).await;
+                    if indexer.seed_count.load(AtomicOrdering::SeqCst) >= seeds.len() {
+                        break;
+                    }
+                }
+
+                assert_eq!(
+                    indexer.seed_count.load(AtomicOrdering::SeqCst),
+                    seeds.len(),
+                    "all seeds should be uploaded in phase 1"
+                );
+
+                // Wait for pruning to complete (updates logical boundary)
+                for _ in 0..100 {
+                    context.sleep(Duration::from_millis(10)).await;
+                    let stats = queue.stats().await;
+                    if stats.retained == 0 {
+                        break;
+                    }
+                }
+
+                let stats = queue.stats().await;
+                assert_eq!(stats.retained, 0, "logical boundary should show all items pruned");
+            }
+
+            // Phase 2: Restart - items may be re-uploaded since journal uses
+            // section-based pruning. Verify the queue recovers and completes.
+            {
+                let queue = Arc::new(
+                    UploadQueue::new(context.clone(), config.clone())
+                        .await
+                        .unwrap(),
+                );
+
+                // Check that the queue recovered some state
+                let stats = queue.stats().await;
+                info!(
+                    retained = stats.retained,
+                    pending = stats.pending,
+                    "queue state after restart"
+                );
+
+                queue.clone().start_worker(indexer.clone());
+
+                // If there are items to process, wait for them
+                if stats.retained > 0 {
+                    for _ in 0..200 {
+                        context.sleep(Duration::from_millis(10)).await;
+                        let stats = queue.stats().await;
+                        if stats.retained == 0 {
+                            break;
+                        }
+                    }
+                }
+
+                // Verify the queue eventually completes (all items processed)
+                let final_stats = queue.stats().await;
+                assert_eq!(
+                    final_stats.retained, 0,
+                    "queue should eventually process all items"
+                );
+            }
+        });
     }
 }
