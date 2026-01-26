@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Errors that can occur in the upload queue.
 #[derive(Debug, Error)]
@@ -554,48 +554,6 @@ struct QueueStats {
     retained: u64,
     /// Items needing upload (retained - completed - in_flight).
     pending: u64,
-}
-
-/// A handle to the upload queue for enqueueing uploads.
-///
-/// This is a lightweight clone of the queue that can be passed around.
-#[derive(Clone)]
-pub struct QueueHandle<E: Spawner + Clock + Storage + Metrics> {
-    queue: Arc<UploadQueue<E>>,
-}
-
-impl<E: Spawner + Clock + Storage + Metrics> QueueHandle<E> {
-    /// Create a new queue handle.
-    pub fn new(queue: Arc<UploadQueue<E>>) -> Self {
-        Self { queue }
-    }
-
-    /// Enqueue a seed for upload.
-    ///
-    /// This awaits the journal append to ensure crash safety.
-    pub async fn enqueue_seed(&self, seed: Seed) {
-        if let Err(e) = self.queue.enqueue_seed(seed).await {
-            error!(?e, "failed to enqueue seed");
-        }
-    }
-
-    /// Enqueue a notarization for upload.
-    ///
-    /// This awaits the journal append to ensure crash safety.
-    pub async fn enqueue_notarization(&self, notarized: Notarized) {
-        if let Err(e) = self.queue.enqueue_notarization(notarized).await {
-            error!(?e, "failed to enqueue notarization");
-        }
-    }
-
-    /// Enqueue a finalization for upload.
-    ///
-    /// This awaits the journal append to ensure crash safety.
-    pub async fn enqueue_finalization(&self, finalized: Finalized) {
-        if let Err(e) = self.queue.enqueue_finalization(finalized).await {
-            error!(?e, "failed to enqueue finalization");
-        }
-    }
 }
 
 #[cfg(test)]

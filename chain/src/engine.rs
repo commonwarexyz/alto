@@ -1,7 +1,7 @@
 use crate::{
     application::Application,
     indexer::{self, Indexer},
-    upload_queue::{self, QueueHandle, UploadQueue},
+    upload_queue::{self, UploadQueue},
 };
 use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
 use commonware_broadcast::buffered;
@@ -284,11 +284,9 @@ where
                         // Start the background worker that processes the queue
                         queue.clone().start_worker(indexer);
 
-                        // Create pusher with queue handle
-                        let queue_handle = QueueHandle::new(queue);
                         Some(indexer::Pusher::new(
                             context.with_label("indexer"),
-                            queue_handle,
+                            queue,
                             marshal_mailbox.clone(),
                         ))
                     }

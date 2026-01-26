@@ -6,10 +6,11 @@ use commonware_parallel::Strategy;
 use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use std::future::Future;
 #[cfg(test)]
-use std::{sync::atomic::AtomicBool, sync::Arc};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use tracing::{debug, warn};
 
-use crate::upload_queue::QueueHandle;
+use crate::upload_queue::UploadQueue;
 
 /// Trait for interacting with an indexer.
 pub trait Indexer: Clone + Send + Sync + 'static {
@@ -104,15 +105,15 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
 #[derive(Clone)]
 pub struct Pusher<E: Spawner + Clock + Storage + Metrics> {
     context: E,
-    queue: QueueHandle<E>,
+    queue: Arc<UploadQueue<E>>,
     marshal: marshal::Mailbox<Scheme, Block>,
 }
 
 impl<E: Spawner + Clock + Storage + Metrics> Pusher<E> {
-    /// Create a new [Pusher] with a queue handle.
+    /// Create a new [Pusher] with an upload queue.
     pub fn new(
         context: E,
-        queue: QueueHandle<E>,
+        queue: Arc<UploadQueue<E>>,
         marshal: marshal::Mailbox<Scheme, Block>,
     ) -> Self {
         Self {
@@ -131,9 +132,12 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
             Activity::Notarization(notarization) => {
                 let view = notarization.view();
 
-                // Enqueue seed (awaits disk write for crash safety)
+                // Enqueue seed (panics on disk failure - fail-fast)
                 let seed = notarization.seed();
-                self.queue.enqueue_seed(seed).await;
+                self.queue
+                    .enqueue_seed(seed)
+                    .await
+                    .expect("failed to enqueue seed");
                 debug!(%view, "seed enqueued for upload");
 
                 // Spawn task to wait for block and enqueue notarization
@@ -151,9 +155,12 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
                             return;
                         };
 
-                        // Enqueue notarization (awaits disk write for crash safety)
+                        // Enqueue notarization (panics on disk failure - fail-fast)
                         let notarization = Notarized::new(notarization, block);
-                        queue.enqueue_notarization(notarization).await;
+                        queue
+                            .enqueue_notarization(notarization)
+                            .await
+                            .expect("failed to enqueue notarization");
                         debug!(%view, "notarization enqueued for upload");
                     }
                 });
@@ -161,9 +168,12 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
             Activity::Finalization(finalization) => {
                 let view = finalization.view();
 
-                // Enqueue seed (awaits disk write for crash safety)
+                // Enqueue seed (panics on disk failure - fail-fast)
                 let seed = finalization.seed();
-                self.queue.enqueue_seed(seed).await;
+                self.queue
+                    .enqueue_seed(seed)
+                    .await
+                    .expect("failed to enqueue seed");
                 debug!(%view, "seed enqueued for upload");
 
                 // Spawn task to wait for block and enqueue finalization
@@ -181,9 +191,12 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
                             return;
                         };
 
-                        // Enqueue finalization (awaits disk write for crash safety)
+                        // Enqueue finalization (panics on disk failure - fail-fast)
                         let finalization = Finalized::new(finalization, block);
-                        queue.enqueue_finalization(finalization).await;
+                        queue
+                            .enqueue_finalization(finalization)
+                            .await
+                            .expect("failed to enqueue finalization");
                         debug!(%view, "finalization enqueued for upload");
                     }
                 });
