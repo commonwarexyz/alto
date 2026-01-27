@@ -898,6 +898,67 @@ mod tests {
     }
 
     #[test_traced]
+    fn test_determinism() {
+        // Test that the upload queue behaves deterministically when run with the same seed.
+        // This verifies that all async operations (journal I/O, parallel uploads, pruning)
+        // execute in a reproducible order.
+
+        /// Run the upload scenario and return the auditor state.
+        fn run_scenario(seed: u64) -> String {
+            let cfg = deterministic::Config::default().with_seed(seed);
+            let executor = Runner::from(cfg);
+            executor.start(|mut context| async move {
+                let (seeds, notarizations, finalizations) = create_test_fixtures(&mut context);
+                let indexer = TestIndexer::new();
+                let config = test_config();
+
+                let queue = Arc::new(UploadQueue::new(context.clone(), config).await.unwrap());
+                queue.clone().start_worker(indexer.clone());
+
+                // Enqueue a mix of all upload types
+                for seed in &seeds {
+                    queue.enqueue_seed(seed.clone()).await.unwrap();
+                }
+                for notarization in &notarizations {
+                    queue.enqueue_notarization(notarization.clone()).await.unwrap();
+                }
+                for finalization in &finalizations {
+                    queue.enqueue_finalization(finalization.clone()).await.unwrap();
+                }
+
+                let total_items = seeds.len() + notarizations.len() + finalizations.len();
+
+                // Wait for all uploads to complete
+                for _ in 0..200 {
+                    context.sleep(Duration::from_millis(10)).await;
+                    if indexer.total_uploads() >= total_items {
+                        break;
+                    }
+                }
+
+                // Wait for pruning to complete
+                for _ in 0..100 {
+                    context.sleep(Duration::from_millis(10)).await;
+                    let stats = queue.stats().await;
+                    if stats.retained == 0 {
+                        break;
+                    }
+                }
+
+                assert_eq!(indexer.total_uploads(), total_items);
+                context.auditor().state()
+            })
+        }
+
+        // Run the same scenario twice with the same seed
+        let seed = 12345;
+        let state1 = run_scenario(seed);
+        let state2 = run_scenario(seed);
+
+        assert_eq!(state1, state2, "upload queue must be deterministic with same seed");
+    }
+
+    #[test_traced]
     fn test_restart_recovery_with_pruning() {
         // Test that the queue handles restart correctly.
         // Note: The journal uses section-based pruning, so items may be re-uploaded
