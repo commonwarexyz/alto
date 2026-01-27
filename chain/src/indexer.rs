@@ -132,7 +132,7 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
             Activity::Notarization(notarization) => {
                 let view = notarization.view();
 
-                // Enqueue seed (panics on disk failure - fail-fast)
+                // Enqueue seed
                 let seed = notarization.seed();
                 self.queue
                     .enqueue_seed(seed)
@@ -155,7 +155,7 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
                             return;
                         };
 
-                        // Enqueue notarization (panics on disk failure - fail-fast)
+                        // Enqueue notarization
                         let notarization = Notarized::new(notarization, block);
                         queue
                             .enqueue_notarization(notarization)
@@ -168,7 +168,7 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
             Activity::Finalization(finalization) => {
                 let view = finalization.view();
 
-                // Enqueue seed (panics on disk failure - fail-fast)
+                // Enqueue seed
                 let seed = finalization.seed();
                 self.queue
                     .enqueue_seed(seed)
@@ -191,7 +191,7 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
                             return;
                         };
 
-                        // Enqueue finalization (panics on disk failure - fail-fast)
+                        // Enqueue finalization
                         let finalization = Finalized::new(finalization, block);
                         queue
                             .enqueue_finalization(finalization)
