@@ -19,7 +19,7 @@ use crate::indexer::Indexer;
 use alto_types::{Finalized, Notarized, Seed};
 use bytes::{Buf, BufMut};
 use commonware_codec::{EncodeSize, Error as CodecError, Read, ReadExt, Write};
-use commonware_macros::select;
+use commonware_macros::select_loop;
 use commonware_runtime::{buffer::PoolRef, Clock, Metrics, Spawner, Storage};
 use commonware_storage::journal::{
     contiguous::variable::{Config as JournalConfig, Journal},
@@ -408,23 +408,16 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             .spawn(move |context| async move {
                 info!("upload queue worker started");
 
-                let mut signal = context.stopped();
-                loop {
-                    select! {
-                        _ = &mut signal => {
-                            info!("upload queue worker shutting down");
-                            break;
-                        },
-                        _ = async {
-                            queue.process_batch(&indexer).await;
-                            context.sleep(queue.config.poll_interval).await;
-                        } => {
-                            // Continue processing
-                        },
-                    }
+                select_loop! {
+                    context,
+                    on_stopped => {
+                        info!("upload queue worker shutting down");
+                    },
+                    _ = async {
+                        queue.process_batch(&indexer).await;
+                        context.sleep(queue.config.poll_interval).await;
+                    } => {},
                 }
-                // Drop signal to indicate cleanup is complete
-                drop(signal);
             });
     }
 
