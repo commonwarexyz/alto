@@ -21,17 +21,20 @@ use bytes::{Buf, BufMut};
 use commonware_codec::{EncodeSize, Error as CodecError, Read, ReadExt, Write};
 use commonware_macros::select_loop;
 use commonware_runtime::{buffer::PoolRef, Clock, Metrics, Spawner, Storage};
-use commonware_storage::journal::{
-    contiguous::variable::{Config as JournalConfig, Journal},
-    Error as JournalError,
+use commonware_storage::{
+    journal::{
+        contiguous::variable::{Config as JournalConfig, Journal},
+        Error as JournalError,
+    },
+    rmap::RMap,
 };
-use commonware_utils::{NZUsize, NZU16, NZU64};
+use commonware_utils::{futures::Pool, NZUsize, NZU16, NZU64};
 use futures::lock::Mutex;
 use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
@@ -50,15 +53,6 @@ pub enum QueuedUpload {
     Finalization(Finalized),
 }
 
-impl QueuedUpload {
-    fn kind_str(&self) -> &'static str {
-        match self {
-            QueuedUpload::Seed(_) => "seed",
-            QueuedUpload::Notarization(_) => "notarization",
-            QueuedUpload::Finalization(_) => "finalization",
-        }
-    }
-}
 
 impl Write for QueuedUpload {
     fn write(&self, writer: &mut impl BufMut) {
@@ -196,6 +190,56 @@ impl Default for Config {
     }
 }
 
+/// Result type for upload futures in the pool.
+type UploadResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+/// State for the upload queue worker.
+struct WorkerState {
+    pool: Pool<(u64, UploadResult)>,
+    retry_count: u32,
+    backoff_until: Option<SystemTime>,
+}
+
+impl WorkerState {
+    fn new() -> Self {
+        Self {
+            pool: Pool::default(),
+            retry_count: 0,
+            backoff_until: None,
+        }
+    }
+
+    /// Check if in backoff, clearing any expired backoff.
+    fn in_backoff(&mut self, now: SystemTime) -> bool {
+        match self.backoff_until {
+            Some(until) if now >= until => {
+                self.backoff_until = None;
+                false
+            }
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    /// Get remaining backoff duration, if any.
+    fn remaining_backoff(&self, now: SystemTime) -> Option<Duration> {
+        self.backoff_until
+            .and_then(|until| until.duration_since(now).ok())
+    }
+
+    /// Record a successful upload - reset backoff state.
+    fn record_success(&mut self) {
+        self.retry_count = 0;
+        self.backoff_until = None;
+    }
+
+    /// Record a failed upload - set backoff and increment retry count.
+    fn record_failure(&mut self, now: SystemTime, delay: Duration) {
+        self.backoff_until = Some(now + delay);
+        self.retry_count = self.retry_count.saturating_add(1);
+    }
+}
+
 /// A disk-backed queue for reliable upload delivery.
 ///
 /// Uses a journal for atomic appends. On successful upload, items are pruned.
@@ -214,10 +258,8 @@ pub struct UploadQueue<E: Spawner + Clock + Storage + Metrics> {
     in_flight: Mutex<HashSet<u64>>,
 
     /// Positions that completed successfully, waiting for contiguous pruning.
-    completed: Mutex<HashSet<u64>>,
-
-    /// Consecutive batch failures for exponential backoff.
-    consecutive_failures: AtomicU32,
+    /// Uses RMap for efficient contiguous range tracking and pruning.
+    completed: Mutex<RMap>,
 
     /// Logical pruning boundary - tracks what we've pruned (may differ from journal's
     /// reported boundary which updates asynchronously).
@@ -280,8 +322,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             metrics,
             journal: Mutex::new(journal),
             in_flight: Mutex::new(HashSet::new()),
-            completed: Mutex::new(HashSet::new()),
-            consecutive_failures: AtomicU32::new(0),
+            completed: Mutex::new(RMap::new()),
             logical_pruning_boundary: AtomicU64::new(effective_boundary),
         })
     }
@@ -303,8 +344,6 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
 
     /// Enqueue an upload item. Returns the position in the journal.
     async fn enqueue(&self, upload: QueuedUpload) -> Result<u64, Error> {
-        let kind = upload.kind_str();
-
         let mut journal = self.journal.lock().await;
         let position = journal.append(upload).await?;
         journal.sync().await?;
@@ -313,7 +352,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         self.metrics.queue_depth.inc();
         self.metrics.journal_size.set(journal.size() as i64);
 
-        debug!(position, kind, "enqueued upload");
+        debug!(position, "enqueued upload");
         Ok(position)
     }
 
@@ -338,60 +377,29 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
 
         // Use our logical boundary which updates immediately after prune
         let boundary = self.logical_pruning_boundary.load(Ordering::Acquire);
-        let mut prune_to = boundary;
 
-        // Find contiguous completed positions from boundary
-        while completed.remove(&prune_to) {
-            prune_to += 1;
-        }
+        // Check if boundary is in a completed range and get its end
+        let Some((_, range_end)) = completed.get(&boundary) else {
+            return Ok(());
+        };
 
-        if prune_to > boundary {
-            journal.prune(prune_to).await?;
-            journal.sync().await?;
-            // Update our logical boundary immediately (journal's boundary updates async)
-            self.logical_pruning_boundary
-                .store(prune_to, Ordering::Release);
-            self.metrics.pruning_boundary.set(prune_to as i64);
-            debug!(
-                old_boundary = boundary,
-                new_boundary = prune_to,
-                "pruned journal"
-            );
-        }
+        // Prune up to (but not including) the position after the range end
+        let prune_to = range_end + 1;
+        completed.remove(boundary, range_end);
+
+        journal.prune(prune_to).await?;
+        journal.sync().await?;
+        // Update our logical boundary immediately (journal's boundary updates async)
+        self.logical_pruning_boundary
+            .store(prune_to, Ordering::Release);
+        self.metrics.pruning_boundary.set(prune_to as i64);
+        debug!(
+            old_boundary = boundary,
+            new_boundary = prune_to,
+            "pruned journal"
+        );
 
         Ok(())
-    }
-
-    /// Get the next positions to process (up to max_concurrent).
-    async fn get_positions_to_process(&self) -> Vec<u64> {
-        let journal_size = self.journal.lock().await.size();
-
-        // Start from our logical pruning boundary - items before this have been successfully uploaded
-        let start = self.logical_pruning_boundary.load(Ordering::Acquire);
-
-        let in_flight = self.in_flight.lock().await;
-        let completed = self.completed.lock().await;
-
-        let mut positions = Vec::new();
-        let mut pos = start;
-
-        while positions.len() < self.config.max_concurrent_uploads && pos < journal_size {
-            // Skip if already in-flight or completed (waiting for prune)
-            if !in_flight.contains(&pos) && !completed.contains(&pos) {
-                positions.push(pos);
-            }
-            pos += 1;
-        }
-
-        positions
-    }
-
-    /// Mark positions as in-flight.
-    async fn mark_in_flight(&self, positions: &[u64]) {
-        let mut in_flight = self.in_flight.lock().await;
-        for &pos in positions {
-            in_flight.insert(pos);
-        }
     }
 
     /// Mark a position as failed (remove from in-flight so it can be retried).
@@ -400,96 +408,82 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         self.metrics.uploads_failed.inc();
     }
 
+    /// Compute backoff delay using exponential backoff.
+    fn compute_backoff_delay(&self, retry_count: u32) -> Duration {
+        let multiplier = 1u32.checked_shl(retry_count).unwrap_or(u32::MAX);
+        (self.config.retry_delay * multiplier).min(self.config.max_retry_delay)
+    }
+
     /// Start the background worker that processes the queue.
     pub fn start_worker<I: Indexer>(self: Arc<Self>, indexer: I) {
         let queue = self.clone();
         self.context
             .with_label("upload_worker")
-            .spawn(move |context| async move {
-                info!("upload queue worker started");
-
-                select_loop! {
-                    context,
-                    on_stopped => {
-                        info!("upload queue worker shutting down");
-                    },
-                    _ = async {
-                        queue.process_batch(&indexer).await;
-                        context.sleep(queue.config.poll_interval).await;
-                    } => {},
-                }
-            });
+            .spawn(move |context| queue.run(indexer, context));
     }
 
-    /// Process a batch of uploads in parallel.
-    async fn process_batch<I: Indexer>(&self, indexer: &I) {
-        // Get positions to process
-        let positions = self.get_positions_to_process().await;
-        if positions.is_empty() {
+    /// Run the upload queue worker loop.
+    async fn run<I: Indexer, C: Spawner + Clock>(self: Arc<Self>, indexer: I, context: C) {
+        info!("upload queue worker started");
+
+        let mut state = WorkerState::new();
+
+        select_loop! {
+            context,
+            on_stopped => {
+                state.pool.cancel_all();
+                info!("upload queue worker shutting down");
+            },
+            _ = async {
+                self.process_one(&indexer, &context, &mut state).await;
+            } => {},
+        }
+    }
+
+    /// Process one iteration: fill pool, wait for a completion, handle result.
+    async fn process_one<I: Indexer, C: Clock>(
+        &self,
+        indexer: &I,
+        context: &C,
+        state: &mut WorkerState,
+    ) {
+        let now = context.now();
+
+        // Handle backoff state
+        if state.in_backoff(now) {
+            // Still in backoff
+            if state.pool.is_empty() {
+                let remaining = state.remaining_backoff(now).unwrap_or_default();
+                context.sleep(remaining).await;
+                return;
+            }
+            // Pool not empty - drain it without adding new work
+        } else {
+            // Not in backoff - fill pool with new work
+            self.fill_pool(indexer, &mut state.pool).await;
+        }
+
+        if state.pool.is_empty() {
+            // No work available, sleep briefly
+            context.sleep(self.config.poll_interval).await;
             return;
         }
 
-        // Mark them as in-flight
-        self.mark_in_flight(&positions).await;
+        // Wait for exactly one completion
+        let (position, result) = state.pool.next_completed().await;
 
-        // Read all items first (holding lock once), then upload in parallel
-        let items: Vec<_> = {
-            let journal = self.journal.lock().await;
-            let mut items = Vec::with_capacity(positions.len());
-            for &pos in &positions {
-                match journal.read(pos).await {
-                    Ok(item) => items.push((pos, Some(item))),
-                    Err(e) => {
-                        warn!(?e, pos, "failed to read item from journal");
-                        items.push((pos, None));
-                    }
-                }
+        match result {
+            Ok(()) => {
+                self.mark_complete(position).await;
+                state.record_success();
             }
-            items
-        };
-
-        // Upload in parallel (no lock held)
-        let mut any_succeeded = false;
-        let mut any_failed = false;
-        let futures: Vec<_> = items
-            .into_iter()
-            .map(|(position, item)| async move {
-                let result = match item {
-                    Some(item) => self.do_upload(indexer, position, item).await,
-                    None => Err("failed to read from journal".into()),
-                };
-                (position, result)
-            })
-            .collect();
-
-        let results = futures::future::join_all(futures).await;
-
-        for (position, result) in results {
-            match result {
-                Ok(()) => {
-                    self.mark_complete(position).await;
-                    any_succeeded = true;
-                }
-                Err(e) => {
-                    warn!(?e, position, "upload failed, will retry");
-                    self.mark_failed(position).await;
-                    any_failed = true;
-                }
+            Err(e) => {
+                warn!(?e, position, "upload failed, will retry");
+                self.mark_failed(position).await;
+                let delay = self.compute_backoff_delay(state.retry_count);
+                debug!(retries = state.retry_count, ?delay, "backing off after failure");
+                state.record_failure(now, delay);
             }
-        }
-
-        // Update backoff state and sleep if needed.
-        // Reset on any success; sleep on any failure (even partial success triggers delay).
-        if any_succeeded {
-            self.consecutive_failures.store(0, Ordering::Relaxed);
-        }
-        if any_failed {
-            let failures = self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
-            // Cap exponent at 6 (64x multiplier) to avoid overflow
-            let multiplier = 1u32 << failures.min(6);
-            let delay = (self.config.retry_delay * multiplier).min(self.config.max_retry_delay);
-            debug!(failures = failures + 1, ?delay, "backing off after failure");
-            self.context.sleep(delay).await;
         }
 
         // Prune completed entries
@@ -498,15 +492,56 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         }
     }
 
-    /// Upload a single item to the indexer (item already read from journal).
-    async fn do_upload<I: Indexer>(
+    /// Fill the pool with upload futures up to max_concurrent_uploads.
+    async fn fill_pool<I: Indexer>(
         &self,
+        indexer: &I,
+        pool: &mut Pool<(u64, UploadResult)>,
+    ) {
+        // Collect positions to process (single lock acquisition for each mutex)
+        let slots_available = self.config.max_concurrent_uploads.saturating_sub(pool.len());
+        if slots_available == 0 {
+            return;
+        }
+
+        let journal_size = self.journal.lock().await.size();
+        let start = self.logical_pruning_boundary.load(Ordering::Acquire);
+        let positions: Vec<u64> = {
+            let in_flight = self.in_flight.lock().await;
+            let completed = self.completed.lock().await;
+            (start..journal_size)
+                .filter(|pos| !in_flight.contains(pos) && completed.get(pos).is_none())
+                .take(slots_available)
+                .collect()
+        };
+
+        // Process each position: read from journal, mark in-flight, push to pool
+        let mut in_flight = self.in_flight.lock().await;
+        for position in positions {
+            let item = match self.journal.lock().await.read(position).await {
+                Ok(item) => item,
+                Err(e) => {
+                    warn!(?e, position, "failed to read item from journal");
+                    continue;
+                }
+            };
+
+            in_flight.insert(position);
+
+            let indexer = indexer.clone();
+            pool.push(async move {
+                let result = Self::upload_item(&indexer, position, item).await;
+                (position, result)
+            });
+        }
+    }
+
+    /// Upload a single item to the indexer.
+    async fn upload_item<I: Indexer>(
         indexer: &I,
         position: u64,
         item: QueuedUpload,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let kind = item.kind_str();
-
         match item {
             QueuedUpload::Seed(seed) => {
                 indexer.seed_upload(seed).await?;
@@ -519,7 +554,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
             }
         }
 
-        debug!(position, kind, "upload succeeded");
+        debug!(position, "upload succeeded");
         Ok(())
     }
 
@@ -529,7 +564,11 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         let journal_size = self.journal.lock().await.size();
         let pruning_boundary = self.logical_pruning_boundary.load(Ordering::Acquire);
         let in_flight = self.in_flight.lock().await.len();
-        let completed_pending_prune = self.completed.lock().await.len();
+        let completed = self.completed.lock().await;
+        let completed_pending_prune: usize = completed
+            .iter()
+            .map(|(start, end)| (end - start + 1) as usize)
+            .sum();
 
         // Items retained in journal (not yet pruned)
         let retained = journal_size.saturating_sub(pruning_boundary);
