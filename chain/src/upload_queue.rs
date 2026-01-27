@@ -53,7 +53,6 @@ pub enum QueuedUpload {
     Finalization(Finalized),
 }
 
-
 impl Write for QueuedUpload {
     fn write(&self, writer: &mut impl BufMut) {
         match self {
@@ -481,7 +480,11 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
                 warn!(?e, position, "upload failed, will retry");
                 self.mark_failed(position).await;
                 let delay = self.compute_backoff_delay(state.retry_count);
-                debug!(retries = state.retry_count, ?delay, "backing off after failure");
+                debug!(
+                    retries = state.retry_count,
+                    ?delay,
+                    "backing off after failure"
+                );
                 state.record_failure(now, delay);
             }
         }
@@ -493,13 +496,12 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
     }
 
     /// Fill the pool with upload futures up to max_concurrent_uploads.
-    async fn fill_pool<I: Indexer>(
-        &self,
-        indexer: &I,
-        pool: &mut Pool<(u64, UploadResult)>,
-    ) {
+    async fn fill_pool<I: Indexer>(&self, indexer: &I, pool: &mut Pool<(u64, UploadResult)>) {
         // Collect positions to process (single lock acquisition for each mutex)
-        let slots_available = self.config.max_concurrent_uploads.saturating_sub(pool.len());
+        let slots_available = self
+            .config
+            .max_concurrent_uploads
+            .saturating_sub(pool.len());
         if slots_available == 0 {
             return;
         }
@@ -920,10 +922,16 @@ mod tests {
                     queue.enqueue_seed(seed.clone()).await.unwrap();
                 }
                 for notarization in &notarizations {
-                    queue.enqueue_notarization(notarization.clone()).await.unwrap();
+                    queue
+                        .enqueue_notarization(notarization.clone())
+                        .await
+                        .unwrap();
                 }
                 for finalization in &finalizations {
-                    queue.enqueue_finalization(finalization.clone()).await.unwrap();
+                    queue
+                        .enqueue_finalization(finalization.clone())
+                        .await
+                        .unwrap();
                 }
 
                 let total_items = seeds.len() + notarizations.len() + finalizations.len();
@@ -955,7 +963,10 @@ mod tests {
         let state1 = run_scenario(seed);
         let state2 = run_scenario(seed);
 
-        assert_eq!(state1, state2, "upload queue must be deterministic with same seed");
+        assert_eq!(
+            state1, state2,
+            "upload queue must be deterministic with same seed"
+        );
     }
 
     #[test_traced]
