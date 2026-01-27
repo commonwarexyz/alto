@@ -384,10 +384,15 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
 
         // Prune up to (but not including) the position after the range end
         let prune_to = range_end + 1;
-        completed.remove(boundary, range_end);
 
+        // Important: prune and sync the journal BEFORE updating in-memory state.
+        // If either operation fails, we return early without modifying `completed`,
+        // keeping state consistent. The positions remain in `completed` and won't
+        // be re-uploaded on retry.
         journal.prune(prune_to).await?;
         journal.sync().await?;
+
+        completed.remove(boundary, range_end);
         // Update our logical boundary immediately (journal's boundary updates async)
         self.logical_pruning_boundary
             .store(prune_to, Ordering::Release);
