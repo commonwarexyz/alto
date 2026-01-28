@@ -510,7 +510,7 @@ impl<E: Spawner + Clock + Storage + Metrics> Actor<E> {
             // Add upload future to pool
             let indexer = indexer.clone();
             self.uploads.push(async move {
-                let result = upload_item(&indexer, position, item).await;
+                let result = upload_item(&indexer, item).await;
                 (position, result)
             });
         }
@@ -539,7 +539,6 @@ impl<E: Spawner + Clock + Storage + Metrics> Actor<E> {
 /// Upload a single item to the indexer.
 async fn upload_item<I: Indexer>(
     indexer: &I,
-    position: u64,
     item: Item,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match item {
@@ -553,8 +552,6 @@ async fn upload_item<I: Indexer>(
             indexer.finalized_upload(finalized).await?;
         }
     }
-
-    debug!(position, "upload succeeded");
     Ok(())
 }
 
