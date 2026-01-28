@@ -41,11 +41,40 @@ use commonware_utils::{
     futures::{OptionFuture, Pool},
     NZU16, NZU64, NZUsize,
 };
-use futures::{channel::mpsc, SinkExt, StreamExt};
+use futures::{
+    channel::{mpsc, oneshot},
+    SinkExt, StreamExt,
+};
 use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
+use thiserror::Error;
 use tracing::{debug, info, warn};
+
+/// Error returned when enqueueing an upload fails.
+#[derive(Debug, Clone, Error)]
+pub enum EnqueueError {
+    /// The upload queue actor has stopped.
+    #[error("upload queue actor stopped")]
+    ActorStopped,
+    /// Failed to write to the journal.
+    #[error("journal error: {0}")]
+    JournalError(String),
+}
+
+impl From<JournalError> for EnqueueError {
+    fn from(e: JournalError) -> Self {
+        EnqueueError::JournalError(e.to_string())
+    }
+}
+
+/// Message sent to the upload queue actor.
+struct Message {
+    /// The item to enqueue.
+    item: Item,
+    /// Channel to send back the result (journal position or error).
+    ack: oneshot::Sender<Result<u64, EnqueueError>>,
+}
 
 /// Handle for sending uploads to the queue actor.
 ///
@@ -53,29 +82,43 @@ use tracing::{debug, info, warn};
 /// and shared across tasks. Sends block if the mailbox is full.
 #[derive(Clone)]
 pub struct Mailbox {
-    sender: mpsc::Sender<Item>,
+    sender: mpsc::Sender<Message>,
 }
 
 impl Mailbox {
-    /// Enqueue a seed for upload. Blocks if mailbox is full.
-    pub async fn enqueue_seed(&self, seed: Seed) {
-        self.enqueue(Item::Seed(seed)).await;
+    /// Enqueue a seed for upload.
+    ///
+    /// Returns the journal position once the item is durably stored.
+    /// Blocks if the mailbox is full.
+    pub async fn enqueue_seed(&self, seed: Seed) -> Result<u64, EnqueueError> {
+        self.enqueue(Item::Seed(seed)).await
     }
 
-    /// Enqueue a notarization for upload. Blocks if mailbox is full.
-    pub async fn enqueue_notarization(&self, notarized: Notarized) {
-        self.enqueue(Item::Notarization(notarized)).await;
+    /// Enqueue a notarization for upload.
+    ///
+    /// Returns the journal position once the item is durably stored.
+    /// Blocks if the mailbox is full.
+    pub async fn enqueue_notarization(&self, notarized: Notarized) -> Result<u64, EnqueueError> {
+        self.enqueue(Item::Notarization(notarized)).await
     }
 
-    /// Enqueue a finalization for upload. Blocks if mailbox is full.
-    pub async fn enqueue_finalization(&self, finalized: Finalized) {
-        self.enqueue(Item::Finalization(finalized)).await;
+    /// Enqueue a finalization for upload.
+    ///
+    /// Returns the journal position once the item is durably stored.
+    /// Blocks if the mailbox is full.
+    pub async fn enqueue_finalization(&self, finalized: Finalized) -> Result<u64, EnqueueError> {
+        self.enqueue(Item::Finalization(finalized)).await
     }
 
-    /// Enqueue an upload item. Blocks if mailbox is full.
-    async fn enqueue(&self, upload: Item) {
-        // Ignore error - only fails if receiver is dropped (actor stopped)
-        let _ = self.sender.clone().send(upload).await;
+    /// Enqueue an upload item and wait for durable acknowledgment.
+    async fn enqueue(&self, item: Item) -> Result<u64, EnqueueError> {
+        let (ack_tx, ack_rx) = oneshot::channel();
+        self.sender
+            .clone()
+            .send(Message { item, ack: ack_tx })
+            .await
+            .map_err(|_| EnqueueError::ActorStopped)?;
+        ack_rx.await.map_err(|_| EnqueueError::ActorStopped)?
     }
 }
 
@@ -241,7 +284,7 @@ pub struct Actor<E: Spawner + Clock + Storage + Metrics> {
     metrics: QueueMetrics,
 
     /// Receiver for incoming uploads.
-    receiver: mpsc::Receiver<Item>,
+    receiver: mpsc::Receiver<Message>,
 
     /// Pool of in-flight upload futures.
     uploads: Pool<(u64, UploadResult)>,
@@ -358,15 +401,18 @@ impl<E: Spawner + Clock + Storage + Metrics> Actor<E> {
                 info!("upload queue actor shutting down");
             },
             // Handle incoming uploads
-            upload = self.receiver.next() => {
-                let Some(upload) = upload else {
+            msg = self.receiver.next() => {
+                let Some(Message { item, ack }) = msg else {
                     debug!("mailbox closed, stopping actor");
                     break;
                 };
-                if let Err(e) = self.enqueue(upload).await {
-                    warn!(?e, "failed to enqueue upload");
+                let result = self.enqueue_item(item).await;
+                let should_spawn = result.is_ok();
+                // Send ack to caller (ignore if they stopped waiting)
+                let _ = ack.send(result);
+                if should_spawn {
+                    self.spawn_uploads(&indexer, backoff_until).await;
                 }
-                self.spawn_uploads(&indexer, backoff_until).await;
             },
             // Handle upload completions
             (position, result) = self.uploads.next_completed() => {
@@ -408,9 +454,9 @@ impl<E: Spawner + Clock + Storage + Metrics> Actor<E> {
         }
     }
 
-    /// Enqueue an upload item. Returns the position in the journal.
-    async fn enqueue(&mut self, upload: Item) -> Result<u64, JournalError> {
-        let position = self.journal.append(upload).await?;
+    /// Enqueue an upload item to the journal. Returns the position once durably stored.
+    async fn enqueue_item(&mut self, item: Item) -> Result<u64, EnqueueError> {
+        let position = self.journal.append(item).await?;
         self.journal.sync().await?;
 
         self.metrics.uploads_enqueued.inc();
@@ -709,7 +755,7 @@ mod tests {
 
             // Enqueue seeds
             for seed in &seeds {
-                mailbox.enqueue_seed(seed.clone()).await;
+                mailbox.enqueue_seed(seed.clone()).await.unwrap();
             }
 
             // Wait for uploads to complete
@@ -745,7 +791,7 @@ mod tests {
 
                 for seed in &seeds {
                     // Enqueue directly on actor (not yet running)
-                    actor.enqueue(Item::Seed(seed.clone())).await.unwrap();
+                    actor.enqueue_item(Item::Seed(seed.clone())).await.unwrap();
                 }
 
                 let stats = actor.stats();
@@ -817,7 +863,7 @@ mod tests {
 
                 // Enqueue seeds
                 for seed in &seeds {
-                    mailbox.enqueue_seed(seed.clone()).await;
+                    mailbox.enqueue_seed(seed.clone()).await.unwrap();
                 }
 
                 // Wait for seeds to upload
@@ -830,7 +876,7 @@ mod tests {
 
                 // Enqueue notarizations (may or may not upload before "crash")
                 for notarization in &notarizations {
-                    mailbox.enqueue_notarization(notarization.clone()).await;
+                    mailbox.enqueue_notarization(notarization.clone()).await.unwrap();
                 }
 
                 // Small delay - some notarizations might upload
@@ -893,13 +939,13 @@ mod tests {
 
                 // Enqueue a mix of all upload types
                 for seed in &seeds {
-                    mailbox.enqueue_seed(seed.clone()).await;
+                    mailbox.enqueue_seed(seed.clone()).await.unwrap();
                 }
                 for notarization in &notarizations {
-                    mailbox.enqueue_notarization(notarization.clone()).await;
+                    mailbox.enqueue_notarization(notarization.clone()).await.unwrap();
                 }
                 for finalization in &finalizations {
-                    mailbox.enqueue_finalization(finalization.clone()).await;
+                    mailbox.enqueue_finalization(finalization.clone()).await.unwrap();
                 }
 
                 let total_items = seeds.len() + notarizations.len() + finalizations.len();
@@ -952,7 +998,7 @@ mod tests {
                 let _handle = actor.start(indexer.clone());
 
                 for seed in &seeds {
-                    mailbox.enqueue_seed(seed.clone()).await;
+                    mailbox.enqueue_seed(seed.clone()).await.unwrap();
                 }
 
                 // Wait for uploads to complete
