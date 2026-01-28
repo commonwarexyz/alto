@@ -3,14 +3,15 @@ use alto_types::Identity;
 use alto_types::{Activity, Block, Finalized, Notarized, Scheme, Seed, Seedable};
 use commonware_consensus::{marshal, Reporter, Viewable};
 use commonware_parallel::Strategy;
-use commonware_runtime::{Clock, Metrics, Spawner, Storage};
+use commonware_runtime::{Clock, Metrics, Spawner};
 use std::future::Future;
 #[cfg(test)]
 use std::sync::atomic::AtomicBool;
+#[cfg(test)]
 use std::sync::Arc;
 use tracing::{debug, warn};
 
-use crate::upload_queue::UploadQueue;
+use crate::upload_queue::Mailbox;
 
 /// Trait for interacting with an indexer.
 pub trait Indexer: Clone + Send + Sync + 'static {
@@ -103,28 +104,24 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
 /// to disk before returning, and a background worker retries until the indexer
 /// acknowledges receipt.
 #[derive(Clone)]
-pub struct Pusher<E: Spawner + Clock + Storage + Metrics> {
+pub struct Pusher<E: Spawner + Clock + Metrics> {
     context: E,
-    queue: Arc<UploadQueue<E>>,
+    mailbox: Mailbox,
     marshal: marshal::Mailbox<Scheme, Block>,
 }
 
-impl<E: Spawner + Clock + Storage + Metrics> Pusher<E> {
-    /// Create a new [Pusher] with an upload queue.
-    pub fn new(
-        context: E,
-        queue: Arc<UploadQueue<E>>,
-        marshal: marshal::Mailbox<Scheme, Block>,
-    ) -> Self {
+impl<E: Spawner + Clock + Metrics> Pusher<E> {
+    /// Create a new [Pusher] with an upload queue mailbox.
+    pub fn new(context: E, mailbox: Mailbox, marshal: marshal::Mailbox<Scheme, Block>) -> Self {
         Self {
             context,
-            queue,
+            mailbox,
             marshal,
         }
     }
 }
 
-impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
+impl<E: Spawner + Clock + Metrics> Reporter for Pusher<E> {
     type Activity = Activity;
 
     async fn report(&mut self, activity: Self::Activity) {
@@ -134,15 +131,12 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
 
                 // Enqueue seed
                 let seed = notarization.seed();
-                self.queue
-                    .enqueue_seed(seed)
-                    .await
-                    .expect("failed to enqueue seed");
+                self.mailbox.enqueue_seed(seed).await;
                 debug!(%view, "seed enqueued for upload");
 
                 // Spawn task to wait for block and enqueue notarization
                 self.context.with_label("notarized_block").spawn({
-                    let queue = self.queue.clone();
+                    let mailbox = self.mailbox.clone();
                     let mut marshal = self.marshal.clone();
                     move |_| async move {
                         // Wait for block
@@ -157,10 +151,7 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
 
                         // Enqueue notarization
                         let notarization = Notarized::new(notarization, block);
-                        queue
-                            .enqueue_notarization(notarization)
-                            .await
-                            .expect("failed to enqueue notarization");
+                        mailbox.enqueue_notarization(notarization).await;
                         debug!(%view, "notarization enqueued for upload");
                     }
                 });
@@ -170,15 +161,12 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
 
                 // Enqueue seed
                 let seed = finalization.seed();
-                self.queue
-                    .enqueue_seed(seed)
-                    .await
-                    .expect("failed to enqueue seed");
+                self.mailbox.enqueue_seed(seed).await;
                 debug!(%view, "seed enqueued for upload");
 
                 // Spawn task to wait for block and enqueue finalization
                 self.context.with_label("finalized_block").spawn({
-                    let queue = self.queue.clone();
+                    let mailbox = self.mailbox.clone();
                     let mut marshal = self.marshal.clone();
                     move |_| async move {
                         // Wait for block
@@ -193,10 +181,7 @@ impl<E: Spawner + Clock + Storage + Metrics> Reporter for Pusher<E> {
 
                         // Enqueue finalization
                         let finalization = Finalized::new(finalization, block);
-                        queue
-                            .enqueue_finalization(finalization)
-                            .await
-                            .expect("failed to enqueue finalization");
+                        mailbox.enqueue_finalization(finalization).await;
                         debug!(%view, "finalization enqueued for upload");
                     }
                 });
