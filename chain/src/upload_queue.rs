@@ -37,7 +37,10 @@ use commonware_storage::{
     },
     rmap::RMap,
 };
-use commonware_utils::{NZU16, NZU64, NZUsize};
+use commonware_utils::{
+    futures::{OptionFuture, Pool},
+    NZU16, NZU64, NZUsize,
+};
 use futures::{channel::mpsc, SinkExt, StreamExt};
 use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
 use std::collections::HashSet;
@@ -223,51 +226,6 @@ impl Default for Config {
 /// Result type for upload completion.
 type UploadResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
-/// Completion message from upload tasks.
-type CompletionMessage = (u64, UploadResult);
-
-/// State for the upload queue worker.
-struct WorkerState {
-    /// Number of uploads currently in flight.
-    in_flight_count: usize,
-    retry_count: u32,
-    backoff_until: Option<SystemTime>,
-}
-
-impl WorkerState {
-    fn new() -> Self {
-        Self {
-            in_flight_count: 0,
-            retry_count: 0,
-            backoff_until: None,
-        }
-    }
-
-    /// Check if in backoff.
-    fn in_backoff(&self, now: SystemTime) -> bool {
-        self.backoff_until.is_some_and(|until| now < until)
-    }
-
-    /// Record a successful upload - reset backoff state.
-    fn record_success(&mut self) {
-        self.retry_count = 0;
-        self.backoff_until = None;
-    }
-
-    /// Record a failed upload - set backoff and increment retry count.
-    fn record_failure(&mut self, now: SystemTime, delay: Duration) {
-        self.backoff_until = Some(now + delay);
-        self.retry_count = self.retry_count.saturating_add(1);
-    }
-
-    /// Duration until backoff expires, or a long duration if not in backoff.
-    fn backoff_remaining(&self, now: SystemTime) -> Duration {
-        self.backoff_until
-            .and_then(|until| until.duration_since(now).ok())
-            .unwrap_or(Duration::from_secs(3600)) // 1 hour - long enough to not trigger, short enough for tests
-    }
-}
-
 /// A disk-backed queue for reliable upload delivery.
 ///
 /// This actor owns all mutable state and processes uploads in a single-threaded
@@ -285,10 +243,8 @@ pub struct Actor<E: Spawner + Clock + Storage + Metrics> {
     /// Receiver for incoming uploads.
     receiver: mpsc::Receiver<Item>,
 
-    /// Receiver for upload completion notifications.
-    completions_rx: mpsc::UnboundedReceiver<CompletionMessage>,
-    /// Sender for upload completion notifications (cloned to spawned tasks).
-    completions_tx: mpsc::UnboundedSender<CompletionMessage>,
+    /// Pool of in-flight upload futures.
+    uploads: Pool<(u64, UploadResult)>,
 
     /// The journal storing upload items.
     journal: Journal<E, Item>,
@@ -360,16 +316,12 @@ impl<E: Spawner + Clock + Storage + Metrics> Actor<E> {
         metrics.pruning_boundary.set(effective_boundary as i64);
         metrics.journal_size.set(journal_size as i64);
 
-        // Create completion channel for upload tasks
-        let (completions_tx, completions_rx) = mpsc::unbounded();
-
         let actor = Self {
             context,
             config,
             metrics,
             receiver,
-            completions_rx,
-            completions_tx,
+            uploads: Pool::default(),
             journal,
             in_flight: HashSet::new(),
             completed: RMap::new(),
@@ -393,10 +345,12 @@ impl<E: Spawner + Clock + Storage + Metrics> Actor<E> {
     async fn run<I: Indexer>(mut self, indexer: I) {
         info!("upload queue actor started");
 
-        let mut state = WorkerState::new();
+        // Backoff state (kept as local variables to avoid borrow conflicts in select_loop)
+        let mut retry_count: u32 = 0;
+        let mut backoff_until: Option<SystemTime> = None;
 
         // Process any items loaded from disk on startup
-        self.spawn_uploads(&indexer, &mut state).await;
+        self.spawn_uploads(&indexer, backoff_until).await;
 
         select_loop! {
             self.context,
@@ -412,40 +366,44 @@ impl<E: Spawner + Clock + Storage + Metrics> Actor<E> {
                 if let Err(e) = self.enqueue(upload).await {
                     warn!(?e, "failed to enqueue upload");
                 }
-                self.spawn_uploads(&indexer, &mut state).await;
+                self.spawn_uploads(&indexer, backoff_until).await;
             },
             // Handle upload completions
-            completion = self.completions_rx.next() => {
-                let Some((position, result)) = completion else {
-                    break;
-                };
-                self.handle_completion(position, result, &mut state);
+            (position, result) = self.uploads.next_completed() => {
+                self.handle_completion(position, result, &mut retry_count, &mut backoff_until);
                 self.try_prune().await.ok();
-                self.spawn_uploads(&indexer, &mut state).await;
+                self.spawn_uploads(&indexer, backoff_until).await;
             },
             // Wake up when backoff expires to retry failed uploads
-            _ = self.context.sleep(state.backoff_remaining(self.context.now())) => {
-                state.backoff_until = None;
-                self.spawn_uploads(&indexer, &mut state).await;
+            _ = OptionFuture::from(backoff_until.and_then(|until| until.duration_since(self.context.now()).ok()).map(|d| self.context.sleep(d))) => {
+                backoff_until = None;
+                self.spawn_uploads(&indexer, backoff_until).await;
             },
         }
     }
 
     /// Handle an upload completion result.
-    fn handle_completion(&mut self, position: u64, result: UploadResult, state: &mut WorkerState) {
-        state.in_flight_count = state.in_flight_count.saturating_sub(1);
-
+    fn handle_completion(
+        &mut self,
+        position: u64,
+        result: UploadResult,
+        retry_count: &mut u32,
+        backoff_until: &mut Option<SystemTime>,
+    ) {
         match result {
             Ok(()) => {
                 self.mark_complete(position);
-                state.record_success();
+                // Reset backoff on success
+                *retry_count = 0;
+                *backoff_until = None;
             }
             Err(e) => {
                 warn!(?e, position, "upload failed, will retry");
                 self.mark_failed(position);
-                let delay = self.compute_backoff_delay(state.retry_count);
-                debug!(retries = state.retry_count, ?delay, "backing off after failure");
-                state.record_failure(self.context.now(), delay);
+                let delay = self.compute_backoff_delay(*retry_count);
+                debug!(retries = *retry_count, ?delay, "backing off after failure");
+                *backoff_until = Some(self.context.now() + delay);
+                *retry_count = retry_count.saturating_add(1);
             }
         }
     }
@@ -515,18 +473,19 @@ impl<E: Spawner + Clock + Storage + Metrics> Actor<E> {
         (self.config.retry_delay * multiplier).min(self.config.max_retry_delay)
     }
 
-    /// Spawn upload tasks up to max_concurrent_uploads.
+    /// Add upload futures to the pool up to max_concurrent_uploads.
     ///
     /// Returns early if in backoff or no slots available.
-    async fn spawn_uploads<I: Indexer>(&mut self, indexer: &I, state: &mut WorkerState) {
-        if state.in_backoff(self.context.now()) {
+    async fn spawn_uploads<I: Indexer>(&mut self, indexer: &I, backoff_until: Option<SystemTime>) {
+        // Check if in backoff
+        if backoff_until.is_some_and(|until| self.context.now() < until) {
             return;
         }
 
         let slots_available = self
             .config
             .max_concurrent_uploads
-            .saturating_sub(state.in_flight_count);
+            .saturating_sub(self.uploads.len());
         if slots_available == 0 {
             return;
         }
@@ -537,7 +496,7 @@ impl<E: Spawner + Clock + Storage + Metrics> Actor<E> {
             .take(slots_available)
             .collect();
 
-        // Process each position: read from journal, mark in-flight, spawn upload task
+        // Process each position: read from journal, mark in-flight, add to upload pool
         for position in positions {
             let item = match self.journal.read(position).await {
                 Ok(item) => item,
@@ -547,14 +506,12 @@ impl<E: Spawner + Clock + Storage + Metrics> Actor<E> {
                 }
             };
             self.in_flight.insert(position);
-            state.in_flight_count += 1;
 
-            // Spawn upload task
+            // Add upload future to pool
             let indexer = indexer.clone();
-            let completions_tx = self.completions_tx.clone();
-            self.context.clone().spawn(move |_| async move {
+            self.uploads.push(async move {
                 let result = upload_item(&indexer, position, item).await;
-                let _ = completions_tx.unbounded_send((position, result));
+                (position, result)
             });
         }
     }
