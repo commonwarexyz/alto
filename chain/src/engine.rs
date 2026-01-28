@@ -1,7 +1,7 @@
 use crate::{
     application::Application,
     indexer::{self, Indexer},
-    upload_queue::{self, UploadQueue},
+    upload_queue::{self, Actor as UploadQueueActor},
 };
 use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
 use commonware_broadcast::buffered;
@@ -32,7 +32,6 @@ use futures::{channel::mpsc, future::try_join_all};
 use governor::clock::Clock as GClock;
 use governor::Quota;
 use rand::{CryptoRng, Rng};
-use std::sync::Arc;
 use std::{
     num::NonZero,
     time::{Duration, Instant},
@@ -273,16 +272,15 @@ impl<
                             ..Default::default()
                         });
 
-                match UploadQueue::new(context.with_label("upload_queue"), queue_config).await {
-                    Ok(queue) => {
-                        let queue = Arc::new(queue);
-
-                        // Start the background worker that processes the queue
-                        queue.clone().start_worker(indexer);
+                match UploadQueueActor::new(context.with_label("upload_queue"), queue_config).await
+                {
+                    Ok((actor, mailbox)) => {
+                        // Start the upload queue actor
+                        let _handle = actor.start(indexer);
 
                         Some(indexer::Pusher::new(
                             context.with_label("indexer"),
-                            queue,
+                            mailbox,
                             marshal_mailbox.clone(),
                         ))
                     }
