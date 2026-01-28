@@ -131,7 +131,10 @@ impl<E: Spawner + Clock + Metrics> Reporter for Pusher<E> {
 
                 // Enqueue seed
                 let seed = notarization.seed();
-                self.mailbox.enqueue_seed(seed).await;
+                if let Err(e) = self.mailbox.enqueue_seed(seed).await {
+                    warn!(%view, ?e, "failed to enqueue seed for upload");
+                    return;
+                }
                 debug!(%view, "seed enqueued for upload");
 
                 // Spawn task to wait for block and enqueue notarization
@@ -151,7 +154,10 @@ impl<E: Spawner + Clock + Metrics> Reporter for Pusher<E> {
 
                         // Enqueue notarization
                         let notarization = Notarized::new(notarization, block);
-                        mailbox.enqueue_notarization(notarization).await;
+                        if let Err(e) = mailbox.enqueue_notarization(notarization).await {
+                            warn!(%view, ?e, "failed to enqueue notarization for upload");
+                            return;
+                        }
                         debug!(%view, "notarization enqueued for upload");
                     }
                 });
@@ -161,7 +167,10 @@ impl<E: Spawner + Clock + Metrics> Reporter for Pusher<E> {
 
                 // Enqueue seed
                 let seed = finalization.seed();
-                self.mailbox.enqueue_seed(seed).await;
+                if let Err(e) = self.mailbox.enqueue_seed(seed).await {
+                    warn!(%view, ?e, "failed to enqueue seed for upload");
+                    return;
+                }
                 debug!(%view, "seed enqueued for upload");
 
                 // Spawn task to wait for block and enqueue finalization
@@ -181,7 +190,10 @@ impl<E: Spawner + Clock + Metrics> Reporter for Pusher<E> {
 
                         // Enqueue finalization
                         let finalization = Finalized::new(finalization, block);
-                        mailbox.enqueue_finalization(finalization).await;
+                        if let Err(e) = mailbox.enqueue_finalization(finalization).await {
+                            warn!(%view, ?e, "failed to enqueue finalization for upload");
+                            return;
+                        }
                         debug!(%view, "finalization enqueued for upload");
                     }
                 });
