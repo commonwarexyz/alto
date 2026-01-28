@@ -523,8 +523,8 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
         };
 
         // Process each position: read from journal, mark in-flight, push to pool
-        let mut in_flight = self.in_flight.lock().await;
         for position in positions {
+            // Acquiring locks each time is intentional to avoid holding locks for too long.
             let item = match self.journal.lock().await.read(position).await {
                 Ok(item) => item,
                 Err(e) => {
@@ -532,8 +532,7 @@ impl<E: Spawner + Clock + Storage + Metrics> UploadQueue<E> {
                     continue;
                 }
             };
-
-            in_flight.insert(position);
+            self.in_flight.lock().await.insert(position);
 
             let indexer = indexer.clone();
             pool.push(async move {
