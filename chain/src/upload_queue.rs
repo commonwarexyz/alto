@@ -40,14 +40,14 @@ use tracing::{debug, info, warn};
 
 /// Errors that can occur in the upload queue.
 #[derive(Debug, Error)]
-pub enum Error {
+enum Error {
     #[error("journal error: {0}")]
     Journal(#[from] JournalError),
 }
 
 /// A queued upload with its type encoded in the data.
 #[derive(Clone)]
-pub enum QueuedUpload {
+enum QueuedUpload {
     Seed(Seed),
     Notarization(Notarized),
     Finalization(Finalized),
