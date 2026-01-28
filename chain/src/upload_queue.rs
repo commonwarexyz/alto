@@ -39,7 +39,7 @@ use commonware_storage::{
 };
 use commonware_utils::{
     futures::{OptionFuture, Pool},
-    NZU16, NZU64, NZUsize,
+    NZUsize, NZU16, NZU64,
 };
 use futures::{
     channel::{mpsc, oneshot},
@@ -323,8 +323,7 @@ impl<E: Spawner + Clock + Storage + Metrics> Actor<E> {
             buffer_pool: PoolRef::new(NZU16!(64), NZUsize!(64 * 1024)),
             write_buffer: NZUsize!(64 * 1024),
         };
-        let journal: Journal<E, Item> =
-            Journal::init(context.clone(), journal_config).await?;
+        let journal: Journal<E, Item> = Journal::init(context.clone(), journal_config).await?;
 
         // Calculate pending count from journal state
         let journal_size = journal.size();
@@ -785,9 +784,8 @@ mod tests {
 
             // Phase 1: Enqueue items but don't process them (no actor started)
             {
-                let (mut actor, mailbox) = Actor::new(context.clone(), config.clone())
-                    .await
-                    .unwrap();
+                let (mut actor, mailbox) =
+                    Actor::new(context.clone(), config.clone()).await.unwrap();
 
                 for seed in &seeds {
                     // Enqueue directly on actor (not yet running)
@@ -809,9 +807,7 @@ mod tests {
             // Phase 2: Restart - create new actor with same partition, start it
             let indexer = TestIndexer::new();
             {
-                let (actor, mailbox) = Actor::new(context.clone(), config.clone())
-                    .await
-                    .unwrap();
+                let (actor, mailbox) = Actor::new(context.clone(), config.clone()).await.unwrap();
 
                 // Verify items recovered (check before starting)
                 let stats = actor.stats();
@@ -856,9 +852,7 @@ mod tests {
 
             // Phase 1: Enqueue all, upload some
             {
-                let (actor, mailbox) = Actor::new(context.clone(), config.clone())
-                    .await
-                    .unwrap();
+                let (actor, mailbox) = Actor::new(context.clone(), config.clone()).await.unwrap();
                 let _handle = actor.start(indexer.clone());
 
                 // Enqueue seeds
@@ -876,7 +870,10 @@ mod tests {
 
                 // Enqueue notarizations (may or may not upload before "crash")
                 for notarization in &notarizations {
-                    mailbox.enqueue_notarization(notarization.clone()).await.unwrap();
+                    mailbox
+                        .enqueue_notarization(notarization.clone())
+                        .await
+                        .unwrap();
                 }
 
                 // Small delay - some notarizations might upload
@@ -891,9 +888,7 @@ mod tests {
             // Phase 2: Restart and verify remaining items upload
             // Note: Some items may be re-uploaded (idempotent), that's okay
             {
-                let (actor, mailbox) = Actor::new(context.clone(), config.clone())
-                    .await
-                    .unwrap();
+                let (actor, mailbox) = Actor::new(context.clone(), config.clone()).await.unwrap();
                 let _handle = actor.start(indexer.clone());
 
                 // Wait for all items to upload
@@ -942,10 +937,16 @@ mod tests {
                     mailbox.enqueue_seed(seed.clone()).await.unwrap();
                 }
                 for notarization in &notarizations {
-                    mailbox.enqueue_notarization(notarization.clone()).await.unwrap();
+                    mailbox
+                        .enqueue_notarization(notarization.clone())
+                        .await
+                        .unwrap();
                 }
                 for finalization in &finalizations {
-                    mailbox.enqueue_finalization(finalization.clone()).await.unwrap();
+                    mailbox
+                        .enqueue_finalization(finalization.clone())
+                        .await
+                        .unwrap();
                 }
 
                 let total_items = seeds.len() + notarizations.len() + finalizations.len();
@@ -992,9 +993,7 @@ mod tests {
 
             // Phase 1: Upload all items and wait for pruning
             {
-                let (actor, mailbox) = Actor::new(context.clone(), config.clone())
-                    .await
-                    .unwrap();
+                let (actor, mailbox) = Actor::new(context.clone(), config.clone()).await.unwrap();
                 let _handle = actor.start(indexer.clone());
 
                 for seed in &seeds {
@@ -1024,9 +1023,7 @@ mod tests {
             // Phase 2: Restart - items may be re-uploaded since journal uses
             // section-based pruning. Verify the queue recovers and completes.
             {
-                let (actor, _mailbox) = Actor::new(context.clone(), config.clone())
-                    .await
-                    .unwrap();
+                let (actor, _mailbox) = Actor::new(context.clone(), config.clone()).await.unwrap();
 
                 // Check that the queue recovered some state (before starting)
                 let stats = actor.stats();
