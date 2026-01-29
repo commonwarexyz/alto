@@ -416,11 +416,17 @@ impl<E: Spawner + Clock + Storage + Metrics> Actor<E> {
             // Handle upload completions
             (position, result) = self.uploads.next_completed() => {
                 self.handle_completion(position, result, &mut retry_count, &mut backoff_until);
-                self.try_prune().await.ok();
+                if let Err(e) = self.try_prune().await {
+                    warn!(?e, "failed to prune journal");
+                }
                 self.spawn_uploads(&indexer, backoff_until).await;
             },
-            // Wake up when backoff expires to retry failed uploads
-            _ = OptionFuture::from(backoff_until.and_then(|until| until.duration_since(self.context.now()).ok()).map(|d| self.context.sleep(d))) => {
+            // Handle backoff expiration - retry uploads after delay
+            // Note: Uses commonware_utils::futures::OptionFuture which yields Poll::Pending
+            // when None, NOT futures::future::OptionFuture which would immediately return
+            // Poll::Ready(None) and cause a busy loop.
+            _ = OptionFuture::from(backoff_until.map(|until| self.context.sleep_until(until))) => {
+                debug!("backoff expired, retrying uploads");
                 backoff_until = None;
                 self.spawn_uploads(&indexer, backoff_until).await;
             },
