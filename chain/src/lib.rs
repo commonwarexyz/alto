@@ -235,7 +235,8 @@ mod tests {
                     indexer: None,
                     strategy: Sequential,
                 };
-                let engine = Engine::new(context.with_label(&uid), config).await;
+                let validator_context = context.with_label(&uid);
+                let engine = Engine::new(validator_context.clone(), config).await;
 
                 // Get networking
                 let (pending, recovered, resolver, broadcast, backfill) =
@@ -255,7 +256,7 @@ mod tests {
                 };
 
                 let marshal_resolver =
-                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                    marshal::resolver::p2p::init(&validator_context, marshal_resolver_cfg, backfill);
 
                 // Start engine
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -420,7 +421,8 @@ mod tests {
                     indexer: None,
                     strategy: Sequential,
                 };
-                let engine = Engine::new(context.with_label(&uid), config).await;
+                let validator_context = context.with_label(&uid);
+                let engine = Engine::new(validator_context.clone(), config).await;
 
                 // Get networking
                 let (pending, recovered, resolver, broadcast, backfill) =
@@ -440,7 +442,7 @@ mod tests {
                 };
 
                 let marshal_resolver =
-                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                    marshal::resolver::p2p::init(&validator_context, marshal_resolver_cfg, backfill);
 
                 // Start engine
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -524,7 +526,8 @@ mod tests {
                 indexer: None,
                 strategy: Sequential,
             };
-            let engine = Engine::new(context.with_label(&uid), config).await;
+            let validator_context = context.with_label(&uid);
+                let engine = Engine::new(validator_context.clone(), config).await;
 
             // Get networking
             let (pending, recovered, resolver, broadcast, backfill) =
@@ -544,7 +547,7 @@ mod tests {
             };
 
             let marshal_resolver =
-                marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                marshal::resolver::p2p::init(&validator_context, marshal_resolver_cfg, backfill);
 
             // Start engine
             engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -671,7 +674,8 @@ mod tests {
                         indexer: None,
                         strategy: Sequential,
                     };
-                    let engine = Engine::new(context.with_label(&uid), config).await;
+                    let validator_context = context.with_label(&uid);
+                let engine = Engine::new(validator_context.clone(), config).await;
 
                     // Get networking
                     let (pending, recovered, resolver, broadcast, backfill) =
@@ -691,7 +695,7 @@ mod tests {
                     };
 
                     let marshal_resolver =
-                        marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                        marshal::resolver::p2p::init(&validator_context, marshal_resolver_cfg, backfill);
 
                     // Start engine
                     engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -856,7 +860,8 @@ mod tests {
                     indexer: Some(indexer.clone()),
                     strategy: Sequential,
                 };
-                let engine = Engine::new(context.with_label(&uid), config).await;
+                let validator_context = context.with_label(&uid);
+                let engine = Engine::new(validator_context.clone(), config).await;
 
                 // Get networking
                 let (pending, recovered, resolver, broadcast, backfill) =
@@ -876,7 +881,7 @@ mod tests {
                 };
 
                 let marshal_resolver =
-                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                    marshal::resolver::p2p::init(&validator_context, marshal_resolver_cfg, backfill);
 
                 // Start engine
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
