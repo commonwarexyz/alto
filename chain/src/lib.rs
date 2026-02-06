@@ -44,7 +44,9 @@ pub struct Peers {
 mod tests {
     use super::*;
     use alto_types::NAMESPACE;
-    use commonware_consensus::{marshal, simplex::scheme::bls12381_threshold::vrf as bls12381_threshold, types::ViewDelta};
+    use commonware_consensus::{
+        marshal, simplex::scheme::bls12381_threshold::vrf as bls12381_threshold, types::ViewDelta,
+    };
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519::PublicKey,
         Signer,
@@ -255,8 +257,11 @@ mod tests {
                     priority_responses: false,
                 };
 
-                let marshal_resolver =
-                    marshal::resolver::p2p::init(&validator_context, marshal_resolver_cfg, backfill);
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &validator_context,
+                    marshal_resolver_cfg,
+                    backfill,
+                );
 
                 // Start engine
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -441,8 +446,11 @@ mod tests {
                     priority_responses: false,
                 };
 
-                let marshal_resolver =
-                    marshal::resolver::p2p::init(&validator_context, marshal_resolver_cfg, backfill);
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &validator_context,
+                    marshal_resolver_cfg,
+                    backfill,
+                );
 
                 // Start engine
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -527,7 +535,7 @@ mod tests {
                 strategy: Sequential,
             };
             let validator_context = context.with_label(&uid);
-                let engine = Engine::new(validator_context.clone(), config).await;
+            let engine = Engine::new(validator_context.clone(), config).await;
 
             // Get networking
             let (pending, recovered, resolver, broadcast, backfill) =
@@ -675,7 +683,7 @@ mod tests {
                         strategy: Sequential,
                     };
                     let validator_context = context.with_label(&uid);
-                let engine = Engine::new(validator_context.clone(), config).await;
+                    let engine = Engine::new(validator_context.clone(), config).await;
 
                     // Get networking
                     let (pending, recovered, resolver, broadcast, backfill) =
@@ -694,8 +702,11 @@ mod tests {
                         priority_responses: false,
                     };
 
-                    let marshal_resolver =
-                        marshal::resolver::p2p::init(&validator_context, marshal_resolver_cfg, backfill);
+                    let marshal_resolver = marshal::resolver::p2p::init(
+                        &validator_context,
+                        marshal_resolver_cfg,
+                        backfill,
+                    );
 
                     // Start engine
                     engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -880,8 +891,11 @@ mod tests {
                     priority_responses: false,
                 };
 
-                let marshal_resolver =
-                    marshal::resolver::p2p::init(&validator_context, marshal_resolver_cfg, backfill);
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &validator_context,
+                    marshal_resolver_cfg,
+                    backfill,
+                );
 
                 // Start engine
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);

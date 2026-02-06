@@ -25,7 +25,12 @@ pub struct Block {
 }
 
 impl Block {
-    fn compute_digest(context: &Context, parent: &Digest, height: Height, timestamp: u64) -> Digest {
+    fn compute_digest(
+        context: &Context,
+        parent: &Digest,
+        height: Height,
+        timestamp: u64,
+    ) -> Digest {
         let mut hasher = Sha256::new();
         hasher.update(parent);
         hasher.update(&height.get().to_be_bytes());

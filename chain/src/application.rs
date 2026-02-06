@@ -68,7 +68,12 @@ where
             current = parent.timestamp + 1;
         }
 
-        Some(Block::new(context, parent.digest(), parent.height.next(), current))
+        Some(Block::new(
+            context,
+            parent.digest(),
+            parent.height.next(),
+            current,
+        ))
     }
 }
 
