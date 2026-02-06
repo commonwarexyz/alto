@@ -238,7 +238,6 @@ mod tests {
                     strategy: Sequential,
                 };
                 let validator_context = context.with_label(&uid);
-                let engine = Engine::new(validator_context.with_label("consensus"), config).await;
 
                 // Get networking
                 let (pending, recovered, resolver, broadcast, backfill) =
@@ -256,14 +255,14 @@ mod tests {
                     priority_requests: false,
                     priority_responses: false,
                 };
-
                 let marshal_resolver = marshal::resolver::p2p::init(
-                    &validator_context.with_label("resolver"),
+                    &validator_context.with_label("backfill"),
                     marshal_resolver_cfg,
                     backfill,
                 );
 
                 // Start engine
+                let engine = Engine::new(validator_context.with_label("engine"), config).await;
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
@@ -427,7 +426,6 @@ mod tests {
                     strategy: Sequential,
                 };
                 let validator_context = context.with_label(&uid);
-                let engine = Engine::new(validator_context.with_label("consensus"), config).await;
 
                 // Get networking
                 let (pending, recovered, resolver, broadcast, backfill) =
@@ -445,14 +443,14 @@ mod tests {
                     priority_requests: false,
                     priority_responses: false,
                 };
-
                 let marshal_resolver = marshal::resolver::p2p::init(
-                    &validator_context.with_label("resolver"),
+                    &validator_context.with_label("backfill"),
                     marshal_resolver_cfg,
                     backfill,
                 );
 
                 // Start engine
+                let engine = Engine::new(validator_context.with_label("engine"), config).await;
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
@@ -535,7 +533,6 @@ mod tests {
                 strategy: Sequential,
             };
             let validator_context = context.with_label(&uid);
-            let engine = Engine::new(validator_context.with_label("consensus"), config).await;
 
             // Get networking
             let (pending, recovered, resolver, broadcast, backfill) =
@@ -553,14 +550,14 @@ mod tests {
                 priority_requests: false,
                 priority_responses: false,
             };
-
             let marshal_resolver = marshal::resolver::p2p::init(
-                &validator_context.with_label("resolver"),
+                &validator_context.with_label("backfill"),
                 marshal_resolver_cfg,
                 backfill,
             );
 
             // Start engine
+            let engine = Engine::new(validator_context.with_label("engine"), config).await;
             engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
 
             // Poll metrics
@@ -686,8 +683,6 @@ mod tests {
                         strategy: Sequential,
                     };
                     let validator_context = context.with_label(&uid);
-                    let engine =
-                        Engine::new(validator_context.with_label("consensus"), config).await;
 
                     // Get networking
                     let (pending, recovered, resolver, broadcast, backfill) =
@@ -705,14 +700,14 @@ mod tests {
                         priority_requests: false,
                         priority_responses: false,
                     };
-
                     let marshal_resolver = marshal::resolver::p2p::init(
-                        &validator_context.with_label("resolver"),
+                        &validator_context.with_label("backfill"),
                         marshal_resolver_cfg,
                         backfill,
                     );
 
                     // Start engine
+                    let engine = Engine::new(validator_context.with_label("engine"), config).await;
                     engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
                 }
 
@@ -876,7 +871,6 @@ mod tests {
                     strategy: Sequential,
                 };
                 let validator_context = context.with_label(&uid);
-                let engine = Engine::new(validator_context.with_label("consensus"), config).await;
 
                 // Get networking
                 let (pending, recovered, resolver, broadcast, backfill) =
@@ -894,14 +888,14 @@ mod tests {
                     priority_requests: false,
                     priority_responses: false,
                 };
-
                 let marshal_resolver = marshal::resolver::p2p::init(
-                    &validator_context.with_label("resolver"),
+                    &validator_context.with_label("backfill"),
                     marshal_resolver_cfg,
                     backfill,
                 );
 
                 // Start engine
+                let engine = Engine::new(validator_context.with_label("engine"), config).await;
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
