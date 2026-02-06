@@ -21,5 +21,4 @@ pub type Activity = CActivity<Scheme, Digest>;
 
 pub type PublicKey = ed25519::PublicKey;
 pub type Identity = <MinSig as Variant>::Public;
-pub type Evaluation = Identity;
 pub type Signature = <MinSig as Variant>::Signature;

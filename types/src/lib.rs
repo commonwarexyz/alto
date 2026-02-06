@@ -9,8 +9,8 @@ pub use block::{Block, Finalized, Notarized};
 
 mod consensus;
 pub use consensus::{
-    Activity, Context, Evaluation, Finalization, Identity, Notarization, PublicKey, Scheme, Seed,
-    Seedable, Signature,
+    Activity, Context, Finalization, Identity, Notarization, PublicKey, Scheme, Seed, Seedable,
+    Signature,
 };
 
 pub mod wasm;
