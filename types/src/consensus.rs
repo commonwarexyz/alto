@@ -1,6 +1,7 @@
-use commonware_consensus::simplex::scheme::bls12381_threshold;
+use commonware_consensus::simplex::scheme::bls12381_threshold::vrf;
 use commonware_consensus::simplex::types::{
-    Activity as CActivity, Finalization as CFinalization, Notarization as CNotarization,
+    Activity as CActivity, Context as CContext, Finalization as CFinalization,
+    Notarization as CNotarization,
 };
 use commonware_cryptography::{
     bls12381::primitives::variant::{MinSig, Variant},
@@ -8,15 +9,15 @@ use commonware_cryptography::{
     sha256::Digest,
 };
 
-pub use commonware_consensus::simplex::scheme::bls12381_threshold::Seedable;
+pub type Context = CContext<Digest, PublicKey>;
 
-pub type Scheme = bls12381_threshold::Scheme<PublicKey, MinSig>;
-pub type Seed = bls12381_threshold::Seed<MinSig>;
+pub type Scheme = vrf::Scheme<PublicKey, MinSig>;
+pub type Seed = vrf::Seed<MinSig>;
+pub use vrf::Seedable;
 pub type Notarization = CNotarization<Scheme, Digest>;
 pub type Finalization = CFinalization<Scheme, Digest>;
 pub type Activity = CActivity<Scheme, Digest>;
 
 pub type PublicKey = ed25519::PublicKey;
 pub type Identity = <MinSig as Variant>::Public;
-pub type Evaluation = Identity;
 pub type Signature = <MinSig as Variant>::Signature;

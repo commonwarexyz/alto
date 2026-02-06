@@ -9,9 +9,9 @@ use commonware_cryptography::{
     ed25519::{PrivateKey, PublicKey},
     Signer,
 };
-use commonware_deployer::ec2::Hosts;
+use commonware_deployer::aws::Hosts;
 use commonware_p2p::{authenticated::discovery as authenticated, Ingress, Manager};
-use commonware_runtime::{tokio, Metrics, RayonPoolSpawner, Runner};
+use commonware_runtime::{tokio, Metrics, Runner, ThreadPooler};
 use commonware_utils::{from_hex_formatted, ordered::Set, union_unique, NZUsize, NZU32};
 use futures::future::try_join_all;
 use governor::Quota;
@@ -201,7 +201,7 @@ fn main() {
 
         // Provide authorized peers
         let participants: Set<PublicKey> = Set::from_iter_dedup(peers.clone());
-        oracle.update(EPOCH.get(), participants.clone()).await;
+        oracle.track(EPOCH.get(), participants.clone()).await;
 
         // Register pending channel
         let pending_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
@@ -270,7 +270,7 @@ fn main() {
 
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),
-            manager: oracle.clone(),
+            provider: oracle.clone(),
             blocker: oracle,
             mailbox_size: config.mailbox_size,
             initial: Duration::from_secs(1),

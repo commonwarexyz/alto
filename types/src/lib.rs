@@ -9,7 +9,7 @@ pub use block::{Block, Finalized, Notarized};
 
 mod consensus;
 pub use consensus::{
-    Activity, Evaluation, Finalization, Identity, Notarization, PublicKey, Scheme, Seed, Seedable,
+    Activity, Context, Finalization, Identity, Notarization, PublicKey, Scheme, Seed, Seedable,
     Signature,
 };
 
@@ -65,14 +65,14 @@ mod tests {
     use commonware_codec::{DecodeExt, Encode};
     use commonware_consensus::{
         simplex::{
-            scheme::bls12381_threshold,
+            scheme::bls12381_threshold::vrf as bls12381_threshold,
             types::{Finalization, Finalize, Notarization, Notarize, Proposal},
         },
         types::{Height, Round, View},
     };
     use commonware_cryptography::{
-        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, Digestible, Hasher,
-        Sha256,
+        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519, sha256,
+        Digest, Digestible, Hasher, Sha256, Signer,
     };
     use commonware_parallel::Sequential;
     use rand::{rngs::StdRng, SeedableRng};
@@ -85,9 +85,14 @@ mod tests {
         let Fixture { schemes, .. } =
             bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
 
-        // Create a block
+        // Create a block with context
+        let context = Context {
+            round: Round::new(EPOCH, View::new(9)),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::new(8), sha256::Digest::EMPTY),
+        };
         let digest = Sha256::hash(b"hello world");
-        let block = Block::new(digest, Height::new(10), 100);
+        let block = Block::new(context, digest, Height::new(10), 100);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
@@ -120,9 +125,14 @@ mod tests {
         let Fixture { schemes, .. } =
             bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
 
-        // Create a block
+        // Create a block with context
+        let context = Context {
+            round: Round::new(EPOCH, View::new(9)),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::new(8), sha256::Digest::EMPTY),
+        };
         let digest = Sha256::hash(b"hello world");
-        let block = Block::new(digest, Height::new(10), 100);
+        let block = Block::new(context, digest, Height::new(10), 100);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
