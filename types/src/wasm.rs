@@ -78,7 +78,14 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
             view: notarized.proof.view().get(),
             parent: notarized.proof.proposal.parent.get(),
             payload: notarized.proof.proposal.payload.to_vec(),
-            signature: notarized.proof.certificate.get().unwrap().vote_signature.encode().to_vec(),
+            signature: notarized
+                .proof
+                .certificate
+                .get()
+                .unwrap()
+                .vote_signature
+                .encode()
+                .to_vec(),
         },
         block: BlockJs {
             parent: notarized.block.parent.to_vec(),
@@ -105,7 +112,14 @@ pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
             view: finalized.proof.view().get(),
             parent: finalized.proof.proposal.parent.get(),
             payload: finalized.proof.proposal.payload.to_vec(),
-            signature: finalized.proof.certificate.get().unwrap().vote_signature.encode().to_vec(),
+            signature: finalized
+                .proof
+                .certificate
+                .get()
+                .unwrap()
+                .vote_signature
+                .encode()
+                .to_vec(),
         },
         block: BlockJs {
             parent: finalized.block.parent.to_vec(),
