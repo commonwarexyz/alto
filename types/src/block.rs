@@ -32,9 +32,9 @@ impl Block {
         timestamp: u64,
     ) -> Digest {
         let mut hasher = Sha256::new();
+        hasher.update(&context.encode());
         hasher.update(parent);
         hasher.update(&height.get().to_be_bytes());
-        hasher.update(&context.encode());
         hasher.update(&timestamp.to_be_bytes());
         hasher.finalize()
     }
