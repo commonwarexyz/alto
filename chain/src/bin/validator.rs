@@ -201,7 +201,7 @@ fn main() {
 
         // Provide authorized peers
         let participants: Set<PublicKey> = Set::from_iter_dedup(peers.clone());
-        oracle.update(EPOCH.get(), participants.clone()).await;
+        oracle.track(EPOCH.get(), participants.clone()).await;
 
         // Register pending channel
         let pending_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
@@ -270,7 +270,7 @@ fn main() {
 
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),
-            manager: oracle.clone(),
+            provider: oracle.clone(),
             blocker: oracle,
             mailbox_size: config.mailbox_size,
             initial: Duration::from_secs(1),

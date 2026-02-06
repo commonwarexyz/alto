@@ -109,7 +109,7 @@ mod tests {
     > {
         oracle
             .manager()
-            .update(0, Set::from_iter_dedup(validators.iter().cloned()))
+            .track(0, Set::from_iter_dedup(validators.iter().cloned()))
             .await;
         let mut registrations = HashMap::new();
         for validator in validators.iter() {
@@ -245,7 +245,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.manager(),
+                    provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),
@@ -431,7 +431,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.manager(),
+                    provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),
@@ -536,7 +536,7 @@ mod tests {
             // Configure marshal resolver
             let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                 public_key: public_key.clone(),
-                manager: oracle.manager(),
+                provider: oracle.manager(),
                 blocker: oracle.control(public_key.clone()),
                 mailbox_size: 1024,
                 initial: Duration::from_secs(1),
@@ -684,7 +684,7 @@ mod tests {
                     // Configure marshal resolver
                     let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                         public_key: public_key.clone(),
-                        manager: oracle.manager(),
+                        provider: oracle.manager(),
                         blocker: oracle.control(public_key.clone()),
                         mailbox_size: 1024,
                         initial: Duration::from_secs(1),
@@ -870,7 +870,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.manager(),
+                    provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),
