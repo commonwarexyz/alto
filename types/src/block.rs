@@ -67,7 +67,7 @@ impl Read for Block {
         let context = Context::read(reader)?;
         let parent = Digest::read(reader)?;
         let height = Height::read(reader)?;
-        let timestamp: u64 = UInt::read(reader)?.0;
+        let timestamp = UInt::read(reader)?.0;
 
         let digest = Self::compute_digest(&context, &parent, height, timestamp);
         Ok(Self {
