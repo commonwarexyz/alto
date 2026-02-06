@@ -73,19 +73,15 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     if !notarized.verify(&certificate_verifier, &Sequential) {
         return JsValue::NULL;
     }
+    let Some(certificate) = notarized.proof.certificate.get() else {
+        return JsValue::NULL;
+    };
     let notarized_js = NotarizedJs {
         proof: ProofJs {
             view: notarized.proof.view().get(),
             parent: notarized.proof.proposal.parent.get(),
             payload: notarized.proof.proposal.payload.to_vec(),
-            signature: notarized
-                .proof
-                .certificate
-                .get()
-                .unwrap()
-                .vote_signature
-                .encode()
-                .to_vec(),
+            signature: certificate.vote_signature.encode().to_vec(),
         },
         block: BlockJs {
             parent: notarized.block.parent.to_vec(),
@@ -107,19 +103,15 @@ pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     if !finalized.verify(&certificate_verifier, &Sequential) {
         return JsValue::NULL;
     }
+    let Some(certificate) = finalized.proof.certificate.get() else {
+        return JsValue::NULL;
+    };
     let finalized_js = FinalizedJs {
         proof: ProofJs {
             view: finalized.proof.view().get(),
             parent: finalized.proof.proposal.parent.get(),
             payload: finalized.proof.proposal.payload.to_vec(),
-            signature: finalized
-                .proof
-                .certificate
-                .get()
-                .unwrap()
-                .vote_signature
-                .encode()
-                .to_vec(),
+            signature: certificate.vote_signature.encode().to_vec(),
         },
         block: BlockJs {
             parent: finalized.block.parent.to_vec(),

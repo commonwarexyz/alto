@@ -238,7 +238,7 @@ mod tests {
                     strategy: Sequential,
                 };
                 let validator_context = context.with_label(&uid);
-                let engine = Engine::new(validator_context.clone(), config).await;
+                let engine = Engine::new(validator_context.with_label("consensus"), config).await;
 
                 // Get networking
                 let (pending, recovered, resolver, broadcast, backfill) =
@@ -258,7 +258,7 @@ mod tests {
                 };
 
                 let marshal_resolver = marshal::resolver::p2p::init(
-                    &validator_context,
+                    &validator_context.with_label("resolver"),
                     marshal_resolver_cfg,
                     backfill,
                 );
@@ -427,7 +427,7 @@ mod tests {
                     strategy: Sequential,
                 };
                 let validator_context = context.with_label(&uid);
-                let engine = Engine::new(validator_context.clone(), config).await;
+                let engine = Engine::new(validator_context.with_label("consensus"), config).await;
 
                 // Get networking
                 let (pending, recovered, resolver, broadcast, backfill) =
@@ -447,7 +447,7 @@ mod tests {
                 };
 
                 let marshal_resolver = marshal::resolver::p2p::init(
-                    &validator_context,
+                    &validator_context.with_label("resolver"),
                     marshal_resolver_cfg,
                     backfill,
                 );
@@ -535,7 +535,7 @@ mod tests {
                 strategy: Sequential,
             };
             let validator_context = context.with_label(&uid);
-            let engine = Engine::new(validator_context.clone(), config).await;
+            let engine = Engine::new(validator_context.with_label("consensus"), config).await;
 
             // Get networking
             let (pending, recovered, resolver, broadcast, backfill) =
@@ -554,8 +554,11 @@ mod tests {
                 priority_responses: false,
             };
 
-            let marshal_resolver =
-                marshal::resolver::p2p::init(&validator_context, marshal_resolver_cfg, backfill);
+            let marshal_resolver = marshal::resolver::p2p::init(
+                &validator_context.with_label("resolver"),
+                marshal_resolver_cfg,
+                backfill,
+            );
 
             // Start engine
             engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -683,7 +686,8 @@ mod tests {
                         strategy: Sequential,
                     };
                     let validator_context = context.with_label(&uid);
-                    let engine = Engine::new(validator_context.clone(), config).await;
+                    let engine =
+                        Engine::new(validator_context.with_label("consensus"), config).await;
 
                     // Get networking
                     let (pending, recovered, resolver, broadcast, backfill) =
@@ -703,7 +707,7 @@ mod tests {
                     };
 
                     let marshal_resolver = marshal::resolver::p2p::init(
-                        &validator_context,
+                        &validator_context.with_label("resolver"),
                         marshal_resolver_cfg,
                         backfill,
                     );
@@ -872,7 +876,7 @@ mod tests {
                     strategy: Sequential,
                 };
                 let validator_context = context.with_label(&uid);
-                let engine = Engine::new(validator_context.clone(), config).await;
+                let engine = Engine::new(validator_context.with_label("consensus"), config).await;
 
                 // Get networking
                 let (pending, recovered, resolver, broadcast, backfill) =
@@ -892,7 +896,7 @@ mod tests {
                 };
 
                 let marshal_resolver = marshal::resolver::p2p::init(
-                    &validator_context,
+                    &validator_context.with_label("resolver"),
                     marshal_resolver_cfg,
                     backfill,
                 );
