@@ -1,15 +1,9 @@
-use crate::{
-    resolver::HttpResolver, NoopReceiver, NoopSender, BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
-    BUFFER_POOL_CAPACITY, BUFFER_POOL_PAGE_SIZE, DEQUE_SIZE, FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
-    FREEZER_JOURNAL_COMPRESSION, FREEZER_JOURNAL_TARGET_SIZE, FREEZER_TABLE_RESIZE_CHUNK_SIZE,
-    FREEZER_TABLE_RESIZE_FREQUENCY, IMMUTABLE_ITEMS_PER_SECTION, MAX_REPAIR,
-    PRUNABLE_ITEMS_PER_SECTION, REPLAY_BUFFER, VIEW_RETENTION_TIMEOUT, WRITE_BUFFER,
-};
+use crate::{resolver::HttpResolver, NoopReceiver, NoopSender};
 use alto_types::{Block, Finalization, Scheme, EPOCH_LENGTH};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
     marshal::{self, ingress::handler, Update},
-    types::FixedEpocher,
+    types::{FixedEpocher, ViewDelta},
     Reporter,
 };
 use commonware_cryptography::{
@@ -21,11 +15,27 @@ use commonware_cryptography::{
 use commonware_parallel::Sequential;
 use commonware_runtime::{buffer::paged::CacheRef, Handle, Metrics, Spawner, Storage};
 use commonware_storage::archive::immutable;
-use commonware_utils::Acknowledgement;
+use commonware_utils::{channel::mpsc, Acknowledgement, NZU16, NZU64, NZUsize};
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
-use commonware_utils::channel::mpsc;
+use std::num::NonZero;
 use tracing::info;
+
+const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
+const IMMUTABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
+const FREEZER_TABLE_RESIZE_FREQUENCY: u8 = 4;
+const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16);
+const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024;
+const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
+const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024);
+const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024);
+const BUFFER_POOL_PAGE_SIZE: NonZero<u16> = NZU16!(4_096);
+const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192);
+const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
+const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
+const DEQUE_SIZE: usize = 10;
+const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21);
+const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21);
 
 #[allow(clippy::type_complexity)]
 pub struct FollowerEngine<E>

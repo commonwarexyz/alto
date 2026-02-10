@@ -32,4 +32,4 @@ WORKDIR /alto
 
 # Build the binary and create both debug and stripped versions
 ENTRYPOINT ["/bin/bash", "-c"]
-CMD ["cd chain && cargo build --release --bin validator --target aarch64-unknown-linux-gnu && cp ../target/aarch64-unknown-linux-gnu/release/validator assets/validator-debug && strip -o assets/validator assets/validator-debug"]
+CMD ["cargo build --release --bin validator --target aarch64-unknown-linux-gnu && cp target/aarch64-unknown-linux-gnu/release/validator chain/assets/validator-debug && strip -o chain/assets/validator chain/assets/validator-debug"]

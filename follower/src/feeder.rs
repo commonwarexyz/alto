@@ -11,8 +11,29 @@ use commonware_cryptography::ed25519::PublicKey;
 use commonware_parallel::Sequential;
 use commonware_runtime::Clock;
 use futures::StreamExt;
-use std::time::Duration;
+use std::{fmt, time::Duration};
 use tracing::{debug, error, info, trace, warn};
+
+#[derive(Debug)]
+pub enum FeederError {
+    Connect(String),
+    Stream(String),
+    InvalidSignature { height: u64 },
+}
+
+impl fmt::Display for FeederError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Connect(e) => write!(f, "failed to connect: {e}"),
+            Self::Stream(e) => write!(f, "stream error: {e}"),
+            Self::InvalidSignature { height } => {
+                write!(f, "invalid finalization signature for height {height}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for FeederError {}
 
 pub struct CertificateFeeder<E: Clock, C: Source> {
     context: E,
@@ -42,23 +63,23 @@ impl<E: Clock, C: Source> CertificateFeeder<E, C> {
     pub async fn run(mut self) {
         loop {
             if let Err(e) = self.process_stream().await {
-                error!(error = ?e, "stream error");
+                error!(error = %e, "stream error");
             }
             self.context.sleep(Duration::from_secs(1)).await;
         }
     }
 
-    async fn process_stream(&mut self) -> Result<(), String> {
+    async fn process_stream(&mut self) -> Result<(), FeederError> {
         let client = self.client.clone();
         let mut stream = client
             .listen()
             .await
-            .map_err(|e| format!("failed to connect: {e}"))?;
+            .map_err(|e| FeederError::Connect(e.to_string()))?;
 
         info!("connected to certificate stream");
 
         while let Some(result) = stream.next().await {
-            let message = result.map_err(|e| format!("stream error: {e}"))?;
+            let message = result.map_err(|e| FeederError::Stream(e.to_string()))?;
             self.handle_message(message).await?;
         }
 
@@ -66,7 +87,10 @@ impl<E: Clock, C: Source> CertificateFeeder<E, C> {
         Ok(())
     }
 
-    async fn handle_message(&mut self, message: Message) -> Result<(), String> {
+    pub(crate) async fn handle_message(
+        &mut self,
+        message: Message,
+    ) -> Result<(), FeederError> {
         match message {
             Message::Finalization(finalized) => {
                 let height = finalized.block.height;
@@ -79,10 +103,9 @@ impl<E: Clock, C: Source> CertificateFeeder<E, C> {
                 );
 
                 if !finalized.verify(&self.scheme, &Sequential) {
-                    return Err(format!(
-                        "invalid finalization signature for height {}",
-                        height.get()
-                    ));
+                    return Err(FeederError::InvalidSignature {
+                        height: height.get(),
+                    });
                 }
 
                 let no_peers = commonware_p2p::Recipients::Some(vec![]);

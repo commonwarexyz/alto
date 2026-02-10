@@ -3,13 +3,11 @@ use alto_types::{Finalized, Notarized};
 use commonware_cryptography::ed25519::PublicKey;
 use commonware_p2p::Recipients;
 use commonware_runtime::IoBufMut;
-use commonware_utils::{NZU16, NZU64, NZUsize};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::Debug,
     future::Future,
-    num::NonZero,
     time::SystemTime,
 };
 
@@ -18,24 +16,6 @@ pub mod feeder;
 pub mod resolver;
 
 pub use alto_client::{IndexQuery, Query};
-
-// Storage constants
-pub const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
-pub const IMMUTABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
-pub const FREEZER_TABLE_RESIZE_FREQUENCY: u8 = 4;
-pub const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16);
-pub const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024;
-pub const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
-pub const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024);
-pub const WRITE_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024);
-pub const BUFFER_POOL_PAGE_SIZE: NonZero<u16> = NZU16!(4_096);
-pub const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192);
-pub const MAX_REPAIR: NonZero<usize> = NZUsize!(50);
-pub const VIEW_RETENTION_TIMEOUT: commonware_consensus::types::ViewDelta =
-    commonware_consensus::types::ViewDelta::new(2560);
-pub const DEQUE_SIZE: usize = 10;
-pub const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21);
-pub const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21);
 
 #[derive(Deserialize, Serialize)]
 pub struct Config {
@@ -116,9 +96,9 @@ impl<S: commonware_parallel::Strategy> Source for alto_client::Client<S> {
 }
 
 #[derive(Clone)]
-pub struct NoopSender;
+pub(crate) struct NoopSender;
 
-pub struct NoopCheckedSender;
+pub(crate) struct NoopCheckedSender;
 
 impl commonware_p2p::CheckedSender for NoopCheckedSender {
     type PublicKey = PublicKey;
@@ -146,7 +126,7 @@ impl commonware_p2p::LimitedSender for NoopSender {
 }
 
 #[derive(Debug)]
-pub struct NoopReceiver;
+pub(crate) struct NoopReceiver;
 
 impl commonware_p2p::Receiver for NoopReceiver {
     type Error = std::io::Error;

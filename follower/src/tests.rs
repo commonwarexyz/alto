@@ -1,4 +1,4 @@
-use crate::feeder::CertificateFeeder;
+use crate::feeder::{CertificateFeeder, FeederError};
 use crate::resolver::HttpResolverActor;
 use crate::Source;
 use alto_client::consensus::{Message, Payload};
@@ -199,6 +199,14 @@ impl TestFixture {
         let identity = *self.schemes[0].polynomial().public();
         Scheme::certificate_verifier(NAMESPACE, identity)
     }
+
+    fn wrong_verifier_scheme(&self) -> Scheme {
+        let mut rng = StdRng::seed_from_u64(42);
+        let Fixture { schemes, .. } =
+            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
+        let wrong_identity = *schemes[0].polynomial().public();
+        Scheme::certificate_verifier(NAMESPACE, wrong_identity)
+    }
 }
 
 #[test_traced]
@@ -357,13 +365,7 @@ fn finalization_verify_valid() {
 fn finalization_verify_invalid_scheme() {
     let fixture = TestFixture::new();
     let finalized = fixture.create_finalized(5, 5);
-
-    let mut rng = StdRng::seed_from_u64(42);
-    let Fixture { schemes, .. } =
-        bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-    let wrong_identity = *schemes[0].polynomial().public();
-    let wrong_verifier = Scheme::certificate_verifier(NAMESPACE, wrong_identity);
-
+    let wrong_verifier = fixture.wrong_verifier_scheme();
     assert!(!finalized.verify(&wrong_verifier, &Sequential));
 }
 
@@ -396,7 +398,7 @@ fn source_mock_listen() {
 }
 
 #[test_traced]
-fn feeder_valid_finalization() {
+fn feeder_accepts_valid_finalization() {
     let fixture = TestFixture::new();
     let finalized = fixture.create_finalized(1, 1);
     let verifier = fixture.verifier_scheme();
@@ -408,13 +410,7 @@ fn feeder_valid_finalization() {
         let engine_buffer = engine.buffer();
 
         let source = MockSource::new();
-        source
-            .messages
-            .lock()
-            .unwrap()
-            .push(Message::Finalization(finalized));
-
-        let feeder = CertificateFeeder::new(
+        let mut feeder = CertificateFeeder::new(
             context.clone(),
             source,
             verifier,
@@ -422,8 +418,10 @@ fn feeder_valid_finalization() {
             engine_buffer,
         );
 
-        let _feeder_handle = context.clone().spawn(|_| feeder.run());
-        context.sleep(Duration::from_millis(500)).await;
+        let result = feeder
+            .handle_message(Message::Finalization(finalized))
+            .await;
+        assert!(result.is_ok());
     });
 }
 
@@ -431,12 +429,7 @@ fn feeder_valid_finalization() {
 fn feeder_rejects_invalid_finalization() {
     let fixture = TestFixture::new();
     let finalized = fixture.create_finalized(1, 1);
-
-    let mut rng = StdRng::seed_from_u64(999);
-    let Fixture { schemes, .. } =
-        bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-    let wrong_identity = *schemes[0].polynomial().public();
-    let wrong_verifier = Scheme::certificate_verifier(NAMESPACE, wrong_identity);
+    let wrong_verifier = fixture.wrong_verifier_scheme();
 
     Runner::default().start(|context| async move {
         let engine =
@@ -445,13 +438,7 @@ fn feeder_rejects_invalid_finalization() {
         let engine_buffer = engine.buffer();
 
         let source = MockSource::new();
-        source
-            .messages
-            .lock()
-            .unwrap()
-            .push(Message::Finalization(finalized));
-
-        let feeder = CertificateFeeder::new(
+        let mut feeder = CertificateFeeder::new(
             context.clone(),
             source,
             wrong_verifier,
@@ -459,7 +446,37 @@ fn feeder_rejects_invalid_finalization() {
             engine_buffer,
         );
 
-        let _feeder_handle = context.clone().spawn(|_| feeder.run());
-        context.sleep(Duration::from_millis(500)).await;
+        let result = feeder
+            .handle_message(Message::Finalization(finalized))
+            .await;
+        assert!(matches!(result, Err(FeederError::InvalidSignature { height: 1 })));
+    });
+}
+
+#[test_traced]
+fn feeder_ignores_notarization() {
+    let fixture = TestFixture::new();
+    let notarized = fixture.create_notarized(1, 1);
+    let verifier = fixture.verifier_scheme();
+
+    Runner::default().start(|context| async move {
+        let engine =
+            crate::engine::FollowerEngine::new(context.clone(), verifier.clone(), 16).await;
+        let marshal_mailbox = engine.mailbox();
+        let engine_buffer = engine.buffer();
+
+        let source = MockSource::new();
+        let mut feeder = CertificateFeeder::new(
+            context.clone(),
+            source,
+            verifier,
+            marshal_mailbox,
+            engine_buffer,
+        );
+
+        let result = feeder
+            .handle_message(Message::Notarization(notarized))
+            .await;
+        assert!(result.is_ok());
     });
 }
