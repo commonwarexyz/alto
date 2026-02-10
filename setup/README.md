@@ -129,7 +129,7 @@ _Before running this command, ensure you change any `version` dependencies you'd
 docker run -it -v ${PWD}:/alto -v ${PWD}/../monorepo:/monorepo validator-builder
 ```
 
-_Emitted binary `validator` is placed in `setup/assets`._
+_Emitted binary `validator` is placed in `assets/`._
 
 #### Deploy Validator Binary
 
