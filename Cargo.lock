@@ -82,6 +82,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "alto-follower"
+version = "0.0.19"
+dependencies = [
+ "alto-client",
+ "alto-types",
+ "bytes",
+ "clap",
+ "commonware-broadcast",
+ "commonware-codec",
+ "commonware-consensus",
+ "commonware-cryptography",
+ "commonware-macros",
+ "commonware-p2p",
+ "commonware-parallel",
+ "commonware-resolver",
+ "commonware-runtime",
+ "commonware-storage",
+ "commonware-utils",
+ "futures",
+ "governor",
+ "rand 0.8.5",
+ "serde",
+ "serde_yaml",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "alto-indexer"
 version = "0.0.19"
 dependencies = [
@@ -150,6 +179,27 @@ dependencies = [
  "serde-wasm-bindgen",
  "thiserror 2.0.18",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "alto-validator"
+version = "0.0.19"
+dependencies = [
+ "alto-chain",
+ "alto-client",
+ "alto-types",
+ "clap",
+ "commonware-codec",
+ "commonware-consensus",
+ "commonware-cryptography",
+ "commonware-deployer",
+ "commonware-p2p",
+ "commonware-runtime",
+ "commonware-utils",
+ "futures",
+ "governor",
+ "serde_yaml",
+ "tracing",
 ]
 
 [[package]]

@@ -2,9 +2,11 @@
 members = [
     "chain",
     "client",
+    "follower",
     "inspector",
     "indexer",
     "types",
+    "validator",
 ]
 resolver = "2"
 

@@ -1,0 +1,35 @@
+[package]
+name = "alto-follower"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Follower (full-node) binary for alto."
+
+[dependencies]
+alto-client = { workspace = true }
+alto-types = { workspace = true }
+commonware-broadcast = { workspace = true }
+commonware-codec = { workspace = true }
+commonware-consensus = { workspace = true }
+commonware-cryptography = { workspace = true }
+commonware-macros = { workspace = true }
+commonware-p2p = { workspace = true }
+commonware-resolver = { workspace = true }
+commonware-runtime = { workspace = true }
+commonware-storage = { workspace = true }
+commonware-utils = { workspace = true }
+commonware-parallel = { workspace = true }
+bytes = { workspace = true }
+rand = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+governor = { workspace = true }
+clap = { workspace = true }
+serde = { version = "1.0.218", features = ["derive"] }
+serde_yaml = "0.9.34"
+
+[dev-dependencies]
+commonware-consensus = { workspace = true, features = ["mocks"] }
+commonware-cryptography = { workspace = true, features = ["mocks"] }
+tracing-subscriber = { workspace = true, features = ["fmt"] }
+tokio = { workspace = true }
