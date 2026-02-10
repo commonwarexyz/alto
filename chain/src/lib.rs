@@ -34,7 +34,7 @@ pub struct Config {
 
 /// A list of peers provided when a validator is run locally.
 ///
-/// When run remotely, [commonware_deployer::ec2::Hosts] is used instead.
+/// When run remotely, [commonware_deployer::aws::Hosts] is used instead.
 #[derive(Deserialize, Serialize)]
 pub struct Peers {
     pub addresses: HashMap<String, SocketAddr>,
@@ -44,7 +44,9 @@ pub struct Peers {
 mod tests {
     use super::*;
     use alto_types::NAMESPACE;
-    use commonware_consensus::{marshal, simplex::scheme::bls12381_threshold, types::ViewDelta};
+    use commonware_consensus::{
+        marshal, simplex::scheme::bls12381_threshold::vrf as bls12381_threshold, types::ViewDelta,
+    };
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519::PublicKey,
         Signer,
@@ -109,7 +111,7 @@ mod tests {
     > {
         oracle
             .manager()
-            .update(0, Set::from_iter_dedup(validators.iter().cloned()))
+            .track(0, Set::from_iter_dedup(validators.iter().cloned()))
             .await;
         let mut registrations = HashMap::new();
         for validator in validators.iter() {
@@ -235,7 +237,7 @@ mod tests {
                     indexer: None,
                     strategy: Sequential,
                 };
-                let engine = Engine::new(context.with_label(&uid), config).await;
+                let validator_context = context.with_label(&uid);
 
                 // Get networking
                 let (pending, recovered, resolver, broadcast, backfill) =
@@ -244,7 +246,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.manager(),
+                    provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),
@@ -253,11 +255,14 @@ mod tests {
                     priority_requests: false,
                     priority_responses: false,
                 };
-
-                let marshal_resolver =
-                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &validator_context.with_label("backfill"),
+                    marshal_resolver_cfg,
+                    backfill,
+                );
 
                 // Start engine
+                let engine = Engine::new(validator_context.with_label("engine"), config).await;
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
@@ -420,7 +425,7 @@ mod tests {
                     indexer: None,
                     strategy: Sequential,
                 };
-                let engine = Engine::new(context.with_label(&uid), config).await;
+                let validator_context = context.with_label(&uid);
 
                 // Get networking
                 let (pending, recovered, resolver, broadcast, backfill) =
@@ -429,7 +434,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.manager(),
+                    provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),
@@ -438,11 +443,14 @@ mod tests {
                     priority_requests: false,
                     priority_responses: false,
                 };
-
-                let marshal_resolver =
-                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &validator_context.with_label("backfill"),
+                    marshal_resolver_cfg,
+                    backfill,
+                );
 
                 // Start engine
+                let engine = Engine::new(validator_context.with_label("engine"), config).await;
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
@@ -524,7 +532,7 @@ mod tests {
                 indexer: None,
                 strategy: Sequential,
             };
-            let engine = Engine::new(context.with_label(&uid), config).await;
+            let validator_context = context.with_label(&uid);
 
             // Get networking
             let (pending, recovered, resolver, broadcast, backfill) =
@@ -533,7 +541,7 @@ mod tests {
             // Configure marshal resolver
             let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                 public_key: public_key.clone(),
-                manager: oracle.manager(),
+                provider: oracle.manager(),
                 blocker: oracle.control(public_key.clone()),
                 mailbox_size: 1024,
                 initial: Duration::from_secs(1),
@@ -542,11 +550,14 @@ mod tests {
                 priority_requests: false,
                 priority_responses: false,
             };
-
-            let marshal_resolver =
-                marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+            let marshal_resolver = marshal::resolver::p2p::init(
+                &validator_context.with_label("backfill"),
+                marshal_resolver_cfg,
+                backfill,
+            );
 
             // Start engine
+            let engine = Engine::new(validator_context.with_label("engine"), config).await;
             engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
 
             // Poll metrics
@@ -671,7 +682,7 @@ mod tests {
                         indexer: None,
                         strategy: Sequential,
                     };
-                    let engine = Engine::new(context.with_label(&uid), config).await;
+                    let validator_context = context.with_label(&uid);
 
                     // Get networking
                     let (pending, recovered, resolver, broadcast, backfill) =
@@ -680,7 +691,7 @@ mod tests {
                     // Configure marshal resolver
                     let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                         public_key: public_key.clone(),
-                        manager: oracle.manager(),
+                        provider: oracle.manager(),
                         blocker: oracle.control(public_key.clone()),
                         mailbox_size: 1024,
                         initial: Duration::from_secs(1),
@@ -689,11 +700,14 @@ mod tests {
                         priority_requests: false,
                         priority_responses: false,
                     };
-
-                    let marshal_resolver =
-                        marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                    let marshal_resolver = marshal::resolver::p2p::init(
+                        &validator_context.with_label("backfill"),
+                        marshal_resolver_cfg,
+                        backfill,
+                    );
 
                     // Start engine
+                    let engine = Engine::new(validator_context.with_label("engine"), config).await;
                     engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
                 }
 
@@ -856,7 +870,7 @@ mod tests {
                     indexer: Some(indexer.clone()),
                     strategy: Sequential,
                 };
-                let engine = Engine::new(context.with_label(&uid), config).await;
+                let validator_context = context.with_label(&uid);
 
                 // Get networking
                 let (pending, recovered, resolver, broadcast, backfill) =
@@ -865,7 +879,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.manager(),
+                    provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),
@@ -874,11 +888,14 @@ mod tests {
                     priority_requests: false,
                     priority_responses: false,
                 };
-
-                let marshal_resolver =
-                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &validator_context.with_label("backfill"),
+                    marshal_resolver_cfg,
+                    backfill,
+                );
 
                 // Start engine
+                let engine = Engine::new(validator_context.with_label("engine"), config).await;
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 

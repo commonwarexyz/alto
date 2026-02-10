@@ -21,13 +21,14 @@ use commonware_p2p::{Blocker, Receiver, Sender};
 use commonware_parallel::Strategy;
 use commonware_resolver::Resolver;
 use commonware_runtime::{
-    buffer::PoolRef, spawn_cell, Clock, ContextCell, Handle, Metrics, RayonPoolSpawner, Spawner,
-    Storage,
+    buffer::paged::CacheRef, spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
+    ThreadPooler,
 };
 use commonware_storage::archive::immutable;
+use commonware_utils::channel::mpsc;
 use commonware_utils::{ordered::Set, NZU16};
 use commonware_utils::{NZUsize, NZU64};
-use futures::{channel::mpsc, future::try_join_all};
+use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use governor::Quota;
 use rand::{CryptoRng, Rng};
@@ -115,7 +116,7 @@ pub struct Engine<
 }
 
 impl<
-        E: Clock + GClock + Rng + CryptoRng + Spawner + RayonPoolSpawner + Storage + Metrics,
+        E: Clock + GClock + Rng + CryptoRng + Spawner + ThreadPooler + Storage + Metrics,
         B: Blocker<PublicKey = PublicKey>,
         S: Strategy,
         I: Indexer,
@@ -136,7 +137,7 @@ impl<
         );
 
         // Create the buffer pool
-        let buffer_pool = PoolRef::new(BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
+        let buffer_pool = CacheRef::new(BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
 
         // Initialize finalizations by height
         let start = Instant::now();
@@ -158,7 +159,7 @@ impl<
                     "{}-finalizations-by-height-freezer-key-journal",
                     cfg.partition_prefix
                 ),
-                freezer_key_buffer_pool: buffer_pool.clone(),
+                freezer_key_page_cache: buffer_pool.clone(),
                 freezer_key_write_buffer: WRITE_BUFFER,
                 freezer_value_partition: format!(
                     "{}-finalizations-by-height-freezer-value-journal",
@@ -198,7 +199,7 @@ impl<
                     "{}-finalized-blocks-freezer-key-journal",
                     cfg.partition_prefix
                 ),
-                freezer_key_buffer_pool: buffer_pool.clone(),
+                freezer_key_page_cache: buffer_pool.clone(),
                 freezer_key_write_buffer: WRITE_BUFFER,
                 freezer_value_partition: format!(
                     "{}-finalized-blocks-freezer-value-journal",
@@ -243,7 +244,7 @@ impl<
                 value_write_buffer: WRITE_BUFFER,
                 block_codec_config: (),
                 max_repair: MAX_REPAIR,
-                buffer_pool: buffer_pool.clone(),
+                page_cache: buffer_pool.clone(),
                 strategy: cfg.strategy.clone(),
             },
         )
@@ -292,7 +293,7 @@ impl<
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
                 blocker: cfg.blocker,
-                buffer_pool,
+                page_cache: buffer_pool,
                 elector: Random,
                 strategy: cfg.strategy,
             },
