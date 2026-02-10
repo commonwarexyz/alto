@@ -1,0 +1,28 @@
+[package]
+name = "alto-setup"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Setup tooling for alto."
+
+[dependencies]
+alto-chain = { version = "0.0.19", path = "../chain" }
+alto-types = { workspace = true }
+clap = { workspace = true }
+commonware-codec = { workspace = true }
+commonware-consensus = { workspace = true, features = ["mocks"] }
+commonware-cryptography = { workspace = true, features = ["mocks"] }
+commonware-deployer = { workspace = true }
+commonware-macros = { workspace = true }
+commonware-math = { workspace = true }
+commonware-utils = { workspace = true }
+rand = { workspace = true }
+serde = { version = "1.0.218", features = ["derive"] }
+serde_yaml = "0.9.34"
+uuid = { version = "1.15.1", features = ["v4"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "json"] }
+
+[[bin]]
+name = "setup"
+path = "src/main.rs"

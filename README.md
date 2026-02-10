@@ -12,6 +12,7 @@ _Components are designed for deployment in adversarial environments. If you find
 * [chain](./chain/README.md): A minimal (and wicked fast) blockchain built with the [Commonware Library](https://github.com/commonwarexyz/monorepo).
 * [validator](./validator/README.md): Validator binary for `alto`.
 * [follower](./follower/README.md): Follower (full-node) binary for `alto`.
+* [setup](./setup/README.md): Setup tooling for `alto`.
 * [client](./client/README.md): Client for interacting with `alto`.
 * [explorer](./explorer/README.md): Visualize `alto` activity.
 * [inspector](./inspector/README.md): Inspect `alto` activity.

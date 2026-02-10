@@ -34,14 +34,11 @@ dependencies = [
  "alto-client",
  "alto-types",
  "bytes",
- "clap",
  "commonware-broadcast",
  "commonware-codec",
  "commonware-consensus",
  "commonware-cryptography",
- "commonware-deployer",
  "commonware-macros",
- "commonware-math",
  "commonware-p2p",
  "commonware-parallel",
  "commonware-resolver",
@@ -53,11 +50,9 @@ dependencies = [
  "governor",
  "rand 0.8.5",
  "serde",
- "serde_yaml",
  "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
@@ -160,6 +155,28 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "alto-setup"
+version = "0.0.19"
+dependencies = [
+ "alto-chain",
+ "alto-types",
+ "clap",
+ "commonware-codec",
+ "commonware-consensus",
+ "commonware-cryptography",
+ "commonware-deployer",
+ "commonware-macros",
+ "commonware-math",
+ "commonware-utils",
+ "rand 0.8.5",
+ "serde",
+ "serde_yaml",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

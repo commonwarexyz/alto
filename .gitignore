@@ -2,6 +2,6 @@
 *.DS_Store
 /target
 *.vscode
-/chain/assets
+/setup/assets
 /chain/test
 /types/pkg

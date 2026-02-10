@@ -34,7 +34,7 @@ pub struct Config {
 
 /// A list of peers provided when a validator is run locally.
 ///
-/// When run remotely, [commonware_deployer::aws::Hosts] is used instead.
+/// When run remotely, `commonware_deployer::aws::Hosts` is used instead.
 #[derive(Deserialize, Serialize)]
 pub struct Peers {
     pub addresses: HashMap<String, SocketAddr>,

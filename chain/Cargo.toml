@@ -17,7 +17,6 @@ commonware-broadcast = { workspace = true }
 commonware-codec = { workspace = true }
 commonware-consensus = { workspace = true, features = ["mocks"] }
 commonware-cryptography = { workspace = true, features = ["mocks"] }
-commonware-deployer = { workspace = true }
 commonware-macros = { workspace = true }
 commonware-p2p = { workspace = true }
 commonware-resolver = { workspace = true }
@@ -25,7 +24,6 @@ commonware-runtime = { workspace = true }
 commonware-storage = { workspace = true }
 commonware-stream = { workspace = true }
 commonware-utils = { workspace = true }
-commonware-math = { workspace = true }
 commonware-parallel = { workspace = true }
 bytes =  { workspace = true }
 rand = { workspace = true }
@@ -34,11 +32,4 @@ futures = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt", "json"] }
 governor = { workspace = true }
-clap = { workspace = true }
-uuid = { version = "1.15.1", features = ["v4"] }
 serde = { version = "1.0.218", features = ["derive"] }
-serde_yaml = "0.9.34"
-
-[[bin]]
-name = "setup"
-path = "src/bin/setup.rs"

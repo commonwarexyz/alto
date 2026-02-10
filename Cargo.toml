@@ -3,6 +3,7 @@ members = [
     "chain",
     "client",
     "follower",
+    "setup",
     "inspector",
     "indexer",
     "types",
