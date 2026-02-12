@@ -32,7 +32,7 @@ const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
 const BUFFER_POOL_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
-const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
+pub const DEFAULT_MAX_REPAIR: NonZero<usize> = NZUsize!(256);
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
@@ -69,7 +69,7 @@ where
     E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
 {
     /// Create a new [Engine].
-    pub async fn new(mut context: E, scheme: Scheme, mailbox_size: usize) -> Self {
+    pub async fn new(mut context: E, scheme: Scheme, mailbox_size: usize, max_repair: NonZero<usize>) -> Self {
         // Create the buffer
         //
         // The follower does not participate in p2p broadcast, so we use a dummy
@@ -167,7 +167,7 @@ where
                 key_write_buffer: WRITE_BUFFER,
                 value_write_buffer: WRITE_BUFFER,
                 block_codec_config: (),
-                max_repair: MAX_REPAIR,
+                max_repair,
                 page_cache,
                 strategy: Sequential,
             },

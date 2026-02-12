@@ -11,6 +11,7 @@ use commonware_runtime::{tokio, Clock, Metrics, Runner, Spawner};
 use commonware_utils::{channel::mpsc, from_hex_formatted};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    num::NonZero,
     path::PathBuf,
     str::FromStr,
     time::Duration,
@@ -77,7 +78,7 @@ fn main() {
 
         // Create engine
         let engine =
-            Engine::new(context.clone(), scheme.clone(), config.mailbox_size).await;
+            Engine::new(context.clone(), scheme.clone(), config.mailbox_size, NonZero::new(config.max_repair).expect("max_repair must be non-zero")).await;
         let mut marshal_mailbox = engine.mailbox();
 
         // Optionally set checkpoint floor from the latest finalized block

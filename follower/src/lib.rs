@@ -23,6 +23,7 @@ pub struct Config {
     pub log_level: String,
     pub metrics_port: u16,
     pub mailbox_size: usize,
+    pub max_repair: usize,
     pub tip: bool,
 }
 
