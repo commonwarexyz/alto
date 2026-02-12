@@ -16,20 +16,20 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 alto-client = { version = "0.0.18", path = "client" }
 alto-types = { version = "0.0.18", path = "types" }
-commonware-broadcast = "0.0.65"
-commonware-codec = "0.0.65"
-commonware-consensus = "0.0.65"
-commonware-cryptography = "0.0.65"
-commonware-deployer = { version = "0.0.65", default-features = false }
-commonware-macros = "0.0.65"
-commonware-p2p = "0.0.65"
-commonware-resolver = "0.0.65"
-commonware-runtime = "0.0.65"
-commonware-storage = "0.0.65"
-commonware-stream = "0.0.65"
-commonware-utils = "0.0.65"
-commonware-math = "0.0.65"
-commonware-parallel = "0.0.65"
+commonware-broadcast = { path = "../monorepo/broadcast" }
+commonware-codec = { path = "../monorepo/codec" }
+commonware-consensus = { path = "../monorepo/consensus" }
+commonware-cryptography = { path = "../monorepo/cryptography" }
+commonware-deployer = { path = "../monorepo/deployer", default-features = false }
+commonware-macros = { path = "../monorepo/macros" }
+commonware-p2p = { path = "../monorepo/p2p" }
+commonware-resolver = { path = "../monorepo/resolver" }
+commonware-runtime = { path = "../monorepo/runtime" }
+commonware-storage = { path = "../monorepo/storage" }
+commonware-stream = { path = "../monorepo/stream" }
+commonware-utils = { path = "../monorepo/utils" }
+commonware-math = { path = "../monorepo/math" }
+commonware-parallel = { path = "../monorepo/parallel" }
 thiserror = "2.0.12"
 bytes = "1.7.1"
 rand = "0.8.5"

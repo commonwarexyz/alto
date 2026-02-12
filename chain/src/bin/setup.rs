@@ -2,14 +2,16 @@ use alto_chain::{Config, Peers};
 use alto_types::NAMESPACE;
 use clap::{value_parser, Arg, ArgMatches, Command};
 use commonware_codec::{Decode, DecodeExt, Encode};
-use commonware_consensus::simplex::scheme::bls12381_threshold;
+use commonware_consensus::simplex::scheme::bls12381_threshold::vrf;
 use commonware_cryptography::{
     bls12381::primitives::{sharing::Sharing, variant::MinSig},
     certificate::mocks::Fixture,
     ed25519::{PrivateKey, PublicKey},
     Signer,
 };
-use commonware_deployer::ec2::{self, METRICS_PORT};
+use commonware_deployer::aws::{
+    Config as DeployConfig, InstanceConfig, MonitoringConfig, PortConfig, METRICS_PORT,
+};
 use commonware_math::algebra::Random;
 use commonware_utils::{from_hex_formatted, hex, NZU32};
 use rand::{rngs::OsRng, seq::IteratorRandom};
@@ -295,8 +297,7 @@ fn generate_local(
 
     // Generate consensus key
     let peers_u32 = peers as u32;
-    let Fixture { schemes, .. } =
-        bls12381_threshold::fixture::<MinSig, _>(&mut OsRng, NAMESPACE, peers_u32);
+    let Fixture { schemes, .. } = vrf::fixture::<MinSig, _>(&mut OsRng, NAMESPACE, peers_u32);
 
     let identity = schemes[0].polynomial().public();
     info!(%identity, "generated network key");
@@ -469,8 +470,7 @@ fn generate_remote(
 
     // Generate consensus key
     let peers_u32 = peers as u32;
-    let Fixture { schemes, .. } =
-        bls12381_threshold::fixture::<MinSig, _>(&mut OsRng, NAMESPACE, peers_u32);
+    let Fixture { schemes, .. } = vrf::fixture::<MinSig, _>(&mut OsRng, NAMESPACE, peers_u32);
 
     let identity = schemes[0].polynomial().public();
     info!(%identity, "generated network key");
@@ -514,7 +514,7 @@ fn generate_remote(
         // Create instance config
         let region_index = index % regions.len();
         let region = regions[region_index].clone();
-        let instance = ec2::InstanceConfig {
+        let instance = InstanceConfig {
             name: name.clone(),
             region,
             instance_type: instance_type.clone(),
@@ -580,16 +580,16 @@ fn generate_remote(
     }
 
     // Generate root config file
-    let config = ec2::Config {
+    let config = DeployConfig {
         tag,
         instances: instance_configs,
-        monitoring: ec2::MonitoringConfig {
+        monitoring: MonitoringConfig {
             instance_type: monitoring_instance_type,
             storage_size: monitoring_storage_size,
             storage_class: STORAGE_CLASS.to_string(),
             dashboard: DASHBOARD_FILE.to_string(),
         },
-        ports: vec![ec2::PortConfig {
+        ports: vec![PortConfig {
             protocol: "tcp".to_string(),
             port: PORT,
             cidr: "0.0.0.0/0".to_string(),
@@ -673,7 +673,7 @@ fn explorer_remote(dir: String, backend_url: String) {
     // Collect all locations
     let config_path = format!("{dir}/config.yaml");
     let config_content = fs::read_to_string(&config_path).expect("failed to read config.yaml");
-    let config: ec2::Config =
+    let config: DeployConfig =
         serde_yaml::from_str(&config_content).expect("failed to parse config.yaml");
     let mut participants = BTreeMap::new();
     for instance in &config.instances {

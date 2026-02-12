@@ -53,7 +53,7 @@ where
 
     async fn propose(
         &mut self,
-        (runtime_context, _context): (E, Self::Context),
+        (runtime_context, context): (E, Self::Context),
         mut ancestry: AncestorStream<Self::SigningScheme, Self::Block>,
     ) -> Option<Self::Block> {
         let parent = ancestry.next().await?;
@@ -64,7 +64,12 @@ where
             current = parent.timestamp + 1;
         }
 
-        Some(Block::new(parent.digest(), parent.height.next(), current))
+        Some(Block::new_with_context(
+            parent.digest(),
+            parent.height.next(),
+            current,
+            context,
+        ))
     }
 }
 
