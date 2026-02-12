@@ -3,9 +3,7 @@ use crate::resolver::HttpResolverActor;
 use crate::Source;
 use alto_client::consensus::{Message, Payload};
 use alto_client::{IndexQuery, Query};
-use alto_types::{
-    Block, Context, Finalized, Notarized, Scheme, EPOCH, NAMESPACE,
-};
+use alto_types::{Block, Context, Finalized, Notarized, Scheme, EPOCH, NAMESPACE};
 use commonware_consensus::{
     marshal::ingress::handler,
     simplex::{
@@ -15,17 +13,13 @@ use commonware_consensus::{
     types::{Height, Round, View},
 };
 use commonware_cryptography::{
-    bls12381::primitives::variant::MinSig,
-    certificate::mocks::Fixture,
-    ed25519, sha256, Digest, Digestible, Hasher, Sha256, Signer,
+    bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519, sha256, Digest,
+    Digestible, Hasher, Sha256, Signer,
 };
 use commonware_macros::test_traced;
 use commonware_parallel::Sequential;
 use commonware_resolver::Resolver;
-use commonware_runtime::{
-    deterministic::Runner,
-    Clock, Runner as _, Spawner,
-};
+use commonware_runtime::{deterministic::Runner, Clock, Runner as _, Spawner};
 use commonware_utils::channel::mpsc;
 use futures::StreamExt;
 use rand::{rngs::StdRng, SeedableRng};
@@ -75,49 +69,34 @@ impl MockSource {
 impl Source for MockSource {
     type Error = MockError;
 
-    fn health(&self) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async { Ok(()) }
+    async fn health(&self) -> Result<(), Self::Error> {
+        Ok(())
     }
 
-    fn block_get(
-        &self,
-        query: Query,
-    ) -> impl Future<Output = Result<Payload, Self::Error>> + Send {
+    async fn block_get(&self, query: Query) -> Result<Payload, Self::Error> {
         let handler = self.block_handler.clone();
-        async move {
-            let guard = handler.lock().unwrap();
-            match guard.as_ref().and_then(|f| f(query)) {
-                Some(payload) => Ok(payload),
-                None => Err(MockError("block not found".to_string())),
-            }
+        let guard = handler.lock().unwrap();
+        match guard.as_ref().and_then(|f| f(query)) {
+            Some(payload) => Ok(payload),
+            None => Err(MockError("block not found".to_string())),
         }
     }
 
-    fn finalized_get(
-        &self,
-        query: IndexQuery,
-    ) -> impl Future<Output = Result<Finalized, Self::Error>> + Send {
+    async fn finalized_get(&self, query: IndexQuery) -> Result<Finalized, Self::Error> {
         let handler = self.finalized_handler.clone();
-        async move {
-            let guard = handler.lock().unwrap();
-            match guard.as_ref().and_then(|f| f(query)) {
-                Some(finalized) => Ok(finalized),
-                None => Err(MockError("finalized not found".to_string())),
-            }
+        let guard = handler.lock().unwrap();
+        match guard.as_ref().and_then(|f| f(query)) {
+            Some(finalized) => Ok(finalized),
+            None => Err(MockError("finalized not found".to_string())),
         }
     }
 
-    fn notarized_get(
-        &self,
-        query: IndexQuery,
-    ) -> impl Future<Output = Result<Notarized, Self::Error>> + Send {
+    async fn notarized_get(&self, query: IndexQuery) -> Result<Notarized, Self::Error> {
         let handler = self.notarized_handler.clone();
-        async move {
-            let guard = handler.lock().unwrap();
-            match guard.as_ref().and_then(|f| f(query)) {
-                Some(notarized) => Ok(notarized),
-                None => Err(MockError("notarized not found".to_string())),
-            }
+        let guard = handler.lock().unwrap();
+        match guard.as_ref().and_then(|f| f(query)) {
+            Some(notarized) => Ok(notarized),
+            None => Err(MockError("notarized not found".to_string())),
         }
     }
 
@@ -238,8 +217,9 @@ fn resolver_actor_fetches_block_by_digest() {
     let digest = block.digest();
 
     let source = MockSource::new();
-    *source.block_handler.lock().unwrap() =
-        Some(Box::new(move |_| Some(Payload::Block(Box::new(block.clone())))));
+    *source.block_handler.lock().unwrap() = Some(Box::new(move |_| {
+        Some(Payload::Block(Box::new(block.clone())))
+    }));
 
     Runner::default().start(|context| async move {
         let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
@@ -266,8 +246,9 @@ fn resolver_actor_fetches_finalized_by_height() {
     let height = Height::new(5);
 
     let source = MockSource::new();
-    *source.block_handler.lock().unwrap() =
-        Some(Box::new(move |_| Some(Payload::Finalized(Box::new(finalized.clone())))));
+    *source.block_handler.lock().unwrap() = Some(Box::new(move |_| {
+        Some(Payload::Finalized(Box::new(finalized.clone())))
+    }));
 
     Runner::default().start(|context| async move {
         let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
@@ -275,16 +256,12 @@ fn resolver_actor_fetches_finalized_by_height() {
 
         let _actor_handle = context.clone().spawn(|_| actor.run());
 
-        resolver
-            .fetch(handler::Request::Finalized { height })
-            .await;
+        resolver.fetch(handler::Request::Finalized { height }).await;
 
         let msg = ingress_rx.recv().await.unwrap();
         match msg {
             handler::Message::Deliver { key, .. } => {
-                assert!(
-                    matches!(key, handler::Request::Finalized { height: h } if h == height)
-                );
+                assert!(matches!(key, handler::Request::Finalized { height: h } if h == height));
             }
             _ => panic!("expected Deliver message"),
         }
@@ -298,8 +275,7 @@ fn resolver_actor_fetches_notarized_by_round() {
     let round = Round::new(EPOCH, View::new(3));
 
     let source = MockSource::new();
-    *source.notarized_handler.lock().unwrap() =
-        Some(Box::new(move |_| Some(notarized.clone())));
+    *source.notarized_handler.lock().unwrap() = Some(Box::new(move |_| Some(notarized.clone())));
 
     Runner::default().start(|context| async move {
         let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
@@ -307,9 +283,7 @@ fn resolver_actor_fetches_notarized_by_round() {
 
         let _actor_handle = context.clone().spawn(|_| actor.run());
 
-        resolver
-            .fetch(handler::Request::Notarized { round })
-            .await;
+        resolver.fetch(handler::Request::Notarized { round }).await;
 
         let msg = ingress_rx.recv().await.unwrap();
         match msg {
@@ -449,7 +423,10 @@ fn feeder_rejects_invalid_finalization() {
         let result = feeder
             .handle_message(Message::Finalization(finalized))
             .await;
-        assert!(matches!(result, Err(FeederError::InvalidSignature { height: 1 })));
+        assert!(matches!(
+            result,
+            Err(FeederError::InvalidSignature { height: 1 })
+        ));
     });
 }
 

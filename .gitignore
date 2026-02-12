@@ -3,5 +3,4 @@
 /target
 *.vscode
 /assets
-/setup/test
 /types/pkg
