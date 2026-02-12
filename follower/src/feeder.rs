@@ -8,6 +8,7 @@ use futures::StreamExt;
 use std::{fmt, time::Duration};
 use tracing::{debug, error, info, trace, warn};
 
+/// Errors that can occur while feeding certificates from the source stream.
 #[derive(Debug)]
 pub enum FeederError {
     Connect(String),
@@ -29,6 +30,11 @@ impl fmt::Display for FeederError {
 
 impl std::error::Error for FeederError {}
 
+/// Feeds certificates from a [Source] stream into [marshal::Actor] via its [marshal::Mailbox].
+///
+/// Listens for finalization and notarization messages, verifies their threshold
+/// signatures, caches the associated blocks, and reports the proofs to marshal.
+/// Automatically reconnects on stream disconnection.
 pub struct CertificateFeeder<E: Clock, C: Source> {
     context: ContextCell<E>,
     client: C,
@@ -37,6 +43,7 @@ pub struct CertificateFeeder<E: Clock, C: Source> {
 }
 
 impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
+    /// Create a new [CertificateFeeder].
     pub fn new(
         context: E,
         client: C,
@@ -51,6 +58,7 @@ impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
         }
     }
 
+    /// Start the [CertificateFeeder] in a background task.
     pub fn start(mut self) -> Handle<()> {
         spawn_cell!(self.context, self.run().await)
     }

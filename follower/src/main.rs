@@ -18,22 +18,26 @@ use std::{
 use tracing::{error, info, warn, Level};
 
 fn main() {
+    // Parse arguments
     let matches = Command::new("follower")
         .about("Follower node for an alto chain (non-validator)")
         .arg(Arg::new("config").long("config").required(true))
         .get_matches();
 
+    // Load config
     let config: Config = {
         let config_path = matches.get_one::<String>("config").unwrap();
         let config_file = std::fs::read_to_string(config_path).expect("Could not read config file");
         serde_yaml::from_str(&config_file).expect("Could not parse config file")
     };
 
+    // Parse identity
     let identity_bytes =
         from_hex_formatted(&config.identity).expect("Could not parse identity hex");
     let identity =
         Identity::decode(identity_bytes.as_ref()).expect("Could not decode identity public key");
 
+    // Initialize runtime
     let cfg = tokio::Config::default()
         .with_tcp_nodelay(Some(true))
         .with_worker_threads(config.worker_threads)
@@ -41,7 +45,9 @@ fn main() {
         .with_catch_panics(false);
     let executor = tokio::Runner::new(cfg);
 
+    // Start runtime
     executor.start(|context| async move {
+        // Configure telemetry
         let log_level = Level::from_str(&config.log_level).expect("Invalid log level");
         tokio::telemetry::init(
             context.with_label("telemetry"),
@@ -58,19 +64,23 @@ fn main() {
 
         info!(source = %config.source, "starting follower node");
 
+        // Create scheme and client
         let scheme = Scheme::certificate_verifier(NAMESPACE, identity);
         let client = Client::new(&config.source, identity, Sequential);
 
+        // Wait for certificate source to be available
         while let Err(e) = client.health().await {
             warn!(error = ?e, "waiting for certificate source to be available...");
             context.sleep(Duration::from_secs(1)).await;
         }
         info!("connected to certificate source");
 
+        // Create engine
         let engine =
             Engine::new(context.clone(), scheme.clone(), config.mailbox_size).await;
         let mut marshal_mailbox = engine.mailbox();
 
+        // Optionally set checkpoint floor from the latest finalized block
         if config.tip {
             match client.finalized_get(IndexQuery::Latest).await {
                 Ok(finalized) => {
@@ -88,14 +98,16 @@ fn main() {
             }
         }
 
+        // Create resolver
         let (ingress_tx, ingress_rx) = mpsc::channel(config.mailbox_size);
-
         let (resolver_actor, resolver) =
             HttpResolverActor::new(client.clone(), ingress_tx, config.mailbox_size);
         let resolver_handle = context.clone().spawn(|_| resolver_actor.run());
 
+        // Start engine
         let (engine_handle, buffer_handle) = engine.start(ingress_rx, resolver);
 
+        // Start certificate feeder
         let feeder = CertificateFeeder::new(
             context,
             client,
@@ -104,6 +116,7 @@ fn main() {
         );
         let feeder_handle = feeder.start();
 
+        // Wait for any task to finish
         select! {
             _ = engine_handle => {},
             _ = buffer_handle => {},

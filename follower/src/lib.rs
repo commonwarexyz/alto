@@ -13,6 +13,7 @@ pub mod resolver;
 
 pub use alto_client::{IndexQuery, Query};
 
+/// Configuration for the follower binary.
 #[derive(Deserialize, Serialize)]
 pub struct Config {
     pub source: String,
@@ -25,6 +26,8 @@ pub struct Config {
     pub tip: bool,
 }
 
+/// Abstraction over the certificate source (HTTP client) used by the
+/// [feeder::CertificateFeeder] and [resolver::HttpResolverActor].
 pub trait Source: Clone + Send + Sync + 'static {
     type Error: std::error::Error + Send + Sync + 'static;
 
@@ -85,6 +88,10 @@ impl<S: commonware_parallel::Strategy> Source for alto_client::Client<S> {
     }
 }
 
+/// Noop p2p sender used by the follower's buffer engine.
+///
+/// The follower does not participate in p2p broadcast, so all send
+/// operations are dropped.
 #[derive(Clone)]
 pub(crate) struct NoopSender;
 
@@ -115,6 +122,10 @@ impl commonware_p2p::LimitedSender for NoopSender {
     }
 }
 
+/// Noop p2p receiver used by the follower's buffer engine.
+///
+/// The follower does not participate in p2p broadcast, so recv blocks
+/// forever (via [std::future::pending]).
 #[derive(Debug)]
 pub(crate) struct NoopReceiver;
 

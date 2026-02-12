@@ -25,19 +25,25 @@ use tracing::info;
 const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
 const IMMUTABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
 const FREEZER_TABLE_RESIZE_FREQUENCY: u8 = 4;
-const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16);
-const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024;
+const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // 3MB
+const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
-const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024);
-const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024);
-const BUFFER_POOL_PAGE_SIZE: NonZero<u16> = NZU16!(4_096);
-const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192);
+const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
+const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
+const BUFFER_POOL_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
+const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
-const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21);
-const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21);
+const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
+const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
+/// The engine that drives the follower's [marshal::Actor].
+///
+/// Unlike the validator's engine, this does not run consensus. Instead, it
+/// relies on a [CertificateFeeder](crate::feeder::CertificateFeeder) to feed
+/// certificates from a trusted source and an [HttpResolverActor](crate::resolver::HttpResolverActor)
+/// to backfill missing blocks.
 #[allow(clippy::type_complexity)]
 pub struct Engine<E>
 where
@@ -62,7 +68,12 @@ impl<E> Engine<E>
 where
     E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
 {
+    /// Create a new [Engine].
     pub async fn new(mut context: E, scheme: Scheme, mailbox_size: usize) -> Self {
+        // Create the buffer
+        //
+        // The follower does not participate in p2p broadcast, so we use a dummy
+        // key and noop sender/receiver. The buffer is still required by marshal.
         let dummy_key = PrivateKey::random(&mut context).public_key();
 
         let (buffer, buffer_mailbox) = buffered::Engine::new(
@@ -76,8 +87,10 @@ where
             },
         );
 
+        // Create the buffer pool
         let page_cache = CacheRef::new(BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
 
+        // Initialize finalizations by height
         let finalizations_by_height = immutable::Archive::init(
             context.with_label("finalizations_by_height"),
             immutable::Config {
@@ -107,6 +120,7 @@ where
         .expect("failed to initialize finalizations by height archive");
         info!("restored finalizations by height archive");
 
+        // Initialize finalized blocks
         let finalized_blocks = immutable::Archive::init(
             context.with_label("finalized_blocks"),
             immutable::Config {
@@ -134,6 +148,7 @@ where
         .expect("failed to initialize finalized blocks archive");
         info!("restored finalized blocks archive");
 
+        // Create marshal
         let provider = ConstantProvider::new(scheme);
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
 
@@ -159,6 +174,7 @@ where
         )
         .await;
 
+        // Return the engine
         Self {
             context,
             buffer,
@@ -168,10 +184,12 @@ where
         }
     }
 
+    /// Returns a clone of the [marshal::Mailbox] for feeding certificates.
     pub fn mailbox(&self) -> marshal::Mailbox<Scheme, Block> {
         self.marshal_mailbox.clone()
     }
 
+    /// Start the [Engine].
     pub fn start(
         self,
         ingress_rx: mpsc::Receiver<handler::Message<Block>>,
@@ -179,8 +197,10 @@ where
     ) -> (Handle<()>, Handle<()>) {
         let context = self.context.clone();
 
+        // Start the buffer
         let buffer_handle = self.buffer.start((NoopSender, NoopReceiver));
 
+        // Start marshal
         let buffer_mailbox = self.buffer_mailbox;
         let marshal = self.marshal;
         let engine_handle = context.spawn(move |_| async move {
@@ -195,6 +215,7 @@ where
     }
 }
 
+/// Reporter that acknowledges finalized blocks from [marshal::Actor].
 #[derive(Clone)]
 struct Application;
 

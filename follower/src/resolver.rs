@@ -17,6 +17,7 @@ use futures::{channel::mpsc, SinkExt, StreamExt};
 use std::collections::HashMap;
 use tracing::{debug, info, trace, warn};
 
+/// Messages sent from the [HttpResolver] handle to the [HttpResolverActor].
 #[allow(clippy::type_complexity)]
 pub enum ResolverMessage {
     Fetch(handler::Request<Block>),
@@ -25,6 +26,9 @@ pub enum ResolverMessage {
     Retain(Box<dyn Fn(&handler::Request<Block>) -> bool + Send>),
 }
 
+/// Handle to the [HttpResolverActor] that implements [Resolver] for marshal.
+///
+/// All operations are forwarded as messages to the actor via a channel.
 #[derive(Clone)]
 pub struct HttpResolver {
     mailbox_tx: mpsc::Sender<ResolverMessage>,
@@ -82,6 +86,11 @@ impl Resolver for HttpResolver {
     }
 }
 
+/// Actor that fetches blocks and certificates from a [Source] on behalf of marshal.
+///
+/// This replaces the p2p-based resolver used by validators. When marshal needs
+/// a block or certificate it does not have locally, it asks this actor to fetch
+/// it from the HTTP source. In-flight requests are deduplicated.
 pub struct HttpResolverActor<C: Source> {
     client: C,
     mailbox_rx: mpsc::Receiver<ResolverMessage>,
@@ -91,6 +100,7 @@ pub struct HttpResolverActor<C: Source> {
 }
 
 impl<C: Source> HttpResolverActor<C> {
+    /// Create a new [HttpResolverActor] and its corresponding [HttpResolver] handle.
     pub fn new(
         client: C,
         ingress_tx: tokio_mpsc::Sender<handler::Message<Block>>,
@@ -111,6 +121,7 @@ impl<C: Source> HttpResolverActor<C> {
         (actor, handle)
     }
 
+    /// Run the actor loop, processing fetch/cancel/clear/retain messages.
     pub async fn run(mut self) {
         info!("resolver actor started");
 
