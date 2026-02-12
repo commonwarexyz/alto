@@ -10,7 +10,7 @@ source: "https://usa.alto.exoware.xyz"
 
 # Hex-encoded BLS12-381 public key of the network identity
 # This is the threshold public key used to verify finalization signatures
-identity: "9165a52253f8c3605ae6337c72256750b934c405c54db019bbfd156e9c28049e637eb68a85115fcf3a05a9229b9e2e3e0ec974b3857dcaffda00b7cffa582a7bd2b19df6766e1dd4b4b695ff99bb7e0252348f5a46f6124a06246f1781e8f1fe"
+identity: "87a81a6cb44377736201073f10e98934d002374a2e2d77968e00b315e60eda60878b1b00cac8e0aca3b613171b7912a90962d3dfae0d1eef44fbe82b79b539f4dbed26d3731e1990ecc748c9fd8635a256864406a59b37ee06cbf63d6f2a328a"
 
 # Directory for storing finalized blocks and state
 directory: "/tmp/alto-follower-usa"
@@ -29,4 +29,4 @@ mailbox_size: 1024
 
 # Auto-checkpoint from the latest finalized block on first run
 # Set to false to start from genesis (requires backfilling all historical blocks)
-tip: false
+tip: true
