@@ -1,10 +1,11 @@
-use alto_types::{Block, Context, Scheme, EPOCH};
+use alto_types::{Block, PublicKey, Scheme};
 use commonware_consensus::{
     marshal::{ingress::mailbox::AncestorStream, Update},
-    types::{Height, Round, View},
+    simplex::types::Context,
+    types::Height,
     Heightable, Reporter,
 };
-use commonware_cryptography::{ed25519, sha256, Digest, Digestible, Hasher, Sha256, Signer};
+use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256};
 use commonware_runtime::{Clock, Metrics, Spawner};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
@@ -25,12 +26,7 @@ pub struct Application {
 
 impl Application {
     pub fn new() -> Self {
-        let genesis_context = Context {
-            round: Round::new(EPOCH, View::zero()),
-            leader: ed25519::PrivateKey::from_seed(0).public_key(),
-            parent: (View::zero(), sha256::Digest::EMPTY),
-        };
-        let genesis = Block::new(genesis_context, Sha256::hash(GENESIS), Height::zero(), 0);
+        let genesis = Block::new(Sha256::hash(GENESIS), Height::zero(), 0);
         Self {
             genesis: Arc::new(genesis),
         }
@@ -48,7 +44,7 @@ where
     E: Rng + Spawner + Metrics + Clock,
 {
     type SigningScheme = Scheme;
-    type Context = Context;
+    type Context = Context<Digest, PublicKey>;
     type Block = Block;
 
     async fn genesis(&mut self) -> Self::Block {
@@ -68,11 +64,11 @@ where
             current = parent.timestamp + 1;
         }
 
-        Some(Block::new(
-            context,
+        Some(Block::new_with_context(
             parent.digest(),
             parent.height.next(),
             current,
+            context,
         ))
     }
 }
@@ -83,7 +79,7 @@ where
 {
     async fn verify(
         &mut self,
-        (runtime_context, _): (E, Context),
+        (runtime_context, _): (E, Self::Context),
         mut ancestry: AncestorStream<Self::SigningScheme, Self::Block>,
     ) -> bool {
         let Some(block) = ancestry.next().await else {

@@ -53,8 +53,8 @@ const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
-const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
-const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
+const BUFFER_POOL_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
+const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(16);
 
@@ -96,12 +96,12 @@ type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpoch
 
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
-pub struct Engine<E, B, S>
-where
+pub struct Engine<
     E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     S: Strategy,
-{
+    I: Indexer,
+> {
     context: ContextCell<E>,
 
     buffer: buffered::Engine<E, PublicKey, Block>,
@@ -118,16 +118,28 @@ where
     marshaled: Marshaled<E>,
 
     consensus: Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E>, S>,
+
+    /// Upload queue actor and indexer client (if indexer is configured).
+    upload_queue: Option<(UploadQueueActor<E>, I)>,
 }
 
-impl<E, B, S> Engine<E, B, S>
-where
-    E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + ThreadPooler + Storage + Metrics,
-    B: Blocker<PublicKey = PublicKey>,
-    S: Strategy,
+impl<
+        E: BufferPooler
+            + Clock
+            + GClock
+            + Rng
+            + CryptoRng
+            + Spawner
+            + ThreadPooler
+            + Storage
+            + Metrics,
+        B: Blocker<PublicKey = PublicKey>,
+        S: Strategy,
+        I: Indexer,
+    > Engine<E, B, S, I>
 {
     /// Create a new [Engine].
-    pub async fn new<I: Indexer>(context: E, cfg: Config<B, I, S>) -> Self {
+    pub async fn new(context: E, cfg: Config<B, I, S>) -> Self {
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
@@ -140,8 +152,9 @@ where
             },
         );
 
-        // Create the page cache
-        let page_cache = CacheRef::from_pooler(&context, PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
+        // Create the buffer pool
+        let page_cache =
+            CacheRef::from_pooler(&context, BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
 
         // Initialize finalizations by height
         let start = Instant::now();
@@ -264,11 +277,9 @@ where
             epocher,
         );
 
-        // Create the reporter with reliable upload queue
-        let reporter = (
-            marshal_mailbox.clone(),
-            if let Some(indexer) = cfg.indexer {
-                // Create upload queue with config (use defaults if not provided)
+        // Create the upload queue and reporter (if indexer is configured)
+        let (upload_queue, pusher) = match cfg.indexer {
+            Some(indexer) => {
                 let queue_config =
                     cfg.upload_queue_config
                         .unwrap_or_else(|| upload_queue::Config {
@@ -279,25 +290,22 @@ where
                 match UploadQueueActor::new(context.with_label("upload_queue"), queue_config).await
                 {
                     Ok((actor, mailbox)) => {
-                        // Start the upload queue actor
-                        let _handle = actor.start(indexer);
-
-                        Some(indexer::Pusher::new(
+                        let pusher = indexer::Pusher::new(
                             context.with_label("indexer"),
                             mailbox,
                             marshal_mailbox.clone(),
-                        ))
+                        );
+                        (Some((actor, indexer)), Some(pusher))
                     }
                     Err(e) => {
                         error!(?e, "failed to create upload queue, indexer disabled");
-                        None
+                        (None, None)
                     }
                 }
-            } else {
-                None
-            },
-        )
-            .into();
+            }
+            None => (None, None),
+        };
+        let reporter = (marshal_mailbox.clone(), pusher).into();
 
         // Create the consensus engine
         let consensus = Consensus::new(
@@ -317,10 +325,10 @@ where
                 activity_timeout: cfg.activity_timeout,
                 skip_timeout: cfg.skip_timeout,
                 fetch_concurrent: cfg.fetch_concurrent,
+                page_cache: page_cache.clone(),
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
                 blocker: cfg.blocker,
-                page_cache,
                 elector: Random,
                 strategy: cfg.strategy,
             },
@@ -335,6 +343,7 @@ where
             marshal,
             marshaled,
             consensus,
+            upload_queue,
         }
     }
 
@@ -408,8 +417,19 @@ where
         // restart could block).
         let consensus_handle = self.consensus.start(pending, recovered, resolver);
 
+        // Start upload queue (if configured)
+        let upload_queue_handle = self
+            .upload_queue
+            .map(|(actor, indexer)| actor.start(indexer));
+
+        // Collect all actor handles
+        let mut handles = vec![buffer_handle, marshal_handle, consensus_handle];
+        if let Some(handle) = upload_queue_handle {
+            handles.push(handle);
+        }
+
         // Wait for any actor to finish
-        if let Err(e) = try_join_all(vec![buffer_handle, marshal_handle, consensus_handle]).await {
+        if let Err(e) = try_join_all(handles).await {
             error!(?e, "engine failed");
         } else {
             warn!("engine stopped");
