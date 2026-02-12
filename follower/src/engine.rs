@@ -1,15 +1,18 @@
-use crate::{resolver::HttpResolver, NoopReceiver, NoopSender};
-use alto_types::{Block, Finalization, Scheme, EPOCH_LENGTH};
+use crate::{
+    resolver::HttpResolver,
+    store::{CaughtUpFlag, DeferredBlocks, DeferredCertificates},
+    NoopReceiver, NoopSender,
+};
+use alto_types::{Block, Scheme, EPOCH_LENGTH};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
     marshal::{self, ingress::handler, Update},
-    types::{FixedEpocher, ViewDelta},
+    types::{FixedEpocher, Height, ViewDelta},
     Reporter,
 };
 use commonware_cryptography::{
     certificate::{ConstantProvider, Scheme as CertScheme},
     ed25519::{PrivateKey, PublicKey},
-    sha256::Digest,
     Signer,
 };
 use commonware_math::algebra::Random;
@@ -19,7 +22,14 @@ use commonware_storage::archive::immutable;
 use commonware_utils::{channel::mpsc, Acknowledgement, NZUsize, NZU16, NZU64};
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
-use std::num::NonZero;
+use std::{
+    num::NonZero,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::SystemTime,
+};
 use tracing::info;
 
 const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
@@ -35,6 +45,7 @@ const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 pub const DEFAULT_MAX_REPAIR: NonZero<usize> = NZUsize!(256);
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
+const BACKFILL_LOG_INTERVAL: u64 = 1000;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
@@ -50,14 +61,15 @@ where
     E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
 {
     context: E,
+    caught_up: CaughtUpFlag,
     buffer: buffered::Engine<E, PublicKey, Block>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
     marshal: marshal::Actor<
         E,
         Block,
         ConstantProvider<Scheme, commonware_consensus::types::Epoch>,
-        immutable::Archive<E, Digest, Finalization>,
-        immutable::Archive<E, Digest, Block>,
+        DeferredCertificates<E>,
+        DeferredBlocks<E>,
         FixedEpocher,
         Sequential,
     >,
@@ -148,6 +160,12 @@ where
         .expect("failed to initialize finalized blocks archive");
         info!("restored finalized blocks archive");
 
+        // Wrap archives with deferred sync
+        let caught_up: CaughtUpFlag = Arc::new(AtomicBool::new(false));
+        let finalizations_by_height =
+            DeferredCertificates::new(finalizations_by_height, caught_up.clone());
+        let finalized_blocks = DeferredBlocks::new(finalized_blocks, caught_up.clone());
+
         // Create marshal
         let provider = ConstantProvider::new(scheme);
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
@@ -177,6 +195,7 @@ where
         // Return the engine
         Self {
             context,
+            caught_up,
             buffer,
             buffer_mailbox,
             marshal,
@@ -203,8 +222,15 @@ where
         // Start marshal
         let buffer_mailbox = self.buffer_mailbox;
         let marshal = self.marshal;
+        let caught_up = self.caught_up;
+        let backfill_start = context.current();
         let engine_handle = context.spawn(move |_| async move {
-            let app = Application;
+            let app = Application {
+                tip: Height::zero(),
+                caught_up,
+                backfill_last_time: backfill_start,
+                backfill_last_height: Height::zero(),
+            };
             marshal
                 .start(app, buffer_mailbox, (ingress_rx, resolver))
                 .await
@@ -216,16 +242,70 @@ where
 }
 
 /// Reporter that acknowledges finalized blocks from [marshal::Actor].
+///
+/// Tracks the latest finalized tip and signals when the follower has caught up,
+/// transitioning the deferred archive wrappers from batched to per-block sync.
 #[derive(Clone)]
-struct Application;
+struct Application {
+    tip: Height,
+    caught_up: CaughtUpFlag,
+    backfill_last_time: SystemTime,
+    backfill_last_height: Height,
+}
 
 impl Reporter for Application {
     type Activity = Update<Block>;
 
     async fn report(&mut self, activity: Self::Activity) {
-        if let Update::Block(block, ack_rx) = activity {
-            info!(height = block.height.get(), "reported block");
-            ack_rx.acknowledge();
+        match activity {
+            Update::Tip(_, height, _) => {
+                self.tip = height;
+            }
+            Update::Block(block, ack) => {
+                let height = block.height;
+                if !self.caught_up.load(Ordering::Relaxed) {
+                    if height.get() - self.backfill_last_height.get() >= BACKFILL_LOG_INTERVAL {
+                        let now = SystemTime::now();
+                        let elapsed = now
+                            .duration_since(self.backfill_last_time)
+                            .unwrap_or_default()
+                            .as_secs_f64();
+                        let blocks = (height.get() - self.backfill_last_height.get()) as f64;
+                        let bps = if elapsed > 0.0 {
+                            blocks / elapsed
+                        } else {
+                            0.0
+                        };
+                        let remaining = self.tip.get().saturating_sub(height.get());
+                        let eta_secs = if bps > 0.0 {
+                            remaining as f64 / bps
+                        } else {
+                            0.0
+                        };
+                        let eta = eta_secs as u64;
+                        let hours = eta / 3600;
+                        let minutes = (eta % 3600) / 60;
+                        let seconds = eta % 60;
+                        info!(
+                            height = height.get(),
+                            tip = self.tip.get(),
+                            remaining,
+                            blocks_per_sec = format!("{bps:.0}"),
+                            eta = format!("{hours}h{minutes:02}m{seconds:02}s"),
+                            "backfilling",
+                        );
+                        self.backfill_last_height = height;
+                        self.backfill_last_time = now;
+                    }
+                    if height >= self.tip && self.tip > Height::zero() {
+                        info!(height = height.get(), "caught up to tip, enabling sync");
+                        self.caught_up.store(true, Ordering::Relaxed);
+                    }
+                } else {
+                    info!(height = height.get(), "reported block");
+                }
+                ack.acknowledge();
+            }
         }
     }
 }

@@ -26,7 +26,7 @@ metrics_port: 9091
 mailbox_size: 1024
 
 # Maximum number of blocks to fetch concurrently during backfill
-max_repair: 256
+max_repair: 1024
 
 # Auto-checkpoint from the latest finalized block on first run.
 # When true (default), the follower will fetch the latest finalized block

@@ -239,7 +239,7 @@ impl<C: Source> HttpResolverActor<C> {
                         "failed to deliver finalized block to marshal"
                     );
                 }
-                info!(height = height.get(), "fetched finalized block by height");
+                debug!(height = height.get(), "fetched finalized block by height");
             }
             Ok(_) => {
                 warn!(

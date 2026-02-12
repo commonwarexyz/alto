@@ -95,13 +95,6 @@ impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
             Message::Finalization(finalized) => {
                 let height = finalized.block.height;
                 let view = finalized.proof.view();
-
-                debug!(
-                    height = height.get(),
-                    view = view.get(),
-                    "received finalization"
-                );
-
                 if !finalized.verify(&self.scheme, &Sequential) {
                     return Err(FeederError::InvalidSignature {
                         height: height.get(),
@@ -116,20 +109,10 @@ impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
                     .report(Activity::Finalization(finalized.proof.clone()))
                     .await;
 
-                info!(
-                    height = height.get(),
-                    view = view.get(),
-                    "reported finalization"
-                );
+                info!(height = height.get(), view = view.get(), "new finalization");
             }
             Message::Notarization(notarized) => {
                 let round = notarized.proof.round();
-                debug!(
-                    height = notarized.block.height.get(),
-                    view = round.view().get(),
-                    "received notarization"
-                );
-
                 if !notarized.verify(&self.scheme, &Sequential) {
                     return Err(FeederError::InvalidSignature {
                         height: notarized.block.height.get(),
@@ -153,7 +136,7 @@ impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
                 info!(
                     height = notarized.block.height.get(),
                     view = round.view().get(),
-                    "reported notarization"
+                    "new notarization"
                 );
             }
             Message::Seed(seed) => {

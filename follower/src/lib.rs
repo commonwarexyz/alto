@@ -10,6 +10,7 @@ use std::{fmt::Debug, future::Future, time::SystemTime};
 pub mod engine;
 pub mod feeder;
 pub mod resolver;
+pub mod store;
 
 pub use alto_client::{IndexQuery, Query};
 
