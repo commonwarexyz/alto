@@ -115,14 +115,39 @@ impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
                 );
             }
             Message::Notarization(notarized) => {
-                trace!(
+                let round = notarized.proof.round();
+                debug!(
                     height = notarized.block.height.get(),
-                    view = notarized.proof.view().get(),
-                    "received notarization (ignored)"
+                    view = round.view().get(),
+                    "received notarization"
+                );
+
+                if !notarized.verify(&self.scheme, &Sequential) {
+                    return Err(FeederError::InvalidSignature {
+                        height: notarized.block.height.get(),
+                    });
+                }
+
+                // This block may not actually be verified (we would only know that once certified). However, it does no damage
+                // to store it in marshal before a finalization arrives (if a block isn't directly finalized, this will prevent us from
+                // having to ask the backend for it again).
+                //
+                // If it is invalid and not part of the canonical chain, we'll just prune it later.
+                self.marshal_mailbox
+                    .verified(round, notarized.block.clone())
+                    .await;
+                self.marshal_mailbox
+                    .report(Activity::Notarization(notarized.proof.clone()))
+                    .await;
+
+                info!(
+                    height = notarized.block.height.get(),
+                    view = round.view().get(),
+                    "reported notarization"
                 );
             }
             Message::Seed(seed) => {
-                trace!(view = seed.view().get(), "received seed (ignored)");
+                trace!(view = seed.view().get(), "received seed");
             }
         }
         Ok(())
