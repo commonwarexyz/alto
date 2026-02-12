@@ -1,16 +1,19 @@
-use crate::consensus::{Context, Finalization, Notarization, Scheme};
+use crate::consensus::{Finalization, Notarization, PublicKey, Scheme};
+use crate::EPOCH;
 use bytes::{Buf, BufMut};
-use commonware_codec::{varint::UInt, Encode, EncodeSize, Error, Read, ReadExt, Write};
-use commonware_consensus::{types::Height, CertifiableBlock, Heightable};
+use commonware_codec::{varint::UInt, DecodeExt, EncodeSize, Error, Read, ReadExt, Write};
+use commonware_consensus::{
+    simplex::types::Context,
+    types::{Height, Round, View},
+    Heightable,
+};
+use commonware_cryptography::Signer as _;
 use commonware_cryptography::{sha256::Digest, Committable, Digestible, Hasher, Sha256};
 use commonware_parallel::Strategy;
 use rand::rngs::OsRng;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
-    /// The consensus context when this block was proposed.
-    pub context: Context,
-
     /// The parent block's digest.
     pub parent: Digest,
 
@@ -22,41 +25,58 @@ pub struct Block {
 
     /// Pre-computed digest of the block.
     digest: Digest,
+
+    /// Consensus context associated with this block.
+    pub context: Context<Digest, PublicKey>,
 }
 
 impl Block {
-    fn compute_digest(
-        context: &Context,
-        parent: &Digest,
-        height: Height,
-        timestamp: u64,
-    ) -> Digest {
+    fn compute_digest(parent: &Digest, height: Height, timestamp: u64) -> Digest {
         let mut hasher = Sha256::new();
-        hasher.update(&context.encode());
         hasher.update(parent);
         hasher.update(&height.get().to_be_bytes());
         hasher.update(&timestamp.to_be_bytes());
         hasher.finalize()
     }
 
-    pub fn new(context: Context, parent: Digest, height: Height, timestamp: u64) -> Self {
-        let digest = Self::compute_digest(&context, &parent, height, timestamp);
+    fn default_context(parent: Digest, height: Height) -> Context<Digest, PublicKey> {
+        let signer = commonware_cryptography::ed25519::PrivateKey::decode([7u8; 32].as_ref())
+            .expect("static signer seed must decode");
+        Context {
+            round: Round::new(EPOCH, View::new(height.get().saturating_sub(1))),
+            leader: signer.public_key(),
+            parent: (View::new(height.get().saturating_sub(1)), parent),
+        }
+    }
+
+    pub fn new(parent: Digest, height: Height, timestamp: u64) -> Self {
+        let context = Self::default_context(parent, height);
+        Self::new_with_context(parent, height, timestamp, context)
+    }
+
+    pub fn new_with_context(
+        parent: Digest,
+        height: Height,
+        timestamp: u64,
+        context: Context<Digest, PublicKey>,
+    ) -> Self {
+        let digest = Self::compute_digest(&parent, height, timestamp);
         Self {
-            context,
             parent,
             height,
             timestamp,
             digest,
+            context,
         }
     }
 }
 
 impl Write for Block {
     fn write(&self, writer: &mut impl BufMut) {
-        self.context.write(writer);
         self.parent.write(writer);
         self.height.write(writer);
         UInt(self.timestamp).write(writer);
+        self.context.write(writer);
     }
 }
 
@@ -64,28 +84,29 @@ impl Read for Block {
     type Cfg = ();
 
     fn read_cfg(reader: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
-        let context = Context::read(reader)?;
         let parent = Digest::read(reader)?;
         let height = Height::read(reader)?;
-        let timestamp = UInt::read(reader)?.0;
+        let timestamp = UInt::read(reader)?.into();
+        let context = Context::read(reader)?;
 
-        let digest = Self::compute_digest(&context, &parent, height, timestamp);
+        // Pre-compute the digest
+        let digest = Self::compute_digest(&parent, height, timestamp);
         Ok(Self {
-            context,
             parent,
             height,
             timestamp,
             digest,
+            context,
         })
     }
 }
 
 impl EncodeSize for Block {
     fn encode_size(&self) -> usize {
-        self.context.encode_size()
-            + self.parent.encode_size()
+        self.parent.encode_size()
             + self.height.encode_size()
             + UInt(self.timestamp).encode_size()
+            + self.context.encode_size()
     }
 }
 
@@ -205,16 +226,16 @@ impl commonware_consensus::Block for Block {
     }
 }
 
-impl Heightable for Block {
-    fn height(&self) -> Height {
-        self.height
-    }
-}
-
-impl CertifiableBlock for Block {
-    type Context = Context;
+impl commonware_consensus::CertifiableBlock for Block {
+    type Context = Context<Digest, PublicKey>;
 
     fn context(&self) -> Self::Context {
         self.context.clone()
+    }
+}
+
+impl Heightable for Block {
+    fn height(&self) -> Height {
+        self.height
     }
 }
