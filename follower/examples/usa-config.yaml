@@ -29,4 +29,4 @@ mailbox_size: 1024
 
 # Auto-checkpoint from the latest finalized block on first run
 # Set to false to start from genesis (requires backfilling all historical blocks)
-auto_checkpoint: false
+tip: false

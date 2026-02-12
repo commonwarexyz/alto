@@ -73,7 +73,7 @@ impl Source for MockSource {
         Ok(())
     }
 
-    async fn block_get(&self, query: Query) -> Result<Payload, Self::Error> {
+    async fn block(&self, query: Query) -> Result<Payload, Self::Error> {
         let handler = self.block_handler.clone();
         let guard = handler.lock().unwrap();
         match guard.as_ref().and_then(|f| f(query)) {
@@ -82,7 +82,7 @@ impl Source for MockSource {
         }
     }
 
-    async fn finalized_get(&self, query: IndexQuery) -> Result<Finalized, Self::Error> {
+    async fn finalized(&self, query: IndexQuery) -> Result<Finalized, Self::Error> {
         let handler = self.finalized_handler.clone();
         let guard = handler.lock().unwrap();
         match guard.as_ref().and_then(|f| f(query)) {
@@ -378,8 +378,7 @@ fn feeder_accepts_valid_finalization() {
     let verifier = fixture.verifier_scheme();
 
     Runner::default().start(|context| async move {
-        let engine =
-            crate::engine::FollowerEngine::new(context.clone(), verifier.clone(), 16).await;
+        let engine = crate::engine::Engine::new(context.clone(), verifier.clone(), 16).await;
         let marshal_mailbox = engine.mailbox();
         let engine_buffer = engine.buffer();
 
@@ -406,8 +405,7 @@ fn feeder_rejects_invalid_finalization() {
     let wrong_verifier = fixture.wrong_verifier_scheme();
 
     Runner::default().start(|context| async move {
-        let engine =
-            crate::engine::FollowerEngine::new(context.clone(), wrong_verifier.clone(), 16).await;
+        let engine = crate::engine::Engine::new(context.clone(), wrong_verifier.clone(), 16).await;
         let marshal_mailbox = engine.mailbox();
         let engine_buffer = engine.buffer();
 
@@ -437,8 +435,7 @@ fn feeder_ignores_notarization() {
     let verifier = fixture.verifier_scheme();
 
     Runner::default().start(|context| async move {
-        let engine =
-            crate::engine::FollowerEngine::new(context.clone(), verifier.clone(), 16).await;
+        let engine = crate::engine::Engine::new(context.clone(), verifier.clone(), 16).await;
         let marshal_mailbox = engine.mailbox();
         let engine_buffer = engine.buffer();
 

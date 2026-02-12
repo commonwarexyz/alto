@@ -4,20 +4,17 @@ use alto_client::IndexQuery;
 use alto_types::Block;
 use bytes::Bytes;
 use commonware_codec::Encode;
-use commonware_consensus::{
-    marshal::ingress::handler,
-    types::Height,
-};
+use commonware_consensus::{marshal::ingress::handler, types::Height};
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
 use commonware_macros::select;
 use commonware_resolver::{Consumer, Resolver};
+use commonware_utils::channel::mpsc as tokio_mpsc;
 use commonware_utils::{
     futures::{AbortablePool, Aborter},
     vec::NonEmptyVec,
 };
 use futures::{channel::mpsc, SinkExt, StreamExt};
 use std::collections::HashMap;
-use commonware_utils::channel::mpsc as tokio_mpsc;
 use tracing::{debug, info, trace, warn};
 
 #[allow(clippy::type_complexity)]
@@ -194,7 +191,7 @@ impl<C: Source> HttpResolverActor<C> {
     ) {
         debug!(?digest, "fetching block by digest");
 
-        match client.block_get(alto_client::Query::Digest(digest)).await {
+        match client.block(alto_client::Query::Digest(digest)).await {
             Ok(Payload::Block(block)) => {
                 let key = handler::Request::Block(digest);
                 let value = Bytes::from(block.encode().to_vec());
@@ -219,19 +216,25 @@ impl<C: Source> HttpResolverActor<C> {
     ) {
         debug!(height = height.get(), "fetching finalized block by height");
 
-        match client.block_get(alto_client::Query::Index(height.get())).await {
+        match client.block(alto_client::Query::Index(height.get())).await {
             Ok(Payload::Finalized(finalized)) => {
                 let key = handler::Request::Finalized { height };
                 let finalization = finalized.proof.clone();
                 let block = finalized.block.clone();
                 let value = Bytes::from((finalization, block).encode().to_vec());
                 if !handler.deliver(key, value).await {
-                    warn!(height = height.get(), "failed to deliver finalized block to marshal");
+                    warn!(
+                        height = height.get(),
+                        "failed to deliver finalized block to marshal"
+                    );
                 }
                 info!(height = height.get(), "fetched finalized block by height");
             }
             Ok(_) => {
-                warn!(height = height.get(), "wrong payload returned for finalized block by height");
+                warn!(
+                    height = height.get(),
+                    "wrong payload returned for finalized block by height"
+                );
             }
             Err(e) => {
                 warn!(height = height.get(), error=?e, "failed to fetch finalized block by height");

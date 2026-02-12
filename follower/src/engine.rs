@@ -15,7 +15,7 @@ use commonware_cryptography::{
 use commonware_parallel::Sequential;
 use commonware_runtime::{buffer::paged::CacheRef, Handle, Metrics, Spawner, Storage};
 use commonware_storage::archive::immutable;
-use commonware_utils::{channel::mpsc, Acknowledgement, NZU16, NZU64, NZUsize};
+use commonware_utils::{channel::mpsc, Acknowledgement, NZUsize, NZU16, NZU64};
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use std::num::NonZero;
@@ -38,7 +38,7 @@ const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21);
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21);
 
 #[allow(clippy::type_complexity)]
-pub struct FollowerEngine<E>
+pub struct Engine<E>
 where
     E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
 {
@@ -57,7 +57,7 @@ where
     marshal_mailbox: marshal::Mailbox<Scheme, Block>,
 }
 
-impl<E> FollowerEngine<E>
+impl<E> Engine<E>
 where
     E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
 {
@@ -188,7 +188,7 @@ where
         let buffer_mailbox = self.buffer_mailbox;
         let marshal = self.marshal;
         let engine_handle = context.spawn(move |_| async move {
-            let app = FollowerApplication;
+            let app = Application;
             marshal
                 .start(app, buffer_mailbox, (ingress_rx, resolver))
                 .await
@@ -200,9 +200,9 @@ where
 }
 
 #[derive(Clone)]
-struct FollowerApplication;
+struct Application;
 
-impl Reporter for FollowerApplication {
+impl Reporter for Application {
     type Activity = Update<Block>;
 
     async fn report(&mut self, activity: Self::Activity) {

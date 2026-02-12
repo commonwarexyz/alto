@@ -1,9 +1,6 @@
 use alto_client::Client;
 use alto_follower::{
-    engine::FollowerEngine,
-    feeder::CertificateFeeder,
-    resolver::HttpResolverActor,
-    Config, IndexQuery,
+    engine::Engine, feeder::CertificateFeeder, resolver::HttpResolverActor, Config, IndexQuery,
 };
 use alto_types::{Identity, Scheme, NAMESPACE};
 use clap::{Arg, Command};
@@ -28,8 +25,7 @@ fn main() {
 
     let config: Config = {
         let config_path = matches.get_one::<String>("config").unwrap();
-        let config_file =
-            std::fs::read_to_string(config_path).expect("Could not read config file");
+        let config_file = std::fs::read_to_string(config_path).expect("Could not read config file");
         serde_yaml::from_str(&config_file).expect("Could not parse config file")
     };
 
@@ -72,10 +68,10 @@ fn main() {
         info!("connected to certificate source");
 
         let engine =
-            FollowerEngine::new(context.clone(), scheme.clone(), config.mailbox_size).await;
+            Engine::new(context.clone(), scheme.clone(), config.mailbox_size).await;
         let mut marshal_mailbox = engine.mailbox();
 
-        if config.auto_checkpoint {
+        if config.tip {
             match client.finalized_get(IndexQuery::Latest).await {
                 Ok(finalized) => {
                     if !finalized.verify(&scheme, &Sequential) {
@@ -96,20 +92,19 @@ fn main() {
 
         let (resolver_actor, resolver) =
             HttpResolverActor::new(client.clone(), ingress_tx, config.mailbox_size);
-
         let resolver_handle = context.clone().spawn(|_| resolver_actor.run());
 
         let buffer_mailbox = engine.buffer();
         let (engine_handle, buffer_handle) = engine.start(ingress_rx, resolver);
 
         let feeder = CertificateFeeder::new(
-            context.clone(),
+            context,
             client,
             scheme,
             marshal_mailbox,
             buffer_mailbox,
         );
-        let feeder_handle = context.spawn(|_| feeder.run());
+        let feeder_handle = feeder.start();
 
         select! {
             _ = engine_handle => {},

@@ -29,4 +29,4 @@ mailbox_size: 1024
 # When true (default), the follower will fetch the latest finalized block
 # from the indexer and use that as the starting point, avoiding the need
 # to backfill all historical blocks.
-auto_checkpoint: true
+tip: true

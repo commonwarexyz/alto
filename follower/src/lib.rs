@@ -5,11 +5,7 @@ use commonware_p2p::Recipients;
 use commonware_runtime::IoBufMut;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
-use std::{
-    fmt::Debug,
-    future::Future,
-    time::SystemTime,
-};
+use std::{fmt::Debug, future::Future, time::SystemTime};
 
 pub mod engine;
 pub mod feeder;
@@ -26,18 +22,15 @@ pub struct Config {
     pub log_level: String,
     pub metrics_port: u16,
     pub mailbox_size: usize,
-    pub auto_checkpoint: bool,
+    pub tip: bool,
 }
 
 pub trait Source: Clone + Send + Sync + 'static {
     type Error: std::error::Error + Send + Sync + 'static;
 
     fn health(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
-    fn block_get(
-        &self,
-        query: Query,
-    ) -> impl Future<Output = Result<Payload, Self::Error>> + Send;
-    fn finalized_get(
+    fn block(&self, query: Query) -> impl Future<Output = Result<Payload, Self::Error>> + Send;
+    fn finalized(
         &self,
         query: IndexQuery,
     ) -> impl Future<Output = Result<Finalized, Self::Error>> + Send;
@@ -62,14 +55,11 @@ impl<S: commonware_parallel::Strategy> Source for alto_client::Client<S> {
         self.health()
     }
 
-    fn block_get(
-        &self,
-        query: Query,
-    ) -> impl Future<Output = Result<Payload, Self::Error>> + Send {
+    fn block(&self, query: Query) -> impl Future<Output = Result<Payload, Self::Error>> + Send {
         self.block_get(query)
     }
 
-    fn finalized_get(
+    fn finalized(
         &self,
         query: IndexQuery,
     ) -> impl Future<Output = Result<Finalized, Self::Error>> + Send {
@@ -132,9 +122,7 @@ impl commonware_p2p::Receiver for NoopReceiver {
     type Error = std::io::Error;
     type PublicKey = PublicKey;
 
-    async fn recv(
-        &mut self,
-    ) -> Result<commonware_p2p::Message<Self::PublicKey>, Self::Error> {
+    async fn recv(&mut self) -> Result<commonware_p2p::Message<Self::PublicKey>, Self::Error> {
         std::future::pending().await
     }
 }

@@ -2,14 +2,10 @@ use crate::Source;
 use alto_client::consensus::Message;
 use alto_types::{Block, Scheme};
 use commonware_broadcast::Broadcaster;
-use commonware_consensus::{
-    marshal,
-    simplex::types::Activity,
-    Reporter, Viewable,
-};
+use commonware_consensus::{marshal, simplex::types::Activity, Reporter, Viewable};
 use commonware_cryptography::ed25519::PublicKey;
 use commonware_parallel::Sequential;
-use commonware_runtime::Clock;
+use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Spawner};
 use futures::StreamExt;
 use std::{fmt, time::Duration};
 use tracing::{debug, error, info, trace, warn};
@@ -36,14 +32,14 @@ impl fmt::Display for FeederError {
 impl std::error::Error for FeederError {}
 
 pub struct CertificateFeeder<E: Clock, C: Source> {
-    context: E,
+    context: ContextCell<E>,
     client: C,
     scheme: Scheme,
     marshal_mailbox: marshal::Mailbox<Scheme, Block>,
     buffer_mailbox: commonware_broadcast::buffered::Mailbox<PublicKey, Block>,
 }
 
-impl<E: Clock, C: Source> CertificateFeeder<E, C> {
+impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
     pub fn new(
         context: E,
         client: C,
@@ -52,12 +48,16 @@ impl<E: Clock, C: Source> CertificateFeeder<E, C> {
         buffer_mailbox: commonware_broadcast::buffered::Mailbox<PublicKey, Block>,
     ) -> Self {
         Self {
-            context,
+            context: ContextCell::new(context),
             client,
             scheme,
             marshal_mailbox,
             buffer_mailbox,
         }
+    }
+
+    pub fn start(mut self) -> Handle<()> {
+        spawn_cell!(self.context, self.run().await)
     }
 
     pub async fn run(mut self) {
@@ -87,10 +87,7 @@ impl<E: Clock, C: Source> CertificateFeeder<E, C> {
         Ok(())
     }
 
-    pub(crate) async fn handle_message(
-        &mut self,
-        message: Message,
-    ) -> Result<(), FeederError> {
+    pub(crate) async fn handle_message(&mut self, message: Message) -> Result<(), FeederError> {
         match message {
             Message::Finalization(finalized) => {
                 let height = finalized.block.height;

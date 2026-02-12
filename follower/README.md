@@ -42,4 +42,4 @@ See [examples/](./examples/) for sample configuration files.
 | `log_level` | Log level (`trace`, `debug`, `info`, `warn`, `error`) |
 | `metrics_port` | Port for Prometheus metrics endpoint |
 | `mailbox_size` | Size of internal mailboxes |
-| `auto_checkpoint` | When `true`, starts from the latest finalized block instead of backfilling from genesis |
+| `tip` | When `true`, starts from the latest finalized block instead of backfilling from genesis |
