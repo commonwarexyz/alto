@@ -94,7 +94,6 @@ fn main() {
             HttpResolverActor::new(client.clone(), ingress_tx, config.mailbox_size);
         let resolver_handle = context.clone().spawn(|_| resolver_actor.run());
 
-        let buffer_mailbox = engine.buffer();
         let (engine_handle, buffer_handle) = engine.start(ingress_rx, resolver);
 
         let feeder = CertificateFeeder::new(
@@ -102,7 +101,6 @@ fn main() {
             client,
             scheme,
             marshal_mailbox,
-            buffer_mailbox,
         );
         let feeder_handle = feeder.start();
 

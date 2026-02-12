@@ -1,9 +1,7 @@
 use crate::Source;
 use alto_client::consensus::Message;
 use alto_types::{Block, Scheme};
-use commonware_broadcast::Broadcaster;
 use commonware_consensus::{marshal, simplex::types::Activity, Reporter, Viewable};
-use commonware_cryptography::ed25519::PublicKey;
 use commonware_parallel::Sequential;
 use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Spawner};
 use futures::StreamExt;
@@ -36,7 +34,6 @@ pub struct CertificateFeeder<E: Clock, C: Source> {
     client: C,
     scheme: Scheme,
     marshal_mailbox: marshal::Mailbox<Scheme, Block>,
-    buffer_mailbox: commonware_broadcast::buffered::Mailbox<PublicKey, Block>,
 }
 
 impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
@@ -45,14 +42,12 @@ impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
         client: C,
         scheme: Scheme,
         marshal_mailbox: marshal::Mailbox<Scheme, Block>,
-        buffer_mailbox: commonware_broadcast::buffered::Mailbox<PublicKey, Block>,
     ) -> Self {
         Self {
             context: ContextCell::new(context),
             client,
             scheme,
             marshal_mailbox,
-            buffer_mailbox,
         }
     }
 
@@ -105,12 +100,10 @@ impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
                     });
                 }
 
-                let no_peers = commonware_p2p::Recipients::Some(vec![]);
-                _ = self
-                    .buffer_mailbox
-                    .broadcast(no_peers, finalized.block.clone())
+                let round = finalized.proof.round();
+                self.marshal_mailbox
+                    .verified(round, finalized.block.clone())
                     .await;
-
                 self.marshal_mailbox
                     .report(Activity::Finalization(finalized.proof.clone()))
                     .await;

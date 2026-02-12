@@ -380,7 +380,6 @@ fn feeder_accepts_valid_finalization() {
     Runner::default().start(|context| async move {
         let engine = crate::engine::Engine::new(context.clone(), verifier.clone(), 16).await;
         let marshal_mailbox = engine.mailbox();
-        let engine_buffer = engine.buffer();
 
         let source = MockSource::new();
         let mut feeder = CertificateFeeder::new(
@@ -388,7 +387,6 @@ fn feeder_accepts_valid_finalization() {
             source,
             verifier,
             marshal_mailbox,
-            engine_buffer,
         );
 
         let result = feeder
@@ -407,7 +405,6 @@ fn feeder_rejects_invalid_finalization() {
     Runner::default().start(|context| async move {
         let engine = crate::engine::Engine::new(context.clone(), wrong_verifier.clone(), 16).await;
         let marshal_mailbox = engine.mailbox();
-        let engine_buffer = engine.buffer();
 
         let source = MockSource::new();
         let mut feeder = CertificateFeeder::new(
@@ -415,7 +412,6 @@ fn feeder_rejects_invalid_finalization() {
             source,
             wrong_verifier,
             marshal_mailbox,
-            engine_buffer,
         );
 
         let result = feeder
@@ -437,7 +433,6 @@ fn feeder_ignores_notarization() {
     Runner::default().start(|context| async move {
         let engine = crate::engine::Engine::new(context.clone(), verifier.clone(), 16).await;
         let marshal_mailbox = engine.mailbox();
-        let engine_buffer = engine.buffer();
 
         let source = MockSource::new();
         let mut feeder = CertificateFeeder::new(
@@ -445,7 +440,6 @@ fn feeder_ignores_notarization() {
             source,
             verifier,
             marshal_mailbox,
-            engine_buffer,
         );
 
         let result = feeder

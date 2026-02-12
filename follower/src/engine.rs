@@ -8,10 +8,11 @@ use commonware_consensus::{
 };
 use commonware_cryptography::{
     certificate::{ConstantProvider, Scheme as CertScheme},
-    ed25519::PublicKey,
+    ed25519::{PrivateKey, PublicKey},
     sha256::Digest,
     Signer,
 };
+use commonware_math::algebra::Random;
 use commonware_parallel::Sequential;
 use commonware_runtime::{buffer::paged::CacheRef, Handle, Metrics, Spawner, Storage};
 use commonware_storage::archive::immutable;
@@ -62,8 +63,7 @@ where
     E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
 {
     pub async fn new(mut context: E, scheme: Scheme, mailbox_size: usize) -> Self {
-        let seed: u64 = context.gen();
-        let dummy_key = commonware_cryptography::ed25519::PrivateKey::from_seed(seed).public_key();
+        let dummy_key = PrivateKey::random(&mut context).public_key();
 
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
@@ -170,10 +170,6 @@ where
 
     pub fn mailbox(&self) -> marshal::Mailbox<Scheme, Block> {
         self.marshal_mailbox.clone()
-    }
-
-    pub fn buffer(&self) -> buffered::Mailbox<PublicKey, Block> {
-        self.buffer_mailbox.clone()
     }
 
     pub fn start(
