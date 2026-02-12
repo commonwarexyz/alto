@@ -133,6 +133,8 @@ impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
                 // having to ask the backend for it again).
                 //
                 // If it is invalid and not part of the canonical chain, we'll just prune it later.
+                //
+                // TODO (https://github.com/commonwarexyz/monorepo/pull/2208): create a dedicated cache for storing unverified (but notarized) blocks
                 self.marshal_mailbox
                     .verified(round, notarized.block.clone())
                     .await;
