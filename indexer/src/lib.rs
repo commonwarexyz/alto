@@ -408,7 +408,7 @@ mod tests {
                 leader: ed25519::PrivateKey::from_seed(0).public_key(),
                 parent: (View::new(0), sha256::Digest::EMPTY),
             };
-            Block::new_with_context(Sha256::hash(b"genesis"), Height::new(1), 1000, context)
+            Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000)
         }
 
         /// Create a proposal for the given block at view 1.
@@ -635,8 +635,7 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
-        let block =
-            Block::new_with_context(Sha256::hash(b"genesis"), Height::new(1), 1000, context);
+        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),
@@ -758,8 +757,7 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
-        let block =
-            Block::new_with_context(Sha256::hash(b"genesis"), Height::new(1), 1000, context);
+        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),
@@ -796,8 +794,7 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
-        let block =
-            Block::new_with_context(Sha256::hash(b"genesis"), Height::new(1), 1000, context);
+        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),

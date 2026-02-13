@@ -1,11 +1,13 @@
-use alto_types::{Block, PublicKey, Scheme};
+use alto_types::{Block, PublicKey, Scheme, EPOCH};
 use commonware_consensus::{
     marshal::{ingress::mailbox::AncestorStream, Update},
     simplex::types::Context,
-    types::Height,
+    types::{Height, Round, View},
     Heightable, Reporter,
 };
-use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256};
+use commonware_cryptography::{
+    ed25519, sha256, sha256::Digest, Digest as _, Digestible, Hasher, Sha256, Signer,
+};
 use commonware_runtime::{Clock, Metrics, Spawner};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
@@ -26,7 +28,12 @@ pub struct Application {
 
 impl Application {
     pub fn new() -> Self {
-        let genesis = Block::new(Sha256::hash(GENESIS), Height::zero(), 0);
+        let genesis_context = Context {
+            round: Round::new(EPOCH, View::zero()),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::zero(), sha256::Digest::EMPTY),
+        };
+        let genesis = Block::new(genesis_context, Sha256::hash(GENESIS), Height::zero(), 0);
         Self {
             genesis: Arc::new(genesis),
         }
@@ -64,11 +71,11 @@ where
             current = parent.timestamp + 1;
         }
 
-        Some(Block::new_with_context(
+        Some(Block::new(
+            context,
             parent.digest(),
             parent.height.next(),
             current,
-            context,
         ))
     }
 }
