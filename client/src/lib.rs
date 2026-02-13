@@ -68,6 +68,8 @@ pub struct ClientBuilder<S: Strategy> {
     identity: Identity,
     tls_certs: Vec<Vec<u8>>,
     strategy: S,
+    pool_max_idle_per_host: Option<usize>,
+    pool_idle_timeout: Option<std::time::Duration>,
 }
 
 impl<S: Strategy> ClientBuilder<S> {
@@ -87,14 +89,26 @@ impl<S: Strategy> ClientBuilder<S> {
             identity,
             tls_certs: Vec::new(),
             strategy,
+            pool_max_idle_per_host: None,
+            pool_idle_timeout: None,
         }
     }
 
     /// Add a trusted TLS certificate (DER-encoded).
-    ///
-    /// Use this for self-signed certificates that should be trusted.
     pub fn with_tls_cert(mut self, cert_der: Vec<u8>) -> Self {
         self.tls_certs.push(cert_der);
+        self
+    }
+
+    /// Set the maximum number of idle connections per host.
+    pub fn with_pool_max_idle_per_host(mut self, max: usize) -> Self {
+        self.pool_max_idle_per_host = Some(max);
+        self
+    }
+
+    /// Set the idle timeout for pooled connections.
+    pub fn with_pool_idle_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.pool_idle_timeout = Some(timeout);
         self
     }
 
@@ -107,6 +121,12 @@ impl<S: Strategy> ClientBuilder<S> {
         for cert_der in &self.tls_certs {
             let cert = reqwest::Certificate::from_der(cert_der).expect("invalid DER certificate");
             http_builder = http_builder.add_root_certificate(cert);
+        }
+        if let Some(max) = self.pool_max_idle_per_host {
+            http_builder = http_builder.pool_max_idle_per_host(max);
+        }
+        if let Some(timeout) = self.pool_idle_timeout {
+            http_builder = http_builder.pool_idle_timeout(timeout);
         }
         let http_client = http_builder.build().expect("failed to build HTTP client");
 
