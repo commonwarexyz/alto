@@ -11,9 +11,7 @@ use commonware_parallel::Strategy;
 use commonware_runtime::{Clock, Metrics, Spawner};
 use std::future::Future;
 #[cfg(test)]
-use std::sync::atomic::AtomicBool;
-#[cfg(test)]
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
 use tracing::{debug, warn};
 
 use crate::upload_queue::Mailbox;
