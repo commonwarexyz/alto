@@ -83,7 +83,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0);
         let n = 4;
         let Fixture { schemes, .. } =
-            bls12381_threshold::vrf::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
+            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
 
         // Create a block with context
         let context = Context {
@@ -92,7 +92,7 @@ mod tests {
             parent: (View::new(8), sha256::Digest::EMPTY),
         };
         let digest = Sha256::hash(b"hello world");
-        let block = Block::new(context, digest, Height::new(10), 100);
+        let block = Block::new_with_context(digest, Height::new(10), 100, context);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
@@ -123,7 +123,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0);
         let n = 4;
         let Fixture { schemes, .. } =
-            bls12381_threshold::vrf::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
+            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
 
         // Create a block with context
         let context = Context {
@@ -132,7 +132,7 @@ mod tests {
             parent: (View::new(8), sha256::Digest::EMPTY),
         };
         let digest = Sha256::hash(b"hello world");
-        let block = Block::new(context, digest, Height::new(10), 100);
+        let block = Block::new_with_context(digest, Height::new(10), 100, context);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
