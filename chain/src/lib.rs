@@ -198,7 +198,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = bls12381_threshold::vrf::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
             let participants_set = Set::from_iter_dedup(participants.clone());
 
@@ -375,7 +375,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = bls12381_threshold::vrf::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
             let participants_set = Set::from_iter_dedup(participants.clone());
 
@@ -614,7 +614,7 @@ mod tests {
 
         // Derive threshold
         let mut rng = StdRng::seed_from_u64(0);
-        let fixture = bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
+        let fixture = bls12381_threshold::vrf::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
 
         // Random restarts every x seconds
         let mut runs = 0;
@@ -824,7 +824,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = bls12381_threshold::vrf::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
             let participants_set = Set::from_iter_dedup(participants.clone());
 
