@@ -10,7 +10,8 @@ use bytes::{Buf, BufMut};
 use commonware_codec::{EncodeSize, Error as CodecError, Read, ReadExt, Write};
 use commonware_macros::select_loop;
 use commonware_runtime::{
-    buffer::paged::CacheRef, spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
+    buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
+    Spawner, Storage,
 };
 use commonware_storage::{queue, queue::shared};
 use commonware_utils::{
@@ -226,7 +227,7 @@ impl Default for Config {
 type UploadResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 /// A durable queue actor for reliable upload delivery.
-pub struct Actor<E: Spawner + Clock + Storage + Metrics> {
+pub struct Actor<E: BufferPooler + Spawner + Clock + Storage + Metrics> {
     context: E,
     config: Config,
     metrics: QueueMetrics,
@@ -237,7 +238,7 @@ pub struct Actor<E: Spawner + Clock + Storage + Metrics> {
     in_flight: HashSet<u64>,
 }
 
-impl<E: Spawner + Clock + Storage + Metrics> Actor<E> {
+impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
     /// Create a new upload queue actor, recovering state from disk if available.
     pub async fn new(context: E, config: Config) -> Result<(Self, Mailbox), queue::Error> {
         let metrics = QueueMetrics::new(&context);
@@ -251,7 +252,7 @@ impl<E: Spawner + Clock + Storage + Metrics> Actor<E> {
                 items_per_section: NZU64!(config.items_per_section),
                 compression: None,
                 codec_config: (),
-                page_cache: CacheRef::new(NZU16!(1024), NZUsize!(1024)),
+                page_cache: CacheRef::from_pooler(&context, NZU16!(1024), NZUsize!(1024)),
                 write_buffer: NZUsize!(64 * 1024),
             },
         )
