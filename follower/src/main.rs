@@ -95,12 +95,14 @@ fn main() {
                     let tip = finalized.block.height;
                     info!(tip = tip.get(), "backfilling to tip");
                     let backfiller = Backfiller::new(
+                        context.clone(),
                         client.clone(),
                         scheme.clone(),
                         finalizations_by_height,
                         finalized_blocks,
                         tip,
                         config.backfill_concurrency,
+                        config.worker_threads,
                     );
                     (finalizations_by_height, finalized_blocks) = backfiller.run().await;
                 }

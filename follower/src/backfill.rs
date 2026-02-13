@@ -6,8 +6,8 @@ use commonware_consensus::simplex::types::Subject;
 use commonware_consensus::types::Height;
 use commonware_cryptography::certificate::Scheme as CertScheme;
 use commonware_cryptography::{sha256, Committable};
-use commonware_parallel::Sequential;
-use commonware_runtime::{Metrics, Spawner, Storage};
+use commonware_parallel::{Rayon, Strategy};
+use commonware_runtime::{Metrics, Spawner, Storage, ThreadPooler};
 use commonware_storage::archive::Archive;
 use commonware_utils::N3f1;
 use futures::stream::FuturesUnordered;
@@ -16,6 +16,7 @@ use governor::clock::Clock as GClock;
 use rand::rngs::OsRng;
 use rand::{CryptoRng, Rng};
 use std::future::Future;
+use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::time::Instant;
 use tracing::{info, warn};
@@ -38,10 +39,11 @@ type BoxFetch<E> = Pin<Box<dyn Future<Output = FetchResult<E>> + Send>>;
 pub struct Backfiller<C, E>
 where
     C: Source,
-    E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+    E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics + ThreadPooler,
 {
     client: C,
     scheme: Scheme,
+    strategy: Rayon,
     finalizations_by_height: FinalizedArchive<E>,
     finalized_blocks: BlockArchive<E>,
     tip: Height,
@@ -51,19 +53,25 @@ where
 impl<C, E> Backfiller<C, E>
 where
     C: Source,
-    E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+    E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics + ThreadPooler,
 {
     pub fn new(
+        context: E,
         client: C,
         scheme: Scheme,
         finalizations_by_height: FinalizedArchive<E>,
         finalized_blocks: BlockArchive<E>,
         tip: Height,
         concurrency: usize,
+        worker_threads: usize,
     ) -> Self {
+        let strategy = context
+            .create_strategy(NonZeroUsize::new(worker_threads).expect("worker_threads must be non-zero"))
+            .expect("failed to create thread pool");
         Self {
             client,
             scheme,
+            strategy,
             finalizations_by_height,
             finalized_blocks,
             tip,
@@ -79,6 +87,10 @@ where
     }
 
     fn verify_batch(&self, batch: &[Finalized]) {
+        // Pre-warm all Lazy<Signature> in parallel (G1 decompression + subgroup check)
+        self.strategy
+            .map_collect_vec(batch.iter(), |f| f.proof.certificate.get().is_some());
+
         let valid = self
             .scheme
             .verify_certificates::<_, sha256::Digest, _, N3f1>(
@@ -91,7 +103,7 @@ where
                         &f.proof.certificate,
                     )
                 }),
-                &Sequential,
+                &self.strategy,
             );
         assert!(valid, "batch verification failed");
     }
