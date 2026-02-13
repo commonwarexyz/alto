@@ -96,6 +96,7 @@ fn main() {
                     info!(tip = tip.get(), "backfilling to tip");
                     let backfiller = Backfiller::new(
                         client.clone(),
+                        scheme.clone(),
                         finalizations_by_height,
                         finalized_blocks,
                         tip,

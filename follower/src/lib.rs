@@ -40,6 +40,10 @@ pub trait Source: Clone + Send + Sync + 'static {
         &self,
         query: IndexQuery,
     ) -> impl Future<Output = Result<Finalized, Self::Error>> + Send;
+    fn finalized_unverified(
+        &self,
+        query: IndexQuery,
+    ) -> impl Future<Output = Result<Finalized, Self::Error>> + Send;
     fn notarized_get(
         &self,
         query: IndexQuery,
@@ -70,6 +74,13 @@ impl<S: commonware_parallel::Strategy> Source for alto_client::Client<S> {
         query: IndexQuery,
     ) -> impl Future<Output = Result<Finalized, Self::Error>> + Send {
         self.finalized_get(query)
+    }
+
+    fn finalized_unverified(
+        &self,
+        query: IndexQuery,
+    ) -> impl Future<Output = Result<Finalized, Self::Error>> + Send {
+        self.finalized_get_unverified(query)
     }
 
     fn notarized_get(

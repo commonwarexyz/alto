@@ -91,6 +91,10 @@ impl Source for MockSource {
         }
     }
 
+    async fn finalized_unverified(&self, query: IndexQuery) -> Result<Finalized, Self::Error> {
+        self.finalized(query).await
+    }
+
     async fn notarized_get(&self, query: IndexQuery) -> Result<Notarized, Self::Error> {
         let handler = self.notarized_handler.clone();
         let guard = handler.lock().unwrap();

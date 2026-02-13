@@ -1,14 +1,19 @@
 use crate::engine::{BlockArchive, FinalizedArchive};
 use crate::Source;
 use alto_client::IndexQuery;
-use alto_types::Finalized;
+use alto_types::{Finalized, Scheme};
+use commonware_consensus::simplex::types::Subject;
 use commonware_consensus::types::Height;
-use commonware_cryptography::Committable;
+use commonware_cryptography::certificate::Scheme as CertScheme;
+use commonware_cryptography::{sha256, Committable};
+use commonware_parallel::Sequential;
 use commonware_runtime::{Metrics, Spawner, Storage};
 use commonware_storage::archive::Archive;
+use commonware_utils::N3f1;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use governor::clock::Clock as GClock;
+use rand::rngs::OsRng;
 use rand::{CryptoRng, Rng};
 use std::future::Future;
 use std::pin::Pin;
@@ -17,15 +22,16 @@ use tracing::{info, warn};
 
 const SYNC_INTERVAL: u64 = 16_384;
 const LOG_INTERVAL: u64 = 1000;
+const BATCH_SIZE: usize = 1024;
 
 type FetchResult<E> = (u64, Result<Finalized, E>);
 type BoxFetch<E> = Pin<Box<dyn Future<Output = FetchResult<E>> + Send>>;
 
 /// Fills the archives with finalized blocks from a [Source] before marshal starts.
 ///
-/// Fetches blocks concurrently (the client verifies signatures on each fetch),
-/// writes directly to the archives with periodic sync, and returns the filled
-/// archives once caught up to `tip`.
+/// Fetches blocks without verification (the client skips signature checks),
+/// accumulates batches, and batch-verifies using `Scheme::verify_certificates()`
+/// which uses MSM-based `batch::verify_same_signer()`.
 ///
 /// Not all heights will have blocks (skipped views are normal). Failed fetches
 /// are skipped -- marshal will handle any remaining gaps during live following.
@@ -35,6 +41,7 @@ where
     E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
 {
     client: C,
+    scheme: Scheme,
     finalizations_by_height: FinalizedArchive<E>,
     finalized_blocks: BlockArchive<E>,
     tip: Height,
@@ -48,6 +55,7 @@ where
 {
     pub fn new(
         client: C,
+        scheme: Scheme,
         finalizations_by_height: FinalizedArchive<E>,
         finalized_blocks: BlockArchive<E>,
         tip: Height,
@@ -55,6 +63,7 @@ where
     ) -> Self {
         Self {
             client,
+            scheme,
             finalizations_by_height,
             finalized_blocks,
             tip,
@@ -64,7 +73,68 @@ where
 
     fn fetch(&self, height: u64) -> BoxFetch<C::Error> {
         let client = self.client.clone();
-        Box::pin(async move { (height, client.finalized(IndexQuery::Index(height)).await) })
+        Box::pin(
+            async move { (height, client.finalized_unverified(IndexQuery::Index(height)).await) },
+        )
+    }
+
+    fn verify_batch(&self, batch: &[Finalized]) {
+        let valid = self
+            .scheme
+            .verify_certificates::<_, sha256::Digest, _, N3f1>(
+                &mut OsRng,
+                batch.iter().map(|f| {
+                    (
+                        Subject::Finalize {
+                            proposal: &f.proof.proposal,
+                        },
+                        &f.proof.certificate,
+                    )
+                }),
+                &Sequential,
+            );
+        assert!(valid, "batch verification failed");
+    }
+
+    async fn flush_batch(
+        &mut self,
+        batch: &mut Vec<Finalized>,
+        pending_writes: &mut u64,
+    ) -> u64 {
+        if batch.is_empty() {
+            return 0;
+        }
+
+        self.verify_batch(batch);
+
+        let count = batch.len() as u64;
+        for finalized in batch.drain(..) {
+            let height = finalized.block.height.get();
+            let commitment = finalized.block.commitment();
+            self.finalized_blocks
+                .put(height, commitment, finalized.block)
+                .await
+                .expect("failed to write block");
+            self.finalizations_by_height
+                .put(height, commitment, finalized.proof)
+                .await
+                .expect("failed to write finalization");
+        }
+
+        *pending_writes += count;
+        if *pending_writes >= SYNC_INTERVAL {
+            self.finalized_blocks
+                .sync()
+                .await
+                .expect("failed to sync blocks");
+            self.finalizations_by_height
+                .sync()
+                .await
+                .expect("failed to sync finalizations");
+            *pending_writes = 0;
+        }
+
+        count
     }
 
     /// Run the backfiller to completion, returning the filled archives.
@@ -84,6 +154,7 @@ where
         let mut last_log_time = Instant::now();
         let mut last_log_written = 0u64;
         let mut pending_writes = 0u64;
+        let mut batch: Vec<Finalized> = Vec::with_capacity(BATCH_SIZE);
 
         let mut futures: FuturesUnordered<BoxFetch<C::Error>> = FuturesUnordered::new();
         let mut next_height = start;
@@ -97,29 +168,10 @@ where
         while let Some((height, result)) = futures.next().await {
             match result {
                 Ok(finalized) => {
-                    let commitment = finalized.block.commitment();
-                    self.finalized_blocks
-                        .put(height, commitment, finalized.block)
-                        .await
-                        .expect("failed to write block");
-                    self.finalizations_by_height
-                        .put(height, commitment, finalized.proof)
-                        .await
-                        .expect("failed to write finalization");
+                    batch.push(finalized);
 
-                    total_written += 1;
-                    pending_writes += 1;
-
-                    if pending_writes >= SYNC_INTERVAL {
-                        self.finalized_blocks
-                            .sync()
-                            .await
-                            .expect("failed to sync blocks");
-                        self.finalizations_by_height
-                            .sync()
-                            .await
-                            .expect("failed to sync finalizations");
-                        pending_writes = 0;
+                    if batch.len() >= BATCH_SIZE {
+                        total_written += self.flush_batch(&mut batch, &mut pending_writes).await;
                     }
 
                     if total_written - last_log_written >= LOG_INTERVAL {
@@ -154,6 +206,9 @@ where
                 next_height += 1;
             }
         }
+
+        // Flush remaining batch
+        total_written += self.flush_batch(&mut batch, &mut pending_writes).await;
 
         // Final sync
         if pending_writes > 0 {

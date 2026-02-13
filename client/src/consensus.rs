@@ -182,6 +182,29 @@ impl<S: Strategy> Client<S> {
         Ok(finalized)
     }
 
+    pub async fn finalized_get_unverified(&self, query: IndexQuery) -> Result<Finalized, Error> {
+        let result = self
+            .http_client
+            .get(finalization_get_path(self.uri.clone(), &query))
+            .send()
+            .await
+            .map_err(Error::Reqwest)?;
+        if !result.status().is_success() {
+            return Err(Error::Failed(result.status()));
+        }
+        let bytes = result.bytes().await.map_err(Error::Reqwest)?;
+        let finalized = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+        match query {
+            IndexQuery::Latest => {}
+            IndexQuery::Index(index) => {
+                if finalized.proof.view().get() != index {
+                    return Err(Error::UnexpectedResponse);
+                }
+            }
+        }
+        Ok(finalized)
+    }
+
     pub async fn block_get(&self, query: Query) -> Result<Payload, Error> {
         // Get the block
         let result = self
