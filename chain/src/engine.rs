@@ -26,6 +26,7 @@ use commonware_runtime::{
     Spawner, Storage, ThreadPooler,
 };
 use commonware_storage::archive::immutable;
+use commonware_utils::channel::mpsc;
 use commonware_utils::{ordered::Set, NZU16};
 use commonware_utils::{NZUsize, NZU64};
 use futures::future::try_join_all;
@@ -36,7 +37,6 @@ use std::{
     num::NonZero,
     time::{Duration, Instant},
 };
-use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 /// Reporter type for [simplex::Engine].
