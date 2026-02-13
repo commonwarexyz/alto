@@ -43,7 +43,7 @@ fn listen_path(base: String) -> String {
 
 pub enum Payload {
     Finalized(Box<Finalized>),
-    Block(Block),
+    Block(Box<Block>),
 }
 
 pub enum Message {
@@ -219,7 +219,7 @@ impl<S: Strategy> Client<S> {
                 if result.digest() != digest {
                     return Err(Error::UnexpectedResponse);
                 }
-                Payload::Block(result)
+                Payload::Block(Box::new(result))
             }
         };
         Ok(result)

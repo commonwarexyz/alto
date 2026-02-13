@@ -299,7 +299,7 @@ async fn main() {
                         log_latency(start);
                         match payload {
                             Payload::Finalized(finalized) => log_finalization(*finalized),
-                            Payload::Block(block) => log_block(block),
+                            Payload::Block(block) => log_block(*block),
                         }
                     }
                     QueryKind::Range(start_height, end_height) => {
@@ -313,7 +313,7 @@ async fn main() {
                                         Payload::Finalized(finalized) => {
                                             log_finalization(*finalized)
                                         }
-                                        Payload::Block(block) => log_block(block),
+                                        Payload::Block(block) => log_block(*block),
                                     }
                                 }
                                 Err(e) => {
