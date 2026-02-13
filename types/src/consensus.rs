@@ -9,7 +9,7 @@ use commonware_cryptography::{
     sha256::Digest,
 };
 
-pub use commonware_consensus::simplex::scheme::bls12381_threshold::vrf::Seedable;
+pub use vrf::Seedable;
 
 pub type Context = CContext<Digest, PublicKey>;
 pub type Scheme = vrf::Scheme<PublicKey, MinSig>;

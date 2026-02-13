@@ -205,15 +205,16 @@ impl commonware_consensus::Block for Block {
     }
 }
 
+impl Heightable for Block {
+    fn height(&self) -> Height {
+        self.height
+    }
+}
+
 impl CertifiableBlock for Block {
     type Context = Context;
 
     fn context(&self) -> Self::Context {
         self.context.clone()
-    }
-}
-impl Heightable for Block {
-    fn height(&self) -> Height {
-        self.height
     }
 }
