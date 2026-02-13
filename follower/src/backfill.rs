@@ -15,7 +15,7 @@ use std::pin::Pin;
 use std::time::Instant;
 use tracing::{info, warn};
 
-const SYNC_INTERVAL: u64 = 1024;
+const SYNC_INTERVAL: u64 = 16_384;
 const LOG_INTERVAL: u64 = 1000;
 
 type FetchResult<E> = (u64, Result<Finalized, E>);
