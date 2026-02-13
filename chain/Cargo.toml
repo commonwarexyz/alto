@@ -17,7 +17,7 @@ commonware-broadcast = { workspace = true }
 commonware-codec = { workspace = true }
 commonware-consensus = { workspace = true, features = ["mocks"] }
 commonware-cryptography = { workspace = true, features = ["mocks"] }
-commonware-deployer = { workspace = true }
+commonware-deployer = { workspace = true, features = ["aws"] }
 commonware-macros = { workspace = true }
 commonware-p2p = { workspace = true }
 commonware-resolver = { workspace = true }
@@ -27,6 +27,7 @@ commonware-stream = { workspace = true }
 commonware-utils = { workspace = true }
 commonware-math = { workspace = true }
 commonware-parallel = { workspace = true }
+prometheus-client = { workspace = true }
 bytes =  { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }

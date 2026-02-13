@@ -1,6 +1,7 @@
 use crate::{
     application::Application,
     indexer::{self, Indexer},
+    upload_queue::{self, Actor as UploadQueueActor},
 };
 use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
 use commonware_broadcast::buffered;
@@ -21,8 +22,8 @@ use commonware_p2p::{Blocker, Receiver, Sender};
 use commonware_parallel::Strategy;
 use commonware_resolver::Resolver;
 use commonware_runtime::{
-    buffer::paged::CacheRef, spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
-    ThreadPooler,
+    buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
+    Spawner, Storage, ThreadPooler,
 };
 use commonware_storage::archive::immutable;
 use commonware_utils::channel::mpsc;
@@ -39,8 +40,7 @@ use std::{
 use tracing::{error, info, warn};
 
 /// Reporter type for [simplex::Engine].
-type Reporter<E, I> =
-    Reporters<Activity, marshal::Mailbox<Scheme, Block>, Option<indexer::Pusher<E, I>>>;
+type Reporter<E> = Reporters<Activity, marshal::Mailbox<Scheme, Block>, Option<indexer::Pusher<E>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -83,7 +83,12 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer, S: Strategy> {
 
     pub strategy: S,
 
+    /// The indexer client for uploading blocks.
+    /// If provided, a reliable upload queue will be created.
     pub indexer: Option<I>,
+
+    /// Configuration for the upload queue (uses defaults if not specified).
+    pub upload_queue_config: Option<upload_queue::Config>,
 }
 
 type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpocher>;
@@ -91,7 +96,7 @@ type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpoch
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
 pub struct Engine<
-    E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+    E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     S: Strategy,
     I: Indexer,
@@ -111,12 +116,22 @@ pub struct Engine<
     >,
     marshaled: Marshaled<E>,
 
-    consensus:
-        Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
+    consensus: Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E>, S>,
+
+    /// Upload queue actor and indexer client (if indexer is configured).
+    upload_queue: Option<(UploadQueueActor<E>, I)>,
 }
 
 impl<
-        E: Clock + GClock + Rng + CryptoRng + Spawner + ThreadPooler + Storage + Metrics,
+        E: BufferPooler
+            + Clock
+            + GClock
+            + Rng
+            + CryptoRng
+            + Spawner
+            + ThreadPooler
+            + Storage
+            + Metrics,
         B: Blocker<PublicKey = PublicKey>,
         S: Strategy,
         I: Indexer,
@@ -137,7 +152,8 @@ impl<
         );
 
         // Create the buffer pool
-        let buffer_pool = CacheRef::new(BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
+        let page_cache =
+            CacheRef::from_pooler(&context, BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
 
         // Initialize finalizations by height
         let start = Instant::now();
@@ -159,7 +175,7 @@ impl<
                     "{}-finalizations-by-height-freezer-key-journal",
                     cfg.partition_prefix
                 ),
-                freezer_key_page_cache: buffer_pool.clone(),
+                freezer_key_page_cache: page_cache.clone(),
                 freezer_key_write_buffer: WRITE_BUFFER,
                 freezer_value_partition: format!(
                     "{}-finalizations-by-height-freezer-value-journal",
@@ -199,7 +215,7 @@ impl<
                     "{}-finalized-blocks-freezer-key-journal",
                     cfg.partition_prefix
                 ),
-                freezer_key_page_cache: buffer_pool.clone(),
+                freezer_key_page_cache: page_cache.clone(),
                 freezer_key_write_buffer: WRITE_BUFFER,
                 freezer_value_partition: format!(
                     "{}-finalized-blocks-freezer-value-journal",
@@ -244,7 +260,7 @@ impl<
                 value_write_buffer: WRITE_BUFFER,
                 block_codec_config: (),
                 max_repair: MAX_REPAIR,
-                page_cache: buffer_pool.clone(),
+                page_cache: page_cache.clone(),
                 strategy: cfg.strategy.clone(),
             },
         )
@@ -259,18 +275,35 @@ impl<
             epocher,
         );
 
-        // Create the reporter
-        let reporter = (
-            marshal_mailbox.clone(),
-            cfg.indexer.map(|indexer| {
-                indexer::Pusher::new(
-                    context.with_label("indexer"),
-                    indexer,
-                    marshal_mailbox.clone(),
-                )
-            }),
-        )
-            .into();
+        // Create the upload queue and reporter (if indexer is configured)
+        let (upload_queue, pusher) = match cfg.indexer {
+            Some(indexer) => {
+                let queue_config =
+                    cfg.upload_queue_config
+                        .unwrap_or_else(|| upload_queue::Config {
+                            partition: format!("{}-upload-queue", cfg.partition_prefix),
+                            ..Default::default()
+                        });
+
+                match UploadQueueActor::new(context.with_label("upload_queue"), queue_config).await
+                {
+                    Ok((actor, mailbox)) => {
+                        let pusher = indexer::Pusher::new(
+                            context.with_label("indexer"),
+                            mailbox,
+                            marshal_mailbox.clone(),
+                        );
+                        (Some((actor, indexer)), Some(pusher))
+                    }
+                    Err(e) => {
+                        error!(?e, "failed to create upload queue, indexer disabled");
+                        (None, None)
+                    }
+                }
+            }
+            None => (None, None),
+        };
+        let reporter = (marshal_mailbox.clone(), pusher).into();
 
         // Create the consensus engine
         let consensus = Consensus::new(
@@ -290,10 +323,10 @@ impl<
                 activity_timeout: cfg.activity_timeout,
                 skip_timeout: cfg.skip_timeout,
                 fetch_concurrent: cfg.fetch_concurrent,
+                page_cache: page_cache.clone(),
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
                 blocker: cfg.blocker,
-                page_cache: buffer_pool,
                 elector: Random,
                 strategy: cfg.strategy,
             },
@@ -308,6 +341,7 @@ impl<
             marshal,
             marshaled,
             consensus,
+            upload_queue,
         }
     }
 
@@ -381,8 +415,19 @@ impl<
         // restart could block).
         let consensus_handle = self.consensus.start(pending, recovered, resolver);
 
+        // Start upload queue (if configured)
+        let upload_queue_handle = self
+            .upload_queue
+            .map(|(actor, indexer)| actor.start(indexer));
+
+        // Collect all actor handles
+        let mut handles = vec![buffer_handle, marshal_handle, consensus_handle];
+        if let Some(handle) = upload_queue_handle {
+            handles.push(handle);
+        }
+
         // Wait for any actor to finish
-        if let Err(e) = try_join_all(vec![buffer_handle, marshal_handle, consensus_handle]).await {
+        if let Err(e) = try_join_all(handles).await {
             error!(?e, "engine failed");
         } else {
             warn!("engine stopped");

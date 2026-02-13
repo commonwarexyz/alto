@@ -1,13 +1,20 @@
 #[cfg(test)]
 use alto_types::Identity;
 use alto_types::{Activity, Block, Finalized, Notarized, Scheme, Seed, Seedable};
-use commonware_consensus::{marshal, Reporter, Viewable};
+use commonware_consensus::{
+    marshal,
+    types::{Round, View},
+    Reporter, Viewable,
+};
+use commonware_cryptography::sha256::Digest;
 use commonware_parallel::Strategy;
-use commonware_runtime::{Metrics, Spawner};
+use commonware_runtime::{Clock, Metrics, Spawner};
 use std::future::Future;
 #[cfg(test)]
-use std::{sync::atomic::AtomicBool, sync::Arc};
+use std::sync::{atomic::AtomicBool, Arc};
 use tracing::{debug, warn};
+
+use crate::upload_queue::Mailbox;
 
 /// Trait for interacting with an indexer.
 pub trait Indexer: Clone + Send + Sync + 'static {
@@ -94,114 +101,139 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
     }
 }
 
-/// An implementation of [Indexer] for the [Reporter] trait.
+/// A [Reporter] implementation that uploads consensus activity to an indexer.
+///
+/// Uses a disk-backed upload queue for reliable delivery. Uploads are persisted
+/// to disk before returning, and a background worker retries until the indexer
+/// acknowledges receipt.
 #[derive(Clone)]
-pub struct Pusher<E: Spawner + Metrics, I: Indexer> {
+pub struct Pusher<E: Spawner + Clock + Metrics> {
     context: E,
-    indexer: I,
+    mailbox: Mailbox,
     marshal: marshal::Mailbox<Scheme, Block>,
 }
 
-impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
-    /// Create a new [Pusher].
-    pub fn new(context: E, indexer: I, marshal: marshal::Mailbox<Scheme, Block>) -> Self {
+impl<E: Spawner + Clock + Metrics> Pusher<E> {
+    /// Create a new [Pusher] with an upload queue mailbox.
+    pub fn new(context: E, mailbox: Mailbox, marshal: marshal::Mailbox<Scheme, Block>) -> Self {
         Self {
             context,
-            indexer,
+            mailbox,
             marshal,
         }
     }
 }
 
-impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
+/// Internal enum for handling both notarization and finalization uploads uniformly.
+enum PendingUpload {
+    Notarization(alto_types::Notarization),
+    Finalization(alto_types::Finalization),
+}
+
+impl PendingUpload {
+    fn view(&self) -> View {
+        match self {
+            Self::Notarization(n) => n.view(),
+            Self::Finalization(f) => f.view(),
+        }
+    }
+
+    fn seed(&self) -> Seed {
+        match self {
+            Self::Notarization(n) => n.seed(),
+            Self::Finalization(f) => f.seed(),
+        }
+    }
+
+    fn round(&self) -> Round {
+        match self {
+            Self::Notarization(n) => n.round(),
+            Self::Finalization(f) => f.round(),
+        }
+    }
+
+    fn payload(&self) -> Digest {
+        match self {
+            Self::Notarization(n) => n.proposal.payload,
+            Self::Finalization(f) => f.proposal.payload,
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Notarization(_) => "notarized_block",
+            Self::Finalization(_) => "finalized_block",
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Notarization(_) => "notarization",
+            Self::Finalization(_) => "finalization",
+        }
+    }
+
+    async fn enqueue_with_block(
+        self,
+        block: Block,
+        mailbox: &Mailbox,
+    ) -> Result<u64, crate::upload_queue::EnqueueError> {
+        match self {
+            Self::Notarization(n) => mailbox.enqueue_notarization(Notarized::new(n, block)).await,
+            Self::Finalization(f) => mailbox.enqueue_finalization(Finalized::new(f, block)).await,
+        }
+    }
+}
+
+impl<E: Spawner + Clock + Metrics> Pusher<E> {
+    /// Spawns a task to wait for a block and enqueue the activity for upload.
+    fn spawn_block_upload(&self, pending: PendingUpload) {
+        let view = pending.view();
+        let round = pending.round();
+        let payload = pending.payload();
+        let label = pending.label();
+        let kind = pending.kind();
+        let mailbox = self.mailbox.clone();
+        let mut marshal = self.marshal.clone();
+
+        self.context.with_label(label).spawn(move |_| async move {
+            // Wait for block
+            let block = marshal.subscribe(Some(round), payload).await.await;
+            let Ok(block) = block else {
+                warn!(%view, "subscription for block cancelled");
+                return;
+            };
+
+            // Enqueue for upload
+            if let Err(e) = pending.enqueue_with_block(block, &mailbox).await {
+                warn!(%view, ?e, "failed to enqueue {kind} for upload");
+                return;
+            }
+            debug!(%view, "{kind} enqueued for upload");
+        });
+    }
+}
+
+impl<E: Spawner + Clock + Metrics> Reporter for Pusher<E> {
     type Activity = Activity;
 
     async fn report(&mut self, activity: Self::Activity) {
-        match activity {
-            Activity::Notarization(notarization) => {
-                // Upload seed to indexer
-                let view = notarization.view();
-                self.context.with_label("notarized_seed").spawn({
-                    let indexer = self.indexer.clone();
-                    let seed = notarization.seed();
-                    move |_| async move {
-                        let result = indexer.seed_upload(seed).await;
-                        if let Err(e) = result {
-                            warn!(?e, "failed to upload seed");
-                            return;
-                        }
-                        debug!(%view, "seed uploaded to indexer");
-                    }
-                });
+        let pending = match activity {
+            Activity::Notarization(n) => PendingUpload::Notarization(n),
+            Activity::Finalization(f) => PendingUpload::Finalization(f),
+            _ => return,
+        };
 
-                // Upload block to indexer (once we have it)
-                self.context.with_label("notarized_block").spawn({
-                    let indexer = self.indexer.clone();
-                    let mut marshal = self.marshal.clone();
-                    move |_| async move {
-                        // Wait for block
-                        let block = marshal
-                            .subscribe(Some(notarization.round()), notarization.proposal.payload)
-                            .await
-                            .await;
-                        let Ok(block) = block else {
-                            warn!(%view, "subscription for block cancelled");
-                            return;
-                        };
+        let view = pending.view();
 
-                        // Upload to indexer once we have it
-                        let notarization = Notarized::new(notarization, block);
-                        let result = indexer.notarized_upload(notarization).await;
-                        if let Err(e) = result {
-                            warn!(?e, "failed to upload notarization");
-                            return;
-                        }
-                        debug!(%view, "notarization uploaded to indexer");
-                    }
-                });
-            }
-            Activity::Finalization(finalization) => {
-                // Upload seed to indexer
-                let view = finalization.view();
-                self.context.with_label("finalized_seed").spawn({
-                    let indexer = self.indexer.clone();
-                    let seed = finalization.seed();
-                    move |_| async move {
-                        let result = indexer.seed_upload(seed).await;
-                        if let Err(e) = result {
-                            warn!(?e, "failed to upload seed");
-                            return;
-                        }
-                        debug!(%view, "seed uploaded to indexer");
-                    }
-                });
-
-                // Upload block to indexer (once we have it)
-                self.context.with_label("finalized_block").spawn({
-                    let indexer = self.indexer.clone();
-                    let mut marshal = self.marshal.clone();
-                    move |_| async move {
-                        let block = marshal
-                            .subscribe(Some(finalization.round()), finalization.proposal.payload)
-                            .await
-                            .await;
-                        let Ok(block) = block else {
-                            warn!(%view, "subscription for block cancelled");
-                            return;
-                        };
-
-                        // Upload to indexer once we have it
-                        let finalization = Finalized::new(finalization, block);
-                        let result = indexer.finalized_upload(finalization).await;
-                        if let Err(e) = result {
-                            warn!(?e, "failed to upload finalization");
-                            return;
-                        }
-                        debug!(%view, "finalization uploaded to indexer");
-                    }
-                });
-            }
-            _ => {}
+        // Enqueue seed
+        if let Err(e) = self.mailbox.enqueue_seed(pending.seed()).await {
+            warn!(%view, ?e, "failed to enqueue seed for upload");
+            return;
         }
+        debug!(%view, "seed enqueued for upload");
+
+        // Spawn task to wait for block and enqueue the activity
+        self.spawn_block_upload(pending);
     }
 }
