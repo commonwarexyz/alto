@@ -83,7 +83,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0);
         let n = 4;
         let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
+            bls12381_threshold::vrf::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
 
         // Create a block
         let digest = Sha256::hash(b"hello world");
@@ -118,7 +118,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0);
         let n = 4;
         let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
+            bls12381_threshold::vrf::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
 
         // Create a block
         let digest = Sha256::hash(b"hello world");

@@ -110,7 +110,7 @@ mod tests {
     > {
         oracle
             .manager()
-            .update(0, Set::from_iter_dedup(validators.iter().cloned()))
+            .track(0, Set::from_iter_dedup(validators.iter().cloned()))
             .await;
         let mut registrations = HashMap::new();
         for validator in validators.iter() {
@@ -196,7 +196,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = bls12381_threshold::vrf::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
             let participants_set = Set::from_iter_dedup(participants.clone());
 
@@ -246,7 +246,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.manager(),
+                    provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),
@@ -256,8 +256,11 @@ mod tests {
                     priority_responses: false,
                 };
 
-                let marshal_resolver =
-                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &context.with_label(&uid),
+                    marshal_resolver_cfg,
+                    backfill,
+                );
 
                 // Start engine
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -370,7 +373,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = bls12381_threshold::vrf::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
             let participants_set = Set::from_iter_dedup(participants.clone());
 
@@ -432,7 +435,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.manager(),
+                    provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),
@@ -442,8 +445,11 @@ mod tests {
                     priority_responses: false,
                 };
 
-                let marshal_resolver =
-                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &context.with_label(&uid),
+                    marshal_resolver_cfg,
+                    backfill,
+                );
 
                 // Start engine
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -537,7 +543,7 @@ mod tests {
             // Configure marshal resolver
             let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                 public_key: public_key.clone(),
-                manager: oracle.manager(),
+                provider: oracle.manager(),
                 blocker: oracle.control(public_key.clone()),
                 mailbox_size: 1024,
                 initial: Duration::from_secs(1),
@@ -547,8 +553,11 @@ mod tests {
                 priority_responses: false,
             };
 
-            let marshal_resolver =
-                marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+            let marshal_resolver = marshal::resolver::p2p::init(
+                &context.with_label(&uid),
+                marshal_resolver_cfg,
+                backfill,
+            );
 
             // Start engine
             engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -603,7 +612,7 @@ mod tests {
 
         // Derive threshold
         let mut rng = StdRng::seed_from_u64(0);
-        let fixture = bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
+        let fixture = bls12381_threshold::vrf::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
 
         // Random restarts every x seconds
         let mut runs = 0;
@@ -685,7 +694,7 @@ mod tests {
                     // Configure marshal resolver
                     let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                         public_key: public_key.clone(),
-                        manager: oracle.manager(),
+                        provider: oracle.manager(),
                         blocker: oracle.control(public_key.clone()),
                         mailbox_size: 1024,
                         initial: Duration::from_secs(1),
@@ -695,8 +704,11 @@ mod tests {
                         priority_responses: false,
                     };
 
-                    let marshal_resolver =
-                        marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                    let marshal_resolver = marshal::resolver::p2p::init(
+                        &context.with_label(&uid),
+                        marshal_resolver_cfg,
+                        backfill,
+                    );
 
                     // Start engine
                     engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
@@ -810,7 +822,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = bls12381_threshold::vrf::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
             let participants_set = Set::from_iter_dedup(participants.clone());
 
@@ -871,7 +883,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    manager: oracle.manager(),
+                    provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),
@@ -881,8 +893,11 @@ mod tests {
                     priority_responses: false,
                 };
 
-                let marshal_resolver =
-                    marshal::resolver::p2p::init(&context, marshal_resolver_cfg, backfill);
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &context.with_label(&uid),
+                    marshal_resolver_cfg,
+                    backfill,
+                );
 
                 // Start engine
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);

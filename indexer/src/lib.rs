@@ -391,7 +391,7 @@ mod tests {
         async fn new() -> Self {
             let mut rng = StdRng::seed_from_u64(0);
             let Fixture { schemes, .. } =
-                bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
+                bls12381_threshold::vrf::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
             let identity = *schemes[0].polynomial().public();
 
             let (addr, _) = start_server(schemes[0].clone(), Sequential).await;
@@ -489,7 +489,7 @@ mod tests {
     fn fixture(seed: u64) -> (Vec<Scheme>, Identity) {
         let mut rng = StdRng::seed_from_u64(seed);
         let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
+            bls12381_threshold::vrf::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
         let identity = *schemes[0].polynomial().public();
         (schemes, identity)
     }
@@ -734,7 +734,7 @@ mod tests {
 
         let mut rng = StdRng::seed_from_u64(0);
         let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
+            bls12381_threshold::vrf::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
         let identity = *schemes[0].polynomial().public();
 
         let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key, Sequential).await;
@@ -766,7 +766,7 @@ mod tests {
 
         let mut rng = StdRng::seed_from_u64(0);
         let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
+            bls12381_threshold::vrf::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
         let identity = *schemes[0].polynomial().public();
 
         let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key, Sequential).await;
