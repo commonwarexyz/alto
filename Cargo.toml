@@ -9,13 +9,13 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.0.18"
+version = "0.0.19"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-alto-client = { version = "0.0.18", path = "client" }
-alto-types = { version = "0.0.18", path = "types" }
+alto-client = { version = "0.0.19", path = "client" }
+alto-types = { version = "0.0.19", path = "types" }
 commonware-broadcast = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "9c7bc02da0910061804867acf515e1192b898f79" }
 commonware-codec = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "9c7bc02da0910061804867acf515e1192b898f79" }
 commonware-consensus = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "9c7bc02da0910061804867acf515e1192b898f79" }

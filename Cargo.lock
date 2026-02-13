@@ -29,7 +29,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "alto-chain"
-version = "0.0.18"
+version = "0.0.19"
 dependencies = [
  "alto-client",
  "alto-types",
@@ -64,7 +64,7 @@ dependencies = [
 
 [[package]]
 name = "alto-client"
-version = "0.0.18"
+version = "0.0.19"
 dependencies = [
  "alto-types",
  "bytes",
@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "alto-indexer"
-version = "0.0.18"
+version = "0.0.19"
 dependencies = [
  "alto-client",
  "alto-types",
@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "alto-inspector"
-version = "0.0.18"
+version = "0.0.19"
 dependencies = [
  "alto-client",
  "alto-types",
@@ -137,7 +137,7 @@ dependencies = [
 
 [[package]]
 name = "alto-types"
-version = "0.0.18"
+version = "0.0.19"
 dependencies = [
  "bytes",
  "commonware-codec",
