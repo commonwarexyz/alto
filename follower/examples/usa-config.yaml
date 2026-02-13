@@ -31,7 +31,7 @@ mailbox_size: 1024
 max_repair: 1024
 
 # Number of concurrent fetches during backfill
-backfill_concurrency: 4096
+backfill_concurrency: 8192
 
 # Auto-checkpoint from the latest finalized block on first run
 # Set to false to start from genesis (requires backfilling all historical blocks)

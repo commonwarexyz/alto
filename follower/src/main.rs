@@ -1,4 +1,4 @@
-use alto_client::Client;
+use alto_client::ClientBuilder;
 use alto_follower::{
     backfill::Backfiller,
     engine::{self, Engine},
@@ -72,7 +72,10 @@ fn main() {
 
         // Create scheme and client
         let scheme = Scheme::certificate_verifier(NAMESPACE, identity);
-        let client = Client::new(&config.source, identity, Sequential);
+        let client = ClientBuilder::new(&config.source, identity, Sequential)
+            .with_pool_max_idle_per_host(config.backfill_concurrency)
+            .with_pool_idle_timeout(Duration::from_secs(300))
+            .build();
 
         // Wait for certificate source to be available
         while let Err(e) = client.health().await {
