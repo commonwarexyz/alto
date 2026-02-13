@@ -22,8 +22,8 @@ use commonware_p2p::{Blocker, Receiver, Sender};
 use commonware_parallel::Strategy;
 use commonware_resolver::Resolver;
 use commonware_runtime::{
-    buffer::paged::CacheRef, spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
-    ThreadPooler,
+    buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
+    Spawner, Storage, ThreadPooler,
 };
 use commonware_storage::archive::immutable;
 use commonware_utils::{ordered::Set, NZU16};
@@ -38,28 +38,6 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
-
-/// Trait for actors whose start is deferred until `run()`.
-///
-/// This allows storing heterogeneous startable actors without exposing
-/// their generic parameters to the containing struct.
-trait DeferredStart: Send {
-    fn start(self: Box<Self>) -> Handle<()>;
-}
-
-/// Deferred starter for the upload queue actor.
-struct UploadQueueStarter<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
-    actor: UploadQueueActor<E>,
-    indexer: I,
-}
-
-impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DeferredStart
-    for UploadQueueStarter<E, I>
-{
-    fn start(self: Box<Self>) -> Handle<()> {
-        self.actor.start(self.indexer)
-    }
-}
 
 /// Reporter type for [simplex::Engine].
 type Reporter<E> = Reporters<Activity, marshal::Mailbox<Scheme, Block>, Option<indexer::Pusher<E>>>;
@@ -118,9 +96,10 @@ type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpoch
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
 pub struct Engine<
-    E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+    E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     S: Strategy,
+    I: Indexer,
 > {
     context: ContextCell<E>,
 
@@ -139,18 +118,27 @@ pub struct Engine<
 
     consensus: Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E>, S>,
 
-    /// Deferred starter for the upload queue actor (if indexer is configured).
-    upload_queue: Option<Box<dyn DeferredStart>>,
+    /// Upload queue actor and indexer client (if indexer is configured).
+    upload_queue: Option<(UploadQueueActor<E>, I)>,
 }
 
 impl<
-        E: Clock + GClock + Rng + CryptoRng + Spawner + ThreadPooler + Storage + Metrics,
+        E: BufferPooler
+            + Clock
+            + GClock
+            + Rng
+            + CryptoRng
+            + Spawner
+            + ThreadPooler
+            + Storage
+            + Metrics,
         B: Blocker<PublicKey = PublicKey>,
         S: Strategy,
-    > Engine<E, B, S>
+        I: Indexer,
+    > Engine<E, B, S, I>
 {
     /// Create a new [Engine].
-    pub async fn new<I: Indexer>(context: E, cfg: Config<B, I, S>) -> Self {
+    pub async fn new(context: E, cfg: Config<B, I, S>) -> Self {
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
@@ -164,7 +152,8 @@ impl<
         );
 
         // Create the buffer pool
-        let page_cache = CacheRef::new(BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
+        let page_cache =
+            CacheRef::from_pooler(&context, BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
 
         // Initialize finalizations by height
         let start = Instant::now();
@@ -287,7 +276,7 @@ impl<
         );
 
         // Create the upload queue and reporter (if indexer is configured)
-        let (upload_queue, pusher): (Option<Box<dyn DeferredStart>>, _) = match cfg.indexer {
+        let (upload_queue, pusher) = match cfg.indexer {
             Some(indexer) => {
                 let queue_config =
                     cfg.upload_queue_config
@@ -299,13 +288,12 @@ impl<
                 match UploadQueueActor::new(context.with_label("upload_queue"), queue_config).await
                 {
                     Ok((actor, mailbox)) => {
-                        let starter = UploadQueueStarter { actor, indexer };
                         let pusher = indexer::Pusher::new(
                             context.with_label("indexer"),
                             mailbox,
                             marshal_mailbox.clone(),
                         );
-                        (Some(Box::new(starter)), Some(pusher))
+                        (Some((actor, indexer)), Some(pusher))
                     }
                     Err(e) => {
                         error!(?e, "failed to create upload queue, indexer disabled");
@@ -428,7 +416,9 @@ impl<
         let consensus_handle = self.consensus.start(pending, recovered, resolver);
 
         // Start upload queue (if configured)
-        let upload_queue_handle = self.upload_queue.map(|starter| starter.start());
+        let upload_queue_handle = self
+            .upload_queue
+            .map(|(actor, indexer)| actor.start(indexer));
 
         // Collect all actor handles
         let mut handles = vec![buffer_handle, marshal_handle, consensus_handle];
