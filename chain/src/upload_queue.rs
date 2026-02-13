@@ -450,3 +450,202 @@ async fn upload_item<I: Indexer>(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alto_types::{Notarization, Seedable, EPOCH, NAMESPACE};
+    use commonware_consensus::simplex::{
+        scheme::bls12381_threshold::vrf as bls12381_threshold,
+        types::{Notarize, Proposal},
+    };
+    use commonware_cryptography::{
+        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, sha256::Digest,
+        Digest as _,
+    };
+    use commonware_macros::test_traced;
+    use commonware_parallel::Sequential;
+    use commonware_runtime::{deterministic::Runner, Clock, Runner as _};
+    use rand::{rngs::StdRng, SeedableRng};
+    use std::io;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    #[derive(Default)]
+    struct UploadState {
+        attempts: usize,
+        successes: usize,
+    }
+
+    #[derive(Clone)]
+    struct TestIndexer {
+        state: Arc<Mutex<UploadState>>,
+        remaining_failures: Arc<Mutex<usize>>,
+    }
+
+    impl TestIndexer {
+        fn fail_first(state: Arc<Mutex<UploadState>>, n: usize) -> Self {
+            Self {
+                state,
+                remaining_failures: Arc::new(Mutex::new(n)),
+            }
+        }
+
+        fn always_fail(state: Arc<Mutex<UploadState>>) -> Self {
+            Self::fail_first(state, usize::MAX)
+        }
+
+        fn always_ok(state: Arc<Mutex<UploadState>>) -> Self {
+            Self::fail_first(state, 0)
+        }
+    }
+
+    impl Indexer for TestIndexer {
+        type Error = io::Error;
+
+        async fn seed_upload(&self, _: Seed) -> Result<(), Self::Error> {
+            {
+                let mut state = self.state.lock().unwrap();
+                state.attempts += 1;
+            }
+
+            let should_fail = {
+                let mut remaining = self.remaining_failures.lock().unwrap();
+                if *remaining > 0 {
+                    *remaining -= 1;
+                    true
+                } else {
+                    false
+                }
+            };
+
+            if should_fail {
+                return Err(io::Error::other("forced failure"));
+            }
+
+            let mut state = self.state.lock().unwrap();
+            state.successes += 1;
+            Ok(())
+        }
+
+        async fn notarized_upload(&self, _: Notarized) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        async fn finalized_upload(&self, _: Finalized) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    fn test_seed() -> Seed {
+        let mut rng = StdRng::seed_from_u64(7);
+        let Fixture { schemes, .. } =
+            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
+        let proposal = Proposal::new(
+            commonware_consensus::types::Round::new(
+                EPOCH,
+                commonware_consensus::types::View::new(1),
+            ),
+            commonware_consensus::types::View::new(0),
+            Digest::EMPTY,
+        );
+        let notarizes: Vec<_> = schemes
+            .iter()
+            .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
+            .collect();
+        let notarization =
+            Notarization::from_notarizes(&schemes[0], &notarizes, &Sequential).unwrap();
+        notarization.seed()
+    }
+
+    #[test_traced]
+    fn retries_after_failure() {
+        let runner = Runner::timed(Duration::from_secs(10));
+        runner.start(|context| async move {
+            let state = Arc::new(Mutex::new(UploadState::default()));
+            let (actor, mailbox) = Actor::new(
+                context.with_label("queue"),
+                Config {
+                    partition: "upload-queue-retry".to_string(),
+                    retry_delay: Duration::from_millis(1),
+                    max_retry_delay: Duration::from_millis(1),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+            actor.start(TestIndexer::fail_first(state.clone(), 1));
+            mailbox.enqueue_seed(test_seed()).await.unwrap();
+
+            let deadline = context.current() + Duration::from_millis(200);
+            loop {
+                let done = {
+                    let state = state.lock().unwrap();
+                    state.successes >= 1 && state.attempts >= 2
+                };
+                if done {
+                    break;
+                }
+                assert!(context.current() < deadline, "upload did not retry in time");
+                context.sleep(Duration::from_millis(5)).await;
+            }
+        });
+    }
+
+    #[test_traced]
+    fn replays_pending_upload_after_restart() {
+        let state = Arc::new(Mutex::new(UploadState::default()));
+        let mut checkpoint = None;
+
+        for phase in 0..2 {
+            let shared = state.clone();
+            let partition = "upload-queue-restart".to_string();
+            let (complete, recovered) = if let Some(prev) = checkpoint {
+                Runner::from(prev)
+            } else {
+                Runner::timed(Duration::from_secs(10))
+            }
+            .start_and_recover(move |context| async move {
+                let (actor, mailbox) = Actor::new(
+                    context.with_label("queue"),
+                    Config {
+                        partition,
+                        retry_delay: Duration::from_millis(1),
+                        max_retry_delay: Duration::from_millis(1),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+
+                if phase == 0 {
+                    actor.start(TestIndexer::always_fail(shared));
+                    mailbox.enqueue_seed(test_seed()).await.unwrap();
+                    context.sleep(Duration::from_millis(20)).await;
+                    false
+                } else {
+                    actor.start(TestIndexer::always_ok(shared.clone()));
+                    let deadline = context.current() + Duration::from_millis(250);
+                    loop {
+                        if shared.lock().unwrap().successes >= 1 {
+                            return true;
+                        }
+                        if context.current() >= deadline {
+                            return false;
+                        }
+                        context.sleep(Duration::from_millis(5)).await;
+                    }
+                }
+            });
+
+            if complete {
+                break;
+            }
+            checkpoint = Some(recovered);
+        }
+
+        let state = state.lock().unwrap();
+        assert!(state.successes >= 1, "pending upload was not replayed");
+    }
+}
