@@ -197,7 +197,7 @@ impl QueueMetrics {
 /// Configuration for the upload queue.
 #[derive(Clone)]
 pub struct Config {
-    /// Partition name prefix for storage.
+    /// Partition name for storage.
     pub partition: String,
     /// Size of the mailbox for incoming messages.
     pub mailbox_size: usize,
@@ -248,7 +248,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
         let (writer, reader) = shared::init(
             context.clone(),
             queue::Config {
-                partition: format!("{}-queue", config.partition),
+                partition: config.partition.clone(),
                 items_per_section: NZU64!(config.items_per_section),
                 compression: None,
                 codec_config: (),
@@ -302,7 +302,9 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
         let mut retry_count: u32 = 0;
         let mut backoff_until: Option<SystemTime> = None;
 
-        self.spawn_uploads(&indexer, backoff_until).await;
+        if !self.spawn_uploads(&indexer, backoff_until).await {
+            return;
+        }
 
         select_loop! {
             self.context,
@@ -315,28 +317,41 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
                     break;
                 };
 
-                let result = self.writer.enqueue(item).await.map_err(EnqueueError::from);
-                let should_spawn = result.is_ok();
-                if should_spawn {
-                    self.metrics.uploads_enqueued.inc();
-                    self.metrics.queue_depth.inc();
-                    self.metrics.queue_size.set(self.writer.size().await as i64);
-                }
+                match self.writer.enqueue(item).await {
+                    Ok(position) => {
+                        self.metrics.uploads_enqueued.inc();
+                        self.metrics.queue_depth.inc();
+                        self.metrics.queue_size.set(self.writer.size().await as i64);
+                        let _ = ack.send(Ok(position));
 
-                let _ = ack.send(result);
-
-                if should_spawn {
-                    self.spawn_uploads(&indexer, backoff_until).await;
+                        if !self.spawn_uploads(&indexer, backoff_until).await {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        // Mutable storage errors are unrecoverable for this actor instance.
+                        let error = e.to_string();
+                        warn!(error = %error, "fatal queue enqueue error, stopping actor");
+                        let _ = ack.send(Err(EnqueueError::QueueError(error)));
+                        break;
+                    }
                 }
             },
             (position, result) = self.uploads.next_completed() => {
-                self.handle_completion(position, result, &mut retry_count, &mut backoff_until).await;
-                self.spawn_uploads(&indexer, backoff_until).await;
+                let ok = self.handle_completion(position, result, &mut retry_count, &mut backoff_until).await;
+                if !ok {
+                    break;
+                }
+                if !self.spawn_uploads(&indexer, backoff_until).await {
+                    break;
+                }
             },
             _ = OptionFuture::from(backoff_until.map(|until| self.context.sleep_until(until))) => {
                 debug!("backoff expired, retrying uploads");
                 backoff_until = None;
-                self.spawn_uploads(&indexer, backoff_until).await;
+                if !self.spawn_uploads(&indexer, backoff_until).await {
+                    break;
+                }
             },
         }
     }
@@ -347,22 +362,21 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
         result: UploadResult,
         retry_count: &mut u32,
         backoff_until: &mut Option<SystemTime>,
-    ) {
+    ) -> bool {
         self.in_flight.remove(&position);
 
         match result {
             Ok(()) => {
                 if let Err(e) = self.reader.ack(position).await {
-                    warn!(?e, position, "failed to ack uploaded item");
-                    let delay = self.compute_backoff_delay(*retry_count);
-                    *backoff_until = Some(self.context.now() + delay);
-                    *retry_count = retry_count.saturating_add(1);
-                    self.reader.reset().await;
-                    return;
+                    // Mutable storage errors are unrecoverable for this actor instance.
+                    warn!(?e, position, "fatal queue ack error, stopping actor");
+                    return false;
                 }
 
                 if let Err(e) = self.writer.sync().await {
-                    warn!(?e, "failed to sync queue after ack");
+                    // Mutable storage errors are unrecoverable for this actor instance.
+                    warn!(?e, "fatal queue sync error, stopping actor");
+                    return false;
                 }
 
                 self.metrics.uploads_succeeded.inc();
@@ -373,6 +387,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
 
                 *retry_count = 0;
                 *backoff_until = None;
+                true
             }
             Err(e) => {
                 warn!(?e, position, "upload failed, will retry");
@@ -383,6 +398,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
 
                 // Re-deliver unacked positions from the queue floor.
                 self.reader.reset().await;
+                true
             }
         }
     }
@@ -392,9 +408,13 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
         (self.config.retry_delay * multiplier).min(self.config.max_retry_delay)
     }
 
-    async fn spawn_uploads<I: Indexer>(&mut self, indexer: &I, backoff_until: Option<SystemTime>) {
+    async fn spawn_uploads<I: Indexer>(
+        &mut self,
+        indexer: &I,
+        backoff_until: Option<SystemTime>,
+    ) -> bool {
         if backoff_until.is_some_and(|until| self.context.now() < until) {
-            return;
+            return true;
         }
 
         let mut slots = self
@@ -402,15 +422,16 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
             .max_concurrent_uploads
             .saturating_sub(self.uploads.len());
         if slots == 0 {
-            return;
+            return true;
         }
 
         while slots > 0 {
             let next = match self.reader.try_recv().await {
                 Ok(item) => item,
                 Err(e) => {
-                    warn!(?e, "failed to dequeue upload item");
-                    break;
+                    // Mutable storage errors are unrecoverable for this actor instance.
+                    warn!(?e, "fatal queue dequeue error, stopping actor");
+                    return false;
                 }
             };
 
@@ -430,6 +451,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
 
             slots -= 1;
         }
+        true
     }
 }
 
