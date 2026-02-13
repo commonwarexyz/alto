@@ -10,7 +10,7 @@ use std::{fmt::Debug, future::Future, time::SystemTime};
 pub mod engine;
 pub mod feeder;
 pub mod resolver;
-pub mod store;
+pub mod backfill;
 
 pub use alto_client::{IndexQuery, Query};
 
@@ -25,6 +25,7 @@ pub struct Config {
     pub metrics_port: u16,
     pub mailbox_size: usize,
     pub max_repair: usize,
+    pub backfill_concurrency: usize,
     pub tip: bool,
 }
 

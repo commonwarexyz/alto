@@ -1,6 +1,10 @@
 use alto_client::Client;
 use alto_follower::{
-    engine::Engine, feeder::CertificateFeeder, resolver::HttpResolverActor, Config, IndexQuery,
+    backfill::Backfiller,
+    engine::{self, Engine},
+    feeder::CertificateFeeder,
+    resolver::HttpResolverActor,
+    Config, IndexQuery,
 };
 use alto_types::{Identity, Scheme, NAMESPACE};
 use clap::{Arg, Command};
@@ -28,7 +32,8 @@ fn main() {
     // Load config
     let config: Config = {
         let config_path = matches.get_one::<String>("config").unwrap();
-        let config_file = std::fs::read_to_string(config_path).expect("Could not read config file");
+        let config_file =
+            std::fs::read_to_string(config_path).expect("Could not read config file");
         serde_yaml::from_str(&config_file).expect("Could not parse config file")
     };
 
@@ -76,12 +81,49 @@ fn main() {
         }
         info!("connected to certificate source");
 
-        // Create engine
-        let engine =
-            Engine::new(context.clone(), scheme.clone(), config.mailbox_size, NonZero::new(config.max_repair).expect("max_repair must be non-zero")).await;
+        // Create archives
+        let (mut finalizations_by_height, mut finalized_blocks, page_cache) =
+            engine::create_archives(&context, &scheme).await;
+
+        // Backfill or skip to tip
+        if config.tip {
+            // Skip to tip: set marshal's floor to the latest finalized block
+        } else {
+            // Backfill: fetch all finalized blocks from the source
+            match client.finalized_get(IndexQuery::Latest).await {
+                Ok(finalized) => {
+                    let tip = finalized.block.height;
+                    info!(tip = tip.get(), "backfilling to tip");
+                    let backfiller = Backfiller::new(
+                        client.clone(),
+                        finalizations_by_height,
+                        finalized_blocks,
+                        tip,
+                        config.backfill_concurrency,
+                    );
+                    (finalizations_by_height, finalized_blocks) = backfiller.run().await;
+                }
+                Err(e) => {
+                    warn!(error = ?e, "failed to fetch tip for backfill, starting from genesis");
+                }
+            }
+        }
+
+        // Create engine with pre-filled archives
+        let max_repair = NonZero::new(config.max_repair).expect("max_repair must be non-zero");
+        let engine = Engine::new(
+            context.clone(),
+            scheme.clone(),
+            finalizations_by_height,
+            finalized_blocks,
+            page_cache,
+            config.mailbox_size,
+            max_repair,
+        )
+        .await;
         let mut marshal_mailbox = engine.mailbox();
 
-        // Optionally set checkpoint floor from the latest finalized block
+        // If tip mode, set marshal's floor to the latest finalized block
         if config.tip {
             match client.finalized_get(IndexQuery::Latest).await {
                 Ok(finalized) => {
@@ -109,12 +151,7 @@ fn main() {
         let (engine_handle, buffer_handle) = engine.start(ingress_rx, resolver);
 
         // Start certificate feeder
-        let feeder = CertificateFeeder::new(
-            context,
-            client,
-            scheme,
-            marshal_mailbox,
-        );
+        let feeder = CertificateFeeder::new(context, client, scheme, marshal_mailbox);
         let feeder_handle = feeder.start();
 
         // Wait for any task to finish

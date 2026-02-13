@@ -25,8 +25,11 @@ metrics_port: 9091
 # Size of internal mailboxes
 mailbox_size: 1024
 
-# Maximum number of blocks to fetch concurrently during backfill
+# Maximum number of blocks to repair concurrently during live following
 max_repair: 1024
+
+# Number of concurrent fetches during backfill
+backfill_concurrency: 4096
 
 # Auto-checkpoint from the latest finalized block on first run.
 # When true (default), the follower will fetch the latest finalized block

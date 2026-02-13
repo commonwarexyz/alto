@@ -6,7 +6,7 @@ use commonware_parallel::Sequential;
 use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Spawner};
 use futures::StreamExt;
 use std::{fmt, time::Duration};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{error, info, trace, warn};
 
 /// Errors that can occur while feeding certificates from the source stream.
 #[derive(Debug)]
