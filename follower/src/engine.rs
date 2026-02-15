@@ -19,7 +19,9 @@ use commonware_storage::archive::immutable;
 use commonware_utils::{channel::mpsc, Acknowledgement, NZUsize, NZU16, NZU64};
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
+use std::collections::VecDeque;
 use std::num::NonZero;
+use std::time::Instant;
 use tracing::info;
 
 const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
@@ -209,7 +211,7 @@ where
         let buffer_mailbox = self.buffer_mailbox;
         let marshal = self.marshal;
         let engine_handle = context.spawn(move |_| async move {
-            let app = Application;
+            let app = Application::new();
             marshal
                 .start(app, buffer_mailbox, (ingress_rx, resolver))
                 .await
@@ -220,16 +222,44 @@ where
     }
 }
 
-/// Reporter that acknowledges finalized blocks from [marshal::Actor].
+const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Reporter that acknowledges finalized blocks from [marshal::Actor]
+/// and logs throughput over a 30-second sliding window.
 #[derive(Clone)]
-struct Application;
+struct Application {
+    started_at: Option<Instant>,
+    timestamps: VecDeque<Instant>,
+}
+
+impl Application {
+    fn new() -> Self {
+        Self {
+            started_at: None,
+            timestamps: VecDeque::new(),
+        }
+    }
+}
 
 impl Reporter for Application {
     type Activity = Update<Block>;
 
     async fn report(&mut self, activity: Self::Activity) {
         if let Update::Block(block, ack_rx) = activity {
-            info!(height = block.height.get(), "reported block");
+            let now = Instant::now();
+            let started_at = *self.started_at.get_or_insert(now);
+            self.timestamps.push_back(now);
+            let cutoff = now - THROUGHPUT_WINDOW;
+            while self.timestamps.front().is_some_and(|t| *t < cutoff) {
+                self.timestamps.pop_front();
+            }
+            let elapsed = now.duration_since(started_at).min(THROUGHPUT_WINDOW);
+            let bps = if elapsed.is_zero() {
+                0.0
+            } else {
+                self.timestamps.len() as f64 / elapsed.as_secs_f64()
+            };
+            info!(height = block.height.get(), bps = format!("{bps:.2}"), "reported block");
             ack_rx.acknowledge();
         }
     }
