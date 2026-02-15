@@ -80,7 +80,7 @@ impl<S: Strategy> Client<S> {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let seed = Seed::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !seed.verify(&self.certificate_verifier) {
+        if self.verify && !seed.verify(&self.certificate_verifier) {
             return Err(Error::InvalidSignature);
         }
 
@@ -123,7 +123,7 @@ impl<S: Strategy> Client<S> {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let notarized = Notarized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !notarized.verify(&self.certificate_verifier, &self.strategy) {
+        if self.verify && !notarized.verify(&self.certificate_verifier, &self.strategy) {
             return Err(Error::InvalidSignature);
         }
 
@@ -166,7 +166,7 @@ impl<S: Strategy> Client<S> {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let finalized = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if !finalized.verify(&self.certificate_verifier, &self.strategy) {
+        if self.verify && !finalized.verify(&self.certificate_verifier, &self.strategy) {
             return Err(Error::InvalidSignature);
         }
 
@@ -199,14 +199,14 @@ impl<S: Strategy> Client<S> {
         let result = match query {
             Query::Latest => {
                 let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-                if !result.verify(&self.certificate_verifier, &self.strategy) {
+                if self.verify && !result.verify(&self.certificate_verifier, &self.strategy) {
                     return Err(Error::InvalidSignature);
                 }
                 Payload::Finalized(Box::new(result))
             }
             Query::Index(index) => {
                 let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-                if !result.verify(&self.certificate_verifier, &self.strategy) {
+                if self.verify && !result.verify(&self.certificate_verifier, &self.strategy) {
                     return Err(Error::InvalidSignature);
                 }
                 if result.block.height.get() != index {
@@ -242,6 +242,7 @@ impl<S: Strategy> Client<S> {
         tokio::spawn({
             let certificate_verifier = self.certificate_verifier.clone();
             let strategy = self.strategy.clone();
+            let verify = self.verify;
             async move {
                 read.for_each(|message| async {
                     match message {
@@ -260,7 +261,7 @@ impl<S: Strategy> Client<S> {
                                     let result = Seed::decode(data);
                                     match result {
                                         Ok(seed) => {
-                                            if !seed.verify(&certificate_verifier) {
+                                            if verify && !seed.verify(&certificate_verifier) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;
@@ -277,7 +278,7 @@ impl<S: Strategy> Client<S> {
                                     let result = Notarized::decode(data);
                                     match result {
                                         Ok(notarized) => {
-                                            if !notarized.verify(&certificate_verifier, &strategy) {
+                                            if verify && !notarized.verify(&certificate_verifier, &strategy) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;
@@ -296,7 +297,7 @@ impl<S: Strategy> Client<S> {
                                     let result = Finalized::decode(data);
                                     match result {
                                         Ok(finalized) => {
-                                            if !finalized.verify(&certificate_verifier, &strategy) {
+                                            if verify && !finalized.verify(&certificate_verifier, &strategy) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;

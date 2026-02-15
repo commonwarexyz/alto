@@ -91,6 +91,9 @@ impl Resolver for HttpResolver {
 /// This replaces the p2p-based resolver used by validators. When marshal needs
 /// a block or certificate it does not have locally, it asks this actor to fetch
 /// it from the HTTP source. In-flight requests are deduplicated.
+///
+/// The [Source] (client) is constructed without verification because marshal's
+/// Deliver handler verifies all signatures before accepting resolved data.
 pub struct HttpResolverActor<C: Source> {
     client: C,
     mailbox_rx: mpsc::Receiver<ResolverMessage>,

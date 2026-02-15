@@ -1,4 +1,4 @@
-use alto_client::Client;
+use alto_client::ClientBuilder;
 use alto_follower::{
     engine::Engine, feeder::CertificateFeeder, resolver::HttpResolverActor, Config, IndexQuery,
 };
@@ -66,8 +66,17 @@ fn main() {
         info!(source = %config.source, "starting follower node");
 
         // Create scheme and client
+        //
+        // The client is created without verification because signatures are
+        // checked downstream at each ingestion point:
+        //
+        //   WebSocket path:  CertificateFeeder::handle_message (feeder.rs)
+        //   Resolver path:   marshal::Actor Deliver handler    (commonware-consensus)
+        //   Tip check below: explicit finalized.verify call
         let scheme = Scheme::certificate_verifier(NAMESPACE, identity);
-        let client = Client::new(&config.source, identity, Sequential);
+        let client = ClientBuilder::new(&config.source, identity, Sequential)
+            .without_verification()
+            .build();
 
         // Wait for certificate source to be available
         while let Err(e) = client.health().await {

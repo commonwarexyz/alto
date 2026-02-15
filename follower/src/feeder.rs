@@ -35,6 +35,10 @@ impl std::error::Error for FeederError {}
 /// Listens for finalization and notarization messages, verifies their threshold
 /// signatures, caches the associated blocks, and reports the proofs to marshal.
 /// Automatically reconnects on stream disconnection.
+///
+/// This is the sole signature verification point for the WebSocket streaming
+/// path. The [Source] (client) is constructed without verification to avoid
+/// redundant checks.
 pub struct CertificateFeeder<E: Clock, C: Source> {
     context: ContextCell<E>,
     client: C,

@@ -4,6 +4,8 @@ use crate::Source;
 use alto_client::consensus::{Message, Payload};
 use alto_client::{IndexQuery, Query};
 use alto_types::{Block, Context, Finalized, Notarized, Scheme, EPOCH, NAMESPACE};
+use bytes::Bytes;
+use commonware_codec::Encode;
 use commonware_consensus::{
     marshal::ingress::handler,
     simplex::{
@@ -20,7 +22,7 @@ use commonware_macros::test_traced;
 use commonware_parallel::Sequential;
 use commonware_resolver::Resolver;
 use commonware_runtime::{deterministic::Runner, Clock, Runner as _, Spawner};
-use commonware_utils::channel::mpsc;
+use commonware_utils::channel::{mpsc, oneshot};
 use futures::StreamExt;
 use rand::{rngs::StdRng, SeedableRng};
 use std::{
@@ -450,5 +452,114 @@ fn feeder_ignores_notarization() {
             .handle_message(Message::Notarization(notarized))
             .await;
         assert!(result.is_ok());
+    });
+}
+
+#[test_traced]
+fn feeder_rejects_invalid_notarization() {
+    let fixture = TestFixture::new();
+    let notarized = fixture.create_notarized(1, 1);
+    let wrong_verifier = fixture.wrong_verifier_scheme();
+
+    Runner::default().start(|context| async move {
+        let engine = crate::engine::Engine::new(
+            context.clone(),
+            wrong_verifier.clone(),
+            16,
+            crate::engine::DEFAULT_MAX_REPAIR,
+        )
+        .await;
+        let marshal_mailbox = engine.mailbox();
+
+        let source = MockSource::new();
+        let mut feeder =
+            CertificateFeeder::new(context.clone(), source, wrong_verifier, marshal_mailbox);
+
+        let result = feeder
+            .handle_message(Message::Notarization(notarized))
+            .await;
+        assert!(matches!(
+            result,
+            Err(FeederError::InvalidSignature { height: 1 })
+        ));
+    });
+}
+
+#[test_traced]
+fn marshal_rejects_invalid_finalization_from_resolver() {
+    let fixture = TestFixture::new();
+    let finalized = fixture.create_finalized(1, 1);
+    let wrong_verifier = fixture.wrong_verifier_scheme();
+
+    Runner::default().start(|context| async move {
+        let engine = crate::engine::Engine::new(
+            context.clone(),
+            wrong_verifier.clone(),
+            16,
+            crate::engine::DEFAULT_MAX_REPAIR,
+        )
+        .await;
+
+        let _marshal_mailbox = engine.mailbox();
+        let (ingress_tx, ingress_rx) = mpsc::channel(16);
+        let source = MockSource::new();
+        let (_, resolver) = HttpResolverActor::new(source, ingress_tx.clone(), 16);
+        let (_engine_handle, _buffer_handle) = engine.start(ingress_rx, resolver);
+
+        let key = handler::Request::<Block>::Finalized {
+            height: Height::new(1),
+        };
+        let value = Bytes::from((finalized.proof, finalized.block).encode().to_vec());
+        let (response_tx, response_rx) = oneshot::channel();
+        ingress_tx
+            .send(handler::Message::Deliver {
+                key,
+                value,
+                response: response_tx,
+            })
+            .await
+            .expect("send failed");
+
+        let accepted = response_rx.await.expect("response dropped");
+        assert!(!accepted, "marshal should reject finalization with invalid signature");
+    });
+}
+
+#[test_traced]
+fn marshal_rejects_invalid_notarization_from_resolver() {
+    let fixture = TestFixture::new();
+    let notarized = fixture.create_notarized(1, 1);
+    let wrong_verifier = fixture.wrong_verifier_scheme();
+
+    Runner::default().start(|context| async move {
+        let engine = crate::engine::Engine::new(
+            context.clone(),
+            wrong_verifier.clone(),
+            16,
+            crate::engine::DEFAULT_MAX_REPAIR,
+        )
+        .await;
+
+        let _marshal_mailbox = engine.mailbox();
+        let (ingress_tx, ingress_rx) = mpsc::channel(16);
+        let source = MockSource::new();
+        let (_, resolver) = HttpResolverActor::new(source, ingress_tx.clone(), 16);
+        let (_engine_handle, _buffer_handle) = engine.start(ingress_rx, resolver);
+
+        let round = Round::new(EPOCH, View::new(1));
+        let key = handler::Request::<Block>::Notarized { round };
+        let value = Bytes::from((notarized.proof, notarized.block).encode().to_vec());
+        let (response_tx, response_rx) = oneshot::channel();
+        ingress_tx
+            .send(handler::Message::Deliver {
+                key,
+                value,
+                response: response_tx,
+            })
+            .await
+            .expect("send failed");
+
+        let accepted = response_rx.await.expect("response dropped");
+        assert!(!accepted, "marshal should reject notarization with invalid signature");
     });
 }
