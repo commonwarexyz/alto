@@ -378,16 +378,17 @@ fn feeder_accepts_valid_finalization() {
     let verifier = fixture.verifier_scheme();
 
     Runner::default().start(|context| async move {
-        let engine = crate::engine::Engine::new(context.clone(), verifier.clone(), 16, crate::engine::DEFAULT_MAX_REPAIR).await;
+        let engine = crate::engine::Engine::new(
+            context.clone(),
+            verifier.clone(),
+            16,
+            crate::engine::DEFAULT_MAX_REPAIR,
+        )
+        .await;
         let marshal_mailbox = engine.mailbox();
 
         let source = MockSource::new();
-        let mut feeder = CertificateFeeder::new(
-            context.clone(),
-            source,
-            verifier,
-            marshal_mailbox,
-        );
+        let mut feeder = CertificateFeeder::new(context.clone(), source, verifier, marshal_mailbox);
 
         let result = feeder
             .handle_message(Message::Finalization(finalized))
@@ -403,16 +404,18 @@ fn feeder_rejects_invalid_finalization() {
     let wrong_verifier = fixture.wrong_verifier_scheme();
 
     Runner::default().start(|context| async move {
-        let engine = crate::engine::Engine::new(context.clone(), wrong_verifier.clone(), 16, crate::engine::DEFAULT_MAX_REPAIR).await;
+        let engine = crate::engine::Engine::new(
+            context.clone(),
+            wrong_verifier.clone(),
+            16,
+            crate::engine::DEFAULT_MAX_REPAIR,
+        )
+        .await;
         let marshal_mailbox = engine.mailbox();
 
         let source = MockSource::new();
-        let mut feeder = CertificateFeeder::new(
-            context.clone(),
-            source,
-            wrong_verifier,
-            marshal_mailbox,
-        );
+        let mut feeder =
+            CertificateFeeder::new(context.clone(), source, wrong_verifier, marshal_mailbox);
 
         let result = feeder
             .handle_message(Message::Finalization(finalized))
@@ -431,16 +434,17 @@ fn feeder_ignores_notarization() {
     let verifier = fixture.verifier_scheme();
 
     Runner::default().start(|context| async move {
-        let engine = crate::engine::Engine::new(context.clone(), verifier.clone(), 16, crate::engine::DEFAULT_MAX_REPAIR).await;
+        let engine = crate::engine::Engine::new(
+            context.clone(),
+            verifier.clone(),
+            16,
+            crate::engine::DEFAULT_MAX_REPAIR,
+        )
+        .await;
         let marshal_mailbox = engine.mailbox();
 
         let source = MockSource::new();
-        let mut feeder = CertificateFeeder::new(
-            context.clone(),
-            source,
-            verifier,
-            marshal_mailbox,
-        );
+        let mut feeder = CertificateFeeder::new(context.clone(), source, verifier, marshal_mailbox);
 
         let result = feeder
             .handle_message(Message::Notarization(notarized))

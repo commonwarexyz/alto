@@ -69,7 +69,12 @@ where
     E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
 {
     /// Create a new [Engine].
-    pub async fn new(mut context: E, scheme: Scheme, mailbox_size: usize, max_repair: NonZero<usize>) -> Self {
+    pub async fn new(
+        mut context: E,
+        scheme: Scheme,
+        mailbox_size: usize,
+        max_repair: NonZero<usize>,
+    ) -> Self {
         // Create the buffer
         //
         // The follower does not participate in p2p broadcast, so we use a dummy
