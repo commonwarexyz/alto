@@ -11,6 +11,7 @@ use std::{fmt::Debug, future::Future, time::SystemTime};
 pub mod engine;
 pub mod feeder;
 pub mod resolver;
+mod throughput;
 
 pub use alto_client::{IndexQuery, Query};
 
