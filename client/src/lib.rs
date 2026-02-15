@@ -93,10 +93,7 @@ impl<S: Strategy> ClientBuilder<S> {
     }
 
     /// Disable signature verification for all returned data.
-    ///
-    /// Use this when the caller will verify signatures itself (e.g. the follower
-    /// verifies in the feeder and marshal already).
-    pub fn without_verification(mut self) -> Self {
+    pub fn with_verification_disabled(mut self) -> Self {
         self.verify = false;
         self
     }

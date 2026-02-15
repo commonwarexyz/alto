@@ -8,5 +8,3 @@ A minimal (and wicked fast) blockchain built with the [Commonware Library](https
 ## Status
 
 `alto-chain` is **ALPHA** software and is not yet recommended for production use. Developers should expect breaking changes and occasional instability.
-
-For setup, deployment, and debugging instructions, see [setup](../setup/README.md).

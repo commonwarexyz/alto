@@ -10,14 +10,14 @@
 _Components are designed for deployment in adversarial environments. If you find an exploit, please refer to our [security policy](./SECURITY.md) before disclosing it publicly (an exploit may equip a malicious party to attack users of a primitive)._
 
 * [chain](./chain/README.md): A minimal (and wicked fast) blockchain built with the [Commonware Library](https://github.com/commonwarexyz/monorepo).
-* [validator](./validator/README.md): Validator binary for `alto`.
-* [follower](./follower/README.md): Follower (full-node) binary for `alto`.
-* [setup](./setup/README.md): Setup tooling for `alto`.
-* [client](./client/README.md): Client for interacting with `alto`.
+* [client](./client/README.md): Interact with `alto`.
 * [explorer](./explorer/README.md): Visualize `alto` activity.
+* [follower](./follower/README.md): Follow the `alto` chain.
 * [inspector](./inspector/README.md): Inspect `alto` activity.
 * [indexer](./indexer/README.md): Serve `alto` activity.
+* [setup](./setup/README.md): Deploy `alto`.
 * [types](./types/README.md): Common types used throughout `alto`.
+* [validator](./validator/README.md): Validate `alto`.
 
 ## Licensing
 

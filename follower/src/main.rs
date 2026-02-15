@@ -75,7 +75,7 @@ fn main() {
         //   Tip check below: explicit finalized.verify call
         let scheme = Scheme::certificate_verifier(NAMESPACE, identity);
         let client = ClientBuilder::new(&config.source, identity, Sequential)
-            .without_verification()
+            .with_verification_disabled()
             .build();
 
         // Wait for certificate source to be available
@@ -94,13 +94,13 @@ fn main() {
         if config.tip {
             match client.finalized_get(IndexQuery::Latest).await {
                 Ok(finalized) => {
-                    if !finalized.verify(&scheme, &Sequential) {
-                        warn!("failed to verify finalization signature for checkpoint, will backfill from genesis");
-                    } else {
-                        let height = finalized.block.height;
-                        info!(height = height.get(), "setting checkpoint floor from latest finalized block");
-                        marshal_mailbox.set_floor(height).await;
-                    }
+                    assert!(
+                        finalized.verify(&scheme, &Sequential),
+                        "failed to verify finalization signature for checkpoint"
+                    );
+                    let height = finalized.block.height;
+                    info!(height = height.get(), "setting checkpoint floor from latest finalized block");
+                    marshal_mailbox.set_floor(height).await;
                 }
                 Err(e) => {
                     warn!(error = ?e, "failed to fetch latest finalized block for checkpoint, will backfill from genesis");
