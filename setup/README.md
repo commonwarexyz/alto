@@ -174,6 +174,22 @@ The `validator-debug` binary contains debug symbols for symbolication. The profi
 deployer ec2 destroy --config config.yaml
 ```
 
+#### Update Public Key
+
+After redeploying a cluster, update the identity (BLS12-381 threshold public key) across example configs and the inspector default:
+
+```bash
+# Global cluster:
+OLD_KEY=$(grep '^identity:' follower/examples/global-config.yaml | sed 's/identity: "//;s/"//')
+NEW_KEY="<new-key-hex>"
+sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/global-config.yaml inspector/src/main.rs
+
+# USA cluster:
+OLD_KEY=$(grep '^identity:' follower/examples/usa-config.yaml | sed 's/identity: "//;s/"//')
+NEW_KEY="<new-key-hex>"
+sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/usa-config.yaml
+```
+
 #### Debugging
 
 ##### Missing AWS Credentials
