@@ -259,7 +259,11 @@ impl Reporter for Application {
             } else {
                 self.timestamps.len() as f64 / elapsed.as_secs_f64()
             };
-            info!(height = block.height.get(), bps = format!("{bps:.2}"), "reported block");
+            info!(
+                height = block.height.get(),
+                bps = format!("{bps:.2}"),
+                "reported block"
+            );
             ack_rx.acknowledge();
         }
     }

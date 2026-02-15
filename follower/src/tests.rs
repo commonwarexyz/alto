@@ -521,7 +521,10 @@ fn marshal_rejects_invalid_finalization_from_resolver() {
             .expect("send failed");
 
         let accepted = response_rx.await.expect("response dropped");
-        assert!(!accepted, "marshal should reject finalization with invalid signature");
+        assert!(
+            !accepted,
+            "marshal should reject finalization with invalid signature"
+        );
     });
 }
 
@@ -560,6 +563,9 @@ fn marshal_rejects_invalid_notarization_from_resolver() {
             .expect("send failed");
 
         let accepted = response_rx.await.expect("response dropped");
-        assert!(!accepted, "marshal should reject notarization with invalid signature");
+        assert!(
+            !accepted,
+            "marshal should reject notarization with invalid signature"
+        );
     });
 }

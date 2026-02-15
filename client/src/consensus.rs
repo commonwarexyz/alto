@@ -278,7 +278,10 @@ impl<S: Strategy> Client<S> {
                                     let result = Notarized::decode(data);
                                     match result {
                                         Ok(notarized) => {
-                                            if verify && !notarized.verify(&certificate_verifier, &strategy) {
+                                            if verify
+                                                && !notarized
+                                                    .verify(&certificate_verifier, &strategy)
+                                            {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;
@@ -297,7 +300,10 @@ impl<S: Strategy> Client<S> {
                                     let result = Finalized::decode(data);
                                     match result {
                                         Ok(finalized) => {
-                                            if verify && !finalized.verify(&certificate_verifier, &strategy) {
+                                            if verify
+                                                && !finalized
+                                                    .verify(&certificate_verifier, &strategy)
+                                            {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;
