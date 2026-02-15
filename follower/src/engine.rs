@@ -14,13 +14,12 @@ use commonware_cryptography::{
 };
 use commonware_math::algebra::Random;
 use commonware_parallel::Sequential;
-use commonware_runtime::{buffer::paged::CacheRef, Handle, Metrics, Spawner, Storage};
+use commonware_runtime::{buffer::paged::CacheRef, Clock, Handle, Metrics, Spawner, Storage};
 use commonware_storage::archive::immutable;
 use commonware_utils::{channel::mpsc, Acknowledgement, NZUsize, NZU16, NZU64};
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use std::num::NonZero;
-use std::time::Instant;
 use tracing::info;
 
 const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
@@ -209,8 +208,8 @@ where
         // Start marshal
         let buffer_mailbox = self.buffer_mailbox;
         let marshal = self.marshal;
-        let engine_handle = context.spawn(move |_| async move {
-            let app = Application::new();
+        let engine_handle = context.spawn(move |context| async move {
+            let app = Application::new(context);
             marshal
                 .start(app, buffer_mailbox, (ingress_rx, resolver))
                 .await
@@ -226,24 +225,26 @@ const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30
 /// Reporter that acknowledges finalized blocks from [marshal::Actor]
 /// and logs throughput over a 30-second sliding window.
 #[derive(Clone)]
-struct Application {
+struct Application<E: Clock> {
+    context: E,
     throughput: Throughput,
 }
 
-impl Application {
-    fn new() -> Self {
+impl<E: Clock> Application<E> {
+    fn new(context: E) -> Self {
         Self {
+            context,
             throughput: Throughput::new(THROUGHPUT_WINDOW),
         }
     }
 }
 
-impl Reporter for Application {
+impl<E: Clock> Reporter for Application<E> {
     type Activity = Update<Block>;
 
     async fn report(&mut self, activity: Self::Activity) {
         if let Update::Block(block, ack_rx) = activity {
-            let bps = self.throughput.record(Instant::now());
+            let bps = self.throughput.record(self.context.current());
             info!(
                 height = block.height.get(),
                 bps = format!("{bps:.2}"),

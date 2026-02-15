@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 /// Sliding-window throughput tracker.
 ///
@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 #[derive(Clone)]
 pub struct Throughput {
     window: Duration,
-    started_at: Option<Instant>,
-    timestamps: VecDeque<Instant>,
+    started_at: Option<SystemTime>,
+    timestamps: VecDeque<SystemTime>,
 }
 
 impl Throughput {
@@ -23,14 +23,17 @@ impl Throughput {
     }
 
     /// Record an event and return the current events-per-second rate.
-    pub fn record(&mut self, now: Instant) -> f64 {
+    pub fn record(&mut self, now: SystemTime) -> f64 {
         let started_at = *self.started_at.get_or_insert(now);
         self.timestamps.push_back(now);
         let cutoff = now - self.window;
         while self.timestamps.front().is_some_and(|t| *t < cutoff) {
             self.timestamps.pop_front();
         }
-        let elapsed = now.duration_since(started_at).min(self.window);
+        let elapsed = now
+            .duration_since(started_at)
+            .unwrap_or(Duration::ZERO)
+            .min(self.window);
         if elapsed.is_zero() {
             0.0
         } else {
@@ -45,14 +48,14 @@ mod tests {
 
     #[test]
     fn first_event_returns_zero() {
-        let now = Instant::now();
+        let now = SystemTime::UNIX_EPOCH;
         let mut t = Throughput::new(Duration::from_secs(10));
         assert_eq!(t.record(now), 0.0);
     }
 
     #[test]
     fn rate_during_startup() {
-        let start = Instant::now();
+        let start = SystemTime::UNIX_EPOCH;
         let mut t = Throughput::new(Duration::from_secs(30));
 
         t.record(start);
@@ -64,7 +67,7 @@ mod tests {
 
     #[test]
     fn rate_after_window_full() {
-        let start = Instant::now();
+        let start = SystemTime::UNIX_EPOCH;
         let window = Duration::from_secs(10);
         let mut t = Throughput::new(window);
 
@@ -81,7 +84,7 @@ mod tests {
 
     #[test]
     fn old_events_are_pruned() {
-        let start = Instant::now();
+        let start = SystemTime::UNIX_EPOCH;
         let window = Duration::from_secs(5);
         let mut t = Throughput::new(window);
 
