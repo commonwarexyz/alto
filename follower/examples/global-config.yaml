@@ -28,8 +28,6 @@ mailbox_size: 1024
 # Maximum number of blocks to fetch concurrently during backfill
 max_repair: 256
 
-# Auto-checkpoint from the latest finalized block on first run.
-# When true (default), the follower will fetch the latest finalized block
-# from the indexer and use that as the starting point, avoiding the need
-# to backfill all historical blocks.
+# Start from the tip of the finalized chain on first run
+# Set to false to start from genesis (requires backfilling all historical blocks)
 tip: false

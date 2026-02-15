@@ -42,4 +42,5 @@ See [examples/](./examples/) for sample configuration files.
 | `log_level` | Log level (`trace`, `debug`, `info`, `warn`, `error`) |
 | `metrics_port` | Port for Prometheus metrics endpoint |
 | `mailbox_size` | Size of internal mailboxes |
+| `max_repair` | Maximum number of blocks to fetch concurrently during backfill |
 | `tip` | When `true`, starts from the latest finalized block instead of backfilling from genesis |

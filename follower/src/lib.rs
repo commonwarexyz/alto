@@ -3,6 +3,7 @@ use alto_types::{Finalized, Notarized};
 use commonware_cryptography::ed25519::PublicKey;
 use commonware_p2p::Recipients;
 use commonware_runtime::IoBufMut;
+use commonware_utils::time::SystemTimeExt;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, future::Future, time::SystemTime};
@@ -119,7 +120,7 @@ impl commonware_p2p::LimitedSender for NoopSender {
         &mut self,
         _recipients: Recipients<Self::PublicKey>,
     ) -> Result<Self::Checked<'_>, SystemTime> {
-        Err(SystemTime::now())
+        Err(SystemTime::limit())
     }
 }
 
