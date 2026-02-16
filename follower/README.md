@@ -29,6 +29,8 @@ cargo install alto-follower
 follower --config config.yaml
 ```
 
+_To deploy your own instance of `alto`, read the guide in [deploy](../deploy/README.md)._
+
 ### Configuration
 
 | Field | Description | Default |

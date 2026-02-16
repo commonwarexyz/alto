@@ -28,3 +28,5 @@ cargo install alto-validator
 ```bash
 validator --config config.yaml --peers peers.yaml
 ```
+
+_To deploy your own instance of `alto`, read the guide in [deploy](../deploy/README.md)._
