@@ -1,20 +1,162 @@
+use alto_client::consensus::{Message, Payload};
 use alto_client::ClientBuilder;
-use alto_follower::{engine::Engine, feeder::Feeder, resolver::Actor, Config, IndexQuery};
-use alto_types::{Identity, Scheme, NAMESPACE};
+use alto_types::{Finalized, Identity, Notarized, Scheme, NAMESPACE};
 use clap::{Arg, Command};
 use commonware_codec::DecodeExt;
+use commonware_cryptography::ed25519::PublicKey;
 use commonware_macros::select;
+use commonware_p2p::Recipients;
 use commonware_parallel::Sequential;
-use commonware_runtime::{tokio, Clock, Metrics, Runner};
-use commonware_utils::{channel::mpsc, from_hex_formatted};
+use commonware_runtime::{tokio, Clock, IoBufMut, Metrics, Runner};
+use commonware_utils::{channel::mpsc, from_hex_formatted, time::SystemTimeExt};
+use futures::Stream;
+use serde::{Deserialize, Serialize};
 use std::{
+    fmt::Debug,
+    future::Future,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZero,
     path::PathBuf,
     str::FromStr,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tracing::{error, info, warn, Level};
+
+mod engine;
+mod feeder;
+mod resolver;
+mod throughput;
+
+#[cfg(test)]
+mod test_utils;
+
+pub use alto_client::{IndexQuery, Query};
+
+/// Configuration for the follower binary.
+#[derive(Deserialize, Serialize)]
+pub struct Config {
+    pub source: String,
+    pub identity: String,
+    pub directory: String,
+    pub worker_threads: usize,
+    pub log_level: String,
+    pub metrics_port: u16,
+    pub mailbox_size: usize,
+    pub max_repair: usize,
+    pub tip: bool,
+}
+
+/// Abstraction over the certificate source (HTTP client) used by the
+/// [feeder::Feeder] and [resolver::Actor].
+pub trait Source: Clone + Send + Sync + 'static {
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    fn health(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn block(&self, query: Query) -> impl Future<Output = Result<Payload, Self::Error>> + Send;
+    fn finalized(
+        &self,
+        query: IndexQuery,
+    ) -> impl Future<Output = Result<Finalized, Self::Error>> + Send;
+    fn notarized_get(
+        &self,
+        query: IndexQuery,
+    ) -> impl Future<Output = Result<Notarized, Self::Error>> + Send;
+    fn listen(
+        &self,
+    ) -> impl Future<
+        Output = Result<
+            impl Stream<Item = Result<Message, Self::Error>> + Send + Unpin,
+            Self::Error,
+        >,
+    > + Send;
+}
+
+impl<S: commonware_parallel::Strategy> Source for alto_client::Client<S> {
+    type Error = alto_client::Error;
+
+    fn health(&self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.health()
+    }
+
+    fn block(&self, query: Query) -> impl Future<Output = Result<Payload, Self::Error>> + Send {
+        self.block_get(query)
+    }
+
+    fn finalized(
+        &self,
+        query: IndexQuery,
+    ) -> impl Future<Output = Result<Finalized, Self::Error>> + Send {
+        self.finalized_get(query)
+    }
+
+    fn notarized_get(
+        &self,
+        query: IndexQuery,
+    ) -> impl Future<Output = Result<Notarized, Self::Error>> + Send {
+        self.notarized_get(query)
+    }
+
+    fn listen(
+        &self,
+    ) -> impl Future<
+        Output = Result<
+            impl Stream<Item = Result<Message, Self::Error>> + Send + Unpin,
+            Self::Error,
+        >,
+    > + Send {
+        self.listen()
+    }
+}
+
+/// Noop p2p sender used by the follower's buffer engine.
+///
+/// The follower does not participate in p2p broadcast, so all send
+/// operations are dropped.
+#[derive(Clone)]
+pub(crate) struct NoopSender;
+
+pub(crate) struct NoopCheckedSender;
+
+impl commonware_p2p::CheckedSender for NoopCheckedSender {
+    type PublicKey = PublicKey;
+    type Error = std::io::Error;
+
+    async fn send(
+        self,
+        _message: impl Into<IoBufMut> + Send,
+        _priority: bool,
+    ) -> Result<Vec<Self::PublicKey>, Self::Error> {
+        Ok(Vec::new())
+    }
+}
+
+impl commonware_p2p::LimitedSender for NoopSender {
+    type PublicKey = PublicKey;
+    type Checked<'a> = NoopCheckedSender;
+
+    async fn check(
+        &mut self,
+        _recipients: Recipients<Self::PublicKey>,
+    ) -> Result<Self::Checked<'_>, SystemTime> {
+        Err(SystemTime::limit())
+    }
+}
+
+/// Noop p2p receiver used by the follower's buffer engine.
+///
+/// The follower does not participate in p2p broadcast, so recv blocks
+/// forever (via [std::future::pending]).
+#[derive(Debug)]
+pub(crate) struct NoopReceiver;
+
+impl commonware_p2p::Receiver for NoopReceiver {
+    type Error = std::io::Error;
+    type PublicKey = PublicKey;
+
+    async fn recv(&mut self) -> Result<commonware_p2p::Message<Self::PublicKey>, Self::Error> {
+        std::future::pending().await
+    }
+}
 
 fn main() {
     // Parse arguments
@@ -26,7 +168,8 @@ fn main() {
     // Load config
     let config: Config = {
         let config_path = matches.get_one::<String>("config").unwrap();
-        let config_file = std::fs::read_to_string(config_path).expect("Could not read config file");
+        let config_file =
+            std::fs::read_to_string(config_path).expect("Could not read config file");
         serde_yaml::from_str(&config_file).expect("Could not parse config file")
     };
 
@@ -84,8 +227,13 @@ fn main() {
         info!("connected to certificate source");
 
         // Create engine
-        let (engine, mut mailbox) =
-            Engine::new(context.with_label("engine"), scheme.clone(), config.mailbox_size, NonZero::new(config.max_repair).expect("max_repair must be non-zero")).await;
+        let (engine, mut mailbox) = engine::Engine::new(
+            context.with_label("engine"),
+            scheme.clone(),
+            config.mailbox_size,
+            NonZero::new(config.max_repair).expect("max_repair must be non-zero"),
+        )
+        .await;
 
         // Optionally set checkpoint floor from the latest finalized block
         if config.tip {
@@ -107,15 +255,19 @@ fn main() {
 
         // Create resolver
         let (ingress_tx, ingress_rx) = mpsc::channel(config.mailbox_size);
-        let (resolver_actor, resolver) =
-            Actor::new(context.with_label("resolver"), client.clone(), ingress_tx, config.mailbox_size);
+        let (resolver_actor, resolver) = resolver::Actor::new(
+            context.with_label("resolver"),
+            client.clone(),
+            ingress_tx,
+            config.mailbox_size,
+        );
         let resolver_handle = resolver_actor.start();
 
         // Start engine
         let engine_handle = engine.start((ingress_rx, resolver));
 
         // Start certificate feeder
-        let feeder = Feeder::new(
+        let feeder = feeder::Feeder::new(
             context.with_label("feeder"),
             client,
             scheme,

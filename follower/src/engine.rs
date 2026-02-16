@@ -35,7 +35,6 @@ const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
 const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
-pub const DEFAULT_MAX_REPAIR: NonZero<usize> = NZUsize!(256);
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
@@ -254,5 +253,128 @@ impl<E: Clock> Reporter for Application<E> {
                 ack_rx.acknowledge();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::resolver::Actor;
+    use crate::test_utils::TestFixture;
+    use commonware_utils::NZUsize;
+    use alto_types::Block;
+    use bytes::Bytes;
+    use commonware_codec::Encode;
+    use commonware_consensus::{
+        marshal::ingress::handler,
+        types::{Height, Round, View},
+    };
+    use commonware_macros::test_traced;
+    use commonware_runtime::{deterministic::Runner, Metrics, Runner as _};
+    use commonware_utils::channel::{mpsc, oneshot};
+
+    use super::*;
+
+    /// Verifies that marshal's Deliver handler rejects a finalization whose
+    /// threshold signature does not match the configured scheme. This is
+    /// the resolver path's signature verification (as opposed to the feeder
+    /// path tested in feeder::tests).
+    #[test_traced]
+    fn marshal_rejects_invalid_finalization_from_resolver() {
+        let fixture = TestFixture::new();
+        let finalized = fixture.create_finalized(1, 1);
+        let wrong_verifier = fixture.wrong_verifier_scheme();
+
+        Runner::default().start(|context| async move {
+            let (engine, _mailbox) = Engine::new(
+                context.with_label("engine"),
+                wrong_verifier.clone(),
+                16,
+                NZUsize!(256),
+            )
+            .await;
+
+            // Wire up the resolver and start the engine
+            let (ingress_tx, ingress_rx) = mpsc::channel(16);
+            let source = crate::test_utils::MockSource::new();
+            let (_, resolver) = Actor::new(
+                context.with_label("resolver"),
+                source,
+                ingress_tx.clone(),
+                16,
+            );
+            let _engine_handle = engine.start((ingress_rx, resolver));
+
+            // Manually inject a finalization into marshal's ingress channel,
+            // bypassing the resolver actor to control the payload directly.
+            let key = handler::Request::<Block>::Finalized {
+                height: Height::new(1),
+            };
+            let value = Bytes::from((finalized.proof, finalized.block).encode().to_vec());
+            let (response_tx, response_rx) = oneshot::channel();
+            ingress_tx
+                .send(handler::Message::Deliver {
+                    key,
+                    value,
+                    response: response_tx,
+                })
+                .await
+                .expect("send failed");
+
+            // Marshal should reject the delivery due to signature mismatch
+            let accepted = response_rx.await.expect("response dropped");
+            assert!(
+                !accepted,
+                "marshal should reject finalization with invalid signature"
+            );
+        });
+    }
+
+    /// Verifies that marshal's Deliver handler rejects a notarization whose
+    /// threshold signature does not match the configured scheme.
+    #[test_traced]
+    fn marshal_rejects_invalid_notarization_from_resolver() {
+        let fixture = TestFixture::new();
+        let notarized = fixture.create_notarized(1, 1);
+        let wrong_verifier = fixture.wrong_verifier_scheme();
+
+        Runner::default().start(|context| async move {
+            let (engine, _mailbox) = Engine::new(
+                context.with_label("engine"),
+                wrong_verifier.clone(),
+                16,
+                NZUsize!(256),
+            )
+            .await;
+
+            let (ingress_tx, ingress_rx) = mpsc::channel(16);
+            let source = crate::test_utils::MockSource::new();
+            let (_, resolver) = Actor::new(
+                context.with_label("resolver"),
+                source,
+                ingress_tx.clone(),
+                16,
+            );
+            let _engine_handle = engine.start((ingress_rx, resolver));
+
+            // Inject a notarization directly into marshal's ingress channel
+            let round = Round::new(alto_types::EPOCH, View::new(1));
+            let key = handler::Request::<Block>::Notarized { round };
+            let value = Bytes::from((notarized.proof, notarized.block).encode().to_vec());
+            let (response_tx, response_rx) = oneshot::channel();
+            ingress_tx
+                .send(handler::Message::Deliver {
+                    key,
+                    value,
+                    response: response_tx,
+                })
+                .await
+                .expect("send failed");
+
+            let accepted = response_rx.await.expect("response dropped");
+            assert!(
+                !accepted,
+                "marshal should reject notarization with invalid signature"
+            );
+        });
     }
 }

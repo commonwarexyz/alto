@@ -169,3 +169,138 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{MockSource, TestFixture};
+    use alto_client::consensus::Message;
+    use commonware_macros::test_traced;
+    use commonware_runtime::{deterministic::Runner, Metrics, Runner as _};
+    use commonware_utils::NZUsize;
+
+    /// Verifies that a finalization with a valid threshold signature is
+    /// accepted by handle_message without error.
+    #[test_traced]
+    fn accepts_valid_finalization() {
+        let fixture = TestFixture::new();
+        let finalized = fixture.create_finalized(1, 1);
+        let verifier = fixture.verifier_scheme();
+
+        Runner::default().start(|context| async move {
+            // Engine is needed to provide the marshal mailbox
+            let (_engine, mailbox) = crate::engine::Engine::new(
+                context.with_label("engine"),
+                verifier.clone(),
+                16,
+                NZUsize!(256),
+            )
+            .await;
+
+            let source = MockSource::new();
+            let mut feeder = Feeder::new(context.with_label("feeder"), source, verifier, mailbox);
+
+            let result = feeder
+                .handle_message(Message::Finalization(finalized))
+                .await;
+            assert!(result.is_ok());
+        });
+    }
+
+    /// Verifies that a finalization with an invalid threshold signature
+    /// causes handle_message to panic (assertion failure).
+    #[test_traced]
+    #[should_panic(expected = "invalid finalization signature for height 1")]
+    fn rejects_invalid_finalization() {
+        let fixture = TestFixture::new();
+        let finalized = fixture.create_finalized(1, 1);
+        // Use a scheme derived from a different polynomial to force
+        // threshold signature verification to fail.
+        let wrong_verifier = fixture.wrong_verifier_scheme();
+
+        Runner::default().start(|context| async move {
+            let (_engine, mailbox) = crate::engine::Engine::new(
+                context.with_label("engine"),
+                wrong_verifier.clone(),
+                16,
+                NZUsize!(256),
+            )
+            .await;
+
+            let source = MockSource::new();
+            let mut feeder = Feeder::new(
+                context.with_label("feeder"),
+                source,
+                wrong_verifier,
+                mailbox,
+            );
+
+            // Should panic on the assert! inside handle_message
+            feeder
+                .handle_message(Message::Finalization(finalized))
+                .await
+                .unwrap();
+        });
+    }
+
+    /// Verifies that a notarization with a valid threshold signature is
+    /// accepted by handle_message without error.
+    #[test_traced]
+    fn accepts_valid_notarization() {
+        let fixture = TestFixture::new();
+        let notarized = fixture.create_notarized(1, 1);
+        let verifier = fixture.verifier_scheme();
+
+        Runner::default().start(|context| async move {
+            let (_engine, mailbox) = crate::engine::Engine::new(
+                context.with_label("engine"),
+                verifier.clone(),
+                16,
+                NZUsize!(256),
+            )
+            .await;
+
+            let source = MockSource::new();
+            let mut feeder = Feeder::new(context.with_label("feeder"), source, verifier, mailbox);
+
+            let result = feeder
+                .handle_message(Message::Notarization(notarized))
+                .await;
+            assert!(result.is_ok());
+        });
+    }
+
+    /// Verifies that a notarization with an invalid threshold signature
+    /// causes handle_message to panic (assertion failure).
+    #[test_traced]
+    #[should_panic(expected = "invalid notarization signature for height 1")]
+    fn rejects_invalid_notarization() {
+        let fixture = TestFixture::new();
+        let notarized = fixture.create_notarized(1, 1);
+        let wrong_verifier = fixture.wrong_verifier_scheme();
+
+        Runner::default().start(|context| async move {
+            let (_engine, mailbox) = crate::engine::Engine::new(
+                context.with_label("engine"),
+                wrong_verifier.clone(),
+                16,
+                NZUsize!(256),
+            )
+            .await;
+
+            let source = MockSource::new();
+            let mut feeder = Feeder::new(
+                context.with_label("feeder"),
+                source,
+                wrong_verifier,
+                mailbox,
+            );
+
+            feeder
+                .handle_message(Message::Notarization(notarized))
+                .await
+                .unwrap();
+        });
+    }
+
+}

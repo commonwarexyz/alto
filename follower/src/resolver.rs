@@ -290,3 +290,185 @@ impl<E: Spawner, C: Source> Actor<E, C> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{MockSource, TestFixture};
+    use alto_client::consensus::Payload;
+    use alto_types::Block;
+    use commonware_consensus::{
+        marshal::ingress::handler,
+        types::{Height, Round, View},
+    };
+    use commonware_cryptography::Digestible;
+    use commonware_macros::test_traced;
+    use commonware_resolver::Resolver as _;
+    use commonware_runtime::{deterministic::Runner, Clock, Metrics, Runner as _};
+    use commonware_utils::channel::mpsc;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    /// Exercises the full Resolver trait surface (fetch, cancel, clear,
+    /// retain) to ensure messages reach the actor without error.
+    #[test_traced]
+    fn fetch_cancel_clear_retain() {
+        Runner::default().start(|context| async move {
+            let source = MockSource::new();
+            let (ingress_tx, _ingress_rx) = mpsc::channel(16);
+            let (actor, mut resolver) =
+                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+
+            let _actor_handle = actor.start();
+
+            let key = handler::Request::<Block>::Finalized {
+                height: Height::new(1),
+            };
+
+            resolver.fetch(key.clone()).await;
+            resolver.cancel(key).await;
+            resolver.clear().await;
+            resolver.retain(|_| true).await;
+
+            // Allow the actor to process all queued messages
+            context.sleep(Duration::from_millis(100)).await;
+        });
+    }
+
+    /// Verifies that the actor fetches a block by digest from the source
+    /// and delivers it to marshal's ingress channel.
+    #[test_traced]
+    fn fetches_block_by_digest() {
+        let fixture = TestFixture::new();
+        let block = fixture.create_block(1, 1);
+        let digest = block.digest();
+
+        // Configure the mock to return the block for any query
+        let source = MockSource::new();
+        *source.block_handler.lock().unwrap() = Some(Box::new(move |_| {
+            Some(Payload::Block(Box::new(block.clone())))
+        }));
+
+        Runner::default().start(|context| async move {
+            let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
+            let (actor, mut resolver) =
+                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+
+            let _actor_handle = actor.start();
+
+            resolver.fetch(handler::Request::Block(digest)).await;
+
+            // Verify the actor delivered the block with the correct key
+            let msg = ingress_rx.recv().await.unwrap();
+            match msg {
+                handler::Message::Deliver { key, .. } => {
+                    assert!(matches!(key, handler::Request::Block(d) if d == digest));
+                }
+                _ => panic!("expected Deliver message"),
+            }
+        });
+    }
+
+    /// Verifies that the actor fetches a finalized block by height from
+    /// the source and delivers it to marshal's ingress channel.
+    #[test_traced]
+    fn fetches_finalized_by_height() {
+        let fixture = TestFixture::new();
+        let finalized = fixture.create_finalized(5, 5);
+        let height = Height::new(5);
+
+        let source = MockSource::new();
+        *source.block_handler.lock().unwrap() = Some(Box::new(move |_| {
+            Some(Payload::Finalized(Box::new(finalized.clone())))
+        }));
+
+        Runner::default().start(|context| async move {
+            let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
+            let (actor, mut resolver) =
+                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+
+            let _actor_handle = actor.start();
+
+            resolver.fetch(handler::Request::Finalized { height }).await;
+
+            let msg = ingress_rx.recv().await.unwrap();
+            match msg {
+                handler::Message::Deliver { key, .. } => {
+                    assert!(
+                        matches!(key, handler::Request::Finalized { height: h } if h == height)
+                    );
+                }
+                _ => panic!("expected Deliver message"),
+            }
+        });
+    }
+
+    /// Verifies that the actor fetches a notarized block by round from
+    /// the source and delivers it to marshal's ingress channel.
+    #[test_traced]
+    fn fetches_notarized_by_round() {
+        let fixture = TestFixture::new();
+        let notarized = fixture.create_notarized(3, 3);
+        let round = Round::new(alto_types::EPOCH, View::new(3));
+
+        let source = MockSource::new();
+        *source.notarized_handler.lock().unwrap() =
+            Some(Box::new(move |_| Some(notarized.clone())));
+
+        Runner::default().start(|context| async move {
+            let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
+            let (actor, mut resolver) =
+                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+
+            let _actor_handle = actor.start();
+
+            resolver.fetch(handler::Request::Notarized { round }).await;
+
+            let msg = ingress_rx.recv().await.unwrap();
+            match msg {
+                handler::Message::Deliver { key, .. } => {
+                    assert!(matches!(key, handler::Request::Notarized { round: r } if r == round));
+                }
+                _ => panic!("expected Deliver message"),
+            }
+        });
+    }
+
+    /// Verifies that duplicate fetch requests for the same key are
+    /// deduplicated -- the source handler should only be called once.
+    #[test_traced]
+    fn dedup() {
+        let fixture = TestFixture::new();
+        let block = fixture.create_block(1, 1);
+        let digest = block.digest();
+
+        let call_count = Arc::new(Mutex::new(0u32));
+        let call_count_inner = call_count.clone();
+
+        let source = MockSource::new();
+        *source.block_handler.lock().unwrap() = Some(Box::new(move |_| {
+            *call_count_inner.lock().unwrap() += 1;
+            Some(Payload::Block(Box::new(block.clone())))
+        }));
+
+        Runner::default().start(|context| async move {
+            let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
+            let (actor, mut resolver) =
+                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+
+            let _actor_handle = actor.start();
+
+            // Send the same request twice
+            let key = handler::Request::<Block>::Block(digest);
+            resolver.fetch(key.clone()).await;
+            resolver.fetch(key).await;
+
+            // Wait for the single fetch to complete
+            let _msg = ingress_rx.recv().await.unwrap();
+            context.sleep(Duration::from_millis(100)).await;
+
+            // Source should have been called exactly once
+            assert_eq!(*call_count.lock().unwrap(), 1);
+        });
+    }
+}
