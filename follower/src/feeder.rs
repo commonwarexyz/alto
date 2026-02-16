@@ -94,7 +94,7 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
     /// Seed messages are ignored. Notarization and finalization messages
     /// have their threshold signatures verified before being reported to
     /// marshal along with their associated blocks.
-    pub(crate) async fn handle_message(&mut self, message: Message) -> Result<(), Error> {
+    async fn handle_message(&mut self, message: Message) -> Result<(), Error> {
         match message {
             Message::Seed(seed) => {
                 trace!(view = seed.view().get(), "received seed");
