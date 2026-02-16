@@ -29,8 +29,6 @@ cargo install alto-follower
 follower --config config.yaml
 ```
 
-See [examples/](./examples/) for sample configuration files.
-
 ### Configuration
 
 | Field | Description |
@@ -44,3 +42,5 @@ See [examples/](./examples/) for sample configuration files.
 | `mailbox_size` | Size of internal mailboxes |
 | `max_repair` | Maximum number of blocks to fetch concurrently during backfill |
 | `tip` | When `true`, starts from the latest finalized block instead of backfilling from genesis |
+
+_See [examples/](./examples/) for sample configuration files._
