@@ -107,6 +107,22 @@ _This configuration consumes ~30MB of disk space per hour per validator (~13 vie
 cargo run --bin deploy -- explorer --dir assets --backend-url <backend URL> remote
 ```
 
+#### [Optional] Update Public Key
+
+After redeploying a cluster, update the identity (BLS12-381 threshold public key) across example configs and the inspector default:
+
+```bash
+# Global cluster:
+OLD_KEY=$(grep '^identity:' follower/examples/global-config.yaml | sed 's/identity: "//;s/"//')
+NEW_KEY="<new-key-hex>"
+sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/global-config.yaml inspector/src/main.rs
+
+# USA cluster:
+OLD_KEY=$(grep '^identity:' follower/examples/usa-config.yaml | sed 's/identity: "//;s/"//')
+NEW_KEY="<new-key-hex>"
+sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/usa-config.yaml
+```
+
 #### Build Validator Binary
 
 ##### Build Cross-Platform Compiler
@@ -172,22 +188,6 @@ The `validator-debug` binary contains debug symbols for symbolication. The profi
 
 ```bash
 deployer ec2 destroy --config config.yaml
-```
-
-#### Update Public Key
-
-After redeploying a cluster, update the identity (BLS12-381 threshold public key) across example configs and the inspector default:
-
-```bash
-# Global cluster:
-OLD_KEY=$(grep '^identity:' follower/examples/global-config.yaml | sed 's/identity: "//;s/"//')
-NEW_KEY="<new-key-hex>"
-sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/global-config.yaml inspector/src/main.rs
-
-# USA cluster:
-OLD_KEY=$(grep '^identity:' follower/examples/usa-config.yaml | sed 's/identity: "//;s/"//')
-NEW_KEY="<new-key-hex>"
-sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/usa-config.yaml
 ```
 
 #### Debugging
