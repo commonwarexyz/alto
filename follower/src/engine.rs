@@ -14,13 +14,14 @@ use commonware_cryptography::{
 };
 use commonware_math::algebra::Random;
 use commonware_parallel::Sequential;
-use commonware_runtime::{buffer::paged::CacheRef, Clock, Handle, Metrics, Spawner, Storage};
+use commonware_runtime::{buffer::paged::CacheRef, spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage};
 use commonware_storage::archive::immutable;
 use commonware_utils::{channel::mpsc, Acknowledgement, NZUsize, NZU16, NZU64};
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use std::num::NonZero;
-use tracing::info;
+use futures::future::try_join_all;
+use tracing::{error, info, warn};
 
 const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
 const IMMUTABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
@@ -50,7 +51,7 @@ pub struct Engine<E>
 where
     E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
 {
-    context: E,
+    context: ContextCell<E>,
     buffer: buffered::Engine<E, PublicKey, Block>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
     marshal: marshal::Actor<
@@ -62,7 +63,6 @@ where
         FixedEpocher,
         Sequential,
     >,
-    marshal_mailbox: marshal::Mailbox<Scheme, Block>,
 }
 
 impl<E> Engine<E>
@@ -75,7 +75,7 @@ where
         scheme: Scheme,
         mailbox_size: usize,
         max_repair: NonZero<usize>,
-    ) -> Self {
+    ) -> (Self, marshal::Mailbox<Scheme, Block>) {
         // Create the buffer
         //
         // The follower does not participate in p2p broadcast, so we use a dummy
@@ -157,8 +157,7 @@ where
         // Create marshal
         let provider = ConstantProvider::new(scheme);
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-
-        let (marshal, marshal_mailbox, _) = marshal::Actor::init(
+        let (marshal, mailbox, _) = marshal::Actor::init(
             context.with_label("marshal"),
             finalizations_by_height,
             finalized_blocks,
@@ -180,44 +179,48 @@ where
         )
         .await;
 
-        // Return the engine
-        Self {
-            context,
+        // Return the engine and marshal mailbox
+        let engine = Self {
+            context: ContextCell::new(context),
             buffer,
             buffer_mailbox,
             marshal,
-            marshal_mailbox,
-        }
-    }
-
-    /// Returns a clone of the [marshal::Mailbox] for feeding certificates.
-    pub fn mailbox(&self) -> marshal::Mailbox<Scheme, Block> {
-        self.marshal_mailbox.clone()
+        };
+        (engine, mailbox)
     }
 
     /// Start the [Engine].
     pub fn start(
-        self,
+        mut self,
         ingress_rx: mpsc::Receiver<handler::Message<Block>>,
         resolver: Resolver,
-    ) -> (Handle<()>, Handle<()>) {
-        let context = self.context.with_label("engine");
+    ) -> Handle<()> {
+        spawn_cell!(self.context, self.run(ingress_rx, resolver).await)
+    }
 
+    async fn run(
+        mut self,
+        ingress_rx: mpsc::Receiver<handler::Message<Block>>,
+        resolver: Resolver,
+    ) {
         // Start the buffer
         let buffer_handle = self.buffer.start((NoopSender, NoopReceiver));
 
         // Start marshal
-        let buffer_mailbox = self.buffer_mailbox;
-        let marshal = self.marshal;
-        let engine_handle = context.spawn(move |context| async move {
-            let app = Application::new(context);
-            marshal
-                .start(app, buffer_mailbox, (ingress_rx, resolver))
-                .await
-                .expect("marshal failed");
-        });
+        let marshal_handle = self
+            .marshal
+            .start(
+                Application::new(self.context.take()),
+                self.buffer_mailbox,
+                (ingress_rx, resolver),
+            );
 
-        (engine_handle, buffer_handle)
+        // Wait for any actor to finish
+        if let Err(e) = try_join_all(vec![buffer_handle, marshal_handle]).await {
+            error!(?e, "engine failed");
+        } else {
+            warn!("engine stopped");
+        }
     }
 }
 

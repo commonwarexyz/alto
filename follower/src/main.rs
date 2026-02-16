@@ -86,9 +86,8 @@ fn main() {
         info!("connected to certificate source");
 
         // Create engine
-        let engine =
+        let (engine, mut mailbox) =
             Engine::new(context.with_label("engine"), scheme.clone(), config.mailbox_size, NonZero::new(config.max_repair).expect("max_repair must be non-zero")).await;
-        let mut marshal_mailbox = engine.mailbox();
 
         // Optionally set checkpoint floor from the latest finalized block
         if config.tip {
@@ -100,7 +99,7 @@ fn main() {
                     );
                     let height = finalized.block.height;
                     info!(height = height.get(), "setting checkpoint floor from latest finalized block");
-                    marshal_mailbox.set_floor(height).await;
+                    mailbox.set_floor(height).await;
                 }
                 Err(e) => {
                     warn!(error = ?e, "failed to fetch latest finalized block for checkpoint, will backfill from genesis");
@@ -115,21 +114,20 @@ fn main() {
         let resolver_handle = resolver_actor.start();
 
         // Start engine
-        let (engine_handle, buffer_handle) = engine.start(ingress_rx, resolver);
+        let engine_handle = engine.start(ingress_rx, resolver);
 
         // Start certificate feeder
         let feeder = Feeder::new(
             context.with_label("feeder"),
             client,
             scheme,
-            marshal_mailbox,
+            mailbox,
         );
         let feeder_handle = feeder.start();
 
         // Wait for any task to finish
         select! {
             _ = engine_handle => {},
-            _ = buffer_handle => {},
             _ = feeder_handle => {},
             _ = resolver_handle => {},
         };
