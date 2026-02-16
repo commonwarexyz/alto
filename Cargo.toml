@@ -50,7 +50,7 @@ tokio = "1.41.0"
 axum = "0.8.8"
 tower = "0.5.2"
 tower-http = "0.6.2"
-reqwest = "0.12.12"
+reqwest = { version = "0.12.12", default-features = false }
 tokio-tungstenite = "0.28.0"
 
 [profile.bench]

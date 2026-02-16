@@ -120,6 +120,7 @@ impl<S: Strategy> ClientBuilder<S> {
         let mut http_builder = reqwest::Client::builder()
             .tcp_nodelay(true)
             .timeout(std::time::Duration::from_secs(5))
+            .http2_adaptive_window(true)
             .resolve(&host, addr);
         for cert_der in &self.tls_certs {
             let cert = reqwest::Certificate::from_der(cert_der).expect("invalid DER certificate");

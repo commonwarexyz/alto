@@ -23,7 +23,7 @@ log_level: "info"
 metrics_port: 9091
 
 # Size of internal mailboxes
-mailbox_size: 1024
+mailbox_size: 4096
 
 # Maximum number of blocks to fetch concurrently during backfill
 max_repair: 512
