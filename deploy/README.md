@@ -151,7 +151,7 @@ _Emitted binary `validator` is placed in `assets/`._
 
 ```bash
 cd assets
-deployer ec2 create --config config.yaml
+deployer aws create --config config.yaml
 ```
 
 #### Monitor Performance on Grafana
@@ -171,7 +171,7 @@ docker run -it -v ${PWD}:/alto validator-builder
 ##### Restart Validator Binary on EC2 Instances
 
 ```bash
-deployer ec2 update --config config.yaml
+deployer aws update --config config.yaml
 ```
 
 #### [Optional] Profile Validator
@@ -179,7 +179,7 @@ deployer ec2 update --config config.yaml
 Collect a CPU profile from a running validator using `samply`:
 
 ```bash
-deployer ec2 profile --config config.yaml --instance <instance-name> --binary validator-debug
+deployer aws profile --config config.yaml --instance <instance-name> --binary validator-debug
 ```
 
 The `validator-debug` binary contains debug symbols for symbolication. The profile will be saved locally and can be viewed in the [Firefox Profiler](https://profiler.firefox.com).
@@ -187,7 +187,7 @@ The `validator-debug` binary contains debug symbols for symbolication. The profi
 #### Destroy Infrastructure
 
 ```bash
-deployer ec2 destroy --config config.yaml
+deployer aws destroy --config config.yaml
 ```
 
 #### Debugging
