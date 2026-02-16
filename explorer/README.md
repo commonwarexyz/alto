@@ -34,9 +34,9 @@ export const LOCATIONS: [[number, number], string][] = [
 ];
 ```
 
-You can generate these configurations using `setup explorer remote`:
+You can generate these configurations using `deploy explorer remote`:
 ```bash
-cargo run --bin setup -- explorer --dir <config-dir> --backend-url <url> remote
+cargo run --bin deploy -- explorer --dir <config-dir> --backend-url <url> remote
 ```
 
 To run in public mode:
@@ -66,9 +66,9 @@ export const PUBLIC_KEY_HEX = "82f8a77b...";
 export const LOCATIONS: [[number, number], string][] = [];
 ```
 
-You can generate this configuration using `setup explorer local`:
+You can generate this configuration using `deploy explorer local`:
 ```bash
-cargo run --bin setup -- explorer --dir <config-dir> --backend-url <url> local
+cargo run --bin deploy -- explorer --dir <config-dir> --backend-url <url> local
 ```
 
 Then copy the generated `config.ts` to `src/local_config.ts`.
