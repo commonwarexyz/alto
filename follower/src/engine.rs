@@ -201,7 +201,7 @@ where
         ingress_rx: mpsc::Receiver<handler::Message<Block>>,
         resolver: Resolver,
     ) -> (Handle<()>, Handle<()>) {
-        let context = self.context.clone();
+        let context = self.context.with_label("engine");
 
         // Start the buffer
         let buffer_handle = self.buffer.start((NoopSender, NoopReceiver));

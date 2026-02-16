@@ -8,6 +8,7 @@ use commonware_consensus::{marshal::ingress::handler, types::Height};
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
 use commonware_macros::select;
 use commonware_resolver::Consumer;
+use commonware_runtime::{spawn_cell, ContextCell, Handle, Spawner};
 use commonware_utils::channel::mpsc as tokio_mpsc;
 use commonware_utils::{
     futures::{AbortablePool, Aborter},
@@ -94,7 +95,8 @@ impl commonware_resolver::Resolver for Resolver {
 ///
 /// The [Source] (client) is constructed without verification because marshal's
 /// Deliver handler verifies all signatures before accepting resolved data.
-pub struct Actor<C: Source> {
+pub struct Actor<E: Spawner, C: Source> {
+    context: ContextCell<E>,
     client: C,
     mailbox_rx: mpsc::Receiver<ResolverMessage>,
     handler: handler::Handler<Block>,
@@ -102,9 +104,10 @@ pub struct Actor<C: Source> {
     in_flight_keys: HashMap<handler::Request<Block>, Aborter>,
 }
 
-impl<C: Source> Actor<C> {
+impl<E: Spawner, C: Source> Actor<E, C> {
     /// Create a new [Actor] and its corresponding [Resolver] handle.
     pub fn new(
+        context: E,
         client: C,
         ingress_tx: tokio_mpsc::Sender<handler::Message<Block>>,
         mailbox_size: usize,
@@ -112,6 +115,7 @@ impl<C: Source> Actor<C> {
         let (mailbox_tx, mailbox_rx) = mpsc::channel(mailbox_size);
 
         let actor = Self {
+            context: ContextCell::new(context),
             client,
             mailbox_rx,
             handler: handler::Handler::new(ingress_tx),
@@ -124,8 +128,13 @@ impl<C: Source> Actor<C> {
         (actor, handle)
     }
 
+    /// Start the [Actor] in a background task.
+    pub fn start(mut self) -> Handle<()> {
+        spawn_cell!(self.context, self.run().await)
+    }
+
     /// Run the actor loop, processing fetch/cancel/clear/retain messages.
-    pub async fn run(mut self) {
+    async fn run(mut self) {
         info!("resolver actor started");
 
         loop {

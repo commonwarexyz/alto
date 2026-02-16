@@ -7,7 +7,7 @@ use clap::{Arg, Command};
 use commonware_codec::DecodeExt;
 use commonware_macros::select;
 use commonware_parallel::Sequential;
-use commonware_runtime::{tokio, Clock, Metrics, Runner, Spawner};
+use commonware_runtime::{tokio, Clock, Metrics, Runner};
 use commonware_utils::{channel::mpsc, from_hex_formatted};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -87,7 +87,7 @@ fn main() {
 
         // Create engine
         let engine =
-            Engine::new(context.clone(), scheme.clone(), config.mailbox_size, NonZero::new(config.max_repair).expect("max_repair must be non-zero")).await;
+            Engine::new(context.with_label("engine"), scheme.clone(), config.mailbox_size, NonZero::new(config.max_repair).expect("max_repair must be non-zero")).await;
         let mut marshal_mailbox = engine.mailbox();
 
         // Optionally set checkpoint floor from the latest finalized block
@@ -111,15 +111,15 @@ fn main() {
         // Create resolver
         let (ingress_tx, ingress_rx) = mpsc::channel(config.mailbox_size);
         let (resolver_actor, resolver) =
-            Actor::new(client.clone(), ingress_tx, config.mailbox_size);
-        let resolver_handle = context.clone().spawn(|_| resolver_actor.run());
+            Actor::new(context.with_label("resolver"), client.clone(), ingress_tx, config.mailbox_size);
+        let resolver_handle = resolver_actor.start();
 
         // Start engine
         let (engine_handle, buffer_handle) = engine.start(ingress_rx, resolver);
 
         // Start certificate feeder
         let feeder = Feeder::new(
-            context,
+            context.with_label("feeder"),
             client,
             scheme,
             marshal_mailbox,

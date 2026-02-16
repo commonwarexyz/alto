@@ -21,7 +21,7 @@ use commonware_cryptography::{
 use commonware_macros::test_traced;
 use commonware_parallel::Sequential;
 use commonware_resolver::Resolver;
-use commonware_runtime::{deterministic::Runner, Clock, Runner as _, Spawner};
+use commonware_runtime::{deterministic::Runner, Clock, Metrics, Runner as _};
 use commonware_utils::channel::{mpsc, oneshot};
 use futures::StreamExt;
 use rand::{rngs::StdRng, SeedableRng};
@@ -195,9 +195,9 @@ fn resolver_fetch_cancel_clear_retain() {
     Runner::default().start(|context| async move {
         let source = MockSource::new();
         let (ingress_tx, _ingress_rx) = mpsc::channel(16);
-        let (actor, mut resolver) = Actor::new(source, ingress_tx, 16);
+        let (actor, mut resolver) = Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
 
-        let _actor_handle = context.clone().spawn(|_| actor.run());
+        let _actor_handle = actor.start();
 
         let key = handler::Request::<Block>::Finalized {
             height: Height::new(1),
@@ -225,9 +225,9 @@ fn resolver_actor_fetches_block_by_digest() {
 
     Runner::default().start(|context| async move {
         let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
-        let (actor, mut resolver) = Actor::new(source, ingress_tx, 16);
+        let (actor, mut resolver) = Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
 
-        let _actor_handle = context.clone().spawn(|_| actor.run());
+        let _actor_handle = actor.start();
 
         resolver.fetch(handler::Request::Block(digest)).await;
 
@@ -254,9 +254,9 @@ fn resolver_actor_fetches_finalized_by_height() {
 
     Runner::default().start(|context| async move {
         let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
-        let (actor, mut resolver) = Actor::new(source, ingress_tx, 16);
+        let (actor, mut resolver) = Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
 
-        let _actor_handle = context.clone().spawn(|_| actor.run());
+        let _actor_handle = actor.start();
 
         resolver.fetch(handler::Request::Finalized { height }).await;
 
@@ -281,9 +281,9 @@ fn resolver_actor_fetches_notarized_by_round() {
 
     Runner::default().start(|context| async move {
         let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
-        let (actor, mut resolver) = Actor::new(source, ingress_tx, 16);
+        let (actor, mut resolver) = Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
 
-        let _actor_handle = context.clone().spawn(|_| actor.run());
+        let _actor_handle = actor.start();
 
         resolver.fetch(handler::Request::Notarized { round }).await;
 
@@ -314,9 +314,9 @@ fn resolver_actor_dedup() {
 
     Runner::default().start(|context| async move {
         let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
-        let (actor, mut resolver) = Actor::new(source, ingress_tx, 16);
+        let (actor, mut resolver) = Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
 
-        let _actor_handle = context.clone().spawn(|_| actor.run());
+        let _actor_handle = actor.start();
 
         let key = handler::Request::<Block>::Block(digest);
         resolver.fetch(key.clone()).await;
@@ -381,7 +381,7 @@ fn feeder_accepts_valid_finalization() {
 
     Runner::default().start(|context| async move {
         let engine = crate::engine::Engine::new(
-            context.clone(),
+            context.with_label("engine"),
             verifier.clone(),
             16,
             crate::engine::DEFAULT_MAX_REPAIR,
@@ -390,7 +390,7 @@ fn feeder_accepts_valid_finalization() {
         let marshal_mailbox = engine.mailbox();
 
         let source = MockSource::new();
-        let mut feeder = Feeder::new(context.clone(), source, verifier, marshal_mailbox);
+        let mut feeder = Feeder::new(context.with_label("feeder"), source, verifier, marshal_mailbox);
 
         let result = feeder
             .handle_message(Message::Finalization(finalized))
@@ -408,7 +408,7 @@ fn feeder_rejects_invalid_finalization() {
 
     Runner::default().start(|context| async move {
         let engine = crate::engine::Engine::new(
-            context.clone(),
+            context.with_label("engine"),
             wrong_verifier.clone(),
             16,
             crate::engine::DEFAULT_MAX_REPAIR,
@@ -418,7 +418,7 @@ fn feeder_rejects_invalid_finalization() {
 
         let source = MockSource::new();
         let mut feeder =
-            Feeder::new(context.clone(), source, wrong_verifier, marshal_mailbox);
+            Feeder::new(context.with_label("feeder"), source, wrong_verifier, marshal_mailbox);
 
         feeder
             .handle_message(Message::Finalization(finalized))
@@ -435,7 +435,7 @@ fn feeder_ignores_notarization() {
 
     Runner::default().start(|context| async move {
         let engine = crate::engine::Engine::new(
-            context.clone(),
+            context.with_label("engine"),
             verifier.clone(),
             16,
             crate::engine::DEFAULT_MAX_REPAIR,
@@ -444,7 +444,7 @@ fn feeder_ignores_notarization() {
         let marshal_mailbox = engine.mailbox();
 
         let source = MockSource::new();
-        let mut feeder = Feeder::new(context.clone(), source, verifier, marshal_mailbox);
+        let mut feeder = Feeder::new(context.with_label("feeder"), source, verifier, marshal_mailbox);
 
         let result = feeder
             .handle_message(Message::Notarization(notarized))
@@ -462,7 +462,7 @@ fn feeder_rejects_invalid_notarization() {
 
     Runner::default().start(|context| async move {
         let engine = crate::engine::Engine::new(
-            context.clone(),
+            context.with_label("engine"),
             wrong_verifier.clone(),
             16,
             crate::engine::DEFAULT_MAX_REPAIR,
@@ -472,7 +472,7 @@ fn feeder_rejects_invalid_notarization() {
 
         let source = MockSource::new();
         let mut feeder =
-            Feeder::new(context.clone(), source, wrong_verifier, marshal_mailbox);
+            Feeder::new(context.with_label("feeder"), source, wrong_verifier, marshal_mailbox);
 
         feeder
             .handle_message(Message::Notarization(notarized))
@@ -489,7 +489,7 @@ fn marshal_rejects_invalid_finalization_from_resolver() {
 
     Runner::default().start(|context| async move {
         let engine = crate::engine::Engine::new(
-            context.clone(),
+            context.with_label("engine"),
             wrong_verifier.clone(),
             16,
             crate::engine::DEFAULT_MAX_REPAIR,
@@ -499,7 +499,7 @@ fn marshal_rejects_invalid_finalization_from_resolver() {
         let _marshal_mailbox = engine.mailbox();
         let (ingress_tx, ingress_rx) = mpsc::channel(16);
         let source = MockSource::new();
-        let (_, resolver) = Actor::new(source, ingress_tx.clone(), 16);
+        let (_, resolver) = Actor::new(context.with_label("resolver"), source, ingress_tx.clone(), 16);
         let (_engine_handle, _buffer_handle) = engine.start(ingress_rx, resolver);
 
         let key = handler::Request::<Block>::Finalized {
@@ -532,7 +532,7 @@ fn marshal_rejects_invalid_notarization_from_resolver() {
 
     Runner::default().start(|context| async move {
         let engine = crate::engine::Engine::new(
-            context.clone(),
+            context.with_label("engine"),
             wrong_verifier.clone(),
             16,
             crate::engine::DEFAULT_MAX_REPAIR,
@@ -542,7 +542,7 @@ fn marshal_rejects_invalid_notarization_from_resolver() {
         let _marshal_mailbox = engine.mailbox();
         let (ingress_tx, ingress_rx) = mpsc::channel(16);
         let source = MockSource::new();
-        let (_, resolver) = Actor::new(source, ingress_tx.clone(), 16);
+        let (_, resolver) = Actor::new(context.with_label("resolver"), source, ingress_tx.clone(), 16);
         let (_engine_handle, _buffer_handle) = engine.start(ingress_rx, resolver);
 
         let round = Round::new(EPOCH, View::new(1));
