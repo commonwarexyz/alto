@@ -1,7 +1,5 @@
 use alto_client::ClientBuilder;
-use alto_follower::{
-    engine::Engine, feeder::Feeder, resolver::Actor, Config, IndexQuery,
-};
+use alto_follower::{engine::Engine, feeder::Feeder, resolver::Actor, Config, IndexQuery};
 use alto_types::{Identity, Scheme, NAMESPACE};
 use clap::{Arg, Command};
 use commonware_codec::DecodeExt;

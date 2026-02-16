@@ -14,13 +14,15 @@ use commonware_cryptography::{
 };
 use commonware_math::algebra::Random;
 use commonware_parallel::Sequential;
-use commonware_runtime::{buffer::paged::CacheRef, spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage};
+use commonware_runtime::{
+    buffer::paged::CacheRef, spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
+};
 use commonware_storage::archive::immutable;
 use commonware_utils::{channel::mpsc, Acknowledgement, NZUsize, NZU16, NZU64};
+use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use std::num::NonZero;
-use futures::future::try_join_all;
 use tracing::{error, info, warn};
 
 const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
@@ -196,21 +198,16 @@ where
         spawn_cell!(self.context, self.run(marshal).await)
     }
 
-    async fn run(
-        mut self,
-        marshal: (mpsc::Receiver<handler::Message<Block>>, Resolver),
-    ) {
+    async fn run(mut self, marshal: (mpsc::Receiver<handler::Message<Block>>, Resolver)) {
         // Start the buffer
         let buffer_handle = self.buffer.start((NoopSender, NoopReceiver));
 
         // Start marshal
-        let marshal_handle = self
-            .marshal
-            .start(
-                Application::new(self.context.take()),
-                self.buffer_mailbox,
-                marshal,
-            );
+        let marshal_handle = self.marshal.start(
+            Application::new(self.context.take()),
+            self.buffer_mailbox,
+            marshal,
+        );
 
         // Wait for any actor to finish
         if let Err(e) = try_join_all(vec![buffer_handle, marshal_handle]).await {
