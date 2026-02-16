@@ -96,12 +96,6 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
                 let height = finalized.block.height;
                 let view = finalized.proof.view();
 
-                debug!(
-                    height = height.get(),
-                    view = view.get(),
-                    "received finalization"
-                );
-
                 assert!(
                     finalized.verify(&self.scheme, &Sequential),
                     "invalid finalization signature for height {}",
@@ -116,20 +110,14 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
                     .report(Activity::Finalization(finalized.proof.clone()))
                     .await;
 
-                info!(
+                debug!(
                     height = height.get(),
                     view = view.get(),
-                    "reported finalization"
+                    "received finalization"
                 );
             }
             Message::Notarization(notarized) => {
                 let round = notarized.proof.round();
-                debug!(
-                    height = notarized.block.height.get(),
-                    view = round.view().get(),
-                    "received notarization"
-                );
-
                 assert!(
                     notarized.verify(&self.scheme, &Sequential),
                     "invalid notarization signature for height {}",
@@ -150,10 +138,10 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
                     .report(Activity::Notarization(notarized.proof.clone()))
                     .await;
 
-                info!(
+                debug!(
                     height = notarized.block.height.get(),
                     view = round.view().get(),
-                    "reported notarization"
+                    "received notarization"
                 );
             }
             Message::Seed(seed) => {

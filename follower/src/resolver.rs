@@ -221,7 +221,7 @@ impl<E: Spawner, C: Source> Actor<E, C> {
                 if !handler.deliver(key, value).await {
                     warn!(?digest, "failed to deliver block to marshal");
                 }
-                info!(?digest, "fetched block by digest");
+                debug!(?digest, "fetched block by digest");
             }
             Ok(_) => {
                 warn!(?digest, "wrong payload returned for block by digest");
@@ -251,7 +251,7 @@ impl<E: Spawner, C: Source> Actor<E, C> {
                         "failed to deliver finalized block to marshal"
                     );
                 }
-                info!(height = height.get(), "fetched finalized block by height");
+                debug!(height = height.get(), "fetched finalized block by height");
             }
             Ok(_) => {
                 warn!(
@@ -282,7 +282,7 @@ impl<E: Spawner, C: Source> Actor<E, C> {
                 if !handler.deliver(key, value).await {
                     warn!(view, "failed to deliver notarized block to marshal");
                 }
-                info!(view, "fetched notarized block by round");
+                debug!(view, "fetched notarized block by round");
             }
             Err(e) => {
                 warn!(view, error=?e, "failed to fetch notarized block by round");
