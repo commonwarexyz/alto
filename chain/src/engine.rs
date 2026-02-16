@@ -293,7 +293,7 @@ impl<
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
                 blocker: cfg.blocker,
-                page_cache: page_cache,
+                page_cache,
                 elector: Random,
                 strategy: cfg.strategy,
             },

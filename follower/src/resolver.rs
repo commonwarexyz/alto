@@ -228,8 +228,8 @@ impl<E: Spawner, C: Source> Actor<E, C> {
     ) {
         debug!(height = height.get(), "fetching finalized block by height");
 
-        match client.block(alto_client::Query::Index(height.get())).await {
-            Ok(Payload::Finalized(finalized)) => {
+        match client.finalized(IndexQuery::Index(height.get())).await {
+            Ok(finalized) => {
                 let key = handler::Request::Finalized { height };
                 let finalization = finalized.proof.clone();
                 let block = finalized.block.clone();
@@ -241,12 +241,6 @@ impl<E: Spawner, C: Source> Actor<E, C> {
                     );
                 }
                 debug!(height = height.get(), "fetched finalized block by height");
-            }
-            Ok(_) => {
-                warn!(
-                    height = height.get(),
-                    "wrong payload returned for finalized block by height"
-                );
             }
             Err(e) => {
                 warn!(height = height.get(), error=?e, "failed to fetch finalized block by height");
@@ -367,9 +361,8 @@ mod tests {
         let height = Height::new(5);
 
         let source = MockSource::new();
-        *source.block_handler.lock().unwrap() = Some(Box::new(move |_| {
-            Some(Payload::Finalized(Box::new(finalized.clone())))
-        }));
+        *source.finalized_handler.lock().unwrap() =
+            Some(Box::new(move |_| Some(finalized.clone())));
 
         Runner::default().start(|context| async move {
             let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
