@@ -18,21 +18,14 @@ use commonware_cryptography::{
 use commonware_parallel::Sequential;
 use rand::{rngs::StdRng, SeedableRng};
 use std::{
-    fmt,
     future::Future,
     sync::{Arc, Mutex},
 };
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{0}")]
 pub struct MockError(pub String);
-
-impl fmt::Display for MockError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for MockError {}
 
 pub type BlockHandler = Arc<Mutex<Option<Box<dyn Fn(Query) -> Option<Payload> + Send + Sync>>>>;
 pub type FinalizedHandler =
