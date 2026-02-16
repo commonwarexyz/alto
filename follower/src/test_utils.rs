@@ -1,3 +1,5 @@
+//! Shared test utilities for the follower crate (mock source and fixture helpers).
+
 use crate::Source;
 use alto_client::consensus::{Message, Payload};
 use alto_client::{IndexQuery, Query};
