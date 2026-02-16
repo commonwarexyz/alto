@@ -24,12 +24,18 @@ impl Throughput {
 
     /// Record an event and return the current events-per-second rate.
     pub fn record(&mut self, now: SystemTime) -> f64 {
+        // Lazily initialize start time on the first event
         let started_at = *self.started_at.get_or_insert(now);
         self.timestamps.push_back(now);
+
+        // Evict timestamps that have fallen outside the sliding window
         let cutoff = now - self.window;
         while self.timestamps.front().is_some_and(|t| *t < cutoff) {
             self.timestamps.pop_front();
         }
+
+        // Use actual elapsed time during startup, clamped to the window
+        // once enough time has passed
         let elapsed = now
             .duration_since(started_at)
             .unwrap_or(Duration::ZERO)
