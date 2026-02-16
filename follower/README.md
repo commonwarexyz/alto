@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/alto-follower.svg)](https://crates.io/crates/alto-follower)
 [![Docs.rs](https://docs.rs/alto-follower/badge.svg)](https://docs.rs/alto-follower)
 
-Follower (full-node) binary for `alto`. Tracks finalized chain state without participating in consensus.
+Run a follower node for `alto`.
 
 ## Status
 

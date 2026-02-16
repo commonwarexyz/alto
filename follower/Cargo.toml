@@ -3,7 +3,7 @@ name = "alto-follower"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Follower (full-node) binary for alto."
+description = "Run a follower node for alto."
 
 [dependencies]
 alto-client = { workspace = true }

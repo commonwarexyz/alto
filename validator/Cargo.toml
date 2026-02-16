@@ -3,7 +3,7 @@ name = "alto-validator"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Validator binary for alto."
+description = "Run a validator node for alto."
 
 [dependencies]
 alto-chain = { version = "0.0.19", path = "../chain" }

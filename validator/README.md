@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/alto-validator.svg)](https://crates.io/crates/alto-validator)
 [![Docs.rs](https://docs.rs/alto-validator/badge.svg)](https://docs.rs/alto-validator)
 
-Validator binary for `alto`. Participates in consensus to produce and finalize blocks.
+Run a validator node for `alto`.
 
 ## Status
 

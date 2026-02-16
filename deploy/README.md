@@ -1,6 +1,6 @@
 # alto-deploy
 
-Deploy tooling for [alto](../README.md). Generates validator/follower configs, peer lists, deployer configs, explorer configs, and handles cross-compilation via Docker.
+Deploy an instance of [alto](../README.md).
 
 ## Deploy
 

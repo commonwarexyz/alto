@@ -3,7 +3,7 @@ name = "alto-deploy"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Setup tooling for alto."
+description = "Deploy an instance of alto."
 
 [dependencies]
 alto-chain = { version = "0.0.19", path = "../chain" }
