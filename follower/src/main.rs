@@ -146,6 +146,8 @@ impl commonware_p2p::LimitedSender for NoopSender {
         &mut self,
         _recipients: Recipients<Self::PublicKey>,
     ) -> Result<Self::Checked<'_>, SystemTime> {
+        // Return the maximum possible time to ensure buffered never
+        // retries sending -- the follower has no p2p peers.
         Err(SystemTime::limit())
     }
 }
