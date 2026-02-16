@@ -182,7 +182,7 @@ mod tests {
 
         Runner::default().start(|context| async move {
             // Engine is needed to provide the marshal mailbox
-            let (_engine, mailbox) = crate::engine::Engine::new(
+            let (_engine, mailbox, _) = crate::engine::Engine::new(
                 context.with_label("engine"),
                 verifier.clone(),
                 16,
@@ -212,7 +212,7 @@ mod tests {
         let wrong_verifier = fixture.wrong_verifier_scheme();
 
         Runner::default().start(|context| async move {
-            let (_engine, mailbox) = crate::engine::Engine::new(
+            let (_engine, mailbox, _) = crate::engine::Engine::new(
                 context.with_label("engine"),
                 wrong_verifier.clone(),
                 16,
@@ -245,7 +245,7 @@ mod tests {
         let verifier = fixture.verifier_scheme();
 
         Runner::default().start(|context| async move {
-            let (_engine, mailbox) = crate::engine::Engine::new(
+            let (_engine, mailbox, _) = crate::engine::Engine::new(
                 context.with_label("engine"),
                 verifier.clone(),
                 16,
@@ -273,7 +273,7 @@ mod tests {
         let wrong_verifier = fixture.wrong_verifier_scheme();
 
         Runner::default().start(|context| async move {
-            let (_engine, mailbox) = crate::engine::Engine::new(
+            let (_engine, mailbox, _) = crate::engine::Engine::new(
                 context.with_label("engine"),
                 wrong_verifier.clone(),
                 16,

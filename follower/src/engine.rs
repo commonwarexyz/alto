@@ -76,7 +76,7 @@ where
         scheme: Scheme,
         mailbox_size: usize,
         max_repair: NonZero<usize>,
-    ) -> (Self, marshal::Mailbox<Scheme, Block>) {
+    ) -> (Self, marshal::Mailbox<Scheme, Block>, Height) {
         // Create the buffer
         //
         // The follower does not participate in p2p broadcast, so we use a dummy
@@ -155,7 +155,7 @@ where
         // Create marshal
         let provider = ConstantProvider::new(scheme);
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-        let (marshal, mailbox, _) = marshal::Actor::init(
+        let (marshal, mailbox, last_processed_height) = marshal::Actor::init(
             context.with_label("marshal"),
             finalizations_by_height,
             finalized_blocks,
@@ -184,7 +184,7 @@ where
             buffer_mailbox,
             marshal,
         };
-        (engine, mailbox)
+        (engine, mailbox, last_processed_height)
     }
 
     /// Start the [Engine].
@@ -284,7 +284,7 @@ mod tests {
         let wrong_verifier = fixture.wrong_verifier_scheme();
 
         Runner::default().start(|context| async move {
-            let (engine, _mailbox) = Engine::new(
+            let (engine, _mailbox, _) = Engine::new(
                 context.with_label("engine"),
                 wrong_verifier.clone(),
                 16,
@@ -337,7 +337,7 @@ mod tests {
         let wrong_verifier = fixture.wrong_verifier_scheme();
 
         Runner::default().start(|context| async move {
-            let (engine, _mailbox) = Engine::new(
+            let (engine, _mailbox, _) = Engine::new(
                 context.with_label("engine"),
                 wrong_verifier.clone(),
                 16,

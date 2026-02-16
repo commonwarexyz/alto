@@ -3,6 +3,7 @@ use alto_client::{ClientBuilder, IndexQuery, Query};
 use alto_types::{Finalized, Identity, Notarized, Scheme, NAMESPACE};
 use clap::{Arg, Command};
 use commonware_codec::DecodeExt;
+use commonware_consensus::types::Height;
 use commonware_cryptography::ed25519::PublicKey;
 use commonware_macros::select;
 use commonware_p2p::Recipients;
@@ -235,7 +236,7 @@ fn main() {
         info!("connected to certificate source");
 
         // Create engine
-        let (engine, mut mailbox) = engine::Engine::new(
+        let (engine, mut mailbox, last_processed_height) = engine::Engine::new(
             context.with_label("engine"),
             scheme.clone(),
             config.mailbox_size,
@@ -243,8 +244,10 @@ fn main() {
         )
         .await;
 
-        // Optionally set checkpoint floor from the latest finalized block
-        if config.tip {
+        // On the first run (no previously synced data), optionally skip to the
+        // latest finalized height so the follower starts near tip instead of
+        // backfilling from genesis.
+        if config.tip && last_processed_height == Height::zero() {
             match client.finalized_get(IndexQuery::Latest).await {
                 Ok(finalized) => {
                     assert!(
