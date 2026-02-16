@@ -168,8 +168,7 @@ fn main() {
     // Load config
     let config: Config = {
         let config_path = matches.get_one::<String>("config").unwrap();
-        let config_file =
-            std::fs::read_to_string(config_path).expect("Could not read config file");
+        let config_file = std::fs::read_to_string(config_path).expect("Could not read config file");
         serde_yaml::from_str(&config_file).expect("Could not parse config file")
     };
 

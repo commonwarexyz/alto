@@ -260,7 +260,6 @@ impl<E: Clock> Reporter for Application<E> {
 mod tests {
     use crate::resolver::Actor;
     use crate::test_utils::TestFixture;
-    use commonware_utils::NZUsize;
     use alto_types::Block;
     use bytes::Bytes;
     use commonware_codec::Encode;
@@ -271,6 +270,7 @@ mod tests {
     use commonware_macros::test_traced;
     use commonware_runtime::{deterministic::Runner, Metrics, Runner as _};
     use commonware_utils::channel::{mpsc, oneshot};
+    use commonware_utils::NZUsize;
 
     use super::*;
 
