@@ -119,7 +119,8 @@ impl<S: Strategy> ClientBuilder<S> {
             .expect("hostname resolved to no addresses");
         let mut http_builder = reqwest::Client::builder()
             .tcp_nodelay(true)
-            .timeout(std::time::Duration::from_secs(5))
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(10))
             .http2_adaptive_window(true)
             .http2_keep_alive_interval(std::time::Duration::from_secs(10))
             .http2_keep_alive_timeout(std::time::Duration::from_secs(5))
