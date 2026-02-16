@@ -223,6 +223,9 @@ fn main() {
         //   WebSocket path:  Feeder::handle_message             (feeder.rs)
         //   Resolver path:   marshal::Actor Deliver handler    (commonware-consensus)
         //   Tip check below: explicit finalized.verify call
+        //
+        // Any certificate verification failure is treated as fatal and
+        // intentionally crashes the follower (fail-fast).
         let scheme = Scheme::certificate_verifier(NAMESPACE, identity);
         let client = ClientBuilder::new(&config.source, identity, Sequential)
             .with_verification_disabled()

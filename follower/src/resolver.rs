@@ -95,6 +95,7 @@ impl commonware_resolver::Resolver for Resolver {
 ///
 /// The [Source] (client) is constructed without verification because marshal's
 /// Deliver handler verifies all signatures before accepting resolved data.
+/// Rejections are treated as fatal and crash the follower (fail-fast).
 pub struct Actor<E: Spawner, C: Source> {
     context: ContextCell<E>,
     client: C,
@@ -234,16 +235,18 @@ impl<E: Spawner, C: Source> Actor<E, C> {
                 let finalization = finalized.proof.clone();
                 let block = finalized.block.clone();
                 let value = Bytes::from((finalization, block).encode().to_vec());
-                if !handler.deliver(key, value).await {
-                    warn!(
-                        height = height.get(),
-                        "failed to deliver finalized block to marshal"
-                    );
-                }
+                assert!(
+                    handler.deliver(key, value).await,
+                    "marshal rejected finalized block for height {}",
+                    height.get()
+                );
                 debug!(height = height.get(), "fetched finalized block by height");
             }
             Ok(_) => {
-                warn!(height = height.get(), "wrong payload returned for finalized block by height");
+                warn!(
+                    height = height.get(),
+                    "wrong payload returned for finalized block by height"
+                );
             }
             Err(e) => {
                 warn!(height = height.get(), error=?e, "failed to fetch finalized block by height");
@@ -265,9 +268,11 @@ impl<E: Spawner, C: Source> Actor<E, C> {
                 let notarization = notarized.proof.clone();
                 let block = notarized.block.clone();
                 let value = Bytes::from((notarization, block).encode().to_vec());
-                if !handler.deliver(key, value).await {
-                    warn!(view, "failed to deliver notarized block to marshal");
-                }
+                assert!(
+                    handler.deliver(key, value).await,
+                    "marshal rejected notarized block for view {}",
+                    view
+                );
                 debug!(view, "fetched notarized block by round");
             }
             Err(e) => {
@@ -485,6 +490,78 @@ mod tests {
                 }
                 _ => panic!("expected Deliver message"),
             }
+        });
+    }
+
+    /// Verifies that the follower crashes if marshal rejects a finalized
+    /// delivery from resolver backfill.
+    #[test_traced]
+    #[should_panic(expected = "marshal rejected finalized block for height 1")]
+    fn panics_when_marshal_rejects_finalized_delivery() {
+        let fixture = TestFixture::new();
+        let finalized = fixture.create_finalized(1, 1);
+        let height = Height::new(1);
+
+        let source = MockSource::new();
+        *source.block_handler.lock().unwrap() = Some(Box::new(move |query| match query {
+            Query::Index(index) if index == height.get() => {
+                Some(Payload::Finalized(Box::new(finalized.clone())))
+            }
+            _ => None,
+        }));
+
+        Runner::default().start(|context| async move {
+            let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
+            let (actor, mut resolver) =
+                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+
+            let _actor_handle = actor.start();
+            resolver.fetch(handler::Request::Finalized { height }).await;
+
+            let msg = ingress_rx.recv().await.unwrap();
+            match msg {
+                handler::Message::Deliver { response, .. } => {
+                    response.send(false).expect("deliver response dropped");
+                }
+                _ => panic!("expected Deliver message"),
+            }
+
+            // Yield to allow the panic in resolver task to surface.
+            context.sleep(Duration::from_millis(50)).await;
+        });
+    }
+
+    /// Verifies that the follower crashes if marshal rejects a notarized
+    /// delivery from resolver backfill.
+    #[test_traced]
+    #[should_panic(expected = "marshal rejected notarized block for view 3")]
+    fn panics_when_marshal_rejects_notarized_delivery() {
+        let fixture = TestFixture::new();
+        let notarized = fixture.create_notarized(3, 3);
+        let round = Round::new(alto_types::EPOCH, View::new(3));
+
+        let source = MockSource::new();
+        *source.notarized_handler.lock().unwrap() =
+            Some(Box::new(move |_| Some(notarized.clone())));
+
+        Runner::default().start(|context| async move {
+            let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
+            let (actor, mut resolver) =
+                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+
+            let _actor_handle = actor.start();
+            resolver.fetch(handler::Request::Notarized { round }).await;
+
+            let msg = ingress_rx.recv().await.unwrap();
+            match msg {
+                handler::Message::Deliver { response, .. } => {
+                    response.send(false).expect("deliver response dropped");
+                }
+                _ => panic!("expected Deliver message"),
+            }
+
+            // Yield to allow the panic in resolver task to surface.
+            context.sleep(Duration::from_millis(50)).await;
         });
     }
 
