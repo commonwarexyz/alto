@@ -63,15 +63,19 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
         spawn_cell!(self.context, self.run().await)
     }
 
-    pub async fn run(mut self) {
+    /// Run the feeder loop, reconnecting on stream disconnection.
+    async fn run(mut self) {
         loop {
             if let Err(e) = self.process_stream().await {
                 error!(error = %e, "stream error");
             }
+            // Wait before reconnecting to avoid tight retry loops
             self.context.sleep(Duration::from_secs(1)).await;
         }
     }
 
+    /// Connect to the certificate stream and process messages until
+    /// the stream ends or an error occurs.
     async fn process_stream(&mut self) -> Result<(), FeederError> {
         let client = self.client.clone();
         let mut stream = client
@@ -90,6 +94,11 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
         Ok(())
     }
 
+    /// Process a single message from the certificate stream.
+    ///
+    /// Seed messages are ignored. Notarization and finalization messages
+    /// have their threshold signatures verified before being reported to
+    /// marshal along with their associated blocks.
     pub(crate) async fn handle_message(&mut self, message: Message) -> Result<(), FeederError> {
         match message {
             Message::Seed(seed) => {
@@ -97,17 +106,24 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
             }
             Message::Notarization(notarized) => {
                 let round = notarized.proof.round();
+
+                // Verify threshold signature (panics on invalid)
                 assert!(
                     notarized.verify(&self.scheme, &Sequential),
                     "invalid notarization signature for height {}",
                     notarized.block.height.get(),
                 );
 
-                // This block may not actually be verified (we would only know that once certified). However, it does no damage
-                // to store it in marshal before a finalization arrives (if a block isn't directly finalized, this will prevent us from
-                // having to ask the backend for it again).
+                // Cache the block and report the notarization proof to marshal.
                 //
-                // If it is invalid and not part of the canonical chain, we'll just prune it later.
+                // This block may not actually be verified (we would only know
+                // that once certified). However, it does no damage to store it
+                // in marshal before a finalization arrives (if a block isn't
+                // directly finalized, this will prevent us from having to ask
+                // the backend for it again).
+                //
+                // If it is invalid and not part of the canonical chain, we'll
+                // just prune it later.
                 //
                 // TODO (https://github.com/commonwarexyz/monorepo/pull/2208): create a dedicated cache for storing unverified (but notarized) blocks
                 self.marshal_mailbox
@@ -127,12 +143,14 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
                 let height = finalized.block.height;
                 let view = finalized.proof.view();
 
+                // Verify threshold signature (panics on invalid)
                 assert!(
                     finalized.verify(&self.scheme, &Sequential),
                     "invalid finalization signature for height {}",
                     height.get(),
                 );
 
+                // Cache the block and report the finalization proof to marshal
                 let round = finalized.proof.round();
                 self.marshal_mailbox
                     .verified(round, finalized.block.clone())
