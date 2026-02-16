@@ -243,6 +243,9 @@ impl<E: Clock> Reporter for Application<E> {
                 self.tip = Some(height);
             }
             Update::Block(block, ack_rx) => {
+                // This is where an application would process the
+                // finalized block (e.g. update state, index transactions,
+                // serve queries, etc.).
                 let bps = self.throughput.record(self.context.current());
                 info!(
                     height = block.height.get(),
