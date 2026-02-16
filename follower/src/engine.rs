@@ -162,7 +162,7 @@ where
             marshal::Config {
                 provider,
                 epocher,
-                partition_prefix: "follower".to_string(),
+                partition_prefix: "follower-marshal".to_string(),
                 mailbox_size,
                 view_retention_timeout: VIEW_RETENTION_TIMEOUT,
                 prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
