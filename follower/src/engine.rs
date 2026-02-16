@@ -258,6 +258,7 @@ impl<E: Clock> Reporter for Application<E> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::resolver::Actor;
     use crate::test_utils::TestFixture;
     use alto_types::Block;
@@ -271,8 +272,6 @@ mod tests {
     use commonware_runtime::{deterministic::Runner, Metrics, Runner as _};
     use commonware_utils::channel::{mpsc, oneshot};
     use commonware_utils::NZUsize;
-
-    use super::*;
 
     /// Verifies that marshal's Deliver handler rejects a finalization whose
     /// threshold signature does not match the configured scheme. This is
