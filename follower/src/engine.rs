@@ -3,7 +3,7 @@ use alto_types::{Block, Finalization, Scheme, EPOCH_LENGTH};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
     marshal::{self, ingress::handler, Update},
-    types::{FixedEpocher, ViewDelta},
+    types::{FixedEpocher, Height, ViewDelta},
     Reporter,
 };
 use commonware_cryptography::{
@@ -125,7 +125,6 @@ where
         )
         .await
         .expect("failed to initialize finalizations by height archive");
-        info!("restored finalizations by height archive");
 
         // Initialize finalized blocks
         let finalized_blocks = immutable::Archive::init(
@@ -153,7 +152,6 @@ where
         )
         .await
         .expect("failed to initialize finalized blocks archive");
-        info!("restored finalized blocks archive");
 
         // Create marshal
         let provider = ConstantProvider::new(scheme);
@@ -224,6 +222,7 @@ where
 struct Application<E: Clock> {
     context: E,
     throughput: Throughput,
+    tip: Option<Height>,
 }
 
 impl<E: Clock> Application<E> {
@@ -231,6 +230,7 @@ impl<E: Clock> Application<E> {
         Self {
             context,
             throughput: Throughput::new(THROUGHPUT_WINDOW),
+            tip: None,
         }
     }
 }
@@ -239,14 +239,20 @@ impl<E: Clock> Reporter for Application<E> {
     type Activity = Update<Block>;
 
     async fn report(&mut self, activity: Self::Activity) {
-        if let Update::Block(block, ack_rx) = activity {
-            let bps = self.throughput.record(self.context.current());
-            info!(
-                height = block.height.get(),
-                bps = format!("{bps:.2}"),
-                "reported block"
-            );
-            ack_rx.acknowledge();
+        match activity {
+            Update::Tip(_, height, _) => {
+                self.tip = Some(height);
+            }
+            Update::Block(block, ack_rx) => {
+                let bps = self.throughput.record(self.context.current());
+                info!(
+                    height = block.height.get(),
+                    tip = self.tip.map(|h| h.get()),
+                    bps = %format_args!("{bps:.2}"),
+                    "processed block"
+                );
+                ack_rx.acknowledge();
+            }
         }
     }
 }
