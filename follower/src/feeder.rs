@@ -11,7 +11,7 @@ use tracing::{debug, error, info, trace, warn};
 
 /// Errors that can occur while feeding certificates from the source stream.
 #[derive(Debug, Error)]
-pub enum FeederError {
+pub enum Error {
     #[error("failed to connect: {0}")]
     Connect(String),
     #[error("stream error: {0}")]
@@ -69,18 +69,18 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
 
     /// Connect to the certificate stream and process messages until
     /// the stream ends or an error occurs.
-    async fn process_stream(&mut self) -> Result<(), FeederError> {
+    async fn process_stream(&mut self) -> Result<(), Error> {
         // Establish a new WebSocket connection to the certificate source
         let client = self.client.clone();
         let mut stream = client
             .listen()
             .await
-            .map_err(|e| FeederError::Connect(e.to_string()))?;
+            .map_err(|e| Error::Connect(e.to_string()))?;
         info!("connected to certificate stream");
 
         // Process messages until the stream ends or an error occurs
         while let Some(result) = stream.next().await {
-            let message = result.map_err(|e| FeederError::Stream(e.to_string()))?;
+            let message = result.map_err(|e| Error::Stream(e.to_string()))?;
             self.handle_message(message).await?;
         }
 
@@ -94,7 +94,7 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
     /// Seed messages are ignored. Notarization and finalization messages
     /// have their threshold signatures verified before being reported to
     /// marshal along with their associated blocks.
-    pub(crate) async fn handle_message(&mut self, message: Message) -> Result<(), FeederError> {
+    pub(crate) async fn handle_message(&mut self, message: Message) -> Result<(), Error> {
         match message {
             Message::Seed(seed) => {
                 trace!(view = seed.view().get(), "received seed");
