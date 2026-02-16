@@ -49,14 +49,4 @@ _See [examples/](./examples/) for sample configuration files._
 
 ## Certificate Validation Policy
 
-`alto-follower` is intentionally fail-fast on invalid consensus certificates.
-
-- Streamed notarizations and finalizations from `/consensus/ws` are verified and
-  cause a panic on signature mismatch.
-- Resolver backfill deliveries are verified by marshal and cause a panic if
-  marshal rejects the certificate.
-- Tip checkpoint finalization verification (`tip: true`) panics on signature
-  mismatch.
-
-This behavior is intentional: invalid certificate data is treated as a fatal
-integrity violation, not a recoverable condition.
+`alto-follower` considers invalid consensus certificates a fatal error and may panic if the `source` provides one. If you observe this behavior, switch to a new `source` and/or ensure your configuration is correct for the network you are following.
