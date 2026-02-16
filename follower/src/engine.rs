@@ -15,7 +15,8 @@ use commonware_cryptography::{
 use commonware_math::algebra::Random;
 use commonware_parallel::Sequential;
 use commonware_runtime::{
-    buffer::paged::CacheRef, spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
+    buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
+    Spawner, Storage,
 };
 use commonware_storage::archive::immutable;
 use commonware_utils::{channel::mpsc, Acknowledgement, NZUsize, NZU16, NZU64};
@@ -50,7 +51,7 @@ const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30
 #[allow(clippy::type_complexity)]
 pub struct Engine<E>
 where
-    E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+    E: BufferPooler + commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
 {
     context: ContextCell<E>,
     buffer: buffered::Engine<E, PublicKey, Block>,
@@ -68,7 +69,7 @@ where
 
 impl<E> Engine<E>
 where
-    E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+    E: BufferPooler + commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
 {
     /// Create a new [Engine].
     pub async fn new(
@@ -94,7 +95,7 @@ where
         );
 
         // Create the page cache
-        let page_cache = CacheRef::new(PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
+        let page_cache = CacheRef::from_pooler(&context, PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
 
         // Initialize finalizations by height
         let finalizations_by_height = immutable::Archive::init(

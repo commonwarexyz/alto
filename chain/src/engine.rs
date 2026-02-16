@@ -21,8 +21,8 @@ use commonware_p2p::{Blocker, Receiver, Sender};
 use commonware_parallel::Strategy;
 use commonware_resolver::Resolver;
 use commonware_runtime::{
-    buffer::paged::CacheRef, spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
-    ThreadPooler,
+    buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
+    Spawner, Storage, ThreadPooler,
 };
 use commonware_storage::archive::immutable;
 use commonware_utils::channel::mpsc;
@@ -91,7 +91,7 @@ type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpoch
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
 pub struct Engine<
-    E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+    E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     S: Strategy,
     I: Indexer,
@@ -116,7 +116,7 @@ pub struct Engine<
 }
 
 impl<
-        E: Clock + GClock + Rng + CryptoRng + Spawner + ThreadPooler + Storage + Metrics,
+        E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + ThreadPooler + Storage + Metrics,
         B: Blocker<PublicKey = PublicKey>,
         S: Strategy,
         I: Indexer,
@@ -137,7 +137,7 @@ impl<
         );
 
         // Create the page cache
-        let page_cache = CacheRef::new(PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
+        let page_cache = CacheRef::from_pooler(&context, PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
 
         // Initialize finalizations by height
         let start = Instant::now();

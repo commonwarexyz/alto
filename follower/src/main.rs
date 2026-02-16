@@ -8,7 +8,7 @@ use commonware_cryptography::ed25519::PublicKey;
 use commonware_macros::select;
 use commonware_p2p::Recipients;
 use commonware_parallel::Sequential;
-use commonware_runtime::{tokio, Clock, IoBufMut, Metrics, Runner};
+use commonware_runtime::{tokio, Clock, IoBufs, Metrics, Runner};
 use commonware_utils::{channel::mpsc, from_hex_formatted, time::SystemTimeExt};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
@@ -132,7 +132,7 @@ impl commonware_p2p::CheckedSender for NoopCheckedSender {
 
     async fn send(
         self,
-        _message: impl Into<IoBufMut> + Send,
+        _message: impl Into<IoBufs> + Send,
         _priority: bool,
     ) -> Result<Vec<Self::PublicKey>, Self::Error> {
         Ok(Vec::new())
