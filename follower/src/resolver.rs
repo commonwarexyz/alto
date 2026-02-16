@@ -6,7 +6,7 @@ use bytes::Bytes;
 use commonware_codec::Encode;
 use commonware_consensus::{marshal::ingress::handler, types::Height};
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
-use commonware_macros::select;
+use commonware_macros::select_loop;
 use commonware_resolver::Consumer;
 use commonware_runtime::{spawn_cell, ContextCell, Handle, Spawner};
 use commonware_utils::channel::mpsc as tokio_mpsc;
@@ -137,54 +137,48 @@ impl<E: Spawner, C: Source> Actor<E, C> {
     async fn run(mut self) {
         info!("resolver actor started");
 
-        loop {
-            select! {
-                result = self.in_flight.next_completed() => {
-                    let Ok(key) = result else {
-                        continue;
-                    };
-                    self.in_flight_keys.remove(&key);
-                },
-                msg = self.mailbox_rx.next() => {
-                    let Some(msg) = msg else {
-                        warn!("mailbox closed");
-                        break;
-                    };
-                    match msg {
-                        ResolverMessage::Fetch(key) => {
-                            if self.in_flight_keys.contains_key(&key) {
-                                trace!(?key, "skipping duplicate fetch request");
-                                continue;
-                            }
-                            let future = Self::process_fetch(
-                                key.clone(),
-                                self.client.clone(),
-                                self.handler.clone(),
-                            );
-                            let aborter = self.in_flight.push(future);
-                            self.in_flight_keys.insert(key, aborter);
+        select_loop! {
+            self.context,
+            on_stopped => {
+                info!("resolver actor stopped");
+            },
+            Ok(key) = self.in_flight.next_completed() else continue => {
+                self.in_flight_keys.remove(&key);
+            },
+            Some(msg) = self.mailbox_rx.next() else break => {
+                match msg {
+                    ResolverMessage::Fetch(key) => {
+                        if self.in_flight_keys.contains_key(&key) {
+                            trace!(?key, "skipping duplicate fetch request");
+                            continue;
                         }
-                        ResolverMessage::Cancel(key) => {
-                            if self.in_flight_keys.remove(&key).is_some() {
-                                debug!(?key, "cancelled in-flight request");
-                            }
-                        }
-                        ResolverMessage::Clear => {
-                            let count = self.in_flight_keys.len();
-                            self.in_flight_keys.clear();
-                            debug!(count, "cleared all in-flight requests");
-                        }
-                        ResolverMessage::Retain(f) => {
-                            let before = self.in_flight_keys.len();
-                            self.in_flight_keys.retain(|key, _| f(key));
-                            let removed = before - self.in_flight_keys.len();
-                            debug!(removed, remaining = self.in_flight_keys.len(), "retained in-flight requests");
+                        let future = Self::process_fetch(
+                            key.clone(),
+                            self.client.clone(),
+                            self.handler.clone(),
+                        );
+                        let aborter = self.in_flight.push(future);
+                        self.in_flight_keys.insert(key, aborter);
+                    }
+                    ResolverMessage::Cancel(key) => {
+                        if self.in_flight_keys.remove(&key).is_some() {
+                            debug!(?key, "cancelled in-flight request");
                         }
                     }
-                },
-            };
+                    ResolverMessage::Clear => {
+                        let count = self.in_flight_keys.len();
+                        self.in_flight_keys.clear();
+                        debug!(count, "cleared all in-flight requests");
+                    }
+                    ResolverMessage::Retain(f) => {
+                        let before = self.in_flight_keys.len();
+                        self.in_flight_keys.retain(|key, _| f(key));
+                        let removed = before - self.in_flight_keys.len();
+                        debug!(removed, remaining = self.in_flight_keys.len(), "retained in-flight requests");
+                    }
+                }
+            },
         }
-        info!("resolver actor stopped");
     }
 
     async fn process_fetch(
