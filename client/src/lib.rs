@@ -110,7 +110,7 @@ impl<S: Strategy> ClientBuilder<S> {
     pub fn build(self) -> Client<S> {
         let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, self.identity);
 
-        // Build HTTP client
+        // Build HTTP client (HTTP/2 is negotiated automatically via ALPN over TLS).
         let mut http_builder = reqwest::Client::builder();
         for cert_der in &self.tls_certs {
             let cert = reqwest::Certificate::from_der(cert_der).expect("invalid DER certificate");
