@@ -1,4 +1,4 @@
-//! Client for interacting with `alto`.
+//! Interact with an `alto` indexer.
 
 use alto_types::{Identity, Scheme, NAMESPACE};
 use commonware_cryptography::sha256::Digest;

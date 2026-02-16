@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/alto-client.svg)](https://crates.io/crates/alto-client)
 [![Docs.rs](https://docs.rs/alto-client/badge.svg)](https://docs.rs/alto-client)
 
-Interact with `alto`.
+Interact with an `alto` indexer.
 
 ## Status
 

@@ -10,7 +10,7 @@
 _Components are designed for deployment in adversarial environments. If you find an exploit, please refer to our [security policy](./SECURITY.md) before disclosing it publicly (an exploit may equip a malicious party to attack users of a primitive)._
 
 * [chain](./chain/README.md): A minimal (and wicked fast) blockchain built with the [Commonware Library](https://github.com/commonwarexyz/monorepo).
-* [client](./client/README.md): Interact with `alto`.
+* [client](./client/README.md): Interact with an `alto` indexer.
 * [deploy](./deploy/README.md): Deploy an instance of `alto`.
 * [explorer](./explorer/README.md): Visualize `alto` activity.
 * [follower](./follower/README.md): Run a follower node for `alto`.
