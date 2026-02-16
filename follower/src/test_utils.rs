@@ -73,21 +73,21 @@ impl Source for MockSource {
         }
     }
 
+    async fn notarized(&self, query: IndexQuery) -> Result<Notarized, Self::Error> {
+        let handler = self.notarized_handler.clone();
+        let guard = handler.lock().unwrap();
+        match guard.as_ref().and_then(|f| f(query)) {
+            Some(notarized) => Ok(notarized),
+            None => Err(MockError("notarized not found".to_string())),
+        }
+    }
+
     async fn finalized(&self, query: IndexQuery) -> Result<Finalized, Self::Error> {
         let handler = self.finalized_handler.clone();
         let guard = handler.lock().unwrap();
         match guard.as_ref().and_then(|f| f(query)) {
             Some(finalized) => Ok(finalized),
             None => Err(MockError("finalized not found".to_string())),
-        }
-    }
-
-    async fn notarized_get(&self, query: IndexQuery) -> Result<Notarized, Self::Error> {
-        let handler = self.notarized_handler.clone();
-        let guard = handler.lock().unwrap();
-        match guard.as_ref().and_then(|f| f(query)) {
-            Some(notarized) => Ok(notarized),
-            None => Err(MockError("notarized not found".to_string())),
         }
     }
 

@@ -184,7 +184,6 @@ impl<E: Spawner, C: Source> Actor<E, C> {
                 },
             };
         }
-
         info!("resolver actor stopped");
     }
 
@@ -273,7 +272,7 @@ impl<E: Spawner, C: Source> Actor<E, C> {
         let view = round.view().get();
         debug!(view, "fetching notarized block by round");
 
-        match client.notarized_get(IndexQuery::Index(view)).await {
+        match client.notarized(IndexQuery::Index(view)).await {
             Ok(notarized) => {
                 let key = handler::Request::Notarized { round };
                 let notarization = notarized.proof.clone();

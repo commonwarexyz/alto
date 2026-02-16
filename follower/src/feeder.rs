@@ -76,7 +76,6 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
             .listen()
             .await
             .map_err(|e| FeederError::Connect(e.to_string()))?;
-
         info!("connected to certificate stream");
 
         // Process messages until the stream ends or an error occurs
@@ -128,7 +127,6 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
                 self.marshal_mailbox
                     .report(Activity::Notarization(notarized.proof.clone()))
                     .await;
-
                 debug!(
                     height = notarized.block.height.get(),
                     view = round.view().get(),
@@ -154,7 +152,6 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
                 self.marshal_mailbox
                     .report(Activity::Finalization(finalized.proof.clone()))
                     .await;
-
                 debug!(
                     height = height.get(),
                     view = view.get(),

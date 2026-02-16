@@ -1,5 +1,5 @@
 use alto_client::consensus::{Message, Payload};
-use alto_client::ClientBuilder;
+use alto_client::{ClientBuilder, IndexQuery, Query};
 use alto_types::{Finalized, Identity, Notarized, Scheme, NAMESPACE};
 use clap::{Arg, Command};
 use commonware_codec::DecodeExt;
@@ -30,8 +30,6 @@ mod throughput;
 #[cfg(test)]
 mod test_utils;
 
-pub use alto_client::{IndexQuery, Query};
-
 /// Configuration for the follower binary.
 #[derive(Deserialize, Serialize)]
 pub struct Config {
@@ -48,19 +46,29 @@ pub struct Config {
 
 /// Abstraction over the certificate source (HTTP client) used by the
 /// [feeder::Feeder] and [resolver::Actor].
-pub trait Source: Clone + Send + Sync + 'static {
+#[allow(dead_code)]
+pub(crate) trait Source: Clone + Send + Sync + 'static {
     type Error: std::error::Error + Send + Sync + 'static;
 
+    /// Check if the source is reachable.
     fn health(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Fetch a block by digest or index.
     fn block(&self, query: Query) -> impl Future<Output = Result<Payload, Self::Error>> + Send;
+
+    /// Fetch a notarized block by view or latest.
+    fn notarized(
+        &self,
+        query: IndexQuery,
+    ) -> impl Future<Output = Result<Notarized, Self::Error>> + Send;
+
+    /// Fetch a finalized block by height or latest.
     fn finalized(
         &self,
         query: IndexQuery,
     ) -> impl Future<Output = Result<Finalized, Self::Error>> + Send;
-    fn notarized_get(
-        &self,
-        query: IndexQuery,
-    ) -> impl Future<Output = Result<Notarized, Self::Error>> + Send;
+
+    /// Open a WebSocket stream of certificate messages.
     fn listen(
         &self,
     ) -> impl Future<
@@ -82,18 +90,18 @@ impl<S: commonware_parallel::Strategy> Source for alto_client::Client<S> {
         self.block_get(query)
     }
 
+    fn notarized(
+        &self,
+        query: IndexQuery,
+    ) -> impl Future<Output = Result<Notarized, Self::Error>> + Send {
+        self.notarized_get(query)
+    }
+
     fn finalized(
         &self,
         query: IndexQuery,
     ) -> impl Future<Output = Result<Finalized, Self::Error>> + Send {
         self.finalized_get(query)
-    }
-
-    fn notarized_get(
-        &self,
-        query: IndexQuery,
-    ) -> impl Future<Output = Result<Notarized, Self::Error>> + Send {
-        self.notarized_get(query)
     }
 
     fn listen(
@@ -202,7 +210,6 @@ fn main() {
             )),
             None,
         );
-
         info!(source = %config.source, "starting follower node");
 
         // Create scheme and client
