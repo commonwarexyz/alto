@@ -6,7 +6,7 @@ Deploy an instance of [alto](../README.md).
 
 ### Local
 
-_To run this example, you must first install [Rust](https://www.rust-lang.org/tools/install)._
+_To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/install)._
 
 #### Create Artifacts
 
@@ -73,7 +73,7 @@ _MacOS defaults to 256 open files, which is too low for the default settings (wh
 
 ### Remote
 
-_To run this example, you must first install [Rust](https://www.rust-lang.org/tools/install) and [Docker](https://www.docker.com/get-started/)._
+_To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/install) and [Docker](https://www.docker.com/get-started/)._
 
 #### Install `commonware-deployer`
 
