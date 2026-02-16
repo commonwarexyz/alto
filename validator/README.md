@@ -28,5 +28,3 @@ cargo install alto-validator
 ```bash
 validator --config config.yaml --peers peers.yaml
 ```
-
-See the [setup README](../setup/README.md) for setup instructions and configuration details.

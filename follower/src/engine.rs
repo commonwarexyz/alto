@@ -37,6 +37,7 @@ const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
+const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The engine that drives the follower's [marshal::Actor].
 ///
@@ -219,8 +220,6 @@ where
         (engine_handle, buffer_handle)
     }
 }
-
-const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Reporter that acknowledges finalized blocks from [marshal::Actor]
 /// and logs throughput over a 30-second sliding window.
