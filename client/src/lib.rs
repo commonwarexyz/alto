@@ -121,6 +121,9 @@ impl<S: Strategy> ClientBuilder<S> {
             .tcp_nodelay(true)
             .timeout(std::time::Duration::from_secs(5))
             .http2_adaptive_window(true)
+            .http2_keep_alive_interval(std::time::Duration::from_secs(10))
+            .http2_keep_alive_timeout(std::time::Duration::from_secs(5))
+            .http2_keep_alive_while_idle(true)
             .resolve(&host, addr);
         for cert_der in &self.tls_certs {
             let cert = reqwest::Certificate::from_der(cert_der).expect("invalid DER certificate");
