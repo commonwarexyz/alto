@@ -53,8 +53,8 @@ const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
-const BUFFER_POOL_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
-const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
+const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
+const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 
 /// Configuration for the [Engine].
@@ -136,8 +136,8 @@ impl<
             },
         );
 
-        // Create the buffer pool
-        let buffer_pool = CacheRef::new(BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
+        // Create the page cache
+        let page_cache = CacheRef::new(PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
 
         // Initialize finalizations by height
         let start = Instant::now();
@@ -159,7 +159,7 @@ impl<
                     "{}-finalizations-by-height-freezer-key-journal",
                     cfg.partition_prefix
                 ),
-                freezer_key_page_cache: buffer_pool.clone(),
+                freezer_key_page_cache: page_cache.clone(),
                 freezer_key_write_buffer: WRITE_BUFFER,
                 freezer_value_partition: format!(
                     "{}-finalizations-by-height-freezer-value-journal",
@@ -199,7 +199,7 @@ impl<
                     "{}-finalized-blocks-freezer-key-journal",
                     cfg.partition_prefix
                 ),
-                freezer_key_page_cache: buffer_pool.clone(),
+                freezer_key_page_cache: page_cache.clone(),
                 freezer_key_write_buffer: WRITE_BUFFER,
                 freezer_value_partition: format!(
                     "{}-finalized-blocks-freezer-value-journal",
@@ -244,7 +244,7 @@ impl<
                 value_write_buffer: WRITE_BUFFER,
                 block_codec_config: (),
                 max_repair: MAX_REPAIR,
-                page_cache: buffer_pool.clone(),
+                page_cache: page_cache.clone(),
                 strategy: cfg.strategy.clone(),
             },
         )
@@ -293,7 +293,7 @@ impl<
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
                 blocker: cfg.blocker,
-                page_cache: buffer_pool,
+                page_cache,
                 elector: Random,
                 strategy: cfg.strategy,
             },

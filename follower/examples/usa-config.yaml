@@ -1,0 +1,35 @@
+# Example configuration for the alto follower node (USA cluster)
+#
+# This configuration connects to the USA alto exoware relay
+# and stores finalized blocks locally.
+#
+# NOTE: You need to replace the identity with the correct one for the USA cluster
+
+# URL of the exoware relay or indexer endpoint
+source: "https://usa.alto.exoware.xyz"
+
+# Hex-encoded BLS12-381 public key of the network identity
+# This is the threshold public key used to verify finalization signatures
+identity: "87a81a6cb44377736201073f10e98934d002374a2e2d77968e00b315e60eda60878b1b00cac8e0aca3b613171b7912a90962d3dfae0d1eef44fbe82b79b539f4dbed26d3731e1990ecc748c9fd8635a256864406a59b37ee06cbf63d6f2a328a"
+
+# Directory for storing finalized blocks and state
+directory: "/tmp/alto-follower-usa"
+
+# Number of worker threads
+worker_threads: 4
+
+# Log level (trace, debug, info, warn, error)
+log_level: "info"
+
+# Port for Prometheus metrics endpoint
+metrics_port: 9092
+
+# Size of internal mailboxes
+mailbox_size: 1024
+
+# Maximum number of blocks to fetch concurrently during backfill
+max_repair: 256
+
+# Start from the tip of the finalized chain on first run
+# Set to false to start from genesis (requires backfilling all historical blocks)
+tip: true

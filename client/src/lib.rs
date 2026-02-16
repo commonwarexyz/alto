@@ -1,4 +1,4 @@
-//! Client for interacting with `alto`.
+//! Interact with an `alto` indexer.
 
 use alto_types::{Identity, Scheme, NAMESPACE};
 use commonware_cryptography::sha256::Digest;
@@ -68,6 +68,7 @@ pub struct ClientBuilder<S: Strategy> {
     identity: Identity,
     tls_certs: Vec<Vec<u8>>,
     strategy: S,
+    verify: bool,
 }
 
 impl<S: Strategy> ClientBuilder<S> {
@@ -87,7 +88,14 @@ impl<S: Strategy> ClientBuilder<S> {
             identity,
             tls_certs: Vec::new(),
             strategy,
+            verify: true,
         }
+    }
+
+    /// Disable signature verification for all returned data.
+    pub fn with_verification_disabled(mut self) -> Self {
+        self.verify = false;
+        self
     }
 
     /// Add a trusted TLS certificate (DER-encoded).
@@ -134,6 +142,7 @@ impl<S: Strategy> ClientBuilder<S> {
             uri: self.uri,
             ws_uri: self.ws_uri,
             certificate_verifier,
+            verify: self.verify,
             http_client,
             ws_connector,
             strategy: self.strategy,
@@ -146,6 +155,7 @@ pub struct Client<S: Strategy> {
     uri: String,
     ws_uri: String,
     certificate_verifier: Scheme,
+    verify: bool,
 
     http_client: reqwest::Client,
     ws_connector: WsConnector,

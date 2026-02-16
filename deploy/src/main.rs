@@ -31,7 +31,7 @@ fn main() {
     tracing_subscriber::fmt().init();
 
     // Define the main command with subcommands
-    let app = Command::new("setup")
+    let app = Command::new("deploy")
         .about("Manage configuration files for an alto chain.")
         .subcommand(
             Command::new("generate")

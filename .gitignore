@@ -1,7 +1,7 @@
 *.swp
 *.DS_Store
-/target
+target
 *.vscode
-/chain/assets
-/chain/test
+/assets
+/test
 /types/pkg

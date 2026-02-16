@@ -1,0 +1,52 @@
+# alto-follower
+
+[![Crates.io](https://img.shields.io/crates/v/alto-follower.svg)](https://crates.io/crates/alto-follower)
+[![Docs.rs](https://docs.rs/alto-follower/badge.svg)](https://docs.rs/alto-follower)
+
+Run a follower node for `alto`.
+
+## Status
+
+`alto-follower` is **ALPHA** software and is not yet recommended for production use. Developers should expect breaking changes and occasional instability.
+
+## Installation
+
+### Local
+
+```bash
+cargo install --path . --force
+```
+
+### Crates.io
+
+```bash
+cargo install alto-follower
+```
+
+## Usage
+
+```bash
+follower --config config.yaml
+```
+
+_To deploy your own instance of `alto`, read the guide in [deploy](../deploy/README.md)._
+
+### Configuration
+
+| Field | Description |
+|-------|-------------|
+| `source` | URL of the indexer to fetch blocks and stream certificates from |
+| `identity` | Hex-encoded BLS12-381 threshold public key used to verify consensus signatures |
+| `directory` | Path to store finalized blocks and state |
+| `worker_threads` | Number of runtime worker threads |
+| `log_level` | Log verbosity (`trace`, `debug`, `info`, `warn`, `error`) |
+| `metrics_port` | Port for the Prometheus metrics endpoint |
+| `mailbox_size` | Capacity of internal actor mailboxes |
+| `max_repair` | Maximum concurrent block fetches during backfill |
+| `tip` | Start from the tip of the finalized chain instead of backfilling from genesis |
+
+_See [examples/](./examples/) for sample configuration files._
+
+## Certificate Validation Policy
+
+`alto-follower` considers invalid consensus certificates a fatal error and may panic if the `source` provides one. If you observe this behavior, switch to a new `source` and/or ensure your configuration is correct for the network you are following.
