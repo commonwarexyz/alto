@@ -1,6 +1,6 @@
 use crate::Source;
 use alto_client::consensus::Payload;
-use alto_client::IndexQuery;
+use alto_client::{IndexQuery, Query};
 use alto_types::Block;
 use bytes::Bytes;
 use commonware_codec::Encode;
@@ -228,8 +228,8 @@ impl<E: Spawner, C: Source> Actor<E, C> {
     ) {
         debug!(height = height.get(), "fetching finalized block by height");
 
-        match client.finalized(IndexQuery::Index(height.get())).await {
-            Ok(finalized) => {
+        match client.block(Query::Index(height.get())).await {
+            Ok(Payload::Finalized(finalized)) => {
                 let key = handler::Request::Finalized { height };
                 let finalization = finalized.proof.clone();
                 let block = finalized.block.clone();
@@ -241,6 +241,9 @@ impl<E: Spawner, C: Source> Actor<E, C> {
                     );
                 }
                 debug!(height = height.get(), "fetched finalized block by height");
+            }
+            Ok(_) => {
+                warn!(height = height.get(), "wrong payload returned for finalized block by height");
             }
             Err(e) => {
                 warn!(height = height.get(), error=?e, "failed to fetch finalized block by height");
@@ -278,7 +281,7 @@ impl<E: Spawner, C: Source> Actor<E, C> {
 mod tests {
     use super::*;
     use crate::test_utils::{MockSource, TestFixture};
-    use alto_client::consensus::Payload;
+    use alto_client::{consensus::Payload, Query};
     use alto_types::Block;
     use commonware_consensus::{
         marshal::ingress::handler,
@@ -361,8 +364,12 @@ mod tests {
         let height = Height::new(5);
 
         let source = MockSource::new();
-        *source.finalized_handler.lock().unwrap() =
-            Some(Box::new(move |_| Some(finalized.clone())));
+        *source.block_handler.lock().unwrap() = Some(Box::new(move |query| match query {
+            Query::Index(index) if index == height.get() => {
+                Some(Payload::Finalized(Box::new(finalized.clone())))
+            }
+            _ => None,
+        }));
 
         Runner::default().start(|context| async move {
             let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
@@ -372,6 +379,71 @@ mod tests {
             let _actor_handle = actor.start();
 
             resolver.fetch(handler::Request::Finalized { height }).await;
+
+            let msg = ingress_rx.recv().await.unwrap();
+            match msg {
+                handler::Message::Deliver { key, .. } => {
+                    assert!(
+                        matches!(key, handler::Request::Finalized { height: h } if h == height)
+                    );
+                }
+                _ => panic!("expected Deliver message"),
+            }
+        });
+    }
+
+    /// Verifies that finalized backfill uses a height-indexed block query
+    /// (not a view-indexed finalization query) so diverged view/height still
+    /// resolves correctly.
+    #[test_traced]
+    fn fetches_finalized_by_height_uses_height_indexed_block_query() {
+        let fixture = TestFixture::new();
+        let finalized = fixture.create_finalized(5, 8);
+        let height = Height::new(5);
+        let expected_height = height.get();
+
+        let block_call_count = Arc::new(Mutex::new(0u32));
+        let block_call_count_inner = block_call_count.clone();
+        let finalized_call_count = Arc::new(Mutex::new(0u32));
+        let finalized_call_count_inner = finalized_call_count.clone();
+
+        let source = MockSource::new();
+        *source.block_handler.lock().unwrap() = Some(Box::new(move |query| {
+            *block_call_count_inner.lock().unwrap() += 1;
+            match query {
+                Query::Index(index) if index == expected_height => {
+                    Some(Payload::Finalized(Box::new(finalized.clone())))
+                }
+                _ => None,
+            }
+        }));
+        *source.finalized_handler.lock().unwrap() = Some(Box::new(move |_| {
+            *finalized_call_count_inner.lock().unwrap() += 1;
+            None
+        }));
+
+        Runner::default().start(|context| async move {
+            let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
+            let (actor, mut resolver) =
+                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+
+            let _actor_handle = actor.start();
+
+            resolver.fetch(handler::Request::Finalized { height }).await;
+
+            // Allow the fetch to run to completion.
+            context.sleep(Duration::from_millis(100)).await;
+
+            assert_eq!(
+                *block_call_count.lock().unwrap(),
+                1,
+                "expected finalized backfill to query block endpoint by height"
+            );
+            assert_eq!(
+                *finalized_call_count.lock().unwrap(),
+                0,
+                "expected finalized backfill to avoid view-indexed finalization endpoint"
+            );
 
             let msg = ingress_rx.recv().await.unwrap();
             match msg {
