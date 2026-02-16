@@ -16,7 +16,7 @@ use commonware_utils::{
 };
 use futures::{channel::mpsc, SinkExt, StreamExt};
 use std::collections::HashMap;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 /// Messages sent from the [Resolver] handle to the [Actor].
 #[allow(clippy::type_complexity)]
@@ -135,13 +135,9 @@ impl<E: Spawner, C: Source> Actor<E, C> {
 
     /// Run the actor loop, processing fetch/cancel/clear/retain messages.
     async fn run(mut self) {
-        info!("resolver actor started");
-
         select_loop! {
             self.context,
-            on_stopped => {
-                info!("resolver actor stopped");
-            },
+            on_stopped => {},
             Ok(key) = self.in_flight.next_completed() else continue => {
                 self.in_flight_keys.remove(&key);
             },
