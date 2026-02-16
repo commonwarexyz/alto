@@ -5,26 +5,18 @@ use commonware_consensus::{marshal, simplex::types::Activity, Reporter, Viewable
 use commonware_parallel::Sequential;
 use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Spawner};
 use futures::StreamExt;
-use std::{fmt, time::Duration};
+use std::time::Duration;
+use thiserror::Error;
 use tracing::{debug, error, info, trace, warn};
 
 /// Errors that can occur while feeding certificates from the source stream.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum FeederError {
+    #[error("failed to connect: {0}")]
     Connect(String),
+    #[error("stream error: {0}")]
     Stream(String),
 }
-
-impl fmt::Display for FeederError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Connect(e) => write!(f, "failed to connect: {e}"),
-            Self::Stream(e) => write!(f, "stream error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for FeederError {}
 
 /// Feeds certificates from a [Source] stream into [marshal::Actor] via its [marshal::Mailbox].
 ///
@@ -69,6 +61,7 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
             if let Err(e) = self.process_stream().await {
                 error!(error = %e, "stream error");
             }
+
             // Wait before reconnecting to avoid tight retry loops
             self.context.sleep(Duration::from_secs(1)).await;
         }
@@ -77,6 +70,7 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
     /// Connect to the certificate stream and process messages until
     /// the stream ends or an error occurs.
     async fn process_stream(&mut self) -> Result<(), FeederError> {
+        // Establish a new WebSocket connection to the certificate source
         let client = self.client.clone();
         let mut stream = client
             .listen()
@@ -85,11 +79,13 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
 
         info!("connected to certificate stream");
 
+        // Process messages until the stream ends or an error occurs
         while let Some(result) = stream.next().await {
             let message = result.map_err(|e| FeederError::Stream(e.to_string()))?;
             self.handle_message(message).await?;
         }
 
+        // Stream ended cleanly (server closed connection)
         warn!("certificate stream disconnected, reconnecting...");
         Ok(())
     }

@@ -23,6 +23,7 @@ commonware-parallel = { workspace = true }
 bytes = { workspace = true }
 rand = { workspace = true }
 futures = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
 governor = { workspace = true }
 clap = { workspace = true }

@@ -123,6 +123,7 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "serde_yaml",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-subscriber",
