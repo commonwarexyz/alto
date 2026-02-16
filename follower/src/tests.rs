@@ -1,4 +1,4 @@
-use crate::feeder::{CertificateFeeder, FeederError};
+use crate::feeder::CertificateFeeder;
 use crate::resolver::HttpResolverActor;
 use crate::Source;
 use alto_client::consensus::{Message, Payload};
@@ -400,6 +400,7 @@ fn feeder_accepts_valid_finalization() {
 }
 
 #[test_traced]
+#[should_panic(expected = "invalid finalization signature for height 1")]
 fn feeder_rejects_invalid_finalization() {
     let fixture = TestFixture::new();
     let finalized = fixture.create_finalized(1, 1);
@@ -419,13 +420,10 @@ fn feeder_rejects_invalid_finalization() {
         let mut feeder =
             CertificateFeeder::new(context.clone(), source, wrong_verifier, marshal_mailbox);
 
-        let result = feeder
+        feeder
             .handle_message(Message::Finalization(finalized))
-            .await;
-        assert!(matches!(
-            result,
-            Err(FeederError::InvalidSignature { height: 1 })
-        ));
+            .await
+            .unwrap();
     });
 }
 
@@ -456,6 +454,7 @@ fn feeder_ignores_notarization() {
 }
 
 #[test_traced]
+#[should_panic(expected = "invalid notarization signature for height 1")]
 fn feeder_rejects_invalid_notarization() {
     let fixture = TestFixture::new();
     let notarized = fixture.create_notarized(1, 1);
@@ -475,13 +474,10 @@ fn feeder_rejects_invalid_notarization() {
         let mut feeder =
             CertificateFeeder::new(context.clone(), source, wrong_verifier, marshal_mailbox);
 
-        let result = feeder
+        feeder
             .handle_message(Message::Notarization(notarized))
-            .await;
-        assert!(matches!(
-            result,
-            Err(FeederError::InvalidSignature { height: 1 })
-        ));
+            .await
+            .unwrap();
     });
 }
 

@@ -13,7 +13,6 @@ use tracing::{debug, error, info, trace, warn};
 pub enum FeederError {
     Connect(String),
     Stream(String),
-    InvalidSignature { height: u64 },
 }
 
 impl fmt::Display for FeederError {
@@ -21,9 +20,6 @@ impl fmt::Display for FeederError {
         match self {
             Self::Connect(e) => write!(f, "failed to connect: {e}"),
             Self::Stream(e) => write!(f, "stream error: {e}"),
-            Self::InvalidSignature { height } => {
-                write!(f, "invalid finalization signature for height {height}")
-            }
         }
     }
 }
@@ -106,11 +102,11 @@ impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
                     "received finalization"
                 );
 
-                if !finalized.verify(&self.scheme, &Sequential) {
-                    return Err(FeederError::InvalidSignature {
-                        height: height.get(),
-                    });
-                }
+                assert!(
+                    finalized.verify(&self.scheme, &Sequential),
+                    "invalid finalization signature for height {}",
+                    height.get(),
+                );
 
                 let round = finalized.proof.round();
                 self.marshal_mailbox
@@ -134,11 +130,11 @@ impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
                     "received notarization"
                 );
 
-                if !notarized.verify(&self.scheme, &Sequential) {
-                    return Err(FeederError::InvalidSignature {
-                        height: notarized.block.height.get(),
-                    });
-                }
+                assert!(
+                    notarized.verify(&self.scheme, &Sequential),
+                    "invalid notarization signature for height {}",
+                    notarized.block.height.get(),
+                );
 
                 // This block may not actually be verified (we would only know that once certified). However, it does no damage
                 // to store it in marshal before a finalization arrives (if a block isn't directly finalized, this will prevent us from
