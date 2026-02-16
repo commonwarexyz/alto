@@ -77,6 +77,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "alto-deploy"
+version = "0.0.19"
+dependencies = [
+ "alto-chain",
+ "alto-types",
+ "clap",
+ "commonware-codec",
+ "commonware-consensus",
+ "commonware-cryptography",
+ "commonware-deployer",
+ "commonware-macros",
+ "commonware-math",
+ "commonware-utils",
+ "rand 0.8.5",
+ "serde",
+ "serde_yaml",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "alto-follower"
 version = "0.0.19"
 dependencies = [
@@ -156,28 +178,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "alto-setup"
-version = "0.0.19"
-dependencies = [
- "alto-chain",
- "alto-types",
- "clap",
- "commonware-codec",
- "commonware-consensus",
- "commonware-cryptography",
- "commonware-deployer",
- "commonware-macros",
- "commonware-math",
- "commonware-utils",
- "rand 0.8.5",
- "serde",
- "serde_yaml",
- "tracing",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
