@@ -20,20 +20,20 @@ license = "MIT OR Apache-2.0"
 alto-chain = { version = "0.0.19", path = "chain" }
 alto-client = { version = "0.0.19", path = "client" }
 alto-types = { version = "0.0.19", path = "types" }
-commonware-broadcast = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "0becd535d767eddd7d9338ec2c56a60fa8b0d708" }
-commonware-codec = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "0becd535d767eddd7d9338ec2c56a60fa8b0d708" }
-commonware-consensus = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "0becd535d767eddd7d9338ec2c56a60fa8b0d708" }
-commonware-cryptography = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "0becd535d767eddd7d9338ec2c56a60fa8b0d708" }
-commonware-deployer = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "0becd535d767eddd7d9338ec2c56a60fa8b0d708", default-features = false }
-commonware-macros = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "0becd535d767eddd7d9338ec2c56a60fa8b0d708" }
-commonware-p2p = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "0becd535d767eddd7d9338ec2c56a60fa8b0d708" }
-commonware-resolver = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "0becd535d767eddd7d9338ec2c56a60fa8b0d708" }
-commonware-runtime = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "0becd535d767eddd7d9338ec2c56a60fa8b0d708" }
-commonware-storage = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "0becd535d767eddd7d9338ec2c56a60fa8b0d708" }
-commonware-stream = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "0becd535d767eddd7d9338ec2c56a60fa8b0d708" }
-commonware-utils = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "0becd535d767eddd7d9338ec2c56a60fa8b0d708" }
-commonware-math = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "0becd535d767eddd7d9338ec2c56a60fa8b0d708" }
-commonware-parallel = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "0becd535d767eddd7d9338ec2c56a60fa8b0d708" }
+commonware-broadcast = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "a0348f8604a2fb3925ca6a9a08478223aeea4cb7" }
+commonware-codec = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "a0348f8604a2fb3925ca6a9a08478223aeea4cb7" }
+commonware-consensus = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "a0348f8604a2fb3925ca6a9a08478223aeea4cb7" }
+commonware-cryptography = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "a0348f8604a2fb3925ca6a9a08478223aeea4cb7" }
+commonware-deployer = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "a0348f8604a2fb3925ca6a9a08478223aeea4cb7", default-features = false }
+commonware-macros = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "a0348f8604a2fb3925ca6a9a08478223aeea4cb7" }
+commonware-p2p = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "a0348f8604a2fb3925ca6a9a08478223aeea4cb7" }
+commonware-resolver = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "a0348f8604a2fb3925ca6a9a08478223aeea4cb7" }
+commonware-runtime = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "a0348f8604a2fb3925ca6a9a08478223aeea4cb7" }
+commonware-storage = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "a0348f8604a2fb3925ca6a9a08478223aeea4cb7" }
+commonware-stream = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "a0348f8604a2fb3925ca6a9a08478223aeea4cb7" }
+commonware-utils = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "a0348f8604a2fb3925ca6a9a08478223aeea4cb7" }
+commonware-math = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "a0348f8604a2fb3925ca6a9a08478223aeea4cb7" }
+commonware-parallel = { git = "https://github.com/commonwarexyz/monorepo.git", rev = "a0348f8604a2fb3925ca6a9a08478223aeea4cb7" }
 thiserror = "2.0.12"
 bytes = "1.7.1"
 rand = "0.8.5"
@@ -50,7 +50,7 @@ tokio = "1.41.0"
 axum = "0.8.8"
 tower = "0.5.2"
 tower-http = "0.6.2"
-reqwest = { version = "0.12.12", default-features = false }
+reqwest = "0.12.12"
 tokio-tungstenite = "0.28.0"
 
 [profile.bench]

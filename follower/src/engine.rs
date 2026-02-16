@@ -13,7 +13,7 @@ use commonware_cryptography::{
     Signer,
 };
 use commonware_math::algebra::Random;
-use commonware_parallel::Sequential;
+use commonware_parallel::Strategy;
 use commonware_runtime::{
     buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
     Spawner, Storage,
@@ -49,9 +49,10 @@ const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30
 /// trusted source and an [Actor](crate::resolver::Actor) to backfill missing
 /// blocks.
 #[allow(clippy::type_complexity)]
-pub struct Engine<E>
+pub struct Engine<E, T>
 where
     E: BufferPooler + commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+    T: Strategy,
 {
     context: ContextCell<E>,
     buffer: buffered::Engine<E, PublicKey, Block>,
@@ -63,13 +64,14 @@ where
         immutable::Archive<E, Digest, Finalization>,
         immutable::Archive<E, Digest, Block>,
         FixedEpocher,
-        Sequential,
+        T,
     >,
 }
 
-impl<E> Engine<E>
+impl<E, T> Engine<E, T>
 where
     E: BufferPooler + commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+    T: Strategy,
 {
     /// Create a new [Engine].
     pub async fn new(
@@ -77,6 +79,7 @@ where
         scheme: Scheme,
         mailbox_size: usize,
         max_repair: NonZero<usize>,
+        strategy: T,
     ) -> (Self, marshal::Mailbox<Scheme, Block>, Height) {
         // Create the buffer
         //
@@ -173,7 +176,7 @@ where
                 block_codec_config: (),
                 max_repair,
                 page_cache,
-                strategy: Sequential,
+                strategy,
             },
         )
         .await;
@@ -274,6 +277,7 @@ mod tests {
     };
     use commonware_macros::test_traced;
     use commonware_runtime::{deterministic::Runner, Metrics, Runner as _};
+    use commonware_parallel::Sequential;
     use commonware_utils::channel::{mpsc, oneshot};
     use commonware_utils::NZUsize;
 
@@ -293,6 +297,7 @@ mod tests {
                 wrong_verifier.clone(),
                 16,
                 NZUsize!(256),
+                Sequential,
             )
             .await;
 
@@ -346,6 +351,7 @@ mod tests {
                 wrong_verifier.clone(),
                 16,
                 NZUsize!(256),
+                Sequential,
             )
             .await;
 

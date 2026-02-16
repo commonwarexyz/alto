@@ -110,8 +110,17 @@ impl<S: Strategy> ClientBuilder<S> {
     pub fn build(self) -> Client<S> {
         let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, self.identity);
 
-        // Build HTTP client (HTTP/2 is negotiated automatically via ALPN over TLS).
-        let mut http_builder = reqwest::Client::builder();
+        let url: reqwest::Url = self.uri.parse().expect("invalid URI");
+        let host = url.host_str().expect("URI must have a host").to_string();
+        let port = url.port_or_known_default().expect("URI must have a port");
+        let addr = std::net::ToSocketAddrs::to_socket_addrs(&(&*host, port))
+            .expect("failed to resolve hostname")
+            .next()
+            .expect("hostname resolved to no addresses");
+        let mut http_builder = reqwest::Client::builder()
+            .tcp_nodelay(true)
+            .timeout(std::time::Duration::from_secs(5))
+            .resolve(&host, addr);
         for cert_der in &self.tls_certs {
             let cert = reqwest::Certificate::from_der(cert_der).expect("invalid DER certificate");
             http_builder = http_builder.add_root_certificate(cert);

@@ -8,7 +8,7 @@ use commonware_cryptography::ed25519::PublicKey;
 use commonware_macros::select;
 use commonware_p2p::Recipients;
 use commonware_parallel::Sequential;
-use commonware_runtime::{tokio, Clock, IoBufs, Metrics, Runner};
+use commonware_runtime::{tokio, Clock, IoBufs, Metrics, Runner, ThreadPooler};
 use commonware_utils::{channel::mpsc, from_hex_formatted, time::SystemTimeExt};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
@@ -239,11 +239,15 @@ fn main() {
         info!("connected to certificate source");
 
         // Create engine
+        let strategy = context
+            .create_strategy(NonZero::new(config.worker_threads).expect("worker_threads must be non-zero"))
+            .unwrap();
         let (engine, mut mailbox, last_processed_height) = engine::Engine::new(
             context.with_label("engine"),
             scheme.clone(),
             config.mailbox_size,
             NonZero::new(config.max_repair).expect("max_repair must be non-zero"),
+            strategy,
         )
         .await;
 
