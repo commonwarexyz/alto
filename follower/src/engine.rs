@@ -31,8 +31,8 @@ const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
-const BUFFER_POOL_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
-const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
+const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
+const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 pub const DEFAULT_MAX_REPAIR: NonZero<usize> = NZUsize!(256);
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
@@ -81,7 +81,6 @@ where
         // The follower does not participate in p2p broadcast, so we use a dummy
         // key and noop sender/receiver. The buffer is still required by marshal.
         let dummy_key = PrivateKey::random(&mut context).public_key();
-
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
             buffered::Config {
@@ -93,8 +92,8 @@ where
             },
         );
 
-        // Create the buffer pool
-        let page_cache = CacheRef::new(BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
+        // Create the page cache
+        let page_cache = CacheRef::new(PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
 
         // Initialize finalizations by height
         let finalizations_by_height = immutable::Archive::init(
@@ -192,16 +191,14 @@ where
     /// Start the [Engine].
     pub fn start(
         mut self,
-        ingress_rx: mpsc::Receiver<handler::Message<Block>>,
-        resolver: Resolver,
+        marshal: (mpsc::Receiver<handler::Message<Block>>, Resolver),
     ) -> Handle<()> {
-        spawn_cell!(self.context, self.run(ingress_rx, resolver).await)
+        spawn_cell!(self.context, self.run(marshal).await)
     }
 
     async fn run(
         mut self,
-        ingress_rx: mpsc::Receiver<handler::Message<Block>>,
-        resolver: Resolver,
+        marshal: (mpsc::Receiver<handler::Message<Block>>, Resolver),
     ) {
         // Start the buffer
         let buffer_handle = self.buffer.start((NoopSender, NoopReceiver));
@@ -212,7 +209,7 @@ where
             .start(
                 Application::new(self.context.take()),
                 self.buffer_mailbox,
-                (ingress_rx, resolver),
+                marshal,
             );
 
         // Wait for any actor to finish

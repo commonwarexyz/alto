@@ -114,7 +114,7 @@ fn main() {
         let resolver_handle = resolver_actor.start();
 
         // Start engine
-        let engine_handle = engine.start(ingress_rx, resolver);
+        let engine_handle = engine.start((ingress_rx, resolver));
 
         // Start certificate feeder
         let feeder = Feeder::new(

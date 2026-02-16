@@ -495,7 +495,7 @@ fn marshal_rejects_invalid_finalization_from_resolver() {
         let (ingress_tx, ingress_rx) = mpsc::channel(16);
         let source = MockSource::new();
         let (_, resolver) = Actor::new(context.with_label("resolver"), source, ingress_tx.clone(), 16);
-        let _engine_handle = engine.start(ingress_rx, resolver);
+        let _engine_handle = engine.start((ingress_rx, resolver));
 
         let key = handler::Request::<Block>::Finalized {
             height: Height::new(1),
@@ -537,7 +537,7 @@ fn marshal_rejects_invalid_notarization_from_resolver() {
         let (ingress_tx, ingress_rx) = mpsc::channel(16);
         let source = MockSource::new();
         let (_, resolver) = Actor::new(context.with_label("resolver"), source, ingress_tx.clone(), 16);
-        let _engine_handle = engine.start(ingress_rx, resolver);
+        let _engine_handle = engine.start((ingress_rx, resolver));
 
         let round = Round::new(EPOCH, View::new(1));
         let key = handler::Request::<Block>::Notarized { round };
