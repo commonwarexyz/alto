@@ -7,7 +7,7 @@ use commonware_codec::Encode;
 use commonware_consensus::{marshal::ingress::handler, types::Height};
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
 use commonware_macros::select;
-use commonware_resolver::{Consumer, Resolver};
+use commonware_resolver::Consumer;
 use commonware_utils::channel::mpsc as tokio_mpsc;
 use commonware_utils::{
     futures::{AbortablePool, Aborter},
@@ -17,7 +17,7 @@ use futures::{channel::mpsc, SinkExt, StreamExt};
 use std::collections::HashMap;
 use tracing::{debug, info, trace, warn};
 
-/// Messages sent from the [HttpResolver] handle to the [HttpResolverActor].
+/// Messages sent from the [Resolver] handle to the [Actor].
 #[allow(clippy::type_complexity)]
 pub enum ResolverMessage {
     Fetch(handler::Request<Block>),
@@ -26,15 +26,15 @@ pub enum ResolverMessage {
     Retain(Box<dyn Fn(&handler::Request<Block>) -> bool + Send>),
 }
 
-/// Handle to the [HttpResolverActor] that implements [Resolver] for marshal.
+/// Handle to the [Actor] that implements [Resolver] for marshal.
 ///
 /// All operations are forwarded as messages to the actor via a channel.
 #[derive(Clone)]
-pub struct HttpResolver {
+pub struct Resolver {
     mailbox_tx: mpsc::Sender<ResolverMessage>,
 }
 
-impl Resolver for HttpResolver {
+impl commonware_resolver::Resolver for Resolver {
     type Key = handler::Request<Block>;
     type PublicKey = PublicKey;
 
@@ -94,7 +94,7 @@ impl Resolver for HttpResolver {
 ///
 /// The [Source] (client) is constructed without verification because marshal's
 /// Deliver handler verifies all signatures before accepting resolved data.
-pub struct HttpResolverActor<C: Source> {
+pub struct Actor<C: Source> {
     client: C,
     mailbox_rx: mpsc::Receiver<ResolverMessage>,
     handler: handler::Handler<Block>,
@@ -102,13 +102,13 @@ pub struct HttpResolverActor<C: Source> {
     in_flight_keys: HashMap<handler::Request<Block>, Aborter>,
 }
 
-impl<C: Source> HttpResolverActor<C> {
-    /// Create a new [HttpResolverActor] and its corresponding [HttpResolver] handle.
+impl<C: Source> Actor<C> {
+    /// Create a new [Actor] and its corresponding [Resolver] handle.
     pub fn new(
         client: C,
         ingress_tx: tokio_mpsc::Sender<handler::Message<Block>>,
         mailbox_size: usize,
-    ) -> (Self, HttpResolver) {
+    ) -> (Self, Resolver) {
         let (mailbox_tx, mailbox_rx) = mpsc::channel(mailbox_size);
 
         let actor = Self {
@@ -119,7 +119,7 @@ impl<C: Source> HttpResolverActor<C> {
             in_flight_keys: HashMap::new(),
         };
 
-        let handle = HttpResolver { mailbox_tx };
+        let handle = Resolver { mailbox_tx };
 
         (actor, handle)
     }

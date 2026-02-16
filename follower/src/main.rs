@@ -1,6 +1,6 @@
 use alto_client::ClientBuilder;
 use alto_follower::{
-    engine::Engine, feeder::CertificateFeeder, resolver::HttpResolverActor, Config, IndexQuery,
+    engine::Engine, feeder::Feeder, resolver::Actor, Config, IndexQuery,
 };
 use alto_types::{Identity, Scheme, NAMESPACE};
 use clap::{Arg, Command};
@@ -70,7 +70,7 @@ fn main() {
         // The client is created without verification because signatures are
         // checked downstream at each ingestion point:
         //
-        //   WebSocket path:  CertificateFeeder::handle_message (feeder.rs)
+        //   WebSocket path:  Feeder::handle_message             (feeder.rs)
         //   Resolver path:   marshal::Actor Deliver handler    (commonware-consensus)
         //   Tip check below: explicit finalized.verify call
         let scheme = Scheme::certificate_verifier(NAMESPACE, identity);
@@ -111,14 +111,14 @@ fn main() {
         // Create resolver
         let (ingress_tx, ingress_rx) = mpsc::channel(config.mailbox_size);
         let (resolver_actor, resolver) =
-            HttpResolverActor::new(client.clone(), ingress_tx, config.mailbox_size);
+            Actor::new(client.clone(), ingress_tx, config.mailbox_size);
         let resolver_handle = context.clone().spawn(|_| resolver_actor.run());
 
         // Start engine
         let (engine_handle, buffer_handle) = engine.start(ingress_rx, resolver);
 
         // Start certificate feeder
-        let feeder = CertificateFeeder::new(
+        let feeder = Feeder::new(
             context,
             client,
             scheme,

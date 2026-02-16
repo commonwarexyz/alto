@@ -1,4 +1,4 @@
-use crate::{resolver::HttpResolver, throughput::Throughput, NoopReceiver, NoopSender};
+use crate::{resolver::Resolver, throughput::Throughput, NoopReceiver, NoopSender};
 use alto_types::{Block, Finalization, Scheme, EPOCH_LENGTH};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
@@ -42,9 +42,9 @@ const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30
 /// The engine that drives the follower's [marshal::Actor].
 ///
 /// Unlike the validator's engine, this does not run consensus. Instead, it
-/// relies on a [CertificateFeeder](crate::feeder::CertificateFeeder) to feed
-/// certificates from a trusted source and an [HttpResolverActor](crate::resolver::HttpResolverActor)
-/// to backfill missing blocks.
+/// relies on a [Feeder](crate::feeder::Feeder) to feed certificates from a
+/// trusted source and an [Actor](crate::resolver::Actor) to backfill missing
+/// blocks.
 #[allow(clippy::type_complexity)]
 pub struct Engine<E>
 where
@@ -199,7 +199,7 @@ where
     pub fn start(
         self,
         ingress_rx: mpsc::Receiver<handler::Message<Block>>,
-        resolver: HttpResolver,
+        resolver: Resolver,
     ) -> (Handle<()>, Handle<()>) {
         let context = self.context.clone();
 

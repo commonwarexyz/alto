@@ -30,7 +30,7 @@ pub struct Config {
 }
 
 /// Abstraction over the certificate source (HTTP client) used by the
-/// [feeder::CertificateFeeder] and [resolver::HttpResolverActor].
+/// [feeder::Feeder] and [resolver::Actor].
 pub trait Source: Clone + Send + Sync + 'static {
     type Error: std::error::Error + Send + Sync + 'static;
 

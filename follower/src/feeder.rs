@@ -35,15 +35,15 @@ impl std::error::Error for FeederError {}
 /// This is the sole signature verification point for the WebSocket streaming
 /// path. The [Source] (client) is constructed without verification to avoid
 /// redundant checks.
-pub struct CertificateFeeder<E: Clock, C: Source> {
+pub struct Feeder<E: Clock, C: Source> {
     context: ContextCell<E>,
     client: C,
     scheme: Scheme,
     marshal_mailbox: marshal::Mailbox<Scheme, Block>,
 }
 
-impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
-    /// Create a new [CertificateFeeder].
+impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
+    /// Create a new [Feeder].
     pub fn new(
         context: E,
         client: C,
@@ -58,7 +58,7 @@ impl<E: Clock + Spawner, C: Source> CertificateFeeder<E, C> {
         }
     }
 
-    /// Start the [CertificateFeeder] in a background task.
+    /// Start the [Feeder] in a background task.
     pub fn start(mut self) -> Handle<()> {
         spawn_cell!(self.context, self.run().await)
     }
