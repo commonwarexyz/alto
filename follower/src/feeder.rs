@@ -28,7 +28,7 @@ impl std::error::Error for FeederError {}
 
 /// Feeds certificates from a [Source] stream into [marshal::Actor] via its [marshal::Mailbox].
 ///
-/// Listens for finalization and notarization messages, verifies their threshold
+/// Listens for seed, notarization, and finalization messages, verifies their threshold
 /// signatures, caches the associated blocks, and reports the proofs to marshal.
 /// Automatically reconnects on stream disconnection.
 ///
@@ -92,29 +92,8 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
 
     pub(crate) async fn handle_message(&mut self, message: Message) -> Result<(), FeederError> {
         match message {
-            Message::Finalization(finalized) => {
-                let height = finalized.block.height;
-                let view = finalized.proof.view();
-
-                assert!(
-                    finalized.verify(&self.scheme, &Sequential),
-                    "invalid finalization signature for height {}",
-                    height.get(),
-                );
-
-                let round = finalized.proof.round();
-                self.marshal_mailbox
-                    .verified(round, finalized.block.clone())
-                    .await;
-                self.marshal_mailbox
-                    .report(Activity::Finalization(finalized.proof.clone()))
-                    .await;
-
-                debug!(
-                    height = height.get(),
-                    view = view.get(),
-                    "received finalization"
-                );
+            Message::Seed(seed) => {
+                trace!(view = seed.view().get(), "received seed");
             }
             Message::Notarization(notarized) => {
                 let round = notarized.proof.round();
@@ -144,8 +123,29 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
                     "received notarization"
                 );
             }
-            Message::Seed(seed) => {
-                trace!(view = seed.view().get(), "received seed");
+            Message::Finalization(finalized) => {
+                let height = finalized.block.height;
+                let view = finalized.proof.view();
+
+                assert!(
+                    finalized.verify(&self.scheme, &Sequential),
+                    "invalid finalization signature for height {}",
+                    height.get(),
+                );
+
+                let round = finalized.proof.round();
+                self.marshal_mailbox
+                    .verified(round, finalized.block.clone())
+                    .await;
+                self.marshal_mailbox
+                    .report(Activity::Finalization(finalized.proof.clone()))
+                    .await;
+
+                debug!(
+                    height = height.get(),
+                    view = view.get(),
+                    "received finalization"
+                );
             }
         }
         Ok(())
