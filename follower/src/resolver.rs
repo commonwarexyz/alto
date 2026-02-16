@@ -95,7 +95,7 @@ impl commonware_resolver::Resolver for Resolver {
 ///
 /// The [Source] (client) is constructed without verification because marshal's
 /// Deliver handler verifies all signatures before accepting resolved data.
-/// Rejections are treated as fatal and crash the follower (fail-fast).
+/// Rejections are logged as warnings and the fetch is abandoned.
 pub struct Actor<E: Spawner, C: Source> {
     context: ContextCell<E>,
     client: C,
@@ -235,11 +235,10 @@ impl<E: Spawner, C: Source> Actor<E, C> {
                 let finalization = finalized.proof.clone();
                 let block = finalized.block.clone();
                 let value = Bytes::from((finalization, block).encode().to_vec());
-                assert!(
-                    handler.deliver(key, value).await,
-                    "marshal rejected finalized block for height {}",
-                    height.get()
-                );
+                if !handler.deliver(key, value).await {
+                    warn!(height = height.get(), "marshal rejected finalized block");
+                    return;
+                }
                 debug!(height = height.get(), "fetched finalized block by height");
             }
             Ok(_) => {
@@ -268,11 +267,10 @@ impl<E: Spawner, C: Source> Actor<E, C> {
                 let notarization = notarized.proof.clone();
                 let block = notarized.block.clone();
                 let value = Bytes::from((notarization, block).encode().to_vec());
-                assert!(
-                    handler.deliver(key, value).await,
-                    "marshal rejected notarized block for view {}",
-                    view
-                );
+                if !handler.deliver(key, value).await {
+                    warn!(view, "marshal rejected notarized block");
+                    return;
+                }
                 debug!(view, "fetched notarized block by round");
             }
             Err(e) => {
@@ -493,11 +491,10 @@ mod tests {
         });
     }
 
-    /// Verifies that the follower crashes if marshal rejects a finalized
-    /// delivery from resolver backfill.
+    /// Verifies that marshal rejecting a finalized delivery logs a warning
+    /// instead of crashing.
     #[test_traced]
-    #[should_panic(expected = "marshal rejected finalized block for height 1")]
-    fn panics_when_marshal_rejects_finalized_delivery() {
+    fn warns_when_marshal_rejects_finalized_delivery() {
         let fixture = TestFixture::new();
         let finalized = fixture.create_finalized(1, 1);
         let height = Height::new(1);
@@ -526,16 +523,14 @@ mod tests {
                 _ => panic!("expected Deliver message"),
             }
 
-            // Yield to allow the panic in resolver task to surface.
             context.sleep(Duration::from_millis(50)).await;
         });
     }
 
-    /// Verifies that the follower crashes if marshal rejects a notarized
-    /// delivery from resolver backfill.
+    /// Verifies that marshal rejecting a notarized delivery logs a warning
+    /// instead of crashing.
     #[test_traced]
-    #[should_panic(expected = "marshal rejected notarized block for view 3")]
-    fn panics_when_marshal_rejects_notarized_delivery() {
+    fn warns_when_marshal_rejects_notarized_delivery() {
         let fixture = TestFixture::new();
         let notarized = fixture.create_notarized(3, 3);
         let round = Round::new(alto_types::EPOCH, View::new(3));
@@ -560,7 +555,6 @@ mod tests {
                 _ => panic!("expected Deliver message"),
             }
 
-            // Yield to allow the panic in resolver task to surface.
             context.sleep(Duration::from_millis(50)).await;
         });
     }
