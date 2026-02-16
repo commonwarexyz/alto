@@ -20,7 +20,7 @@ use tracing::{debug, trace, warn};
 
 /// Messages sent from the [Resolver] handle to the [Actor].
 #[allow(clippy::type_complexity)]
-pub enum ResolverMessage {
+pub enum Message {
     Fetch(handler::Request<Block>),
     Cancel(handler::Request<Block>),
     Clear,
@@ -32,7 +32,7 @@ pub enum ResolverMessage {
 /// All operations are forwarded as messages to the actor via a channel.
 #[derive(Clone)]
 pub struct Resolver {
-    mailbox_tx: mpsc::Sender<ResolverMessage>,
+    mailbox_tx: mpsc::Sender<Message>,
 }
 
 impl commonware_resolver::Resolver for Resolver {
@@ -40,7 +40,7 @@ impl commonware_resolver::Resolver for Resolver {
     type PublicKey = PublicKey;
 
     async fn fetch(&mut self, key: Self::Key) {
-        let msg = ResolverMessage::Fetch(key);
+        let msg = Message::Fetch(key);
         if let Err(e) = self.mailbox_tx.send(msg).await {
             warn!(error = ?e, "failed to send fetch request to resolver actor");
         }
@@ -66,21 +66,21 @@ impl commonware_resolver::Resolver for Resolver {
     }
 
     async fn cancel(&mut self, key: Self::Key) {
-        let msg = ResolverMessage::Cancel(key);
+        let msg = Message::Cancel(key);
         if let Err(e) = self.mailbox_tx.send(msg).await {
             warn!(error = ?e, "failed to send cancel request to resolver actor");
         }
     }
 
     async fn clear(&mut self) {
-        let msg = ResolverMessage::Clear;
+        let msg = Message::Clear;
         if let Err(e) = self.mailbox_tx.send(msg).await {
             warn!(error = ?e, "failed to send clear request to resolver actor");
         }
     }
 
     async fn retain(&mut self, f: impl Fn(&Self::Key) -> bool + Send + 'static) {
-        let msg = ResolverMessage::Retain(Box::new(f));
+        let msg = Message::Retain(Box::new(f));
         if let Err(e) = self.mailbox_tx.send(msg).await {
             warn!(error = ?e, "failed to send retain request to resolver actor");
         }
@@ -98,7 +98,7 @@ impl commonware_resolver::Resolver for Resolver {
 pub struct Actor<E: Spawner, C: Source> {
     context: ContextCell<E>,
     client: C,
-    mailbox_rx: mpsc::Receiver<ResolverMessage>,
+    mailbox_rx: mpsc::Receiver<Message>,
     handler: handler::Handler<Block>,
     in_flight: AbortablePool<handler::Request<Block>>,
     in_flight_keys: HashMap<handler::Request<Block>, Aborter>,
@@ -143,7 +143,7 @@ impl<E: Spawner, C: Source> Actor<E, C> {
             },
             Some(msg) = self.mailbox_rx.next() else break => {
                 match msg {
-                    ResolverMessage::Fetch(key) => {
+                    Message::Fetch(key) => {
                         if self.in_flight_keys.contains_key(&key) {
                             trace!(?key, "skipping duplicate fetch request");
                             continue;
@@ -156,17 +156,17 @@ impl<E: Spawner, C: Source> Actor<E, C> {
                         let aborter = self.in_flight.push(future);
                         self.in_flight_keys.insert(key, aborter);
                     }
-                    ResolverMessage::Cancel(key) => {
+                    Message::Cancel(key) => {
                         if self.in_flight_keys.remove(&key).is_some() {
                             debug!(?key, "cancelled in-flight request");
                         }
                     }
-                    ResolverMessage::Clear => {
+                    Message::Clear => {
                         let count = self.in_flight_keys.len();
                         self.in_flight_keys.clear();
                         debug!(count, "cleared all in-flight requests");
                     }
-                    ResolverMessage::Retain(f) => {
+                    Message::Retain(f) => {
                         let before = self.in_flight_keys.len();
                         self.in_flight_keys.retain(|key, _| f(key));
                         let removed = before - self.in_flight_keys.len();
