@@ -6,7 +6,7 @@ license.workspace = true
 description = "Run a validator node for alto."
 
 [dependencies]
-alto-chain = { version = "0.0.19", path = "../chain" }
+alto-chain = { workspace = true }
 alto-client = { workspace = true }
 alto-types = { workspace = true }
 commonware-codec = { workspace = true }

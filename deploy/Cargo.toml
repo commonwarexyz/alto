@@ -6,7 +6,7 @@ license.workspace = true
 description = "Deploy an instance of alto."
 
 [dependencies]
-alto-chain = { version = "0.0.19", path = "../chain" }
+alto-chain = { workspace = true }
 alto-types = { workspace = true }
 clap = { workspace = true }
 commonware-codec = { workspace = true }
