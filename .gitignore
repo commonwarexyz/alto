@@ -1,6 +1,6 @@
 *.swp
 *.DS_Store
-/target
+target
 *.vscode
 /assets
 /test
