@@ -39,6 +39,7 @@ pub struct Config {
     pub identity: String,
     pub directory: String,
     pub worker_threads: usize,
+    pub signature_threads: usize,
     pub log_level: String,
     pub metrics_port: u16,
     pub mailbox_size: usize,
@@ -246,7 +247,7 @@ fn main() {
 
         // Create engine
         let strategy = context
-            .create_strategy(NonZero::new(config.worker_threads).expect("worker_threads must be non-zero"))
+            .create_strategy(NonZero::new(config.signature_threads).expect("signature_threads must be non-zero"))
             .unwrap();
         let (engine, mut mailbox, last_processed_height) = engine::Engine::new(
             context.with_label("engine"),

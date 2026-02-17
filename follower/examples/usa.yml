@@ -16,7 +16,10 @@ identity: "87a81a6cb44377736201073f10e98934d002374a2e2d77968e00b315e60eda60878b1
 directory: "/tmp/alto-follower-usa"
 
 # Number of worker threads
-worker_threads: 4
+worker_threads: 2
+
+# Number of threads for signature verification
+signature_threads: 4
 
 # Log level (trace, debug, info, warn, error)
 log_level: "info"
