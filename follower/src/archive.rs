@@ -156,6 +156,7 @@ where
 
 /// Wrapper over [immutable::Archive] and [prunable::Archive] for finalization
 /// certificates. Implements [marshal::store::Certificates].
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Certificates<E: BufferPooler + Storage + Metrics + Clock> {
     Immutable(immutable::Archive<E, Digest, Finalization>),
     Prunable(prunable::Archive<FourCap, E, Digest, Finalization>),
@@ -209,6 +210,7 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates f
 
 /// Wrapper over [immutable::Archive] and [prunable::Archive] for finalized
 /// blocks. Implements [marshal::store::Blocks].
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Blocks<E: BufferPooler + Storage + Metrics + Clock> {
     Immutable(immutable::Archive<E, Digest, Block>),
     Prunable(prunable::Archive<FourCap, E, Digest, Block>),
