@@ -221,9 +221,10 @@ impl<E: Clock> Reporter for Application<E> {
                 // finalized block (e.g. update state, index transactions,
                 // serve queries, etc.).
                 let bps = self.throughput.record(self.context.current());
-                if let Some(depth) = self.pruning_depth.filter(|_| {
-                    block.height.get() % FINALIZED_ITEMS_PER_SECTION.get() == 0
-                }) {
+                if let Some(depth) = self
+                    .pruning_depth
+                    .filter(|_| block.height.get() % FINALIZED_ITEMS_PER_SECTION.get() == 0)
+                {
                     let prune_to = block.height.get().saturating_sub(depth);
                     if prune_to > 0 {
                         self.mailbox.prune(Height::new(prune_to)).await;
