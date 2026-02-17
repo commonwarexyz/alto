@@ -1,6 +1,6 @@
 use crate::{
     archive::{
-        self, BlockArchive, CertArchive, PRUNABLE_ITEMS_PER_SECTION, REPLAY_BUFFER, WRITE_BUFFER,
+        self, Blocks, Certificates, PRUNABLE_ITEMS_PER_SECTION, REPLAY_BUFFER, WRITE_BUFFER,
     },
     resolver::Resolver,
     throughput::Throughput,
@@ -61,8 +61,8 @@ where
         E,
         Block,
         ConstantProvider<Scheme, commonware_consensus::types::Epoch>,
-        CertArchive<E>,
-        BlockArchive<E>,
+        Certificates<E>,
+        Blocks<E>,
         FixedEpocher,
         T,
     >,

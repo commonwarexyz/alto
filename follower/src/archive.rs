@@ -1,3 +1,21 @@
+//! Archive storage for the follower.
+//!
+//! The follower stores two collections of finalized data:
+//!
+//!   - Certificates (finalizations keyed by height)
+//!   - Blocks (finalized blocks keyed by digest)
+//!
+//! When pruning is enabled (`pruning_depth` is `Some`), both collections use
+//! [prunable::Archive] so old sections can be reclaimed. When pruning is
+//! disabled, [immutable::Archive] is used instead (optimized for append-only
+//! workloads with freezer-backed storage).
+//!
+//! [Certificates] and [Blocks] are enum wrappers that implement the
+//! [marshal::store::Certificates] and [marshal::store::Blocks] traits,
+//! respectively, by delegating to whichever archive variant was initialized.
+//! UFCS is required because both the [Archive] trait and the marshal store
+//! traits share method names (`put`, `sync`, `get`, `prune`).
+
 use alto_types::{Block, Finalization, Scheme};
 use commonware_consensus::{marshal, types::Height};
 use commonware_cryptography::{certificate::Scheme as CertScheme, sha256::Digest, Committable};
@@ -9,24 +27,32 @@ use commonware_storage::{
 use commonware_utils::{NZUsize, NZU16, NZU64};
 use std::num::NonZero;
 
+// Shared constants (also used by marshal config in engine.rs)
 pub(crate) const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
 pub(crate) const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 pub(crate) const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
 
+// Finalized archive constants (shared by both prunable and immutable paths)
 const FINALIZED_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
 const FINALIZED_COMPRESSION: Option<u8> = Some(3);
 const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
+
+// Immutable-only constants (freezer table sizing)
 const FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(14); // 1MB
 const FREEZER_TABLE_RESIZE_FREQUENCY: u8 = 4;
 const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // ~3MB
 const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1_073_741_824; // 1GB
 
+/// Initialize the certificate and block archives based on the pruning config.
+///
+/// Returns the two archive wrappers plus the shared page cache (needed by
+/// marshal for its own prunable internal stores).
 pub(crate) async fn init<E>(
     context: &mut E,
     scheme: &Scheme,
     pruning_depth: Option<u64>,
-) -> (CertArchive<E>, BlockArchive<E>, CacheRef)
+) -> (Certificates<E>, Blocks<E>, CacheRef)
 where
     E: BufferPooler + Storage + Metrics + Clock,
 {
@@ -68,8 +94,8 @@ where
         .await
         .expect("failed to initialize finalized blocks archive");
         (
-            CertArchive::Prunable(fbh),
-            BlockArchive::Prunable(fb),
+            Certificates::Prunable(fbh),
+            Blocks::Prunable(fb),
             page_cache,
         )
     } else {
@@ -123,19 +149,21 @@ where
         .await
         .expect("failed to initialize finalized blocks archive");
         (
-            CertArchive::Immutable(fbh),
-            BlockArchive::Immutable(fb),
+            Certificates::Immutable(fbh),
+            Blocks::Immutable(fb),
             page_cache,
         )
     }
 }
 
-pub(crate) enum CertArchive<E: BufferPooler + Storage + Metrics + Clock> {
+/// Wrapper over [immutable::Archive] and [prunable::Archive] for finalization
+/// certificates. Implements [marshal::store::Certificates].
+pub(crate) enum Certificates<E: BufferPooler + Storage + Metrics + Clock> {
     Immutable(immutable::Archive<E, Digest, Finalization>),
     Prunable(prunable::Archive<FourCap, E, Digest, Finalization>),
 }
 
-impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates for CertArchive<E> {
+impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates for Certificates<E> {
     type Commitment = Digest;
     type Scheme = Scheme;
     type Error = archive::Error;
@@ -181,12 +209,14 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates f
     }
 }
 
-pub(crate) enum BlockArchive<E: BufferPooler + Storage + Metrics + Clock> {
+/// Wrapper over [immutable::Archive] and [prunable::Archive] for finalized
+/// blocks. Implements [marshal::store::Blocks].
+pub(crate) enum Blocks<E: BufferPooler + Storage + Metrics + Clock> {
     Immutable(immutable::Archive<E, Digest, Block>),
     Prunable(prunable::Archive<FourCap, E, Digest, Block>),
 }
 
-impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Blocks for BlockArchive<E> {
+impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Blocks for Blocks<E> {
     type Block = Block;
     type Error = archive::Error;
 
