@@ -51,7 +51,14 @@ const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30
 #[allow(clippy::type_complexity)]
 pub struct Engine<E, T>
 where
-    E: BufferPooler + commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+    E: BufferPooler
+        + commonware_runtime::Clock
+        + GClock
+        + Rng
+        + CryptoRng
+        + Spawner
+        + Storage
+        + Metrics,
     T: Strategy,
 {
     context: ContextCell<E>,
@@ -70,7 +77,14 @@ where
 
 impl<E, T> Engine<E, T>
 where
-    E: BufferPooler + commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+    E: BufferPooler
+        + commonware_runtime::Clock
+        + GClock
+        + Rng
+        + CryptoRng
+        + Spawner
+        + Storage
+        + Metrics,
     T: Strategy,
 {
     /// Create a new [Engine].
@@ -276,8 +290,8 @@ mod tests {
         types::{Height, Round, View},
     };
     use commonware_macros::test_traced;
-    use commonware_runtime::{deterministic::Runner, Metrics, Runner as _};
     use commonware_parallel::Sequential;
+    use commonware_runtime::{deterministic::Runner, Metrics, Runner as _};
     use commonware_utils::channel::{mpsc, oneshot};
     use commonware_utils::NZUsize;
 
