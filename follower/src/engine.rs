@@ -1,6 +1,7 @@
 use crate::{
     archive::{
-        self, Blocks, Certificates, PRUNABLE_ITEMS_PER_SECTION, REPLAY_BUFFER, WRITE_BUFFER,
+        self, Blocks, Certificates, FINALIZED_ITEMS_PER_SECTION, PRUNABLE_ITEMS_PER_SECTION,
+        REPLAY_BUFFER, WRITE_BUFFER,
     },
     resolver::Resolver,
     throughput::Throughput,
@@ -32,7 +33,6 @@ use tracing::{error, info, warn};
 
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
-const PRUNE_INTERVAL: u64 = 262_144;
 const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The engine that drives the follower's [marshal::Actor].
@@ -219,12 +219,12 @@ impl<E: Clock> Reporter for Application<E> {
                 // finalized block (e.g. update state, index transactions,
                 // serve queries, etc.).
                 let bps = self.throughput.record(self.context.current());
-                if let Some(depth) = self.pruning_depth {
-                    if block.height.get() % PRUNE_INTERVAL == 0 {
-                        let prune_to = block.height.get().saturating_sub(depth);
-                        if prune_to > 0 {
-                            self.mailbox.prune(Height::new(prune_to)).await;
-                        }
+                if let Some(depth) = self.pruning_depth.filter(|_| {
+                    block.height.get() % FINALIZED_ITEMS_PER_SECTION.get() == 0
+                }) {
+                    let prune_to = block.height.get().saturating_sub(depth);
+                    if prune_to > 0 {
+                        self.mailbox.prune(Height::new(prune_to)).await;
                     }
                 }
                 info!(

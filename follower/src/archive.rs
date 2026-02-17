@@ -13,8 +13,6 @@
 //! [Certificates] and [Blocks] are enum wrappers that implement the
 //! [marshal::store::Certificates] and [marshal::store::Blocks] traits,
 //! respectively, by delegating to whichever archive variant was initialized.
-//! UFCS is required because both the [Archive] trait and the marshal store
-//! traits share method names (`put`, `sync`, `get`, `prune`).
 
 use alto_types::{Block, Finalization, Scheme};
 use commonware_consensus::{marshal, types::Height};
@@ -33,7 +31,7 @@ pub(crate) const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8
 pub(crate) const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
 
 // Finalized archive constants (shared by both prunable and immutable paths)
-const FINALIZED_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
+pub(crate) const FINALIZED_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
 const FINALIZED_COMPRESSION: Option<u8> = Some(3);
 const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
