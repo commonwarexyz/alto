@@ -202,7 +202,11 @@ where
 
         // Start marshal
         let marshal_handle = self.marshal.start(
-            Application::new(self.context.take(), self.marshal_mailbox, self.pruning_depth),
+            Application::new(
+                self.context.take(),
+                self.marshal_mailbox,
+                self.pruning_depth,
+            ),
             self.buffer_mailbox,
             marshal,
         );

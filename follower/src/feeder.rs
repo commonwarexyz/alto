@@ -193,8 +193,7 @@ mod tests {
             .await;
 
             let source = MockSource::new();
-            let mut feeder =
-                Feeder::new(context.with_label("feeder"), source, verifier, mailbox);
+            let mut feeder = Feeder::new(context.with_label("feeder"), source, verifier, mailbox);
 
             let result = feeder
                 .handle_message(Message::Finalization(finalized))
@@ -261,8 +260,7 @@ mod tests {
             .await;
 
             let source = MockSource::new();
-            let mut feeder =
-                Feeder::new(context.with_label("feeder"), source, verifier, mailbox);
+            let mut feeder = Feeder::new(context.with_label("feeder"), source, verifier, mailbox);
 
             let result = feeder
                 .handle_message(Message::Notarization(notarized))
