@@ -15,12 +15,9 @@ use commonware_runtime::{
 };
 use commonware_storage::{queue, queue::shared};
 use commonware_utils::{
+    channel::{mpsc, oneshot},
     futures::{OptionFuture, Pool},
     NZUsize, NZU16, NZU64,
-};
-use futures::{
-    channel::{mpsc, oneshot},
-    SinkExt, StreamExt,
 };
 use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
 use std::collections::HashSet;
@@ -311,7 +308,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
             on_stopped => {
                 info!("upload queue actor shutting down");
             },
-            msg = self.receiver.next() => {
+            msg = self.receiver.recv() => {
                 let Some(Message { item, ack }) = msg else {
                     debug!("mailbox closed, stopping actor");
                     break;

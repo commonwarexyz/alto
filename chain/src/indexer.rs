@@ -103,9 +103,10 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
 
 /// A [Reporter] implementation that uploads consensus activity to an indexer.
 ///
-/// Uses a disk-backed upload queue for reliable delivery. Uploads are persisted
-/// to disk before returning, and a background worker retries until the indexer
-/// acknowledges receipt.
+/// Uses a disk-backed upload queue for reliable delivery. Seed uploads are
+/// durably enqueued before `report` returns. Notarization/finalization uploads
+/// are enqueued by a background task once the corresponding block is available,
+/// and retries continue until the indexer acknowledges receipt.
 #[derive(Clone)]
 pub struct Pusher<E: Spawner + Clock + Metrics> {
     context: E,
