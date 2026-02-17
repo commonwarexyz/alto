@@ -34,4 +34,4 @@ tip: false
 
 # Number of finalized blocks to retain before pruning
 # Omit or set to null to keep all blocks (no pruning)
-pruning_depth: 100000
+pruning_depth: null

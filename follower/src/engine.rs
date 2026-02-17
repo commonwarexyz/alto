@@ -1,5 +1,12 @@
-use crate::{resolver::Resolver, throughput::Throughput, NoopReceiver, NoopSender};
-use alto_types::{Block, Finalization, Scheme, EPOCH_LENGTH};
+use crate::{
+    archive::{
+        self, BlockArchive, CertArchive, PRUNABLE_ITEMS_PER_SECTION, REPLAY_BUFFER, WRITE_BUFFER,
+    },
+    resolver::Resolver,
+    throughput::Throughput,
+    NoopReceiver, NoopSender,
+};
+use alto_types::{Block, Scheme, EPOCH_LENGTH};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
     marshal::{self, ingress::handler, Update},
@@ -7,32 +14,22 @@ use commonware_consensus::{
     Reporter,
 };
 use commonware_cryptography::{
-    certificate::{ConstantProvider, Scheme as CertScheme},
+    certificate::ConstantProvider,
     ed25519::{PrivateKey, PublicKey},
-    sha256::Digest,
     Signer,
 };
 use commonware_math::algebra::Random;
 use commonware_parallel::Strategy;
 use commonware_runtime::{
-    buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
-    Spawner, Storage,
+    spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
 };
-use commonware_storage::{archive::prunable, translator::FourCap};
-use commonware_utils::{channel::mpsc, Acknowledgement, NZUsize, NZU16, NZU64};
+use commonware_utils::{channel::mpsc, Acknowledgement};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use std::num::NonZero;
 use tracing::{error, info, warn};
 
-const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
-const FINALIZED_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
-const FINALIZED_COMPRESSION: Option<u8> = Some(3);
-const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
-const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
-const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
-const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
 const PRUNE_INTERVAL: u64 = 262_144;
@@ -64,8 +61,8 @@ where
         E,
         Block,
         ConstantProvider<Scheme, commonware_consensus::types::Epoch>,
-        prunable::Archive<FourCap, E, Digest, Finalization>,
-        prunable::Archive<FourCap, E, Digest, Block>,
+        CertArchive<E>,
+        BlockArchive<E>,
         FixedEpocher,
         T,
     >,
@@ -110,46 +107,8 @@ where
             },
         );
 
-        // Create the page cache
-        let page_cache = CacheRef::from_pooler(&context, PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
-
-        // Initialize finalizations by height
-        let finalizations_by_height = prunable::Archive::init(
-            context.with_label("finalizations_by_height"),
-            prunable::Config {
-                translator: FourCap,
-                key_partition: "follower-finalizations-by-height-key".to_string(),
-                key_page_cache: page_cache.clone(),
-                value_partition: "follower-finalizations-by-height-value".to_string(),
-                compression: FINALIZED_COMPRESSION,
-                codec_config: scheme.certificate_codec_config(),
-                items_per_section: FINALIZED_ITEMS_PER_SECTION,
-                key_write_buffer: WRITE_BUFFER,
-                value_write_buffer: WRITE_BUFFER,
-                replay_buffer: REPLAY_BUFFER,
-            },
-        )
-        .await
-        .expect("failed to initialize finalizations by height archive");
-
-        // Initialize finalized blocks
-        let finalized_blocks = prunable::Archive::init(
-            context.with_label("finalized_blocks"),
-            prunable::Config {
-                translator: FourCap,
-                key_partition: "follower-finalized-blocks-key".to_string(),
-                key_page_cache: page_cache.clone(),
-                value_partition: "follower-finalized-blocks-value".to_string(),
-                compression: None,
-                codec_config: (),
-                items_per_section: FINALIZED_ITEMS_PER_SECTION,
-                key_write_buffer: WRITE_BUFFER,
-                value_write_buffer: WRITE_BUFFER,
-                replay_buffer: REPLAY_BUFFER,
-            },
-        )
-        .await
-        .expect("failed to initialize finalized blocks archive");
+        let (finalizations_by_height, finalized_blocks, page_cache) =
+            archive::init(&mut context, &scheme, pruning_depth).await;
 
         // Create marshal
         let provider = ConstantProvider::new(scheme);
