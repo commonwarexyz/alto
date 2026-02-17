@@ -39,11 +39,13 @@ _To deploy your own instance of `alto`, read the guide in [deploy](../deploy/REA
 | `identity` | Hex-encoded BLS12-381 threshold public key used to verify consensus signatures |
 | `directory` | Path to store finalized blocks and state |
 | `worker_threads` | Number of runtime worker threads |
+| `signature_threads` | Number of threads for signature verification |
 | `log_level` | Log verbosity (`trace`, `debug`, `info`, `warn`, `error`) |
 | `metrics_port` | Port for the Prometheus metrics endpoint |
 | `mailbox_size` | Capacity of internal actor mailboxes |
 | `max_repair` | Maximum concurrent block fetches during backfill |
 | `tip` | Start from the tip of the finalized chain instead of backfilling from genesis |
+| `pruning_depth` | Number of finalized blocks to retain before pruning (null to keep all) |
 
 _See [examples/](./examples/) for sample configuration files._
 
