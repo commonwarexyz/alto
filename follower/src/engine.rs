@@ -35,7 +35,7 @@ const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
-const PRUNE_INTERVAL: u64 = 10_000;
+const PRUNE_INTERVAL: u64 = 262_144;
 const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The engine that drives the follower's [marshal::Actor].

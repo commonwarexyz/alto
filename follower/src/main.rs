@@ -214,7 +214,11 @@ fn main() {
             )),
             None,
         );
-        info!(source = %config.source, "starting follower node");
+        info!(
+            source = %config.source,
+            pruning_depth = config.pruning_depth,
+            "starting follower node"
+        );
 
         // Create scheme and client
         //
