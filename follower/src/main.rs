@@ -43,6 +43,7 @@ pub struct Config {
     pub mailbox_size: usize,
     pub max_repair: usize,
     pub tip: bool,
+    pub pruning_depth: Option<u64>,
 }
 
 /// Abstraction over the certificate source (HTTP client) used by the
@@ -248,6 +249,7 @@ fn main() {
             config.mailbox_size,
             NonZero::new(config.max_repair).expect("max_repair must be non-zero"),
             strategy,
+            config.pruning_depth,
         )
         .await;
 

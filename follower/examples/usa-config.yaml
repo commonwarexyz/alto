@@ -33,3 +33,7 @@ max_repair: 512
 # Start from the tip of the finalized chain on first run
 # Set to false to start from genesis (requires backfilling all historical blocks)
 tip: true
+
+# Number of finalized blocks to retain before pruning
+# Omit or set to null to keep all blocks (no pruning)
+pruning_depth: 100000

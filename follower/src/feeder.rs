@@ -188,11 +188,13 @@ mod tests {
                 16,
                 NZUsize!(256),
                 Sequential,
+                None,
             )
             .await;
 
             let source = MockSource::new();
-            let mut feeder = Feeder::new(context.with_label("feeder"), source, verifier, mailbox);
+            let mut feeder =
+                Feeder::new(context.with_label("feeder"), source, verifier, mailbox);
 
             let result = feeder
                 .handle_message(Message::Finalization(finalized))
@@ -219,6 +221,7 @@ mod tests {
                 16,
                 NZUsize!(256),
                 Sequential,
+                None,
             )
             .await;
 
@@ -253,11 +256,13 @@ mod tests {
                 16,
                 NZUsize!(256),
                 Sequential,
+                None,
             )
             .await;
 
             let source = MockSource::new();
-            let mut feeder = Feeder::new(context.with_label("feeder"), source, verifier, mailbox);
+            let mut feeder =
+                Feeder::new(context.with_label("feeder"), source, verifier, mailbox);
 
             let result = feeder
                 .handle_message(Message::Notarization(notarized))
@@ -282,6 +287,7 @@ mod tests {
                 16,
                 NZUsize!(256),
                 Sequential,
+                None,
             )
             .await;
 

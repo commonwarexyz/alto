@@ -18,7 +18,7 @@ use commonware_runtime::{
     buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
     Spawner, Storage,
 };
-use commonware_storage::archive::immutable;
+use commonware_storage::{archive::prunable, translator::FourCap};
 use commonware_utils::{channel::mpsc, Acknowledgement, NZUsize, NZU16, NZU64};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
@@ -27,19 +27,15 @@ use std::num::NonZero;
 use tracing::{error, info, warn};
 
 const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
-const IMMUTABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
-const FREEZER_TABLE_RESIZE_FREQUENCY: u8 = 4;
-const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // 3MB
-const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
-const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
+const FINALIZED_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
+const FINALIZED_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
 const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
-const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
-const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
+const PRUNE_INTERVAL: u64 = 10_000;
 const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The engine that drives the follower's [marshal::Actor].
@@ -68,11 +64,13 @@ where
         E,
         Block,
         ConstantProvider<Scheme, commonware_consensus::types::Epoch>,
-        immutable::Archive<E, Digest, Finalization>,
-        immutable::Archive<E, Digest, Block>,
+        prunable::Archive<FourCap, E, Digest, Finalization>,
+        prunable::Archive<FourCap, E, Digest, Block>,
         FixedEpocher,
         T,
     >,
+    pruning_depth: Option<u64>,
+    marshal_mailbox: marshal::Mailbox<Scheme, Block>,
 }
 
 impl<E, T> Engine<E, T>
@@ -94,6 +92,7 @@ where
         mailbox_size: usize,
         max_repair: NonZero<usize>,
         strategy: T,
+        pruning_depth: Option<u64>,
     ) -> (Self, marshal::Mailbox<Scheme, Block>, Height) {
         // Create the buffer
         //
@@ -115,28 +114,18 @@ where
         let page_cache = CacheRef::from_pooler(&context, PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
 
         // Initialize finalizations by height
-        let finalizations_by_height = immutable::Archive::init(
+        let finalizations_by_height = prunable::Archive::init(
             context.with_label("finalizations_by_height"),
-            immutable::Config {
-                metadata_partition: "follower-finalizations-by-height-metadata".to_string(),
-                freezer_table_partition: "follower-finalizations-by-height-freezer-table"
-                    .to_string(),
-                freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
-                freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
-                freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
-                freezer_key_partition: "follower-finalizations-by-height-freezer-key-journal"
-                    .to_string(),
-                freezer_key_page_cache: page_cache.clone(),
-                freezer_value_partition: "follower-finalizations-by-height-freezer-value-journal"
-                    .to_string(),
-                freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
-                freezer_value_compression: FREEZER_JOURNAL_COMPRESSION,
-                ordinal_partition: "follower-finalizations-by-height-ordinal".to_string(),
-                items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
-                freezer_key_write_buffer: WRITE_BUFFER,
-                freezer_value_write_buffer: WRITE_BUFFER,
-                ordinal_write_buffer: WRITE_BUFFER,
+            prunable::Config {
+                translator: FourCap,
+                key_partition: "follower-finalizations-by-height-key".to_string(),
+                key_page_cache: page_cache.clone(),
+                value_partition: "follower-finalizations-by-height-value".to_string(),
+                compression: FINALIZED_COMPRESSION,
                 codec_config: scheme.certificate_codec_config(),
+                items_per_section: FINALIZED_ITEMS_PER_SECTION,
+                key_write_buffer: WRITE_BUFFER,
+                value_write_buffer: WRITE_BUFFER,
                 replay_buffer: REPLAY_BUFFER,
             },
         )
@@ -144,26 +133,18 @@ where
         .expect("failed to initialize finalizations by height archive");
 
         // Initialize finalized blocks
-        let finalized_blocks = immutable::Archive::init(
+        let finalized_blocks = prunable::Archive::init(
             context.with_label("finalized_blocks"),
-            immutable::Config {
-                metadata_partition: "follower-finalized-blocks-metadata".to_string(),
-                freezer_table_partition: "follower-finalized-blocks-freezer-table".to_string(),
-                freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
-                freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
-                freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
-                freezer_key_partition: "follower-finalized-blocks-freezer-key-journal".to_string(),
-                freezer_key_page_cache: page_cache.clone(),
-                freezer_value_partition: "follower-finalized-blocks-freezer-value-journal"
-                    .to_string(),
-                freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
-                freezer_value_compression: None,
-                ordinal_partition: "follower-finalized-blocks-ordinal".to_string(),
-                items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
-                freezer_key_write_buffer: WRITE_BUFFER,
-                freezer_value_write_buffer: WRITE_BUFFER,
-                ordinal_write_buffer: WRITE_BUFFER,
+            prunable::Config {
+                translator: FourCap,
+                key_partition: "follower-finalized-blocks-key".to_string(),
+                key_page_cache: page_cache.clone(),
+                value_partition: "follower-finalized-blocks-value".to_string(),
+                compression: None,
                 codec_config: (),
+                items_per_section: FINALIZED_ITEMS_PER_SECTION,
+                key_write_buffer: WRITE_BUFFER,
+                value_write_buffer: WRITE_BUFFER,
                 replay_buffer: REPLAY_BUFFER,
             },
         )
@@ -201,6 +182,8 @@ where
             buffer,
             buffer_mailbox,
             marshal,
+            pruning_depth,
+            marshal_mailbox: mailbox.clone(),
         };
         (engine, mailbox, last_processed_height)
     }
@@ -219,7 +202,7 @@ where
 
         // Start marshal
         let marshal_handle = self.marshal.start(
-            Application::new(self.context.take()),
+            Application::new(self.context.take(), self.marshal_mailbox, self.pruning_depth),
             self.buffer_mailbox,
             marshal,
         );
@@ -240,14 +223,22 @@ struct Application<E: Clock> {
     context: E,
     throughput: Throughput,
     tip: Option<Height>,
+    mailbox: marshal::Mailbox<Scheme, Block>,
+    pruning_depth: Option<u64>,
 }
 
 impl<E: Clock> Application<E> {
-    fn new(context: E) -> Self {
+    fn new(
+        context: E,
+        mailbox: marshal::Mailbox<Scheme, Block>,
+        pruning_depth: Option<u64>,
+    ) -> Self {
         Self {
             context,
             throughput: Throughput::new(THROUGHPUT_WINDOW),
             tip: None,
+            mailbox,
+            pruning_depth,
         }
     }
 }
@@ -265,6 +256,14 @@ impl<E: Clock> Reporter for Application<E> {
                 // finalized block (e.g. update state, index transactions,
                 // serve queries, etc.).
                 let bps = self.throughput.record(self.context.current());
+                if let Some(depth) = self.pruning_depth {
+                    if block.height.get() % PRUNE_INTERVAL == 0 {
+                        let prune_to = block.height.get().saturating_sub(depth);
+                        if prune_to > 0 {
+                            self.mailbox.prune(Height::new(prune_to)).await;
+                        }
+                    }
+                }
                 info!(
                     height = block.height.get(),
                     tip = self.tip.map(|h| h.get()),
@@ -312,6 +311,7 @@ mod tests {
                 16,
                 NZUsize!(256),
                 Sequential,
+                None,
             )
             .await;
 
@@ -366,6 +366,7 @@ mod tests {
                 16,
                 NZUsize!(256),
                 Sequential,
+                None,
             )
             .await;
 
