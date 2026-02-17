@@ -25,10 +25,10 @@ log_level: "info"
 metrics_port: 9092
 
 # Size of internal mailboxes
-mailbox_size: 1024
+mailbox_size: 4096
 
 # Maximum number of blocks to fetch concurrently during backfill
-max_repair: 256
+max_repair: 512
 
 # Start from the tip of the finalized chain on first run
 # Set to false to start from genesis (requires backfilling all historical blocks)
