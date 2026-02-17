@@ -110,6 +110,9 @@ impl<S: Strategy> ClientBuilder<S> {
     pub fn build(self) -> Client<S> {
         let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, self.identity);
 
+        // Pre-resolve the hostname at build time and pin it with `resolve()` so
+        // reqwest reuses the same address for every request, avoiding per-request
+        // DNS lookups and ensuring HTTP/2 connection reuse over a single socket.
         let url: reqwest::Url = self.uri.parse().expect("invalid URI");
         let host = url.host_str().expect("URI must have a host").to_string();
         let port = url.port_or_known_default().expect("URI must have a port");
