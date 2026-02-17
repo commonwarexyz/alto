@@ -107,6 +107,8 @@ where
             },
         );
 
+        // Initialize the finalized certificate and block archives. Uses
+        // prunable archives when pruning is enabled, immutable otherwise.
         let (finalizations_by_height, finalized_blocks, page_cache) =
             archive::init(&mut context, &scheme, pruning_depth).await;
 
