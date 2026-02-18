@@ -14,6 +14,7 @@ const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30
 const PRUNE_INTERVAL: u64 = 10_000;
 const MAILBOX_SIZE: usize = 1024;
 
+/// Formats an estimated time of arrival (ETA) based on the remaining work and rate.
 fn format_eta(remaining: u64, rate: f64) -> String {
     if remaining == 0 {
         return "0s".to_string();
@@ -33,8 +34,7 @@ fn format_eta(remaining: u64, rate: f64) -> String {
     }
 }
 
-/// Thin [Reporter] that acknowledges blocks immediately and forwards
-/// them to the [Application] actor for async processing.
+/// A forwarder of [Update] messages to the [Application].
 #[derive(Clone)]
 pub(crate) struct Mailbox {
     tx: mpsc::Sender<Update<Block>>,
@@ -48,8 +48,7 @@ impl Reporter for Mailbox {
     }
 }
 
-/// Application actor that processes finalized blocks on its own task,
-/// decoupled from marshal's acknowledgement loop.
+/// A simple application that tracks just tracks the rate of block processing.
 pub(crate) struct Application<E: Clock + Spawner> {
     context: ContextCell<E>,
     rx: mpsc::Receiver<Update<Block>>,
@@ -88,6 +87,9 @@ impl<E: Clock + Spawner> Application<E> {
                     self.tip = Some(height);
                 }
                 Update::Block(block, ack) => {
+                    // This is where an application would process the
+                    // finalized block (e.g. update state, index transactions,
+                    // serve queries, etc.).
                     let height = block.height.get();
                     let bps = self.throughput.record(self.context.current());
                     let remaining = self.tip.map(|t| t.get().saturating_sub(height));
@@ -100,6 +102,7 @@ impl<E: Clock + Spawner> Application<E> {
                     );
                     ack.acknowledge();
 
+                    // Prune the archive if the height is a multiple of the prune interval.
                     if let Some(depth) = self.pruning_depth.filter(|_| height % PRUNE_INTERVAL == 0)
                     {
                         let prune_to = height.saturating_sub(depth);
