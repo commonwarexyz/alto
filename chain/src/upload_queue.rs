@@ -390,9 +390,13 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
             Err(e) => {
                 warn!(?e, position, "upload failed, will retry");
                 self.metrics.uploads.inc(status::Status::Failure);
-                let delay = self.compute_backoff_delay(*retry_count);
-                *backoff_until = Some(self.context.now() + delay);
-                *retry_count = retry_count.saturating_add(1);
+                // Advance backoff once per retry round (not per failed item).
+                // Concurrent failures in the same round should share one delay.
+                if backoff_until.is_none() {
+                    let delay = self.compute_backoff_delay(*retry_count);
+                    *backoff_until = Some(self.context.now() + delay);
+                    *retry_count = retry_count.saturating_add(1);
+                }
 
                 // Re-deliver unacked positions from the queue floor.
                 self.reader.reset().await;
