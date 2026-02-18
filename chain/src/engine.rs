@@ -125,6 +125,33 @@ where
     S: Strategy,
     I: Indexer,
 {
+    async fn init_upload_queue(
+        context: &E,
+        partition_prefix: &str,
+        indexer: Option<I>,
+        marshal_mailbox: &marshal::Mailbox<Scheme, Block>,
+    ) -> (Option<(UploadQueueActor<E>, I)>, Option<indexer::Pusher<E>>) {
+        let Some(indexer) = indexer else {
+            return (None, None);
+        };
+
+        let queue_config = upload_queue::Config {
+            partition: format!("{partition_prefix}-upload-queue"),
+            ..Default::default()
+        };
+
+        let (actor, mailbox) =
+            UploadQueueActor::new(context.with_label("upload_queue"), queue_config)
+                .await
+                .expect("failed to create upload queue");
+        let pusher = indexer::Pusher::new(
+            context.with_label("indexer"),
+            mailbox,
+            marshal_mailbox.clone(),
+        );
+        (Some((actor, indexer)), Some(pusher))
+    }
+
     /// Create a new [Engine].
     pub async fn new(context: E, cfg: Config<B, I, S>) -> Self {
         // Create the buffer
@@ -264,26 +291,13 @@ where
         );
 
         // Create the upload queue and reporter (if indexer is configured)
-        let (upload_queue, pusher) = match cfg.indexer {
-            Some(indexer) => {
-                let queue_config = upload_queue::Config {
-                    partition: format!("{}-upload-queue", cfg.partition_prefix),
-                    ..Default::default()
-                };
-
-                let (actor, mailbox) =
-                    UploadQueueActor::new(context.with_label("upload_queue"), queue_config)
-                        .await
-                        .expect("failed to create upload queue");
-                let pusher = indexer::Pusher::new(
-                    context.with_label("indexer"),
-                    mailbox,
-                    marshal_mailbox.clone(),
-                );
-                (Some((actor, indexer)), Some(pusher))
-            }
-            None => (None, None),
-        };
+        let (upload_queue, pusher) = Self::init_upload_queue(
+            &context,
+            &cfg.partition_prefix,
+            cfg.indexer,
+            &marshal_mailbox,
+        )
+        .await;
         let reporter = (marshal_mailbox.clone(), pusher).into();
 
         // Create the consensus engine
