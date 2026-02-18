@@ -21,8 +21,11 @@ use commonware_utils::{
     NZUsize, NZU16, NZU64,
 };
 use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
-use std::collections::HashSet;
-use std::time::{Duration, SystemTime};
+use std::{
+    collections::HashSet,
+    num::NonZero,
+    time::{Duration, SystemTime},
+};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
@@ -192,7 +195,7 @@ pub struct Config {
     /// Maximum delay between retries.
     pub max_retry_delay: Duration,
     /// Number of items per queue section.
-    pub items_per_section: u64,
+    pub items_per_section: NonZero<u64>,
 }
 
 impl Default for Config {
@@ -203,7 +206,7 @@ impl Default for Config {
             max_concurrent_uploads: 8,
             retry_delay: Duration::from_millis(500),
             max_retry_delay: Duration::from_secs(30),
-            items_per_section: 1024,
+            items_per_section: NZU64!(1024),
         }
     }
 }
@@ -233,7 +236,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
             context.clone(),
             queue::Config {
                 partition: config.partition.clone(),
-                items_per_section: NZU64!(config.items_per_section),
+                items_per_section: config.items_per_section,
                 compression: None,
                 codec_config: (),
                 page_cache: CacheRef::from_pooler(&context, NZU16!(1024), NZUsize!(1024)),
