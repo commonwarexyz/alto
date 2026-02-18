@@ -31,6 +31,7 @@ use tracing::{error, warn};
 
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
+const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(1024);
 
 /// The engine that drives the follower's [marshal::Actor].
 ///
@@ -128,7 +129,7 @@ where
                 value_write_buffer: WRITE_BUFFER,
                 block_codec_config: (),
                 max_repair,
-                max_pending_acks: NZUsize!(1024),
+                max_pending_acks: MAX_PENDING_ACKS,
                 page_cache,
                 strategy,
             },
