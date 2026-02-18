@@ -21,8 +21,8 @@ use commonware_p2p::{Blocker, Receiver, Sender};
 use commonware_parallel::Strategy;
 use commonware_resolver::Resolver;
 use commonware_runtime::{
-    buffer::paged::CacheRef, spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
-    ThreadPooler,
+    buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
+    Spawner, Storage, ThreadPooler,
 };
 use commonware_storage::archive::immutable;
 use commonware_utils::channel::mpsc;
@@ -56,6 +56,7 @@ const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
 const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
+const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(16);
 
 /// Configuration for the [Engine].
 pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer, S: Strategy> {
@@ -90,12 +91,13 @@ type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpoch
 
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
-pub struct Engine<
-    E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+pub struct Engine<E, B, S, I>
+where
+    E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     S: Strategy,
     I: Indexer,
-> {
+{
     context: ContextCell<E>,
 
     buffer: buffered::Engine<E, PublicKey, Block>,
@@ -115,12 +117,12 @@ pub struct Engine<
         Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
 }
 
-impl<
-        E: Clock + GClock + Rng + CryptoRng + Spawner + ThreadPooler + Storage + Metrics,
-        B: Blocker<PublicKey = PublicKey>,
-        S: Strategy,
-        I: Indexer,
-    > Engine<E, B, S, I>
+impl<E, B, S, I> Engine<E, B, S, I>
+where
+    E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + ThreadPooler + Storage + Metrics,
+    B: Blocker<PublicKey = PublicKey>,
+    S: Strategy,
+    I: Indexer,
 {
     /// Create a new [Engine].
     pub async fn new(context: E, cfg: Config<B, I, S>) -> Self {
@@ -137,7 +139,7 @@ impl<
         );
 
         // Create the page cache
-        let page_cache = CacheRef::new(PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
+        let page_cache = CacheRef::from_pooler(&context, PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
 
         // Initialize finalizations by height
         let start = Instant::now();
@@ -244,6 +246,7 @@ impl<
                 value_write_buffer: WRITE_BUFFER,
                 block_codec_config: (),
                 max_repair: MAX_REPAIR,
+                max_pending_acks: MAX_PENDING_ACKS,
                 page_cache: page_cache.clone(),
                 strategy: cfg.strategy.clone(),
             },

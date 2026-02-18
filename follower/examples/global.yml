@@ -14,7 +14,10 @@ identity: "a5e8eb414379bf165cc6f717719c31cd87e062c4e3bd3647ad320dbb0b063b04f2882
 directory: "/tmp/alto-follower-global"
 
 # Number of worker threads
-worker_threads: 4
+worker_threads: 2
+
+# Number of threads for signature verification
+signature_threads: 4
 
 # Log level (trace, debug, info, warn, error)
 log_level: "info"
@@ -23,11 +26,15 @@ log_level: "info"
 metrics_port: 9091
 
 # Size of internal mailboxes
-mailbox_size: 1024
+mailbox_size: 4096
 
 # Maximum number of blocks to fetch concurrently during backfill
-max_repair: 256
+max_repair: 512
 
 # Start from the tip of the finalized chain on first run
 # Set to false to start from genesis (requires backfilling all historical blocks)
 tip: false
+
+# Number of finalized blocks to retain before pruning
+# Omit or set to null to keep all blocks (no pruning)
+pruning_depth: null

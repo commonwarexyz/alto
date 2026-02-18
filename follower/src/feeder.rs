@@ -187,6 +187,8 @@ mod tests {
                 verifier.clone(),
                 16,
                 NZUsize!(256),
+                Sequential,
+                None,
             )
             .await;
 
@@ -217,6 +219,8 @@ mod tests {
                 wrong_verifier.clone(),
                 16,
                 NZUsize!(256),
+                Sequential,
+                None,
             )
             .await;
 
@@ -250,6 +254,8 @@ mod tests {
                 verifier.clone(),
                 16,
                 NZUsize!(256),
+                Sequential,
+                None,
             )
             .await;
 
@@ -278,6 +284,8 @@ mod tests {
                 wrong_verifier.clone(),
                 16,
                 NZUsize!(256),
+                Sequential,
+                None,
             )
             .await;
 

@@ -110,8 +110,16 @@ impl<S: Strategy> ClientBuilder<S> {
     pub fn build(self) -> Client<S> {
         let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, self.identity);
 
-        // Build HTTP client
-        let mut http_builder = reqwest::Client::builder();
+        // HTTP/2 multiplexes all requests over a single connection, so
+        // DNS is only resolved once on the initial connect.
+        let mut http_builder = reqwest::Client::builder()
+            .tcp_nodelay(true)
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(10))
+            .http2_adaptive_window(true)
+            .http2_keep_alive_interval(std::time::Duration::from_secs(10))
+            .http2_keep_alive_timeout(std::time::Duration::from_secs(5))
+            .http2_keep_alive_while_idle(true);
         for cert_der in &self.tls_certs {
             let cert = reqwest::Certificate::from_der(cert_der).expect("invalid DER certificate");
             http_builder = http_builder.add_root_certificate(cert);

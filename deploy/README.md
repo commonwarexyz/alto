@@ -113,14 +113,14 @@ After redeploying a cluster, update the identity (BLS12-381 threshold public key
 
 ```bash
 # Global cluster:
-OLD_KEY=$(grep '^identity:' follower/examples/global-config.yaml | sed 's/identity: "//;s/"//')
+OLD_KEY=$(grep '^identity:' follower/examples/global.yml | sed 's/identity: "//;s/"//')
 NEW_KEY="<new-key-hex>"
-sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/global-config.yaml inspector/src/main.rs
+sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/global.yml inspector/src/main.rs
 
 # USA cluster:
-OLD_KEY=$(grep '^identity:' follower/examples/usa-config.yaml | sed 's/identity: "//;s/"//')
+OLD_KEY=$(grep '^identity:' follower/examples/usa.yml | sed 's/identity: "//;s/"//')
 NEW_KEY="<new-key-hex>"
-sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/usa-config.yaml
+sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/usa.yml
 ```
 
 #### Build Validator Binary

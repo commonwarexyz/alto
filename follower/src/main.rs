@@ -8,7 +8,7 @@ use commonware_cryptography::ed25519::PublicKey;
 use commonware_macros::select;
 use commonware_p2p::Recipients;
 use commonware_parallel::Sequential;
-use commonware_runtime::{tokio, Clock, IoBufMut, Metrics, Runner};
+use commonware_runtime::{tokio, Clock, IoBufs, Metrics, Runner, ThreadPooler};
 use commonware_utils::{channel::mpsc, from_hex_formatted, time::SystemTimeExt};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,8 @@ use std::{
 };
 use tracing::{error, info, warn, Level};
 
+mod application;
+mod archive;
 mod engine;
 mod feeder;
 mod resolver;
@@ -37,12 +39,14 @@ pub struct Config {
     pub source: String,
     pub identity: String,
     pub directory: String,
-    pub worker_threads: usize,
+    pub worker_threads: NonZero<usize>,
+    pub signature_threads: NonZero<usize>,
     pub log_level: String,
     pub metrics_port: u16,
-    pub mailbox_size: usize,
-    pub max_repair: usize,
+    pub mailbox_size: NonZero<usize>,
+    pub max_repair: NonZero<usize>,
     pub tip: bool,
+    pub pruning_depth: Option<u64>,
 }
 
 /// Abstraction over the certificate source (HTTP client) used by the
@@ -132,7 +136,7 @@ impl commonware_p2p::CheckedSender for NoopCheckedSender {
 
     async fn send(
         self,
-        _message: impl Into<IoBufMut> + Send,
+        _message: impl Into<IoBufs> + Send,
         _priority: bool,
     ) -> Result<Vec<Self::PublicKey>, Self::Error> {
         Ok(Vec::new())
@@ -192,7 +196,7 @@ fn main() {
     // Initialize runtime
     let cfg = tokio::Config::default()
         .with_tcp_nodelay(Some(true))
-        .with_worker_threads(config.worker_threads)
+        .with_worker_threads(config.worker_threads.get())
         .with_storage_directory(PathBuf::from(config.directory))
         .with_catch_panics(false);
     let executor = tokio::Runner::new(cfg);
@@ -213,7 +217,11 @@ fn main() {
             )),
             None,
         );
-        info!(source = %config.source, "starting follower node");
+        info!(
+            source = %config.source,
+            pruning_depth = config.pruning_depth,
+            "starting follower node"
+        );
 
         // Create scheme and client
         //
@@ -239,11 +247,16 @@ fn main() {
         info!("connected to certificate source");
 
         // Create engine
+        let strategy = context
+            .create_strategy(config.signature_threads)
+            .unwrap();
         let (engine, mut mailbox, last_processed_height) = engine::Engine::new(
             context.with_label("engine"),
             scheme.clone(),
-            config.mailbox_size,
-            NonZero::new(config.max_repair).expect("max_repair must be non-zero"),
+            config.mailbox_size.get(),
+            config.max_repair,
+            strategy,
+            config.pruning_depth,
         )
         .await;
 
@@ -268,12 +281,12 @@ fn main() {
         }
 
         // Create resolver
-        let (ingress_tx, ingress_rx) = mpsc::channel(config.mailbox_size);
+        let (ingress_tx, ingress_rx) = mpsc::channel(config.mailbox_size.get());
         let (resolver_actor, resolver) = resolver::Actor::new(
             context.with_label("resolver"),
             client.clone(),
             ingress_tx,
-            config.mailbox_size,
+            config.mailbox_size.get(),
         );
         let resolver_handle = resolver_actor.start();
 
