@@ -12,7 +12,6 @@ use tracing::info;
 
 const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
 const PRUNE_INTERVAL: u64 = 10_000;
-const MAILBOX_SIZE: usize = 1024;
 
 /// Formats an estimated time of arrival (ETA) based on the remaining work and rate.
 fn format_eta(remaining: u64, rate: f64) -> String {
@@ -70,9 +69,10 @@ impl<E: Clock + Spawner> Application<E> {
     pub(crate) fn new(
         context: E,
         mailbox: marshal::Mailbox<Scheme, Block>,
+        mailbox_size: usize,
         pruning_depth: Option<u64>,
     ) -> (Self, Mailbox) {
-        let (tx, rx) = mpsc::channel(MAILBOX_SIZE);
+        let (tx, rx) = mpsc::channel(mailbox_size);
         let app = Self {
             context: ContextCell::new(context.clone()),
             rx,

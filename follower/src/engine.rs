@@ -66,6 +66,7 @@ where
     >,
     pruning_depth: Option<u64>,
     marshal_mailbox: marshal::Mailbox<Scheme, Block>,
+    mailbox_size: usize,
 }
 
 impl<E, T> Engine<E, T>
@@ -144,6 +145,7 @@ where
             marshal,
             pruning_depth,
             marshal_mailbox: mailbox.clone(),
+            mailbox_size,
         };
         (engine, mailbox, last_processed_height)
     }
@@ -164,6 +166,7 @@ where
         let (app, mailbox) = Application::new(
             self.context.take(),
             self.marshal_mailbox,
+            self.mailbox_size,
             self.pruning_depth,
         );
         let app_handle = app.start();
