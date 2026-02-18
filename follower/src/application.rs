@@ -26,31 +26,18 @@ fn format_eta(remaining: u64, rate: f64) -> String {
     }
 }
 
-enum Message {
-    Tip(Height),
-    Block(Block),
-}
-
 /// Thin [Reporter] that acknowledges blocks immediately and forwards
 /// them to the [Application] actor for async processing.
 #[derive(Clone)]
 pub(crate) struct AppReporter {
-    tx: mpsc::Sender<Message>,
+    tx: mpsc::Sender<Update<Block>>,
 }
 
 impl Reporter for AppReporter {
     type Activity = Update<Block>;
 
     async fn report(&mut self, activity: Self::Activity) {
-        match activity {
-            Update::Tip(_, height, _) => {
-                self.tx.send(Message::Tip(height)).await.ok();
-            }
-            Update::Block(block, ack) => {
-                ack.acknowledge();
-                self.tx.send(Message::Block(block)).await.ok();
-            }
-        }
+        let _ = self.tx.send(activity).await;
     }
 }
 
@@ -58,7 +45,7 @@ impl Reporter for AppReporter {
 /// decoupled from marshal's acknowledgement loop.
 pub(crate) struct Application<E: Clock + Spawner> {
     context: ContextCell<E>,
-    rx: mpsc::Receiver<Message>,
+    rx: mpsc::Receiver<Update<Block>>,
     throughput: Throughput,
     tip: Option<Height>,
     mailbox: marshal::Mailbox<Scheme, Block>,
@@ -90,10 +77,10 @@ impl<E: Clock + Spawner> Application<E> {
     async fn run(mut self) {
         while let Some(msg) = self.rx.next().await {
             match msg {
-                Message::Tip(height) => {
+                Update::Tip(_, height, _) => {
                     self.tip = Some(height);
                 }
-                Message::Block(block) => {
+                Update::Block(block, ack) => {
                     let height = block.height.get();
                     let bps = self.throughput.record(self.context.current());
                     let remaining = self.tip.map(|t| t.get().saturating_sub(height));
@@ -104,6 +91,7 @@ impl<E: Clock + Spawner> Application<E> {
                         eta = %format_args!("{}", format_eta(remaining.unwrap_or(0), bps)),
                         "processed block"
                     );
+                    ack.acknowledge();
 
                     if let Some(depth) = self.pruning_depth.filter(|_| height % PRUNE_INTERVAL == 0)
                     {

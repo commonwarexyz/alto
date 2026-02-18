@@ -14,7 +14,6 @@
 //! [marshal::store::Certificates] and [marshal::store::Blocks] traits,
 //! respectively, by delegating to whichever archive variant was initialized.
 
-use crate::throughput::Throughput;
 use alto_types::{Block, Finalization, Scheme};
 use commonware_consensus::{marshal, types::Height};
 use commonware_cryptography::{certificate::Scheme as CertScheme, sha256::Digest, Committable};
@@ -25,7 +24,6 @@ use commonware_storage::{
 };
 use commonware_utils::{NZUsize, NZU16, NZU64};
 use std::num::NonZero;
-use tracing::info;
 
 // Shared constants (also used by marshal config in engine.rs)
 pub(crate) const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
@@ -95,7 +93,7 @@ where
         .expect("failed to initialize finalized blocks archive");
         (
             Certificates::Prunable(fbh),
-            Blocks::new(BlocksInner::Prunable(fb)),
+            Blocks::Prunable(fb),
             page_cache,
         )
     } else {
@@ -150,7 +148,7 @@ where
         .expect("failed to initialize finalized blocks archive");
         (
             Certificates::Immutable(fbh),
-            Blocks::new(BlocksInner::Immutable(fb)),
+            Blocks::Immutable(fb),
             page_cache,
         )
     }
@@ -210,30 +208,12 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates f
     }
 }
 
-const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
-
 /// Wrapper over [immutable::Archive] and [prunable::Archive] for finalized
 /// blocks. Implements [marshal::store::Blocks].
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum BlocksInner<E: BufferPooler + Storage + Metrics + Clock> {
+pub(crate) enum Blocks<E: BufferPooler + Storage + Metrics + Clock> {
     Immutable(immutable::Archive<E, Digest, Block>),
     Prunable(prunable::Archive<FourCap, E, Digest, Block>),
-}
-
-pub(crate) struct Blocks<E: BufferPooler + Storage + Metrics + Clock> {
-    inner: BlocksInner<E>,
-    throughput: Throughput,
-    pending: u64,
-}
-
-impl<E: BufferPooler + Storage + Metrics + Clock> Blocks<E> {
-    fn new(inner: BlocksInner<E>) -> Self {
-        Self {
-            inner,
-            throughput: Throughput::new(THROUGHPUT_WINDOW),
-            pending: 0,
-        }
-    }
 }
 
 impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Blocks for Blocks<E> {
@@ -243,51 +223,40 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Blocks for Blo
     async fn put(&mut self, block: Block) -> Result<(), Self::Error> {
         let height = block.height.get();
         let commitment = block.commitment();
-        self.pending += 1;
-        match &mut self.inner {
-            BlocksInner::Immutable(a) => Archive::put(a, height, commitment, block).await,
-            BlocksInner::Prunable(a) => Archive::put(a, height, commitment, block).await,
+        match self {
+            Self::Immutable(a) => Archive::put(a, height, commitment, block).await,
+            Self::Prunable(a) => Archive::put(a, height, commitment, block).await,
         }
     }
 
     async fn sync(&mut self) -> Result<(), Self::Error> {
-        let result = match &mut self.inner {
-            BlocksInner::Immutable(a) => Archive::sync(a).await,
-            BlocksInner::Prunable(a) => Archive::sync(a).await,
-        };
-        if result.is_ok() && self.pending > 0 {
-            let now = std::time::SystemTime::now();
-            let mut bps = 0.0;
-            for _ in 0..self.pending {
-                bps = self.throughput.record(now);
-            }
-            self.pending = 0;
-            info!(bps = %format_args!("{bps:.2}"), "synced blocks");
+        match self {
+            Self::Immutable(a) => Archive::sync(a).await,
+            Self::Prunable(a) => Archive::sync(a).await,
         }
-        result
     }
 
     async fn get(&self, id: Identifier<'_, Digest>) -> Result<Option<Block>, Self::Error> {
-        match &self.inner {
-            BlocksInner::Immutable(a) => Archive::get(a, id).await,
-            BlocksInner::Prunable(a) => Archive::get(a, id).await,
+        match self {
+            Self::Immutable(a) => Archive::get(a, id).await,
+            Self::Prunable(a) => Archive::get(a, id).await,
         }
     }
 
     async fn prune(&mut self, min: Height) -> Result<(), Self::Error> {
-        match &mut self.inner {
-            BlocksInner::Immutable(_) => Ok(()),
-            BlocksInner::Prunable(a) => prunable::Archive::prune(a, min.get()).await,
+        match self {
+            Self::Immutable(_) => Ok(()),
+            Self::Prunable(a) => prunable::Archive::prune(a, min.get()).await,
         }
     }
 
     fn missing_items(&self, start: Height, max: usize) -> Vec<Height> {
-        match &self.inner {
-            BlocksInner::Immutable(a) => Archive::missing_items(a, start.get(), max)
+        match self {
+            Self::Immutable(a) => Archive::missing_items(a, start.get(), max)
                 .into_iter()
                 .map(Height::new)
                 .collect(),
-            BlocksInner::Prunable(a) => Archive::missing_items(a, start.get(), max)
+            Self::Prunable(a) => Archive::missing_items(a, start.get(), max)
                 .into_iter()
                 .map(Height::new)
                 .collect(),
@@ -295,9 +264,9 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Blocks for Blo
     }
 
     fn next_gap(&self, value: Height) -> (Option<Height>, Option<Height>) {
-        let (a, b) = match &self.inner {
-            BlocksInner::Immutable(a) => Archive::next_gap(a, value.get()),
-            BlocksInner::Prunable(a) => Archive::next_gap(a, value.get()),
+        let (a, b) = match self {
+            Self::Immutable(a) => Archive::next_gap(a, value.get()),
+            Self::Prunable(a) => Archive::next_gap(a, value.get()),
         };
         (a.map(Height::new), b.map(Height::new))
     }

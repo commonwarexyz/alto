@@ -245,6 +245,7 @@ where
                 value_write_buffer: WRITE_BUFFER,
                 block_codec_config: (),
                 max_repair: MAX_REPAIR,
+                max_pending_acks: NZUsize!(1),
                 page_cache: page_cache.clone(),
                 strategy: cfg.strategy.clone(),
             },

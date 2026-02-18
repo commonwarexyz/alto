@@ -22,7 +22,7 @@ use commonware_parallel::Strategy;
 use commonware_runtime::{
     spawn_cell, BufferPooler, ContextCell, Handle, Metrics, Spawner, Storage,
 };
-use commonware_utils::channel::mpsc;
+use commonware_utils::{channel::mpsc, NZUsize};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
@@ -128,6 +128,7 @@ where
                 value_write_buffer: WRITE_BUFFER,
                 block_codec_config: (),
                 max_repair,
+                max_pending_acks: NZUsize!(512),
                 page_cache,
                 strategy,
             },
