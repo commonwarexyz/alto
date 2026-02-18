@@ -1,4 +1,6 @@
-use alto_chain::{engine, Config, Peers};
+use alto_chain::{Config, Peers};
+
+mod engine;
 use alto_client::Client;
 use alto_types::{EPOCH, NAMESPACE};
 use clap::{Arg, Command};
