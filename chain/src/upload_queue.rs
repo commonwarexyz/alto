@@ -9,9 +9,10 @@ use alto_types::{Finalized, Notarized, Seed};
 use bytes::{Buf, BufMut};
 use commonware_codec::{EncodeSize, Error as CodecError, Read, ReadExt, Write};
 use commonware_macros::select_loop;
+use commonware_runtime::telemetry::metrics::status::CounterExt;
 use commonware_runtime::{
-    buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
-    Spawner, Storage,
+    buffer::paged::CacheRef, spawn_cell, telemetry::metrics::status, BufferPooler, Clock,
+    ContextCell, Handle, Metrics, Spawner, Storage,
 };
 use commonware_storage::{queue, queue::shared};
 use commonware_utils::{
@@ -137,54 +138,40 @@ impl EncodeSize for Item {
 /// Metrics for the upload queue.
 #[derive(Clone)]
 struct QueueMetrics {
-    queue_depth: Gauge,
-    uploads_enqueued: Counter,
-    uploads_succeeded: Counter,
-    uploads_failed: Counter,
-    pruning_boundary: Gauge,
-    queue_size: Gauge,
+    depth: Gauge,
+    enqueued: Counter,
+    uploads: status::Counter,
+    ack_floor: Gauge,
 }
 
 impl QueueMetrics {
     fn new<E: Metrics>(context: &E) -> Self {
         let metrics = Self {
-            queue_depth: Gauge::default(),
-            uploads_enqueued: Counter::default(),
-            uploads_succeeded: Counter::default(),
-            uploads_failed: Counter::default(),
-            pruning_boundary: Gauge::default(),
-            queue_size: Gauge::default(),
+            depth: Gauge::default(),
+            enqueued: Counter::default(),
+            uploads: status::Counter::default(),
+            ack_floor: Gauge::default(),
         };
 
         context.register(
-            "queue_depth",
+            "depth",
             "Current number of pending uploads",
-            metrics.queue_depth.clone(),
+            metrics.depth.clone(),
         );
         context.register(
-            "uploads_enqueued",
+            "enqueued",
             "Total number of uploads enqueued",
-            metrics.uploads_enqueued.clone(),
+            metrics.enqueued.clone(),
         );
         context.register(
-            "uploads_succeeded",
-            "Total number of successful uploads",
-            metrics.uploads_succeeded.clone(),
+            "uploads",
+            "Total number of upload outcomes by status",
+            metrics.uploads.clone(),
         );
         context.register(
-            "uploads_failed",
-            "Total number of failed upload attempts",
-            metrics.uploads_failed.clone(),
-        );
-        context.register(
-            "pruning_boundary",
+            "ack_floor",
             "Items before this position have been uploaded and pruned",
-            metrics.pruning_boundary.clone(),
-        );
-        context.register(
-            "queue_size",
-            "Total items appended to queue",
-            metrics.queue_size.clone(),
+            metrics.ack_floor.clone(),
         );
 
         metrics
@@ -268,9 +255,8 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
             );
         }
 
-        metrics.queue_depth.set(pending as i64);
-        metrics.pruning_boundary.set(pruning_boundary as i64);
-        metrics.queue_size.set(queue_size as i64);
+        metrics.depth.set(pending as i64);
+        metrics.ack_floor.set(pruning_boundary as i64);
 
         let actor = Self {
             context,
@@ -316,9 +302,8 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
 
                 match self.writer.enqueue(item).await {
                     Ok(position) => {
-                        self.metrics.uploads_enqueued.inc();
-                        self.metrics.queue_depth.inc();
-                        self.metrics.queue_size.set(self.writer.size().await as i64);
+                        self.metrics.enqueued.inc();
+                        self.metrics.depth.inc();
                         let _ = ack.send(Ok(position));
 
                         if !self.spawn_uploads(&indexer, backoff_until).await {
@@ -376,19 +361,24 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
                     return false;
                 }
 
-                self.metrics.uploads_succeeded.inc();
-                self.metrics.queue_depth.dec();
-                self.metrics
-                    .pruning_boundary
-                    .set(self.reader.ack_floor().await as i64);
+                self.metrics.uploads.inc(status::Status::Success);
+                self.metrics.depth.dec();
+                let ack_floor = self.reader.ack_floor().await;
+                self.metrics.ack_floor.set(ack_floor as i64);
 
-                *retry_count = 0;
-                *backoff_until = None;
+                // Only clear retry/backoff state once the queue is fully drained.
+                // This avoids a successful completion canceling backoff that was
+                // scheduled due to another failing position.
+                let queue_size = self.writer.size().await;
+                if self.in_flight.is_empty() && ack_floor >= queue_size {
+                    *retry_count = 0;
+                    *backoff_until = None;
+                }
                 true
             }
             Err(e) => {
                 warn!(?e, position, "upload failed, will retry");
-                self.metrics.uploads_failed.inc();
+                self.metrics.uploads.inc(status::Status::Failure);
                 let delay = self.compute_backoff_delay(*retry_count);
                 *backoff_until = Some(self.context.now() + delay);
                 *retry_count = retry_count.saturating_add(1);

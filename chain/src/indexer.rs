@@ -1,3 +1,4 @@
+use crate::upload_queue::Mailbox;
 #[cfg(test)]
 use alto_types::Identity;
 use alto_types::{Activity, Block, Finalized, Notarized, Scheme, Seed, Seedable};
@@ -8,7 +9,6 @@ use std::future::Future;
 #[cfg(test)]
 use std::sync::{atomic::AtomicBool, Arc};
 use tracing::{debug, warn};
-use crate::upload_queue::Mailbox;
 
 /// Trait for interacting with an indexer.
 pub trait Indexer: Clone + Send + Sync + 'static {
