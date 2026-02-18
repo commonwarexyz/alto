@@ -1,7 +1,6 @@
 use crate::{
     archive::{
-        self, Blocks, Certificates, FINALIZED_ITEMS_PER_SECTION, PRUNABLE_ITEMS_PER_SECTION,
-        REPLAY_BUFFER, WRITE_BUFFER,
+        self, Blocks, Certificates, PRUNABLE_ITEMS_PER_SECTION, REPLAY_BUFFER, WRITE_BUFFER,
     },
     resolver::Resolver,
     throughput::Throughput,
@@ -25,7 +24,7 @@ use commonware_runtime::{
     spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
 };
 use commonware_utils::{channel::mpsc, Acknowledgement};
-use futures::future::try_join_all;
+use futures::{future::try_join_all, FutureExt};
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use std::num::NonZero;
@@ -34,6 +33,7 @@ use tracing::{error, info, warn};
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
 const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
+const PRUNE_INTERVAL: u64 = 10_000;
 
 /// The engine that drives the follower's [marshal::Actor].
 ///
@@ -220,23 +220,24 @@ impl<E: Clock> Reporter for Application<E> {
                 // This is where an application would process the
                 // finalized block (e.g. update state, index transactions,
                 // serve queries, etc.).
+                let height = block.height.get();
                 let bps = self.throughput.record(self.context.current());
-                if let Some(depth) = self
-                    .pruning_depth
-                    .filter(|_| block.height.get() % FINALIZED_ITEMS_PER_SECTION.get() == 0)
-                {
-                    let prune_to = block.height.get().saturating_sub(depth);
-                    if prune_to > 0 {
-                        self.mailbox.prune(Height::new(prune_to)).await;
-                    }
-                }
                 info!(
-                    height = block.height.get(),
+                    height,
                     tip = self.tip.map(|h| h.get()),
                     bps = %format_args!("{bps:.2}"),
                     "processed block"
                 );
                 ack_rx.acknowledge();
+
+                // Attempt prune (without blocking). If the marshal mailbox
+                // is full, the prune will be attempted again next cycle.
+                if let Some(depth) = self.pruning_depth.filter(|_| height % PRUNE_INTERVAL == 0) {
+                    let prune_to = height.saturating_sub(depth);
+                    if prune_to > 0 {
+                        self.mailbox.prune(Height::new(prune_to)).now_or_never();
+                    }
+                }
             }
         }
     }

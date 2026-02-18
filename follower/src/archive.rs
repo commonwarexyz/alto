@@ -28,10 +28,10 @@ use std::num::NonZero;
 // Shared constants (also used by marshal config in engine.rs)
 pub(crate) const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
 pub(crate) const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
-pub(crate) const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
+pub(crate) const WRITE_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 
 // Finalized archive constants (shared by both prunable and immutable paths)
-pub(crate) const FINALIZED_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
+pub const FINALIZED_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
 const FINALIZED_COMPRESSION: Option<u8> = Some(3);
 const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
