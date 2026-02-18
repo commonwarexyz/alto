@@ -31,7 +31,6 @@ pub(crate) const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8
 pub(crate) const WRITE_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 
 // Finalized archive constants.
-pub const FINALIZED_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
 const FINALIZED_COMPRESSION: Option<u8> = Some(3);
 const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
@@ -45,6 +44,7 @@ const PRUNABLE_FINALIZED_BLOCKS_KEY_PARTITION: &str = "follower-prunable-finaliz
 const PRUNABLE_FINALIZED_BLOCKS_VALUE_PARTITION: &str = "follower-prunable-finalized-blocks-value";
 
 // Immutable archive partitions.
+pub const IMMUTABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
 const IMMUTABLE_FINALIZATIONS_BY_HEIGHT_METADATA_PARTITION: &str =
     "follower-finalizations-by-height-metadata";
 const IMMUTABLE_FINALIZATIONS_BY_HEIGHT_FREEZER_TABLE_PARTITION: &str =
@@ -93,7 +93,7 @@ where
                 value_partition: PRUNABLE_FINALIZATIONS_BY_HEIGHT_VALUE_PARTITION.to_string(),
                 compression: FINALIZED_COMPRESSION,
                 codec_config: scheme.certificate_codec_config(),
-                items_per_section: FINALIZED_ITEMS_PER_SECTION,
+                items_per_section: PRUNABLE_ITEMS_PER_SECTION,
                 key_write_buffer: WRITE_BUFFER,
                 value_write_buffer: WRITE_BUFFER,
                 replay_buffer: REPLAY_BUFFER,
@@ -110,7 +110,7 @@ where
                 value_partition: PRUNABLE_FINALIZED_BLOCKS_VALUE_PARTITION.to_string(),
                 compression: FINALIZED_COMPRESSION,
                 codec_config: (),
-                items_per_section: FINALIZED_ITEMS_PER_SECTION,
+                items_per_section: PRUNABLE_ITEMS_PER_SECTION,
                 key_write_buffer: WRITE_BUFFER,
                 value_write_buffer: WRITE_BUFFER,
                 replay_buffer: REPLAY_BUFFER,
@@ -141,7 +141,7 @@ where
                 freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
                 freezer_value_compression: FINALIZED_COMPRESSION,
                 ordinal_partition: IMMUTABLE_FINALIZATIONS_BY_HEIGHT_ORDINAL_PARTITION.to_string(),
-                items_per_section: FINALIZED_ITEMS_PER_SECTION,
+                items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
                 freezer_key_write_buffer: WRITE_BUFFER,
                 freezer_value_write_buffer: WRITE_BUFFER,
                 ordinal_write_buffer: WRITE_BUFFER,
@@ -166,7 +166,7 @@ where
                 freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
                 freezer_value_compression: FINALIZED_COMPRESSION,
                 ordinal_partition: IMMUTABLE_FINALIZED_BLOCKS_ORDINAL_PARTITION.to_string(),
-                items_per_section: FINALIZED_ITEMS_PER_SECTION,
+                items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
                 freezer_key_write_buffer: WRITE_BUFFER,
                 freezer_value_write_buffer: WRITE_BUFFER,
                 ordinal_write_buffer: WRITE_BUFFER,

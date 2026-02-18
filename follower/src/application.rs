@@ -34,6 +34,14 @@ fn format_eta(remaining: u64, rate: f64) -> String {
     }
 }
 
+/// Formats ETA when remaining work may be unknown (e.g. tip not received yet).
+fn format_eta_maybe(remaining: Option<u64>, rate: f64) -> String {
+    match remaining {
+        Some(remaining) => format_eta(remaining, rate),
+        None => "unknown".to_string(),
+    }
+}
+
 /// A forwarder of [Update] messages to the [Application].
 #[derive(Clone)]
 pub(crate) struct Mailbox {
@@ -97,7 +105,7 @@ impl<E: Clock + Spawner> Application<E> {
                         height,
                         tip = self.tip.map(|h| h.get()),
                         bps = %format_args!("{bps:.2}"),
-                        eta = %format_args!("{}", format_eta(remaining.unwrap_or(0), bps)),
+                        eta = %format_args!("{}", format_eta_maybe(remaining, bps)),
                         "processed block"
                     );
                     ack.acknowledge();
@@ -118,7 +126,7 @@ impl<E: Clock + Spawner> Application<E> {
 
 #[cfg(test)]
 mod tests {
-    use super::format_eta;
+    use super::{format_eta, format_eta_maybe};
 
     #[test]
     fn eta_is_unknown_when_rate_is_zero_and_remaining_non_zero() {
@@ -128,5 +136,10 @@ mod tests {
     #[test]
     fn eta_is_zero_when_no_remaining_work() {
         assert_eq!(format_eta(0, 0.0), "0s");
+    }
+
+    #[test]
+    fn eta_is_unknown_when_remaining_is_unknown() {
+        assert_eq!(format_eta_maybe(None, 123.0), "unknown");
     }
 }
