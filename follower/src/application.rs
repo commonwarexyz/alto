@@ -15,6 +15,13 @@ const PRUNE_INTERVAL: u64 = 10_000;
 const MAILBOX_SIZE: usize = 1024;
 
 fn format_eta(remaining: u64, rate: f64) -> String {
+    if remaining == 0 {
+        return "0s".to_string();
+    }
+    if !rate.is_finite() || rate <= 0.0 {
+        return "unknown".to_string();
+    }
+
     let secs = (remaining as f64 / rate) as u64;
     let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
     if h > 0 {
@@ -23,6 +30,21 @@ fn format_eta(remaining: u64, rate: f64) -> String {
         format!("{m}m{s:02}s")
     } else {
         format!("{s}s")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_eta;
+
+    #[test]
+    fn eta_is_unknown_when_rate_is_zero_and_remaining_non_zero() {
+        assert_eq!(format_eta(42, 0.0), "unknown");
+    }
+
+    #[test]
+    fn eta_is_zero_when_no_remaining_work() {
+        assert_eq!(format_eta(0, 0.0), "0s");
     }
 }
 
