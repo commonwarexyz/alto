@@ -30,11 +30,29 @@ pub(crate) const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
 pub(crate) const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 pub(crate) const WRITE_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 
-// Finalized archive constants (shared by both prunable and immutable paths)
+// Finalized archive constants.
 pub const FINALIZED_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
 const FINALIZED_COMPRESSION: Option<u8> = Some(3);
 const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
+
+// Prunable archive partitions.
+const PRUNABLE_FINALIZATIONS_BY_HEIGHT_KEY_PARTITION: &str =
+    "follower-prunable-finalizations-by-height-key";
+const PRUNABLE_FINALIZATIONS_BY_HEIGHT_VALUE_PARTITION: &str =
+    "follower-prunable-finalizations-by-height-value";
+const PRUNABLE_FINALIZED_BLOCKS_KEY_PARTITION: &str = "follower-prunable-finalized-blocks-key";
+const PRUNABLE_FINALIZED_BLOCKS_VALUE_PARTITION: &str =
+    "follower-prunable-finalized-blocks-value";
+
+// Immutable archive partitions.
+const IMMUTABLE_FINALIZATIONS_BY_HEIGHT_KEY_PARTITION: &str =
+    "follower-immutable-finalizations-by-height-key";
+const IMMUTABLE_FINALIZATIONS_BY_HEIGHT_VALUE_PARTITION: &str =
+    "follower-immutable-finalizations-by-height-value";
+const IMMUTABLE_FINALIZED_BLOCKS_KEY_PARTITION: &str = "follower-immutable-finalized-blocks-key";
+const IMMUTABLE_FINALIZED_BLOCKS_VALUE_PARTITION: &str =
+    "follower-immutable-finalized-blocks-value";
 
 // Immutable-only constants (freezer table sizing)
 const FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(14); // 1MB
@@ -61,9 +79,9 @@ where
             context.with_label("finalizations_by_height"),
             prunable::Config {
                 translator: FourCap,
-                key_partition: "follower-finalizations-by-height-key".to_string(),
+                key_partition: PRUNABLE_FINALIZATIONS_BY_HEIGHT_KEY_PARTITION.to_string(),
                 key_page_cache: page_cache.clone(),
-                value_partition: "follower-finalizations-by-height-value".to_string(),
+                value_partition: PRUNABLE_FINALIZATIONS_BY_HEIGHT_VALUE_PARTITION.to_string(),
                 compression: FINALIZED_COMPRESSION,
                 codec_config: scheme.certificate_codec_config(),
                 items_per_section: FINALIZED_ITEMS_PER_SECTION,
@@ -78,9 +96,9 @@ where
             context.with_label("finalized_blocks"),
             prunable::Config {
                 translator: FourCap,
-                key_partition: "follower-finalized-blocks-key".to_string(),
+                key_partition: PRUNABLE_FINALIZED_BLOCKS_KEY_PARTITION.to_string(),
                 key_page_cache: page_cache.clone(),
-                value_partition: "follower-finalized-blocks-value".to_string(),
+                value_partition: PRUNABLE_FINALIZED_BLOCKS_VALUE_PARTITION.to_string(),
                 compression: FINALIZED_COMPRESSION,
                 codec_config: (),
                 items_per_section: FINALIZED_ITEMS_PER_SECTION,
@@ -106,9 +124,10 @@ where
                 freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                 freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
                 freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
-                freezer_key_partition: "follower-finalizations-by-height-key".to_string(),
+                freezer_key_partition: IMMUTABLE_FINALIZATIONS_BY_HEIGHT_KEY_PARTITION.to_string(),
                 freezer_key_page_cache: page_cache.clone(),
-                freezer_value_partition: "follower-finalizations-by-height-value".to_string(),
+                freezer_value_partition: IMMUTABLE_FINALIZATIONS_BY_HEIGHT_VALUE_PARTITION
+                    .to_string(),
                 freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
                 freezer_value_compression: FINALIZED_COMPRESSION,
                 ordinal_partition: "follower-finalizations-by-height-ordinal".to_string(),
@@ -130,9 +149,9 @@ where
                 freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                 freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
                 freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
-                freezer_key_partition: "follower-finalized-blocks-key".to_string(),
+                freezer_key_partition: IMMUTABLE_FINALIZED_BLOCKS_KEY_PARTITION.to_string(),
                 freezer_key_page_cache: page_cache.clone(),
-                freezer_value_partition: "follower-finalized-blocks-value".to_string(),
+                freezer_value_partition: IMMUTABLE_FINALIZED_BLOCKS_VALUE_PARTITION.to_string(),
                 freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
                 freezer_value_compression: FINALIZED_COMPRESSION,
                 ordinal_partition: "follower-finalized-blocks-ordinal".to_string(),
