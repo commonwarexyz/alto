@@ -36,11 +36,11 @@ fn format_eta(remaining: u64, rate: f64) -> String {
 /// Thin [Reporter] that acknowledges blocks immediately and forwards
 /// them to the [Application] actor for async processing.
 #[derive(Clone)]
-pub(crate) struct AppReporter {
+pub(crate) struct Mailbox {
     tx: mpsc::Sender<Update<Block>>,
 }
 
-impl Reporter for AppReporter {
+impl Reporter for Mailbox {
     type Activity = Update<Block>;
 
     async fn report(&mut self, activity: Self::Activity) {
@@ -64,7 +64,7 @@ impl<E: Clock + Spawner> Application<E> {
         context: E,
         mailbox: marshal::Mailbox<Scheme, Block>,
         pruning_depth: Option<u64>,
-    ) -> (Self, AppReporter) {
+    ) -> (Self, Mailbox) {
         let (tx, rx) = mpsc::channel(MAILBOX_SIZE);
         let app = Self {
             context: ContextCell::new(context.clone()),
@@ -74,7 +74,7 @@ impl<E: Clock + Spawner> Application<E> {
             mailbox,
             pruning_depth,
         };
-        (app, AppReporter { tx })
+        (app, Mailbox { tx })
     }
 
     pub(crate) fn start(mut self) -> Handle<()> {

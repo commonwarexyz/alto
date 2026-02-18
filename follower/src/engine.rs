@@ -160,7 +160,7 @@ where
         let buffer_handle = self.buffer.start((NoopSender, NoopReceiver));
 
         // Start the application actor
-        let (app, app_reporter) = Application::new(
+        let (app, mailbox) = Application::new(
             self.context.take(),
             self.marshal_mailbox,
             self.pruning_depth,
@@ -170,7 +170,7 @@ where
         // Start marshal
         let marshal_handle = self
             .marshal
-            .start(app_reporter, self.buffer_mailbox, marshal);
+            .start(mailbox, self.buffer_mailbox, marshal);
 
         // Wait for any actor to finish
         if let Err(e) = try_join_all(vec![buffer_handle, marshal_handle, app_handle]).await {
