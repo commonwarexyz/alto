@@ -181,6 +181,18 @@ where
     }
 }
 
+fn format_eta(remaining: u64, rate: f64) -> String {
+    let secs = (remaining as f64 / rate) as u64;
+    let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+    if h > 0 {
+        format!("{h}h{m:02}m{s:02}s")
+    } else if m > 0 {
+        format!("{m}m{s:02}s")
+    } else {
+        format!("{s}s")
+    }
+}
+
 /// Reporter that acknowledges finalized blocks from [marshal::Actor]
 /// and logs throughput over a 30-second sliding window.
 #[derive(Clone)]
@@ -222,10 +234,12 @@ impl<E: Clock> Reporter for Application<E> {
                 // serve queries, etc.).
                 let height = block.height.get();
                 let bps = self.throughput.record(self.context.current());
+                let remaining = self.tip.map(|t| t.get().saturating_sub(height));
                 info!(
                     height,
                     tip = self.tip.map(|h| h.get()),
                     bps = %format_args!("{bps:.2}"),
+                    eta = %format_args!("{}", format_eta(remaining.unwrap_or(0), bps)),
                     "processed block"
                 );
                 ack_rx.acknowledge();
