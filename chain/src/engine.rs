@@ -143,7 +143,7 @@ where
         let (actor, mailbox) =
             UploadQueueActor::new(context.with_label("upload_queue"), queue_config)
                 .await
-                .expect("failed to create upload queue");
+                .unwrap_or_else(|e| panic!("failed to create upload queue: {e}"));
         let pusher = indexer::Pusher::new(
             context.with_label("indexer"),
             mailbox,
