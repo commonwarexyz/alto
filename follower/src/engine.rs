@@ -128,7 +128,7 @@ where
                 value_write_buffer: WRITE_BUFFER,
                 block_codec_config: (),
                 max_repair,
-                max_pending_acks: NZUsize!(512),
+                max_pending_acks: NZUsize!(1024),
                 page_cache,
                 strategy,
             },
