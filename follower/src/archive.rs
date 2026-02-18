@@ -42,8 +42,7 @@ const PRUNABLE_FINALIZATIONS_BY_HEIGHT_KEY_PARTITION: &str =
 const PRUNABLE_FINALIZATIONS_BY_HEIGHT_VALUE_PARTITION: &str =
     "follower-prunable-finalizations-by-height-value";
 const PRUNABLE_FINALIZED_BLOCKS_KEY_PARTITION: &str = "follower-prunable-finalized-blocks-key";
-const PRUNABLE_FINALIZED_BLOCKS_VALUE_PARTITION: &str =
-    "follower-prunable-finalized-blocks-value";
+const PRUNABLE_FINALIZED_BLOCKS_VALUE_PARTITION: &str = "follower-prunable-finalized-blocks-value";
 
 // Immutable archive partitions.
 const IMMUTABLE_FINALIZATIONS_BY_HEIGHT_METADATA_PARTITION: &str =
@@ -130,8 +129,8 @@ where
             immutable::Config {
                 metadata_partition: IMMUTABLE_FINALIZATIONS_BY_HEIGHT_METADATA_PARTITION
                     .to_string(),
-                freezer_table_partition:
-                    IMMUTABLE_FINALIZATIONS_BY_HEIGHT_FREEZER_TABLE_PARTITION.to_string(),
+                freezer_table_partition: IMMUTABLE_FINALIZATIONS_BY_HEIGHT_FREEZER_TABLE_PARTITION
+                    .to_string(),
                 freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                 freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
                 freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
@@ -156,8 +155,8 @@ where
             context.with_label("finalized_blocks"),
             immutable::Config {
                 metadata_partition: IMMUTABLE_FINALIZED_BLOCKS_METADATA_PARTITION.to_string(),
-                freezer_table_partition:
-                    IMMUTABLE_FINALIZED_BLOCKS_FREEZER_TABLE_PARTITION.to_string(),
+                freezer_table_partition: IMMUTABLE_FINALIZED_BLOCKS_FREEZER_TABLE_PARTITION
+                    .to_string(),
                 freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                 freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
                 freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
