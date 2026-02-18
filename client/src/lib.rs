@@ -107,24 +107,11 @@ impl<S: Strategy> ClientBuilder<S> {
     }
 
     /// Build the client.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the URI is invalid, cannot be resolved, or if TLS
-    /// certificates are malformed.
     pub fn build(self) -> Client<S> {
         let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, self.identity);
 
-        // Pre-resolve the hostname at build time and pin it with `resolve()` so
-        // reqwest reuses the same address for every request, avoiding per-request
-        // DNS lookups and ensuring HTTP/2 connection reuse over a single socket.
-        let url: reqwest::Url = self.uri.parse().expect("invalid URI");
-        let host = url.host_str().expect("URI must have a host").to_string();
-        let port = url.port_or_known_default().expect("URI must have a port");
-        let addr = std::net::ToSocketAddrs::to_socket_addrs(&(&*host, port))
-            .expect("failed to resolve hostname")
-            .next()
-            .expect("hostname resolved to no addresses");
+        // HTTP/2 multiplexes all requests over a single connection, so
+        // DNS is only resolved once on the initial connect.
         let mut http_builder = reqwest::Client::builder()
             .tcp_nodelay(true)
             .connect_timeout(std::time::Duration::from_secs(5))
@@ -132,8 +119,7 @@ impl<S: Strategy> ClientBuilder<S> {
             .http2_adaptive_window(true)
             .http2_keep_alive_interval(std::time::Duration::from_secs(10))
             .http2_keep_alive_timeout(std::time::Duration::from_secs(5))
-            .http2_keep_alive_while_idle(true)
-            .resolve(&host, addr);
+            .http2_keep_alive_while_idle(true);
         for cert_der in &self.tls_certs {
             let cert = reqwest::Certificate::from_der(cert_der).expect("invalid DER certificate");
             http_builder = http_builder.add_root_certificate(cert);
