@@ -1,17 +1,16 @@
 use crate::{
+    application::Application,
     archive::{
         self, Blocks, Certificates, PRUNABLE_ITEMS_PER_SECTION, REPLAY_BUFFER, WRITE_BUFFER,
     },
     resolver::Resolver,
-    throughput::Throughput,
     NoopReceiver, NoopSender,
 };
 use alto_types::{Block, Scheme, EPOCH_LENGTH};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
-    marshal::{self, ingress::handler, Update},
+    marshal::{self, ingress::handler},
     types::{FixedEpocher, Height, ViewDelta},
-    Reporter,
 };
 use commonware_cryptography::{
     certificate::ConstantProvider,
@@ -21,19 +20,17 @@ use commonware_cryptography::{
 use commonware_math::algebra::Random;
 use commonware_parallel::Strategy;
 use commonware_runtime::{
-    spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
+    spawn_cell, BufferPooler, ContextCell, Handle, Metrics, Spawner, Storage,
 };
-use commonware_utils::{channel::mpsc, Acknowledgement};
-use futures::{future::try_join_all, FutureExt};
+use commonware_utils::{channel::mpsc, NZUsize};
+use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use std::num::NonZero;
-use tracing::{error, info, warn};
+use tracing::{error, warn};
 
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
-const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
-const PRUNE_INTERVAL: u64 = 10_000;
 
 /// The engine that drives the follower's [marshal::Actor].
 ///
@@ -131,6 +128,7 @@ where
                 value_write_buffer: WRITE_BUFFER,
                 block_codec_config: (),
                 max_repair,
+                max_pending_acks: NZUsize!(1024),
                 page_cache,
                 strategy,
             },
@@ -161,98 +159,22 @@ where
         // Start the buffer
         let buffer_handle = self.buffer.start((NoopSender, NoopReceiver));
 
-        // Start marshal
-        let marshal_handle = self.marshal.start(
-            Application::new(
-                self.context.take(),
-                self.marshal_mailbox,
-                self.pruning_depth,
-            ),
-            self.buffer_mailbox,
-            marshal,
+        // Start the application actor
+        let (app, app_reporter) = Application::new(
+            self.context.take(),
+            self.marshal_mailbox,
+            self.pruning_depth,
         );
+        let app_handle = app.start();
+
+        // Start marshal
+        let marshal_handle = self.marshal.start(app_reporter, self.buffer_mailbox, marshal);
 
         // Wait for any actor to finish
-        if let Err(e) = try_join_all(vec![buffer_handle, marshal_handle]).await {
+        if let Err(e) = try_join_all(vec![buffer_handle, marshal_handle, app_handle]).await {
             error!(?e, "engine failed");
         } else {
             warn!("engine stopped");
-        }
-    }
-}
-
-fn format_eta(remaining: u64, rate: f64) -> String {
-    let secs = (remaining as f64 / rate) as u64;
-    let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
-    if h > 0 {
-        format!("{h}h{m:02}m{s:02}s")
-    } else if m > 0 {
-        format!("{m}m{s:02}s")
-    } else {
-        format!("{s}s")
-    }
-}
-
-/// Reporter that acknowledges finalized blocks from [marshal::Actor]
-/// and logs throughput over a 30-second sliding window.
-#[derive(Clone)]
-struct Application<E: Clock> {
-    context: E,
-    throughput: Throughput,
-    tip: Option<Height>,
-    mailbox: marshal::Mailbox<Scheme, Block>,
-    pruning_depth: Option<u64>,
-}
-
-impl<E: Clock> Application<E> {
-    fn new(
-        context: E,
-        mailbox: marshal::Mailbox<Scheme, Block>,
-        pruning_depth: Option<u64>,
-    ) -> Self {
-        Self {
-            context,
-            throughput: Throughput::new(THROUGHPUT_WINDOW),
-            tip: None,
-            mailbox,
-            pruning_depth,
-        }
-    }
-}
-
-impl<E: Clock> Reporter for Application<E> {
-    type Activity = Update<Block>;
-
-    async fn report(&mut self, activity: Self::Activity) {
-        match activity {
-            Update::Tip(_, height, _) => {
-                self.tip = Some(height);
-            }
-            Update::Block(block, ack_rx) => {
-                // This is where an application would process the
-                // finalized block (e.g. update state, index transactions,
-                // serve queries, etc.).
-                let height = block.height.get();
-                let bps = self.throughput.record(self.context.current());
-                let remaining = self.tip.map(|t| t.get().saturating_sub(height));
-                info!(
-                    height,
-                    tip = self.tip.map(|h| h.get()),
-                    bps = %format_args!("{bps:.2}"),
-                    eta = %format_args!("{}", format_eta(remaining.unwrap_or(0), bps)),
-                    "processed block"
-                );
-                ack_rx.acknowledge();
-
-                // Attempt prune (without blocking). If the marshal mailbox
-                // is full, the prune will be attempted again next cycle.
-                if let Some(depth) = self.pruning_depth.filter(|_| height % PRUNE_INTERVAL == 0) {
-                    let prune_to = height.saturating_sub(depth);
-                    if prune_to > 0 {
-                        self.mailbox.prune(Height::new(prune_to)).now_or_never();
-                    }
-                }
-            }
         }
     }
 }
