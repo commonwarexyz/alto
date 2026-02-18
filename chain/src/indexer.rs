@@ -1,14 +1,16 @@
+use crate::upload_queue::Mailbox;
 #[cfg(test)]
 use alto_types::Identity;
 use alto_types::{Activity, Block, Finalized, Notarized, Scheme, Seed, Seedable};
+use commonware_consensus::types::{Round, View};
 use commonware_consensus::{marshal, Reporter, Viewable};
+use commonware_cryptography::sha256::Digest;
 use commonware_parallel::Strategy;
 use commonware_runtime::{Metrics, Spawner};
 use std::future::Future;
 #[cfg(test)]
 use std::sync::{atomic::AtomicBool, Arc};
 use tracing::{debug, warn};
-use crate::upload_queue::Mailbox;
 
 /// Trait for interacting with an indexer.
 pub trait Indexer: Clone + Send + Sync + 'static {
@@ -116,81 +118,122 @@ impl<E: Spawner + Metrics> Pusher<E> {
             marshal,
         }
     }
+
+    fn spawn_block_upload(&self, pending: PendingUpload) {
+        let view = pending.view();
+        let round = pending.round();
+        let payload = pending.payload();
+        let label = pending.label();
+        let kind = pending.kind();
+        let upload_queue = self.upload_queue.clone();
+        let mut marshal = self.marshal.clone();
+
+        self.context.with_label(label).spawn(move |_| async move {
+            // Wait for block
+            let block = marshal.subscribe(Some(round), payload).await.await;
+            let Ok(block) = block else {
+                warn!(%view, "subscription for block cancelled");
+                return;
+            };
+
+            // Enqueue for upload
+            if let Err(e) = pending.enqueue_with_block(block, &upload_queue).await {
+                warn!(%view, ?e, "failed to enqueue {kind} for upload");
+                return;
+            }
+            debug!(%view, "{kind} enqueued for upload");
+        });
+    }
+}
+
+enum PendingUpload {
+    Notarization(alto_types::Notarization),
+    Finalization(alto_types::Finalization),
+}
+
+impl PendingUpload {
+    fn view(&self) -> View {
+        match self {
+            Self::Notarization(n) => n.view(),
+            Self::Finalization(f) => f.view(),
+        }
+    }
+
+    fn seed(&self) -> Seed {
+        match self {
+            Self::Notarization(n) => n.seed(),
+            Self::Finalization(f) => f.seed(),
+        }
+    }
+
+    fn round(&self) -> Round {
+        match self {
+            Self::Notarization(n) => n.round(),
+            Self::Finalization(f) => f.round(),
+        }
+    }
+
+    fn payload(&self) -> Digest {
+        match self {
+            Self::Notarization(n) => n.proposal.payload,
+            Self::Finalization(f) => f.proposal.payload,
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Notarization(_) => "notarized_block",
+            Self::Finalization(_) => "finalized_block",
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Notarization(_) => "notarization",
+            Self::Finalization(_) => "finalization",
+        }
+    }
+
+    async fn enqueue_with_block(
+        self,
+        block: Block,
+        upload_queue: &Mailbox,
+    ) -> Result<u64, crate::upload_queue::EnqueueError> {
+        match self {
+            Self::Notarization(n) => {
+                upload_queue
+                    .enqueue_notarization(Notarized::new(n, block))
+                    .await
+            }
+            Self::Finalization(f) => {
+                upload_queue
+                    .enqueue_finalization(Finalized::new(f, block))
+                    .await
+            }
+        }
+    }
 }
 
 impl<E: Spawner + Metrics> Reporter for Pusher<E> {
     type Activity = Activity;
 
     async fn report(&mut self, activity: Self::Activity) {
-        match activity {
-            Activity::Notarization(notarization) => {
-                // Enqueue seed
-                let view = notarization.view();
-                if let Err(e) = self.upload_queue.enqueue_seed(notarization.seed()).await {
-                    warn!(%view, ?e, "failed to enqueue seed for upload");
-                    return;
-                }
-                debug!(%view, "seed enqueued for upload");
+        let pending = match activity {
+            Activity::Notarization(n) => PendingUpload::Notarization(n),
+            Activity::Finalization(f) => PendingUpload::Finalization(f),
+            _ => return,
+        };
 
-                // Enqueue notarized block (once we have it)
-                self.context.with_label("notarized_block").spawn({
-                    let upload_queue = self.upload_queue.clone();
-                    let mut marshal = self.marshal.clone();
-                    move |_| async move {
-                        // Wait for block
-                        let block = marshal
-                            .subscribe(Some(notarization.round()), notarization.proposal.payload)
-                            .await
-                            .await;
-                        let Ok(block) = block else {
-                            warn!(%view, "subscription for block cancelled");
-                            return;
-                        };
+        let view = pending.view();
 
-                        // Enqueue for upload once we have it
-                        let notarization = Notarized::new(notarization, block);
-                        if let Err(e) = upload_queue.enqueue_notarization(notarization).await {
-                            warn!(%view, ?e, "failed to enqueue notarization for upload");
-                            return;
-                        }
-                        debug!(%view, "notarization enqueued for upload");
-                    }
-                });
-            }
-            Activity::Finalization(finalization) => {
-                // Enqueue seed
-                let view = finalization.view();
-                if let Err(e) = self.upload_queue.enqueue_seed(finalization.seed()).await {
-                    warn!(%view, ?e, "failed to enqueue seed for upload");
-                    return;
-                }
-                debug!(%view, "seed enqueued for upload");
-
-                // Enqueue finalized block (once we have it)
-                self.context.with_label("finalized_block").spawn({
-                    let upload_queue = self.upload_queue.clone();
-                    let mut marshal = self.marshal.clone();
-                    move |_| async move {
-                        let block = marshal
-                            .subscribe(Some(finalization.round()), finalization.proposal.payload)
-                            .await
-                            .await;
-                        let Ok(block) = block else {
-                            warn!(%view, "subscription for block cancelled");
-                            return;
-                        };
-
-                        // Enqueue for upload once we have it
-                        let finalization = Finalized::new(finalization, block);
-                        if let Err(e) = upload_queue.enqueue_finalization(finalization).await {
-                            warn!(%view, ?e, "failed to enqueue finalization for upload");
-                            return;
-                        }
-                        debug!(%view, "finalization enqueued for upload");
-                    }
-                });
-            }
-            _ => {}
+        // Enqueue seed
+        if let Err(e) = self.upload_queue.enqueue_seed(pending.seed()).await {
+            warn!(%view, ?e, "failed to enqueue seed for upload");
+            return;
         }
+        debug!(%view, "seed enqueued for upload");
+
+        // Enqueue block activity once the block is available
+        self.spawn_block_upload(pending);
     }
 }
