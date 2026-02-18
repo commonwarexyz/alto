@@ -46,13 +46,23 @@ const PRUNABLE_FINALIZED_BLOCKS_VALUE_PARTITION: &str =
     "follower-prunable-finalized-blocks-value";
 
 // Immutable archive partitions.
+const IMMUTABLE_FINALIZATIONS_BY_HEIGHT_METADATA_PARTITION: &str =
+    "follower-finalizations-by-height-metadata";
+const IMMUTABLE_FINALIZATIONS_BY_HEIGHT_FREEZER_TABLE_PARTITION: &str =
+    "follower-finalizations-by-height-freezer-table";
 const IMMUTABLE_FINALIZATIONS_BY_HEIGHT_KEY_PARTITION: &str =
     "follower-immutable-finalizations-by-height-key";
 const IMMUTABLE_FINALIZATIONS_BY_HEIGHT_VALUE_PARTITION: &str =
     "follower-immutable-finalizations-by-height-value";
+const IMMUTABLE_FINALIZATIONS_BY_HEIGHT_ORDINAL_PARTITION: &str =
+    "follower-finalizations-by-height-ordinal";
+const IMMUTABLE_FINALIZED_BLOCKS_METADATA_PARTITION: &str = "follower-finalized-blocks-metadata";
+const IMMUTABLE_FINALIZED_BLOCKS_FREEZER_TABLE_PARTITION: &str =
+    "follower-finalized-blocks-freezer-table";
 const IMMUTABLE_FINALIZED_BLOCKS_KEY_PARTITION: &str = "follower-immutable-finalized-blocks-key";
 const IMMUTABLE_FINALIZED_BLOCKS_VALUE_PARTITION: &str =
     "follower-immutable-finalized-blocks-value";
+const IMMUTABLE_FINALIZED_BLOCKS_ORDINAL_PARTITION: &str = "follower-finalized-blocks-ordinal";
 
 // Immutable-only constants (freezer table sizing)
 const FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(14); // 1MB
@@ -118,9 +128,10 @@ where
         let fbh = immutable::Archive::init(
             context.with_label("finalizations_by_height"),
             immutable::Config {
-                metadata_partition: "follower-finalizations-by-height-metadata".to_string(),
-                freezer_table_partition: "follower-finalizations-by-height-freezer-table"
+                metadata_partition: IMMUTABLE_FINALIZATIONS_BY_HEIGHT_METADATA_PARTITION
                     .to_string(),
+                freezer_table_partition:
+                    IMMUTABLE_FINALIZATIONS_BY_HEIGHT_FREEZER_TABLE_PARTITION.to_string(),
                 freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                 freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
                 freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
@@ -130,7 +141,7 @@ where
                     .to_string(),
                 freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
                 freezer_value_compression: FINALIZED_COMPRESSION,
-                ordinal_partition: "follower-finalizations-by-height-ordinal".to_string(),
+                ordinal_partition: IMMUTABLE_FINALIZATIONS_BY_HEIGHT_ORDINAL_PARTITION.to_string(),
                 items_per_section: FINALIZED_ITEMS_PER_SECTION,
                 freezer_key_write_buffer: WRITE_BUFFER,
                 freezer_value_write_buffer: WRITE_BUFFER,
@@ -144,8 +155,9 @@ where
         let fb = immutable::Archive::init(
             context.with_label("finalized_blocks"),
             immutable::Config {
-                metadata_partition: "follower-finalized-blocks-metadata".to_string(),
-                freezer_table_partition: "follower-finalized-blocks-freezer-table".to_string(),
+                metadata_partition: IMMUTABLE_FINALIZED_BLOCKS_METADATA_PARTITION.to_string(),
+                freezer_table_partition:
+                    IMMUTABLE_FINALIZED_BLOCKS_FREEZER_TABLE_PARTITION.to_string(),
                 freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                 freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
                 freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
@@ -154,7 +166,7 @@ where
                 freezer_value_partition: IMMUTABLE_FINALIZED_BLOCKS_VALUE_PARTITION.to_string(),
                 freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
                 freezer_value_compression: FINALIZED_COMPRESSION,
-                ordinal_partition: "follower-finalized-blocks-ordinal".to_string(),
+                ordinal_partition: IMMUTABLE_FINALIZED_BLOCKS_ORDINAL_PARTITION.to_string(),
                 items_per_section: FINALIZED_ITEMS_PER_SECTION,
                 freezer_key_write_buffer: WRITE_BUFFER,
                 freezer_value_write_buffer: WRITE_BUFFER,
