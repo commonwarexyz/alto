@@ -33,21 +33,6 @@ fn format_eta(remaining: u64, rate: f64) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::format_eta;
-
-    #[test]
-    fn eta_is_unknown_when_rate_is_zero_and_remaining_non_zero() {
-        assert_eq!(format_eta(42, 0.0), "unknown");
-    }
-
-    #[test]
-    fn eta_is_zero_when_no_remaining_work() {
-        assert_eq!(format_eta(0, 0.0), "0s");
-    }
-}
-
 /// Thin [Reporter] that acknowledges blocks immediately and forwards
 /// them to the [Application] actor for async processing.
 #[derive(Clone)]
@@ -125,5 +110,20 @@ impl<E: Clock + Spawner> Application<E> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_eta;
+
+    #[test]
+    fn eta_is_unknown_when_rate_is_zero_and_remaining_non_zero() {
+        assert_eq!(format_eta(42, 0.0), "unknown");
+    }
+
+    #[test]
+    fn eta_is_zero_when_no_remaining_work() {
+        assert_eq!(format_eta(0, 0.0), "0s");
     }
 }
