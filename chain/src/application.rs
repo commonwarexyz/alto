@@ -1,13 +1,10 @@
-use alto_types::{Block, PublicKey, Scheme, EPOCH};
+use alto_types::{Block, Context, Scheme, EPOCH};
 use commonware_consensus::{
     marshal::{ingress::mailbox::AncestorStream, Update},
-    simplex::types::Context,
     types::{Height, Round, View},
     Heightable, Reporter,
 };
-use commonware_cryptography::{
-    ed25519, sha256, sha256::Digest, Digest as _, Digestible, Hasher, Sha256, Signer,
-};
+use commonware_cryptography::{ed25519, sha256, Digest, Digestible, Hasher, Sha256, Signer};
 use commonware_runtime::{Clock, Metrics, Spawner};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
@@ -51,7 +48,7 @@ where
     E: Rng + Spawner + Metrics + Clock,
 {
     type SigningScheme = Scheme;
-    type Context = Context<Digest, PublicKey>;
+    type Context = Context;
     type Block = Block;
 
     async fn genesis(&mut self) -> Self::Block {
@@ -86,7 +83,7 @@ where
 {
     async fn verify(
         &mut self,
-        (runtime_context, _): (E, Self::Context),
+        (runtime_context, _): (E, Context),
         mut ancestry: AncestorStream<Self::SigningScheme, Self::Block>,
     ) -> bool {
         let Some(block) = ancestry.next().await else {

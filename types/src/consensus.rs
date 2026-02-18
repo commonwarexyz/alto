@@ -9,11 +9,11 @@ use commonware_cryptography::{
     sha256::Digest,
 };
 
-pub use vrf::Seedable;
-
 pub type Context = CContext<Digest, PublicKey>;
+
 pub type Scheme = vrf::Scheme<PublicKey, MinSig>;
 pub type Seed = vrf::Seed<MinSig>;
+pub use vrf::Seedable;
 pub type Notarization = CNotarization<Scheme, Digest>;
 pub type Finalization = CFinalization<Scheme, Digest>;
 pub type Activity = CActivity<Scheme, Digest>;
