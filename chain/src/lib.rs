@@ -236,7 +236,6 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: None,
-                    upload_queue_config: None,
                     strategy: Sequential,
                 };
                 let validator_context = context.with_label(&uid);
@@ -425,7 +424,6 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: None,
-                    upload_queue_config: None,
                     strategy: Sequential,
                 };
                 let validator_context = context.with_label(&uid);
@@ -533,7 +531,6 @@ mod tests {
                 fetch_concurrent: 10,
                 fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                 indexer: None,
-                upload_queue_config: None,
                 strategy: Sequential,
             };
             let validator_context = context.with_label(&uid);
@@ -684,7 +681,6 @@ mod tests {
                         fetch_concurrent: 10,
                         fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                         indexer: None,
-                        upload_queue_config: None,
                         strategy: Sequential,
                     };
                     let validator_context = context.with_label(&uid);
@@ -873,7 +869,6 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: Some(indexer.clone()),
-                    upload_queue_config: None,
                     strategy: Sequential,
                 };
                 let validator_context = context.with_label(&uid);

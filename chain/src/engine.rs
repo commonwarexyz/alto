@@ -53,8 +53,8 @@ const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
-const BUFFER_POOL_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
-const BUFFER_POOL_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
+const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
+const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(16);
 
@@ -84,24 +84,20 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer, S: Strategy> {
 
     pub strategy: S,
 
-    /// The indexer client for uploading blocks.
-    /// If provided, a reliable upload queue will be created.
     pub indexer: Option<I>,
-
-    /// Configuration for the upload queue (uses defaults if not specified).
-    pub upload_queue_config: Option<upload_queue::Config>,
 }
 
 type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpocher>;
 
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
-pub struct Engine<
+pub struct Engine<E, B, S, I>
+where
     E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     S: Strategy,
     I: Indexer,
-> {
+{
     context: ContextCell<E>,
 
     buffer: buffered::Engine<E, PublicKey, Block>,
@@ -119,24 +115,15 @@ pub struct Engine<
 
     consensus: Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E>, S>,
 
-    /// Upload queue actor and indexer client (if indexer is configured).
     upload_queue: Option<(UploadQueueActor<E>, I)>,
 }
 
-impl<
-        E: BufferPooler
-            + Clock
-            + GClock
-            + Rng
-            + CryptoRng
-            + Spawner
-            + ThreadPooler
-            + Storage
-            + Metrics,
-        B: Blocker<PublicKey = PublicKey>,
-        S: Strategy,
-        I: Indexer,
-    > Engine<E, B, S, I>
+impl<E, B, S, I> Engine<E, B, S, I>
+where
+    E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + ThreadPooler + Storage + Metrics,
+    B: Blocker<PublicKey = PublicKey>,
+    S: Strategy,
+    I: Indexer,
 {
     /// Create a new [Engine].
     pub async fn new(context: E, cfg: Config<B, I, S>) -> Self {
@@ -152,9 +139,8 @@ impl<
             },
         );
 
-        // Create the buffer pool
-        let page_cache =
-            CacheRef::from_pooler(&context, BUFFER_POOL_PAGE_SIZE, BUFFER_POOL_CAPACITY);
+        // Create the page cache
+        let page_cache = CacheRef::from_pooler(&context, PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
 
         // Initialize finalizations by height
         let start = Instant::now();
@@ -280,12 +266,10 @@ impl<
         // Create the upload queue and reporter (if indexer is configured)
         let (upload_queue, pusher) = match cfg.indexer {
             Some(indexer) => {
-                let queue_config =
-                    cfg.upload_queue_config
-                        .unwrap_or_else(|| upload_queue::Config {
-                            partition: format!("{}-upload-queue", cfg.partition_prefix),
-                            ..Default::default()
-                        });
+                let queue_config = upload_queue::Config {
+                    partition: format!("{}-upload-queue", cfg.partition_prefix),
+                    ..Default::default()
+                };
 
                 match UploadQueueActor::new(context.with_label("upload_queue"), queue_config).await
                 {
@@ -325,7 +309,7 @@ impl<
                 activity_timeout: cfg.activity_timeout,
                 skip_timeout: cfg.skip_timeout,
                 fetch_concurrent: cfg.fetch_concurrent,
-                page_cache: page_cache.clone(),
+                page_cache,
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
                 blocker: cfg.blocker,
