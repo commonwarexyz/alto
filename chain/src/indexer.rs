@@ -8,7 +8,6 @@ use std::future::Future;
 #[cfg(test)]
 use std::sync::{atomic::AtomicBool, Arc};
 use tracing::{debug, warn};
-
 use crate::upload_queue::Mailbox;
 
 /// Trait for interacting with an indexer.
@@ -100,16 +99,20 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
 #[derive(Clone)]
 pub struct Pusher<E: Spawner + Metrics> {
     context: E,
-    mailbox: Mailbox,
+    upload_queue: Mailbox,
     marshal: marshal::Mailbox<Scheme, Block>,
 }
 
 impl<E: Spawner + Metrics> Pusher<E> {
     /// Create a new [Pusher].
-    pub fn new(context: E, mailbox: Mailbox, marshal: marshal::Mailbox<Scheme, Block>) -> Self {
+    pub fn new(
+        context: E,
+        upload_queue: Mailbox,
+        marshal: marshal::Mailbox<Scheme, Block>,
+    ) -> Self {
         Self {
             context,
-            mailbox,
+            upload_queue,
             marshal,
         }
     }
@@ -123,7 +126,7 @@ impl<E: Spawner + Metrics> Reporter for Pusher<E> {
             Activity::Notarization(notarization) => {
                 // Enqueue seed
                 let view = notarization.view();
-                if let Err(e) = self.mailbox.enqueue_seed(notarization.seed()).await {
+                if let Err(e) = self.upload_queue.enqueue_seed(notarization.seed()).await {
                     warn!(%view, ?e, "failed to enqueue seed for upload");
                     return;
                 }
@@ -131,7 +134,7 @@ impl<E: Spawner + Metrics> Reporter for Pusher<E> {
 
                 // Enqueue notarized block (once we have it)
                 self.context.with_label("notarized_block").spawn({
-                    let mailbox = self.mailbox.clone();
+                    let upload_queue = self.upload_queue.clone();
                     let mut marshal = self.marshal.clone();
                     move |_| async move {
                         // Wait for block
@@ -146,7 +149,7 @@ impl<E: Spawner + Metrics> Reporter for Pusher<E> {
 
                         // Enqueue for upload once we have it
                         let notarization = Notarized::new(notarization, block);
-                        if let Err(e) = mailbox.enqueue_notarization(notarization).await {
+                        if let Err(e) = upload_queue.enqueue_notarization(notarization).await {
                             warn!(%view, ?e, "failed to enqueue notarization for upload");
                             return;
                         }
@@ -157,7 +160,7 @@ impl<E: Spawner + Metrics> Reporter for Pusher<E> {
             Activity::Finalization(finalization) => {
                 // Enqueue seed
                 let view = finalization.view();
-                if let Err(e) = self.mailbox.enqueue_seed(finalization.seed()).await {
+                if let Err(e) = self.upload_queue.enqueue_seed(finalization.seed()).await {
                     warn!(%view, ?e, "failed to enqueue seed for upload");
                     return;
                 }
@@ -165,7 +168,7 @@ impl<E: Spawner + Metrics> Reporter for Pusher<E> {
 
                 // Enqueue finalized block (once we have it)
                 self.context.with_label("finalized_block").spawn({
-                    let mailbox = self.mailbox.clone();
+                    let upload_queue = self.upload_queue.clone();
                     let mut marshal = self.marshal.clone();
                     move |_| async move {
                         let block = marshal
@@ -179,7 +182,7 @@ impl<E: Spawner + Metrics> Reporter for Pusher<E> {
 
                         // Enqueue for upload once we have it
                         let finalization = Finalized::new(finalization, block);
-                        if let Err(e) = mailbox.enqueue_finalization(finalization).await {
+                        if let Err(e) = upload_queue.enqueue_finalization(finalization).await {
                             warn!(%view, ?e, "failed to enqueue finalization for upload");
                             return;
                         }

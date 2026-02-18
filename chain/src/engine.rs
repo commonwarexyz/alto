@@ -271,21 +271,16 @@ where
                     ..Default::default()
                 };
 
-                match UploadQueueActor::new(context.with_label("upload_queue"), queue_config).await
-                {
-                    Ok((actor, mailbox)) => {
-                        let pusher = indexer::Pusher::new(
-                            context.with_label("indexer"),
-                            mailbox,
-                            marshal_mailbox.clone(),
-                        );
-                        (Some((actor, indexer)), Some(pusher))
-                    }
-                    Err(e) => {
-                        error!(?e, "failed to create upload queue, indexer disabled");
-                        (None, None)
-                    }
-                }
+                let (actor, mailbox) =
+                    UploadQueueActor::new(context.with_label("upload_queue"), queue_config)
+                        .await
+                        .expect("failed to create upload queue");
+                let pusher = indexer::Pusher::new(
+                    context.with_label("indexer"),
+                    mailbox,
+                    marshal_mailbox.clone(),
+                );
+                (Some((actor, indexer)), Some(pusher))
             }
             None => (None, None),
         };
@@ -309,10 +304,10 @@ where
                 activity_timeout: cfg.activity_timeout,
                 skip_timeout: cfg.skip_timeout,
                 fetch_concurrent: cfg.fetch_concurrent,
-                page_cache,
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
                 blocker: cfg.blocker,
+                page_cache,
                 elector: Random,
                 strategy: cfg.strategy,
             },
