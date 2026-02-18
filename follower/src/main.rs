@@ -38,12 +38,12 @@ pub struct Config {
     pub source: String,
     pub identity: String,
     pub directory: String,
-    pub worker_threads: usize,
-    pub signature_threads: usize,
+    pub worker_threads: NonZero<usize>,
+    pub signature_threads: NonZero<usize>,
     pub log_level: String,
     pub metrics_port: u16,
-    pub mailbox_size: usize,
-    pub max_repair: usize,
+    pub mailbox_size: NonZero<usize>,
+    pub max_repair: NonZero<usize>,
     pub tip: bool,
     pub pruning_depth: Option<u64>,
 }
@@ -195,7 +195,7 @@ fn main() {
     // Initialize runtime
     let cfg = tokio::Config::default()
         .with_tcp_nodelay(Some(true))
-        .with_worker_threads(config.worker_threads)
+        .with_worker_threads(config.worker_threads.get())
         .with_storage_directory(PathBuf::from(config.directory))
         .with_catch_panics(false);
     let executor = tokio::Runner::new(cfg);
@@ -247,13 +247,13 @@ fn main() {
 
         // Create engine
         let strategy = context
-            .create_strategy(NonZero::new(config.signature_threads).expect("signature_threads must be non-zero"))
+            .create_strategy(config.signature_threads)
             .unwrap();
         let (engine, mut mailbox, last_processed_height) = engine::Engine::new(
             context.with_label("engine"),
             scheme.clone(),
-            config.mailbox_size,
-            NonZero::new(config.max_repair).expect("max_repair must be non-zero"),
+            config.mailbox_size.get(),
+            config.max_repair,
             strategy,
             config.pruning_depth,
         )
@@ -280,12 +280,12 @@ fn main() {
         }
 
         // Create resolver
-        let (ingress_tx, ingress_rx) = mpsc::channel(config.mailbox_size);
+        let (ingress_tx, ingress_rx) = mpsc::channel(config.mailbox_size.get());
         let (resolver_actor, resolver) = resolver::Actor::new(
             context.with_label("resolver"),
             client.clone(),
             ingress_tx,
-            config.mailbox_size,
+            config.mailbox_size.get(),
         );
         let resolver_handle = resolver_actor.start();
 

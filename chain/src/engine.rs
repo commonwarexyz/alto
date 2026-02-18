@@ -90,12 +90,13 @@ type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpoch
 
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
-pub struct Engine<
+pub struct Engine<E, B, S, I>
+where
     E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     S: Strategy,
     I: Indexer,
-> {
+{
     context: ContextCell<E>,
 
     buffer: buffered::Engine<E, PublicKey, Block>,
@@ -115,20 +116,20 @@ pub struct Engine<
         Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
 }
 
-impl<
-        E: BufferPooler
-            + Clock
-            + GClock
-            + Rng
-            + CryptoRng
-            + Spawner
-            + ThreadPooler
-            + Storage
-            + Metrics,
-        B: Blocker<PublicKey = PublicKey>,
-        S: Strategy,
-        I: Indexer,
-    > Engine<E, B, S, I>
+impl<E, B, S, I> Engine<E, B, S, I>
+where
+    E: BufferPooler
+        + Clock
+        + GClock
+        + Rng
+        + CryptoRng
+        + Spawner
+        + ThreadPooler
+        + Storage
+        + Metrics,
+    B: Blocker<PublicKey = PublicKey>,
+    S: Strategy,
+    I: Indexer,
 {
     /// Create a new [Engine].
     pub async fn new(context: E, cfg: Config<B, I, S>) -> Self {

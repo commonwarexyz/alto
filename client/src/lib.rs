@@ -107,6 +107,11 @@ impl<S: Strategy> ClientBuilder<S> {
     }
 
     /// Build the client.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the URI is invalid, cannot be resolved, or if TLS
+    /// certificates are malformed.
     pub fn build(self) -> Client<S> {
         let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, self.identity);
 
