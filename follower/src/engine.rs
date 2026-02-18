@@ -168,7 +168,9 @@ where
         let app_handle = app.start();
 
         // Start marshal
-        let marshal_handle = self.marshal.start(app_reporter, self.buffer_mailbox, marshal);
+        let marshal_handle = self
+            .marshal
+            .start(app_reporter, self.buffer_mailbox, marshal);
 
         // Wait for any actor to finish
         if let Err(e) = try_join_all(vec![buffer_handle, marshal_handle, app_handle]).await {
