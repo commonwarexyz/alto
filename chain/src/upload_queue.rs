@@ -213,6 +213,10 @@ impl Default for Config {
 
 type UploadResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
+const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
+const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
+const WRITE_BUFFER_SIZE: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
+
 /// A durable queue actor for reliable upload delivery.
 pub struct Actor<E: BufferPooler + Spawner + Clock + Storage + Metrics> {
     context: E,
@@ -239,8 +243,12 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
                 items_per_section: config.items_per_section,
                 compression: None,
                 codec_config: (),
-                page_cache: CacheRef::from_pooler(&context, NZU16!(1024), NZUsize!(1024)),
-                write_buffer: NZUsize!(64 * 1024),
+                page_cache: CacheRef::from_pooler(
+                    &context,
+                    PAGE_CACHE_PAGE_SIZE,
+                    PAGE_CACHE_CAPACITY,
+                ),
+                write_buffer: WRITE_BUFFER_SIZE,
             },
         )
         .await?;
