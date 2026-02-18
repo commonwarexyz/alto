@@ -23,6 +23,7 @@ use std::{
 };
 use tracing::{error, info, warn, Level};
 
+mod application;
 mod archive;
 mod engine;
 mod feeder;
