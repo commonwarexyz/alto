@@ -118,15 +118,7 @@ where
 
 impl<E, B, S, I> Engine<E, B, S, I>
 where
-    E: BufferPooler
-        + Clock
-        + GClock
-        + Rng
-        + CryptoRng
-        + Spawner
-        + ThreadPooler
-        + Storage
-        + Metrics,
+    E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + ThreadPooler + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     S: Strategy,
     I: Indexer,
