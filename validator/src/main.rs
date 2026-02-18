@@ -1,6 +1,8 @@
 use alto_chain::{Config, Peers};
 
 mod engine;
+#[cfg(test)]
+mod test_utils;
 use alto_client::Client;
 use alto_types::{EPOCH, NAMESPACE};
 use clap::{Arg, Command};

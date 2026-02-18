@@ -30,3 +30,10 @@ serde_yaml = "0.9.34"
 [[bin]]
 name = "validator"
 path = "src/main.rs"
+
+[dev-dependencies]
+commonware-consensus = { workspace = true, features = ["mocks"] }
+commonware-cryptography = { workspace = true, features = ["mocks"] }
+commonware-macros = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt"] }
+tokio = { workspace = true }

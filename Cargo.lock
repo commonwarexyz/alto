@@ -213,6 +213,7 @@ dependencies = [
  "commonware-consensus",
  "commonware-cryptography",
  "commonware-deployer",
+ "commonware-macros",
  "commonware-p2p",
  "commonware-parallel",
  "commonware-resolver",
@@ -223,7 +224,9 @@ dependencies = [
  "governor",
  "rand 0.8.5",
  "serde_yaml",
+ "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
