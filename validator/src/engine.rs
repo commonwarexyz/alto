@@ -1,4 +1,4 @@
-use crate::{
+use alto_chain::{
     application::Application,
     indexer::{self, Indexer},
 };
