@@ -304,9 +304,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
         let mut failure_count: u32 = 0;
         let mut backoff_until: Option<SystemTime> = None;
 
-        if !self.spawn_uploads(&indexer, backoff_until).await {
-            return;
-        }
+        self.spawn_uploads(&indexer, backoff_until).await;
 
         select_loop! {
             self.context,
@@ -331,19 +329,14 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
                 }
             },
             (position, result) = self.uploads.next_completed() => {
-                let ok = self.handle_completion(position, result, &mut failure_count, &mut backoff_until).await;
-                if !ok {
-                    break;
-                }
+                self.handle_completion(position, result, &mut failure_count, &mut backoff_until).await;
             },
             _ = OptionFuture::from(backoff_until.map(|until| self.context.sleep_until(until))) => {
                 debug!("backoff expired, retrying uploads");
                 backoff_until = None;
             },
             on_end => {
-                if !self.spawn_uploads(&indexer, backoff_until).await {
-                    break;
-                }
+                self.spawn_uploads(&indexer, backoff_until).await;
             },
         }
     }
@@ -354,7 +347,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
         result: UploadResult,
         failure_count: &mut u32,
         backoff_until: &mut Option<SystemTime>,
-    ) -> bool {
+    ) {
         self.in_flight.remove(&position);
 
         match result {
@@ -380,7 +373,6 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
                     *failure_count = 0;
                     *backoff_until = None;
                 }
-                true
             }
             Err(e) => {
                 warn!(?e, position, "upload failed, will retry");
@@ -392,7 +384,6 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
 
                 // Re-deliver unacked positions from the queue floor.
                 self.reader.reset().await;
-                true
             }
         }
     }
@@ -420,9 +411,9 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
         &mut self,
         indexer: &I,
         backoff_until: Option<SystemTime>,
-    ) -> bool {
+    ) {
         if backoff_until.is_some_and(|until| self.context.now() < until) {
-            return true;
+            return;
         }
 
         let mut slots = self
@@ -430,7 +421,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
             .max_concurrent_uploads
             .saturating_sub(self.uploads.len());
         if slots == 0 {
-            return true;
+            return;
         }
 
         while slots > 0 {
@@ -457,7 +448,6 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
 
             slots -= 1;
         }
-        true
     }
 }
 
