@@ -335,11 +335,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
                         let _ = ack.send(Ok(position));
                     }
                     Err(e) => {
-                        // Mutable storage errors are unrecoverable for this actor instance.
-                        let error = e.to_string();
-                        warn!(error = %error, "fatal queue enqueue error, stopping actor");
-                        let _ = ack.send(Err(EnqueueError::QueueError(error)));
-                        break;
+                        panic!("fatal queue enqueue error: {e}");
                     }
                 }
             },
@@ -373,15 +369,11 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
         match result {
             Ok(()) => {
                 if let Err(e) = self.reader.ack(position).await {
-                    // Mutable storage errors are unrecoverable for this actor instance.
-                    warn!(?e, position, "fatal queue ack error, stopping actor");
-                    return false;
+                    panic!("fatal queue ack error at position {position}: {e}");
                 }
 
                 if let Err(e) = self.writer.sync().await {
-                    // Mutable storage errors are unrecoverable for this actor instance.
-                    warn!(?e, "fatal queue sync error, stopping actor");
-                    return false;
+                    panic!("fatal queue sync error: {e}");
                 }
 
                 self.metrics.uploads.inc(status::Status::Success);
@@ -454,9 +446,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
             let next = match self.reader.try_recv().await {
                 Ok(item) => item,
                 Err(e) => {
-                    // Mutable storage errors are unrecoverable for this actor instance.
-                    warn!(?e, "fatal queue dequeue error, stopping actor");
-                    return false;
+                    panic!("fatal queue dequeue error: {e}");
                 }
             };
 
