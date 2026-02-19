@@ -18,9 +18,10 @@ use commonware_storage::{queue, queue::shared};
 use commonware_utils::{
     channel::{mpsc, oneshot},
     futures::{OptionFuture, Pool},
-    NZUsize, NZU16, NZU64,
+    NZU32, NZUsize, NZU16, NZU64,
 };
 use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
+use rand::Rng;
 use std::{
     collections::HashSet,
     num::NonZero,
@@ -194,6 +195,10 @@ pub struct Config {
     pub retry_delay: Duration,
     /// Maximum delay between retries.
     pub max_retry_delay: Duration,
+    /// Number of failures per exponential backoff step.
+    pub failures_per_backoff_step: NonZero<u32>,
+    /// Maximum jitter percentage added to computed retry delay.
+    pub retry_jitter_percent: u8,
     /// Number of items per queue section.
     pub items_per_section: NonZero<u64>,
 }
@@ -206,6 +211,8 @@ impl Default for Config {
             max_concurrent_uploads: 8,
             retry_delay: Duration::from_millis(500),
             max_retry_delay: Duration::from_secs(30),
+            failures_per_backoff_step: NZU32!(2),
+            retry_jitter_percent: 25,
             items_per_section: NZU64!(1024),
         }
     }
@@ -213,12 +220,19 @@ impl Default for Config {
 
 type UploadResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
+fn compute_base_backoff_delay(config: &Config, failure_count: u32) -> Duration {
+    let step = config.failures_per_backoff_step.get();
+    let exponent = failure_count / step;
+    let multiplier = 1u32.checked_shl(exponent).unwrap_or(u32::MAX);
+    (config.retry_delay * multiplier).min(config.max_retry_delay)
+}
+
 const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const WRITE_BUFFER_SIZE: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
 
 /// A durable queue actor for reliable upload delivery.
-pub struct Actor<E: BufferPooler + Spawner + Clock + Storage + Metrics> {
+pub struct Actor<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> {
     context: E,
     config: Config,
     metrics: QueueMetrics,
@@ -229,9 +243,12 @@ pub struct Actor<E: BufferPooler + Spawner + Clock + Storage + Metrics> {
     in_flight: HashSet<u64>,
 }
 
-impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
+impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
     /// Create a new upload queue actor, recovering state from disk if available.
     pub async fn new(context: E, config: Config) -> Result<(Self, Mailbox), queue::Error> {
+        let mut config = config;
+        config.retry_jitter_percent = config.retry_jitter_percent.min(100);
+
         let metrics = QueueMetrics::new(&context);
 
         let (sender, receiver) = mpsc::channel(config.mailbox_size);
@@ -293,7 +310,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
     async fn run<I: Indexer>(mut self, indexer: I) {
         info!("upload queue actor started");
 
-        let mut retry_count: u32 = 0;
+        let mut failure_count: u32 = 0;
         let mut backoff_until: Option<SystemTime> = None;
 
         if !self.spawn_uploads(&indexer, backoff_until).await {
@@ -331,7 +348,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
                 }
             },
             (position, result) = self.uploads.next_completed() => {
-                let ok = self.handle_completion(position, result, &mut retry_count, &mut backoff_until).await;
+                let ok = self.handle_completion(position, result, &mut failure_count, &mut backoff_until).await;
                 if !ok {
                     break;
                 }
@@ -353,7 +370,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
         &mut self,
         position: u64,
         result: UploadResult,
-        retry_count: &mut u32,
+        failure_count: &mut u32,
         backoff_until: &mut Option<SystemTime>,
     ) -> bool {
         self.in_flight.remove(&position);
@@ -382,7 +399,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
                 // scheduled due to another failing position.
                 let queue_size = self.writer.size().await;
                 if self.in_flight.is_empty() && ack_floor >= queue_size {
-                    *retry_count = 0;
+                    *failure_count = 0;
                     *backoff_until = None;
                 }
                 true
@@ -390,13 +407,10 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
             Err(e) => {
                 warn!(?e, position, "upload failed, will retry");
                 self.metrics.uploads.inc(status::Status::Failure);
-                // Advance backoff once per retry round (not per failed item).
-                // Concurrent failures in the same round should share one delay.
-                if backoff_until.is_none() {
-                    let delay = self.compute_backoff_delay(*retry_count);
-                    *backoff_until = Some(self.context.now() + delay);
-                    *retry_count = retry_count.saturating_add(1);
-                }
+                let delay = self.compute_backoff_delay(*failure_count);
+                let jitter = self.sample_jitter(delay);
+                *backoff_until = Some(self.context.now() + delay.saturating_add(jitter));
+                *failure_count = failure_count.saturating_add(1);
 
                 // Re-deliver unacked positions from the queue floor.
                 self.reader.reset().await;
@@ -405,9 +419,23 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics> Actor<E> {
         }
     }
 
-    fn compute_backoff_delay(&self, retry_count: u32) -> Duration {
-        let multiplier = 1u32.checked_shl(retry_count).unwrap_or(u32::MAX);
-        (self.config.retry_delay * multiplier).min(self.config.max_retry_delay)
+    fn compute_backoff_delay(&self, failure_count: u32) -> Duration {
+        compute_base_backoff_delay(&self.config, failure_count)
+    }
+
+    fn sample_jitter(&mut self, delay: Duration) -> Duration {
+        let jitter_percent = self.config.retry_jitter_percent as u32;
+        if jitter_percent == 0 || delay.is_zero() {
+            return Duration::ZERO;
+        }
+
+        let jitter_nanos = delay.as_nanos().saturating_mul(jitter_percent as u128) / 100;
+        let jitter_nanos = jitter_nanos.min(u64::MAX as u128) as u64;
+        if jitter_nanos == 0 {
+            return Duration::ZERO;
+        }
+
+        Duration::from_nanos(self.context.gen_range(0..=jitter_nanos))
     }
 
     async fn spawn_uploads<I: Indexer>(
@@ -671,5 +699,22 @@ mod tests {
 
         let state = state.lock().unwrap();
         assert!(state.successes >= 1, "pending upload was not replayed");
+    }
+
+    #[test]
+    fn backoff_doubles_every_configured_failures() {
+        let config = Config {
+            retry_delay: Duration::from_millis(100),
+            max_retry_delay: Duration::from_secs(10),
+            failures_per_backoff_step: NZU32!(2),
+            retry_jitter_percent: 0,
+            ..Default::default()
+        };
+
+        assert_eq!(compute_base_backoff_delay(&config, 0), Duration::from_millis(100));
+        assert_eq!(compute_base_backoff_delay(&config, 1), Duration::from_millis(100));
+        assert_eq!(compute_base_backoff_delay(&config, 2), Duration::from_millis(200));
+        assert_eq!(compute_base_backoff_delay(&config, 3), Duration::from_millis(200));
+        assert_eq!(compute_base_backoff_delay(&config, 4), Duration::from_millis(400));
     }
 }
