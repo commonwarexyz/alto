@@ -333,10 +333,6 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
                         self.metrics.enqueued.inc();
                         self.metrics.depth.inc();
                         let _ = ack.send(Ok(position));
-
-                        if !self.spawn_uploads(&indexer, backoff_until).await {
-                            break;
-                        }
                     }
                     Err(e) => {
                         // Mutable storage errors are unrecoverable for this actor instance.
@@ -352,13 +348,12 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
                 if !ok {
                     break;
                 }
-                if !self.spawn_uploads(&indexer, backoff_until).await {
-                    break;
-                }
             },
             _ = OptionFuture::from(backoff_until.map(|until| self.context.sleep_until(until))) => {
                 debug!("backoff expired, retrying uploads");
                 backoff_until = None;
+            },
+            on_end => {
                 if !self.spawn_uploads(&indexer, backoff_until).await {
                     break;
                 }
