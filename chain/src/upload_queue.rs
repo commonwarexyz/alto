@@ -36,15 +36,6 @@ pub enum EnqueueError {
     /// The upload queue actor has stopped.
     #[error("upload queue actor stopped")]
     ActorStopped,
-    /// Failed to write to the persistent queue.
-    #[error("queue error: {0}")]
-    QueueError(String),
-}
-
-impl From<queue::Error> for EnqueueError {
-    fn from(e: queue::Error) -> Self {
-        EnqueueError::QueueError(e.to_string())
-    }
 }
 
 /// Message sent to the upload queue actor.
