@@ -18,7 +18,7 @@ use commonware_storage::{queue, queue::shared};
 use commonware_utils::{
     channel::{mpsc, oneshot},
     futures::{OptionFuture, Pool},
-    NZU32, NZUsize, NZU16, NZU64,
+    NZUsize, NZU16, NZU32, NZU64,
 };
 use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
 use rand::Rng;
@@ -407,11 +407,7 @@ impl<E: BufferPooler + Spawner + Clock + Storage + Metrics + Rng> Actor<E> {
         Duration::from_nanos(self.context.gen_range(0..=jitter_nanos))
     }
 
-    async fn spawn_uploads<I: Indexer>(
-        &mut self,
-        indexer: &I,
-        backoff_until: Option<SystemTime>,
-    ) {
+    async fn spawn_uploads<I: Indexer>(&mut self, indexer: &I, backoff_until: Option<SystemTime>) {
         if backoff_until.is_some_and(|until| self.context.now() < until) {
             return;
         }
@@ -677,10 +673,25 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(compute_base_backoff_delay(&config, 0), Duration::from_millis(100));
-        assert_eq!(compute_base_backoff_delay(&config, 1), Duration::from_millis(100));
-        assert_eq!(compute_base_backoff_delay(&config, 2), Duration::from_millis(200));
-        assert_eq!(compute_base_backoff_delay(&config, 3), Duration::from_millis(200));
-        assert_eq!(compute_base_backoff_delay(&config, 4), Duration::from_millis(400));
+        assert_eq!(
+            compute_base_backoff_delay(&config, 0),
+            Duration::from_millis(100)
+        );
+        assert_eq!(
+            compute_base_backoff_delay(&config, 1),
+            Duration::from_millis(100)
+        );
+        assert_eq!(
+            compute_base_backoff_delay(&config, 2),
+            Duration::from_millis(200)
+        );
+        assert_eq!(
+            compute_base_backoff_delay(&config, 3),
+            Duration::from_millis(200)
+        );
+        assert_eq!(
+            compute_base_backoff_delay(&config, 4),
+            Duration::from_millis(400)
+        );
     }
 }
