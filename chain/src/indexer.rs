@@ -1,3 +1,4 @@
+use crate::upload_queue::Mailbox;
 #[cfg(test)]
 use alto_types::Identity;
 use alto_types::{Activity, Block, Finalized, Notarized, Scheme, Seed, Seedable};
@@ -6,7 +7,7 @@ use commonware_parallel::Strategy;
 use commonware_runtime::{Metrics, Spawner};
 use std::future::Future;
 #[cfg(test)]
-use std::{sync::atomic::AtomicBool, sync::Arc};
+use std::sync::{atomic::AtomicBool, Arc};
 use tracing::{debug, warn};
 
 /// Trait for interacting with an indexer.
@@ -96,47 +97,44 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
 
 /// An implementation of [Indexer] for the [Reporter] trait.
 #[derive(Clone)]
-pub struct Pusher<E: Spawner + Metrics, I: Indexer> {
+pub struct Pusher<E: Spawner + Metrics> {
     context: E,
-    indexer: I,
+    upload_queue: Mailbox,
     marshal: marshal::Mailbox<Scheme, Block>,
 }
 
-impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
+impl<E: Spawner + Metrics> Pusher<E> {
     /// Create a new [Pusher].
-    pub fn new(context: E, indexer: I, marshal: marshal::Mailbox<Scheme, Block>) -> Self {
+    pub fn new(
+        context: E,
+        upload_queue: Mailbox,
+        marshal: marshal::Mailbox<Scheme, Block>,
+    ) -> Self {
         Self {
             context,
-            indexer,
+            upload_queue,
             marshal,
         }
     }
 }
 
-impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
+impl<E: Spawner + Metrics> Reporter for Pusher<E> {
     type Activity = Activity;
 
     async fn report(&mut self, activity: Self::Activity) {
         match activity {
             Activity::Notarization(notarization) => {
-                // Upload seed to indexer
+                // Enqueue seed
                 let view = notarization.view();
-                self.context.with_label("notarized_seed").spawn({
-                    let indexer = self.indexer.clone();
-                    let seed = notarization.seed();
-                    move |_| async move {
-                        let result = indexer.seed_upload(seed).await;
-                        if let Err(e) = result {
-                            warn!(?e, "failed to upload seed");
-                            return;
-                        }
-                        debug!(%view, "seed uploaded to indexer");
-                    }
-                });
+                if let Err(e) = self.upload_queue.enqueue_seed(notarization.seed()).await {
+                    warn!(%view, ?e, "failed to enqueue seed for upload");
+                    return;
+                }
+                debug!(%view, "seed enqueued for upload");
 
-                // Upload block to indexer (once we have it)
+                // Enqueue notarized block (once we have it)
                 self.context.with_label("notarized_block").spawn({
-                    let indexer = self.indexer.clone();
+                    let upload_queue = self.upload_queue.clone();
                     let mut marshal = self.marshal.clone();
                     move |_| async move {
                         // Wait for block
@@ -149,36 +147,28 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                             return;
                         };
 
-                        // Upload to indexer once we have it
+                        // Enqueue for upload once we have it
                         let notarization = Notarized::new(notarization, block);
-                        let result = indexer.notarized_upload(notarization).await;
-                        if let Err(e) = result {
-                            warn!(?e, "failed to upload notarization");
+                        if let Err(e) = upload_queue.enqueue_notarization(notarization).await {
+                            warn!(%view, ?e, "failed to enqueue notarization for upload");
                             return;
                         }
-                        debug!(%view, "notarization uploaded to indexer");
+                        debug!(%view, "notarization enqueued for upload");
                     }
                 });
             }
             Activity::Finalization(finalization) => {
-                // Upload seed to indexer
+                // Enqueue seed
                 let view = finalization.view();
-                self.context.with_label("finalized_seed").spawn({
-                    let indexer = self.indexer.clone();
-                    let seed = finalization.seed();
-                    move |_| async move {
-                        let result = indexer.seed_upload(seed).await;
-                        if let Err(e) = result {
-                            warn!(?e, "failed to upload seed");
-                            return;
-                        }
-                        debug!(%view, "seed uploaded to indexer");
-                    }
-                });
+                if let Err(e) = self.upload_queue.enqueue_seed(finalization.seed()).await {
+                    warn!(%view, ?e, "failed to enqueue seed for upload");
+                    return;
+                }
+                debug!(%view, "seed enqueued for upload");
 
-                // Upload block to indexer (once we have it)
+                // Enqueue finalized block (once we have it)
                 self.context.with_label("finalized_block").spawn({
-                    let indexer = self.indexer.clone();
+                    let upload_queue = self.upload_queue.clone();
                     let mut marshal = self.marshal.clone();
                     move |_| async move {
                         let block = marshal
@@ -190,14 +180,13 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                             return;
                         };
 
-                        // Upload to indexer once we have it
+                        // Enqueue for upload once we have it
                         let finalization = Finalized::new(finalization, block);
-                        let result = indexer.finalized_upload(finalization).await;
-                        if let Err(e) = result {
-                            warn!(?e, "failed to upload finalization");
+                        if let Err(e) = upload_queue.enqueue_finalization(finalization).await {
+                            warn!(%view, ?e, "failed to enqueue finalization for upload");
                             return;
                         }
-                        debug!(%view, "finalization uploaded to indexer");
+                        debug!(%view, "finalization enqueued for upload");
                     }
                 });
             }

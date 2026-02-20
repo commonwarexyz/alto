@@ -4,6 +4,7 @@ use std::{collections::HashMap, net::SocketAddr};
 pub mod application;
 pub mod engine;
 pub mod indexer;
+pub mod upload_queue;
 pub mod utils;
 
 /// Configuration for the [engine::Engine].

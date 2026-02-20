@@ -1,6 +1,7 @@
 use crate::{
     application::Application,
     indexer::{self, Indexer},
+    upload_queue::{self, Actor as UploadQueueActor},
 };
 use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
 use commonware_broadcast::buffered;
@@ -39,8 +40,7 @@ use std::{
 use tracing::{error, info, warn};
 
 /// Reporter type for [simplex::Engine].
-type Reporter<E, I> =
-    Reporters<Activity, marshal::Mailbox<Scheme, Block>, Option<indexer::Pusher<E, I>>>;
+type Reporter<E> = Reporters<Activity, marshal::Mailbox<Scheme, Block>, Option<indexer::Pusher<E>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -113,8 +113,9 @@ where
     >,
     marshaled: Marshaled<E>,
 
-    consensus:
-        Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
+    consensus: Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E>, S>,
+
+    upload_queue: Option<(UploadQueueActor<E>, I)>,
 }
 
 impl<E, B, S, I> Engine<E, B, S, I>
@@ -124,6 +125,33 @@ where
     S: Strategy,
     I: Indexer,
 {
+    async fn init_upload_queue(
+        context: &E,
+        partition_prefix: &str,
+        indexer: Option<I>,
+        marshal_mailbox: &marshal::Mailbox<Scheme, Block>,
+    ) -> (Option<(UploadQueueActor<E>, I)>, Option<indexer::Pusher<E>>) {
+        let Some(indexer) = indexer else {
+            return (None, None);
+        };
+
+        let queue_config = upload_queue::Config {
+            partition: format!("{partition_prefix}-upload-queue"),
+            ..Default::default()
+        };
+
+        let (actor, mailbox) =
+            UploadQueueActor::new(context.with_label("upload_queue"), queue_config)
+                .await
+                .unwrap_or_else(|e| panic!("failed to create upload queue: {e}"));
+        let pusher = indexer::Pusher::new(
+            context.with_label("indexer"),
+            mailbox,
+            marshal_mailbox.clone(),
+        );
+        (Some((actor, indexer)), Some(pusher))
+    }
+
     /// Create a new [Engine].
     pub async fn new(context: E, cfg: Config<B, I, S>) -> Self {
         // Create the buffer
@@ -262,18 +290,15 @@ where
             epocher,
         );
 
-        // Create the reporter
-        let reporter = (
-            marshal_mailbox.clone(),
-            cfg.indexer.map(|indexer| {
-                indexer::Pusher::new(
-                    context.with_label("indexer"),
-                    indexer,
-                    marshal_mailbox.clone(),
-                )
-            }),
+        // Create the upload queue and reporter (if indexer is configured)
+        let (upload_queue, pusher) = Self::init_upload_queue(
+            &context,
+            &cfg.partition_prefix,
+            cfg.indexer,
+            &marshal_mailbox,
         )
-            .into();
+        .await;
+        let reporter = (marshal_mailbox.clone(), pusher).into();
 
         // Create the consensus engine
         let consensus = Consensus::new(
@@ -311,6 +336,7 @@ where
             marshal,
             marshaled,
             consensus,
+            upload_queue,
         }
     }
 
@@ -384,8 +410,19 @@ where
         // restart could block).
         let consensus_handle = self.consensus.start(pending, recovered, resolver);
 
+        // Start upload queue (if configured)
+        let upload_queue_handle = self
+            .upload_queue
+            .map(|(actor, indexer)| actor.start(indexer));
+
+        // Collect all actor handles
+        let mut handles = vec![buffer_handle, marshal_handle, consensus_handle];
+        if let Some(handle) = upload_queue_handle {
+            handles.push(handle);
+        }
+
         // Wait for any actor to finish
-        if let Err(e) = try_join_all(vec![buffer_handle, marshal_handle, consensus_handle]).await {
+        if let Err(e) = try_join_all(handles).await {
             error!(?e, "engine failed");
         } else {
             warn!("engine stopped");

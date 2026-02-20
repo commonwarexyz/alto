@@ -25,6 +25,7 @@ commonware-storage = { workspace = true }
 commonware-stream = { workspace = true }
 commonware-utils = { workspace = true }
 commonware-parallel = { workspace = true }
+prometheus-client = { workspace = true }
 bytes =  { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
