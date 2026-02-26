@@ -40,6 +40,30 @@ const localClusterConfig: ClusterConfig = {
 
 export const DEFAULT_CLUSTER: Cluster = MODE === 'public' ? 'global' : 'local';
 
+const SCHEME_PREFIX = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
+
+const trimTrailingSlashes = (value: string): string => value.replace(/\/+$/, '');
+
+export const getHttpBaseUrl = (backendUrl: string): string => {
+    const normalized = trimTrailingSlashes(backendUrl.trim());
+    if (SCHEME_PREFIX.test(normalized)) {
+        return normalized;
+    }
+    const protocol = MODE === 'local' ? 'http' : 'https';
+    return `${protocol}://${normalized}`;
+};
+
+export const getWsBaseUrl = (backendUrl: string): string => {
+    const httpBaseUrl = getHttpBaseUrl(backendUrl);
+    if (httpBaseUrl.startsWith('https://')) {
+        return `wss://${httpBaseUrl.slice('https://'.length)}`;
+    }
+    if (httpBaseUrl.startsWith('http://')) {
+        return `ws://${httpBaseUrl.slice('http://'.length)}`;
+    }
+    return httpBaseUrl;
+};
+
 export const getClusterConfig = (cluster: Cluster): ClusterConfig => {
     if (MODE === 'local') {
         return localClusterConfig;

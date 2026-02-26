@@ -1,13 +1,19 @@
 use crate::Source;
 use alto_client::consensus::Message;
 use alto_types::{Block, Scheme};
-use commonware_consensus::{marshal, simplex::types::Activity, Reporter, Viewable};
+use commonware_consensus::{
+    marshal::{core::Mailbox as MarshalCoreMailbox, standard::StandardMinimmit},
+    minimmit::types::Activity,
+    Reporter, Viewable,
+};
 use commonware_parallel::Sequential;
 use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Spawner};
 use futures::StreamExt;
 use std::time::Duration;
 use thiserror::Error;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, warn};
+
+type MarshalMailbox = MarshalCoreMailbox<StandardMinimmit<Block, Scheme>>;
 
 /// Errors that can occur while feeding certificates from the source stream.
 #[derive(Debug, Error)]
@@ -18,9 +24,9 @@ pub enum Error {
     Stream(String),
 }
 
-/// Feeds certificates from a [Source] stream into [marshal::Actor] via its [marshal::Mailbox].
+/// Feeds certificates from a [Source] stream into marshal.
 ///
-/// Listens for seed, notarization, and finalization messages, verifies their threshold
+/// Listens for notarization and finalization messages, verifies their threshold
 /// signatures, caches the associated blocks, and reports the proofs to marshal.
 /// Automatically reconnects on stream disconnection.
 ///
@@ -31,17 +37,12 @@ pub struct Feeder<E: Clock, C: Source> {
     context: ContextCell<E>,
     client: C,
     scheme: Scheme,
-    marshal_mailbox: marshal::Mailbox<Scheme, Block>,
+    marshal_mailbox: MarshalMailbox,
 }
 
 impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
     /// Create a new [Feeder].
-    pub fn new(
-        context: E,
-        client: C,
-        scheme: Scheme,
-        marshal_mailbox: marshal::Mailbox<Scheme, Block>,
-    ) -> Self {
+    pub fn new(context: E, client: C, scheme: Scheme, marshal_mailbox: MarshalMailbox) -> Self {
         Self {
             context: ContextCell::new(context),
             client,
@@ -91,14 +92,10 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
 
     /// Process a single message from the certificate stream.
     ///
-    /// Seed messages are ignored. Notarization and finalization messages
-    /// have their threshold signatures verified before being reported to
-    /// marshal along with their associated blocks.
+    /// Notarization and finalization messages have their threshold signatures
+    /// verified before being reported to marshal along with their associated blocks.
     async fn handle_message(&mut self, message: Message) -> Result<(), Error> {
         match message {
-            Message::Seed(seed) => {
-                trace!(view = seed.view().get(), "received seed");
-            }
             Message::Notarization(notarized) => {
                 let round = notarized.proof.round();
 
@@ -125,7 +122,7 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
                     .verified(round, notarized.block.clone())
                     .await;
                 self.marshal_mailbox
-                    .report(Activity::Notarization(notarized.proof.clone()))
+                    .report(Activity::MNotarization(notarized.proof.clone()))
                     .await;
                 debug!(
                     height = notarized.block.height.get(),

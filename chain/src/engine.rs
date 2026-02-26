@@ -5,9 +5,14 @@ use crate::{
 use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
-    application::marshaled::Marshaled as ConsensusMarshaled,
-    marshal::{self, ingress::handler},
-    simplex::{self, elector::Random, Engine as Consensus},
+    elector::RoundRobin,
+    marshal::{
+        self,
+        core::MinimmitConsensus,
+        resolver::handler,
+        standard::{Inline as StandardInline, StandardMinimmit},
+    },
+    minimmit::{self, Engine as Consensus},
     types::{Epoch, FixedEpocher, ViewDelta},
     Reporters,
 };
@@ -17,7 +22,7 @@ use commonware_cryptography::{
     ed25519::PublicKey,
     sha256::Digest,
 };
-use commonware_p2p::{Blocker, Receiver, Sender};
+use commonware_p2p::{Blocker, Provider, Receiver, Sender};
 use commonware_parallel::Strategy;
 use commonware_resolver::Resolver;
 use commonware_runtime::{
@@ -38,9 +43,10 @@ use std::{
 };
 use tracing::{error, info, warn};
 
-/// Reporter type for [simplex::Engine].
-type Reporter<E, I> =
-    Reporters<Activity, marshal::Mailbox<Scheme, Block>, Option<indexer::Pusher<E, I>>>;
+/// Reporter type for [minimmit::Engine].
+type MarshalVariant = StandardMinimmit<Block, Scheme>;
+type MarshalMailbox = marshal::core::Mailbox<MarshalVariant>;
+type Reporter<E, I> = Reporters<Activity, MarshalMailbox, Option<indexer::Pusher<E, I>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -87,7 +93,8 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer, S: Strategy> {
     pub indexer: Option<I>,
 }
 
-type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpocher>;
+type Marshaled<E> =
+    StandardInline<E, Scheme, Application, Block, FixedEpocher, MinimmitConsensus<Scheme, Digest>>;
 
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
@@ -102,9 +109,9 @@ where
 
     buffer: buffered::Engine<E, PublicKey, Block>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
-    marshal: marshal::Actor<
+    marshal: marshal::core::Actor<
         E,
-        Block,
+        MarshalVariant,
         ConstantProvider<Scheme, Epoch>,
         immutable::Archive<E, Digest, Finalization>,
         immutable::Archive<E, Digest, Block>,
@@ -114,7 +121,7 @@ where
     marshaled: Marshaled<E>,
 
     consensus:
-        Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
+        Consensus<E, Scheme, RoundRobin, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
 }
 
 impl<E, B, S, I> Engine<E, B, S, I>
@@ -125,7 +132,11 @@ where
     I: Indexer,
 {
     /// Create a new [Engine].
-    pub async fn new(context: E, cfg: Config<B, I, S>) -> Self {
+    pub async fn new(
+        context: E,
+        provider: &mut impl Provider<PublicKey = PublicKey>,
+        cfg: Config<B, I, S>,
+    ) -> Self {
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
@@ -135,6 +146,7 @@ where
                 deque_size: cfg.deque_size,
                 priority: true,
                 codec_config: (),
+                peer_set_subscription: provider.subscribe().await,
             },
         );
 
@@ -226,7 +238,7 @@ where
             .expect("failed to create scheme");
         let provider = ConstantProvider::new(scheme.clone());
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-        let (marshal, marshal_mailbox, _) = marshal::Actor::init(
+        let (marshal, marshal_mailbox, _) = marshal::core::Actor::init(
             context.with_label("marshal"),
             finalizations_by_height,
             finalized_blocks,
@@ -278,7 +290,7 @@ where
         // Create the consensus engine
         let consensus = Consensus::new(
             context.with_label("consensus"),
-            simplex::Config {
+            minimmit::Config {
                 epoch: EPOCH,
                 scheme,
                 automaton: marshaled.clone(),
@@ -297,7 +309,7 @@ where
                 write_buffer: WRITE_BUFFER,
                 blocker: cfg.blocker,
                 page_cache,
-                elector: Random,
+                elector: RoundRobin::default(),
                 strategy: cfg.strategy,
             },
         );
@@ -314,7 +326,7 @@ where
         }
     }
 
-    /// Start the [simplex::Engine].
+    /// Start the [minimmit::Engine].
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         mut self,
@@ -335,8 +347,8 @@ where
             impl Receiver<PublicKey = PublicKey>,
         ),
         marshal: (
-            mpsc::Receiver<handler::Message<Block>>,
-            impl Resolver<Key = handler::Request<Block>, PublicKey = PublicKey>,
+            mpsc::Receiver<handler::Message<Digest>>,
+            impl Resolver<Key = handler::Request<Digest>, PublicKey = PublicKey>,
         ),
     ) -> Handle<()> {
         spawn_cell!(
@@ -366,8 +378,8 @@ where
             impl Receiver<PublicKey = PublicKey>,
         ),
         marshal: (
-            mpsc::Receiver<handler::Message<Block>>,
-            impl Resolver<Key = handler::Request<Block>, PublicKey = PublicKey>,
+            mpsc::Receiver<handler::Message<Digest>>,
+            impl Resolver<Key = handler::Request<Digest>, PublicKey = PublicKey>,
         ),
     ) {
         // Start the buffer

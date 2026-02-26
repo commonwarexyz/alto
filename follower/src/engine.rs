@@ -9,12 +9,13 @@ use crate::{
 use alto_types::{Block, Scheme, EPOCH_LENGTH};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
-    marshal::{self, ingress::handler},
-    types::{FixedEpocher, Height, ViewDelta},
+    marshal::{self, core, resolver::handler, standard::StandardMinimmit},
+    types::{Epoch, FixedEpocher, Height, ViewDelta},
 };
 use commonware_cryptography::{
     certificate::ConstantProvider,
     ed25519::{PrivateKey, PublicKey},
+    sha256::Digest,
     Signer,
 };
 use commonware_math::algebra::Random;
@@ -22,7 +23,7 @@ use commonware_parallel::Strategy;
 use commonware_runtime::{
     spawn_cell, BufferPooler, ContextCell, Handle, Metrics, Spawner, Storage,
 };
-use commonware_utils::{channel::mpsc, NZUsize};
+use commonware_utils::{channel::mpsc, ordered::Set, NZUsize};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
@@ -32,6 +33,8 @@ use tracing::{error, warn};
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
 const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(1024);
+type MarshalVariant = StandardMinimmit<Block, Scheme>;
+type MarshalMailbox = core::Mailbox<MarshalVariant>;
 
 /// The engine that drives the follower's [marshal::Actor].
 ///
@@ -55,17 +58,18 @@ where
     context: ContextCell<E>,
     buffer: buffered::Engine<E, PublicKey, Block>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
-    marshal: marshal::Actor<
+    marshal: core::Actor<
         E,
-        Block,
-        ConstantProvider<Scheme, commonware_consensus::types::Epoch>,
+        MarshalVariant,
+        ConstantProvider<Scheme, Epoch>,
         Certificates<E>,
         Blocks<E>,
         FixedEpocher,
         T,
     >,
+    _peer_set_sender: mpsc::UnboundedSender<(u64, Set<PublicKey>, Set<PublicKey>)>,
     pruning_depth: Option<u64>,
-    marshal_mailbox: marshal::Mailbox<Scheme, Block>,
+    marshal_mailbox: MarshalMailbox,
     mailbox_size: usize,
 }
 
@@ -89,12 +93,13 @@ where
         max_repair: NonZero<usize>,
         strategy: T,
         pruning_depth: Option<u64>,
-    ) -> (Self, marshal::Mailbox<Scheme, Block>, Height) {
+    ) -> (Self, MarshalMailbox, Height) {
         // Create the buffer
         //
         // The follower does not participate in p2p broadcast, so we use a dummy
         // key and noop sender/receiver. The buffer is still required by marshal.
         let dummy_key = PrivateKey::random(&mut context).public_key();
+        let (peer_set_sender, peer_set_subscription) = mpsc::unbounded_channel();
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
             buffered::Config {
@@ -103,6 +108,7 @@ where
                 deque_size: DEQUE_SIZE,
                 priority: false,
                 codec_config: (),
+                peer_set_subscription,
             },
         );
 
@@ -114,7 +120,7 @@ where
         // Create marshal
         let provider = ConstantProvider::new(scheme);
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-        let (marshal, mailbox, last_processed_height) = marshal::Actor::init(
+        let (marshal, mailbox, last_processed_height) = core::Actor::init(
             context.with_label("marshal"),
             finalizations_by_height,
             finalized_blocks,
@@ -143,6 +149,7 @@ where
             buffer,
             buffer_mailbox,
             marshal,
+            _peer_set_sender: peer_set_sender,
             pruning_depth,
             marshal_mailbox: mailbox.clone(),
             mailbox_size,
@@ -153,12 +160,12 @@ where
     /// Start the [Engine].
     pub fn start(
         mut self,
-        marshal: (mpsc::Receiver<handler::Message<Block>>, Resolver),
+        marshal: (mpsc::Receiver<handler::Message<Digest>>, Resolver),
     ) -> Handle<()> {
         spawn_cell!(self.context, self.run(marshal).await)
     }
 
-    async fn run(mut self, marshal: (mpsc::Receiver<handler::Message<Block>>, Resolver)) {
+    async fn run(mut self, marshal: (mpsc::Receiver<handler::Message<Digest>>, Resolver)) {
         // Start the buffer
         let buffer_handle = self.buffer.start((NoopSender, NoopReceiver));
 
@@ -188,11 +195,10 @@ mod tests {
     use super::*;
     use crate::resolver::Actor;
     use crate::test_utils::TestFixture;
-    use alto_types::Block;
     use bytes::Bytes;
     use commonware_codec::Encode;
     use commonware_consensus::{
-        marshal::ingress::handler,
+        marshal::resolver::handler,
         types::{Height, Round, View},
     };
     use commonware_macros::test_traced;
@@ -235,7 +241,7 @@ mod tests {
 
             // Manually inject a finalization into marshal's ingress channel,
             // bypassing the resolver actor to control the payload directly.
-            let key = handler::Request::<Block>::Finalized {
+            let key = handler::Request::<Digest>::Finalized {
                 height: Height::new(1),
             };
             let value = Bytes::from((finalized.proof, finalized.block).encode().to_vec());
@@ -289,7 +295,7 @@ mod tests {
 
             // Inject a notarization directly into marshal's ingress channel
             let round = Round::new(alto_types::EPOCH, View::new(1));
-            let key = handler::Request::<Block>::Notarized { round };
+            let key = handler::Request::<Digest>::Notarized { round };
             let value = Bytes::from((notarized.proof, notarized.block).encode().to_vec());
             let (response_tx, response_rx) = oneshot::channel();
             ingress_tx

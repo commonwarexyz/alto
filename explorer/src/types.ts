@@ -2,7 +2,7 @@
 export type ViewStatus = "growing" | "notarized" | "finalized" | "timed_out" | "unknown";
 
 // Search types
-export type SearchType = 'block' | 'notarization' | 'finalization' | 'seed';
+export type SearchType = 'block' | 'notarization' | 'finalization';
 
 // Block data
 export interface BlockJs {
@@ -10,12 +10,6 @@ export interface BlockJs {
     timestamp: number;
     digest: Uint8Array;
     parent: Uint8Array;
-}
-
-// Seed (for leader election)
-export interface SeedJs {
-    view: number;
-    signature: Uint8Array;
 }
 
 // Proof for notarizations and finalizations
@@ -55,7 +49,7 @@ export interface ViewData {
 }
 
 // Type for search results
-export type SearchResult = SeedJs | NotarizedJs | FinalizedJs | BlockJs | null;
+export type SearchResult = NotarizedJs | FinalizedJs | BlockJs | null;
 
 // Time constants
 export const MS_PER_SECOND = 1000;

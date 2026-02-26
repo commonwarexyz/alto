@@ -193,19 +193,19 @@ pub(crate) enum Certificates<E: BufferPooler + Storage + Metrics + Clock> {
 }
 
 impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates for Certificates<E> {
-    type Commitment = Digest;
-    type Scheme = Scheme;
+    type BlockDigest = Digest;
+    type Finalization = Finalization;
     type Error = archive::Error;
 
     async fn put(
         &mut self,
         height: Height,
-        commitment: Digest,
-        finalization: Finalization,
+        digest: Self::BlockDigest,
+        finalization: Self::Finalization,
     ) -> Result<(), Self::Error> {
         match self {
-            Self::Immutable(a) => Archive::put(a, height.get(), commitment, finalization).await,
-            Self::Prunable(a) => Archive::put(a, height.get(), commitment, finalization).await,
+            Self::Immutable(a) => Archive::put(a, height.get(), digest, finalization).await,
+            Self::Prunable(a) => Archive::put(a, height.get(), digest, finalization).await,
         }
     }
 
@@ -216,7 +216,10 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates f
         }
     }
 
-    async fn get(&self, id: Identifier<'_, Digest>) -> Result<Option<Finalization>, Self::Error> {
+    async fn get(
+        &self,
+        id: Identifier<'_, Self::BlockDigest>,
+    ) -> Result<Option<Self::Finalization>, Self::Error> {
         match self {
             Self::Immutable(a) => Archive::get(a, id).await,
             Self::Prunable(a) => Archive::get(a, id).await,

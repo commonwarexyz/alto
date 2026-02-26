@@ -1,7 +1,7 @@
 use crate::throughput::Throughput;
 use alto_types::{Block, Scheme};
 use commonware_consensus::{
-    marshal::{self, Update},
+    marshal::{core::Mailbox as MarshalCoreMailbox, standard::StandardMinimmit, Update},
     types::Height,
     Reporter,
 };
@@ -12,6 +12,7 @@ use tracing::info;
 
 const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
 const PRUNE_INTERVAL: u64 = 10_000;
+type MarshalMailbox = MarshalCoreMailbox<StandardMinimmit<Block, Scheme>>;
 
 /// Formats an estimated time of arrival (ETA) based on the remaining work and rate.
 fn format_eta(remaining: u64, rate: f64) -> String {
@@ -61,14 +62,14 @@ pub(crate) struct Application<E: Clock + Spawner> {
     rx: mpsc::Receiver<Update<Block>>,
     throughput: Throughput,
     tip: Option<Height>,
-    mailbox: marshal::Mailbox<Scheme, Block>,
+    mailbox: MarshalMailbox,
     pruning_depth: Option<u64>,
 }
 
 impl<E: Clock + Spawner> Application<E> {
     pub(crate) fn new(
         context: E,
-        mailbox: marshal::Mailbox<Scheme, Block>,
+        mailbox: MarshalMailbox,
         mailbox_size: usize,
         pruning_depth: Option<u64>,
     ) -> (Self, Mailbox) {

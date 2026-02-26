@@ -32,7 +32,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section>
                         <h3>About</h3>
                         <p>
-                            This explorer visualizes the performance of <a href="https://github.com/commonwarexyz/alto">alto</a>'s consensus, <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/simplex/index.html">simplex</a>,
+                            This explorer visualizes the performance of <a href="https://github.com/commonwarexyz/alto">alto</a>'s consensus, <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/minimmit/index.html">minimmit</a>,
                             {MODE === 'public' ? ' deployed on a cluster of globally distributed nodes.' : ' running on your local machine.'}
                         </p>
                         {MODE === 'public' && (
@@ -64,12 +64,12 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section>
                         <h3>What are you looking at?</h3>
                         <p>
-                            This explorer displays the progression of <i>simplex</i> over time, broken into <strong>views</strong>.
+                            This explorer displays the progression of <i>minimmit</i> over time, broken into <strong>views</strong>.
                         </p>
                         <p>
-                            Validators enter a new view whenever they observe either <i>2f+1</i> votes for a block proposal or <i>2f+1</i> nullifies
-                            (to skip this view) AND some seed (a VRF used to select the next leader). Validators finalize a view whenever they
-                            observe <i>2f+1</i> finalizes for a block proposal.
+                            Minimmit uses round-robin leader election. There are no seed certificates.
+                            A view is m-notarized when validators observe <i>2f+1</i> notarize votes for a proposal,
+                            and finalized when validators observe <i>n-f</i> notarize votes for the same proposal.
                         </p>
                         <p>
                             We color the phases of a view as follows:
@@ -78,30 +78,29 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             <li>
                                 <div className="status-indicator-wrapper">
                                     <div className="about-status-indicator" style={{ backgroundColor: "#0000eeff" }}></div>
-                                    <strong>Seeded</strong>
+                                    <strong>Proposed</strong>
                                 </div>
-                                Some leader has been elected to propose a block.
+                                The round-robin leader for this view has proposed a block.
                                 {MODE === 'public' && ' The dot on the map (of the same color) is the region where the leader is located.'}
-                                {' '}A new leader is elected for each view.
+                                {' '}Leaders advance deterministically by view.
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">
                                     <div className="about-status-indicator" style={{ backgroundColor: "#000" }}></div>
-                                    <strong>Locked</strong>
+                                    <strong>M-Notarized</strong>
                                 </div>
-                                Some block <i>b</i> has received <i>2f+1</i> votes in a given view <i>v</i>. This means there can never be another locked block
-                                in view <i>v</i> (and block <i>b</i> must be used in the canonical chain if <i>2f+1</i> participants did not move to nullify).
+                                Some block <i>b</i> has received <i>2f+1</i> notarize votes in view <i>v</i>.
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">
                                     <div className="about-status-indicator" style={{ backgroundColor: "#228B22ff" }}></div>
                                     <strong>Finalized</strong>
                                 </div>
-                                The block <i>b</i> in view <i>v</i> has received <i>2f+1</i> finalizes. The block is now immutable.
+                                The block <i>b</i> in view <i>v</i> has received <i>n-f</i> notarize votes and is now immutable.
                             </li>
                         </ul>
                         <p>
-                            You can read more about the design of <i>simplex</i> <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/simplex/index.html">here</a>.
+                            You can read more about the design of <i>minimmit</i> <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/minimmit/index.html">here</a>.
                         </p>
                     </section>
 
@@ -137,17 +136,16 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <section>
                         <h3>Why is it so fast?</h3>
                         <p>
-                            <i>simplex</i>, like <a href="https://eprint.iacr.org/2023/463">Simplex Consensus</a>, employs <strong>all-to-all broadcast</strong> and <strong>progress-driven view transitions</strong> to
-                            achieve optimal latency in both the optimistic and pessimistic case (under the partial synchrony model).
+                            <i>minimmit</i> uses all-to-all authenticated broadcast and progress-driven view transitions to
+                            achieve low latency under partial synchrony.
                         </p>
                         <p>
                             Using authenticated connections (provided by <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>), each validator
-                            sends consensus messages directly to every other validator (no leader relay or multi-hop gossip). As soon as any validator observes <i>2f+1</i> votes for a block proposal, they broadcast
-                            a threshold signature (again directly) to all other validators and enter the next view immediately (without waiting for finalization or any timeout). If a validator sees a threshold signature
-                            for a view <i>v</i>, they enter view <i>v+1</i> immediately (ensuring validators stay synchronized without using a clock).
+                            sends consensus messages directly to every other validator (no leader relay or multi-hop gossip). As soon as any validator observes
+                            enough votes for m-notarization or finalization, they broadcast threshold artifacts directly and advance views quickly.
                         </p>
                         <p>
-                            English? <i>simplex</i> moves at <strong>network speed</strong> (and it turns out that's pretty fast in 2025).
+                            English? <i>minimmit</i> moves at <strong>network speed</strong>.
                         </p>
                     </section>
 

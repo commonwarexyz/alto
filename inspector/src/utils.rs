@@ -1,5 +1,5 @@
 use alto_client::{IndexQuery, Query};
-use alto_types::{Finalized, Notarized, Seed};
+use alto_types::{Finalized, Notarized};
 use commonware_codec::DecodeExt;
 use commonware_consensus::Viewable;
 use commonware_cryptography::{sha256::Digest, Digestible};
@@ -18,7 +18,7 @@ pub enum QueryKind {
     Range(u64, u64),
 }
 
-// Parse IndexQuery for seed, notarization, and finalization
+// Parse IndexQuery for notarization and finalization
 pub fn parse_index_query(query: &str) -> Option<IndexQueryKind> {
     if query == "latest" {
         Some(IndexQueryKind::Single(IndexQuery::Latest))
@@ -82,10 +82,6 @@ pub fn format_age(age: u64) -> String {
         let hours = remaining_ms / MS_PER_HOUR;
         format!("{days}d {hours}h")
     }
-}
-
-pub fn log_seed(seed: Seed) {
-    info!(view = %seed.view(), signature = ?seed.signature, "seed");
 }
 
 pub fn log_notarization(notarized: Notarized) {

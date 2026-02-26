@@ -1,7 +1,9 @@
-use commonware_consensus::simplex::scheme::bls12381_threshold::vrf;
-use commonware_consensus::simplex::types::{
-    Activity as CActivity, Context as CContext, Finalization as CFinalization,
-    Notarization as CNotarization,
+use commonware_consensus::minimmit::{
+    scheme::bls12381_threshold,
+    types::{
+        Activity as CActivity, Context as CContext, Finalization as CFinalization,
+        MNotarization as CNotarization,
+    },
 };
 use commonware_cryptography::{
     bls12381::primitives::variant::{MinSig, Variant},
@@ -11,9 +13,7 @@ use commonware_cryptography::{
 
 pub type Context = CContext<Digest, PublicKey>;
 
-pub type Scheme = vrf::Scheme<PublicKey, MinSig>;
-pub type Seed = vrf::Seed<MinSig>;
-pub use vrf::Seedable;
+pub type Scheme = bls12381_threshold::Scheme<PublicKey, MinSig>;
 pub type Notarization = CNotarization<Scheme, Digest>;
 pub type Finalization = CFinalization<Scheme, Digest>;
 pub type Activity = CActivity<Scheme, Digest>;

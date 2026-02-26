@@ -9,8 +9,7 @@ pub use block::{Block, Finalized, Notarized};
 
 mod consensus;
 pub use consensus::{
-    Activity, Context, Finalization, Identity, Notarization, PublicKey, Scheme, Seed, Seedable,
-    Signature,
+    Activity, Context, Finalization, Identity, Notarization, PublicKey, Scheme, Signature,
 };
 
 pub mod wasm;
@@ -35,26 +34,23 @@ pub const EPOCH_LENGTH: NonZero<u64> = NZU64!(u64::MAX);
 
 #[repr(u8)]
 pub enum Kind {
-    Seed = 0,
-    Notarization = 1,
-    Finalization = 2,
+    Notarization = 0,
+    Finalization = 1,
 }
 
 impl Kind {
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
-            0 => Some(Self::Seed),
-            1 => Some(Self::Notarization),
-            2 => Some(Self::Finalization),
+            0 => Some(Self::Notarization),
+            1 => Some(Self::Finalization),
             _ => None,
         }
     }
 
     pub fn to_hex(&self) -> String {
         match self {
-            Self::Seed => hex(&[0]),
-            Self::Notarization => hex(&[1]),
-            Self::Finalization => hex(&[2]),
+            Self::Notarization => hex(&[0]),
+            Self::Finalization => hex(&[1]),
         }
     }
 }
@@ -64,11 +60,12 @@ mod tests {
     use super::*;
     use commonware_codec::{DecodeExt, Encode};
     use commonware_consensus::{
-        simplex::{
-            scheme::bls12381_threshold::vrf as bls12381_threshold,
-            types::{Finalization, Finalize, Notarization, Notarize, Proposal},
+        minimmit::{
+            scheme::bls12381_threshold,
+            types::{Finalization, Notarize, Proposal},
         },
         types::{Height, Round, View},
+        Block as _,
     };
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519, sha256,
@@ -96,6 +93,7 @@ mod tests {
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
+            block.parent(),
             block.digest(),
         );
 
@@ -136,16 +134,17 @@ mod tests {
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
+            block.parent(),
             block.digest(),
         );
 
         // Create a finalization
         let finalizes: Vec<_> = schemes
             .iter()
-            .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
+            .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
             .collect();
         let finalization =
-            Finalization::from_finalizes(&schemes[0], &finalizes, &Sequential).unwrap();
+            Finalization::from_notarizes(&schemes[0], &finalizes, &Sequential).unwrap();
         let finalized = Finalized::new(finalization, block.clone());
 
         // Serialize and deserialize

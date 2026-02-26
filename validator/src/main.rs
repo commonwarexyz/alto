@@ -266,7 +266,8 @@ fn main() {
             share,
             strategy,
         };
-        let engine = engine::Engine::new(context.with_label("engine"), engine_cfg).await;
+        let engine =
+            engine::Engine::new(context.with_label("engine"), &mut oracle, engine_cfg).await;
 
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),

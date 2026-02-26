@@ -132,7 +132,7 @@ impl Read for Notarized {
     type Cfg = ();
 
     fn read_cfg(buf: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
-        let proof = Notarization::read(buf)?;
+        let proof = Notarization::read_cfg(buf, &1024)?;
         let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
@@ -179,7 +179,7 @@ impl Read for Finalized {
     type Cfg = ();
 
     fn read_cfg(buf: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
-        let proof = Finalization::read(buf)?;
+        let proof = Finalization::read_cfg(buf, &1024)?;
         let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
