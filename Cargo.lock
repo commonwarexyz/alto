@@ -681,7 +681,7 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 [[package]]
 name = "commonware-broadcast"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "commonware-codec",
  "commonware-cryptography",
@@ -697,7 +697,7 @@ dependencies = [
 [[package]]
 name = "commonware-codec"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -709,16 +709,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "commonware-coding"
+version = "2026.2.0"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
+dependencies = [
+ "bytes",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-macros",
+ "commonware-math",
+ "commonware-parallel",
+ "commonware-storage",
+ "commonware-utils",
+ "num-rational",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "rayon",
+ "reed-solomon-simd",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "commonware-consensus"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "bytes",
  "cfg-if",
  "commonware-broadcast",
  "commonware-codec",
+ "commonware-coding",
  "commonware-cryptography",
  "commonware-macros",
+ "commonware-math",
  "commonware-p2p",
  "commonware-parallel",
  "commonware-resolver",
@@ -731,6 +754,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_core 0.6.4",
  "rand_distr",
+ "rayon",
  "thiserror 2.0.18",
  "tracing",
 ]
@@ -738,7 +762,7 @@ dependencies = [
 [[package]]
 name = "commonware-cryptography"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
@@ -772,7 +796,7 @@ dependencies = [
 [[package]]
 name = "commonware-deployer"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "cfg-if",
  "commonware-macros",
@@ -783,7 +807,7 @@ dependencies = [
 [[package]]
 name = "commonware-macros"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "commonware-macros-impl",
  "tokio",
@@ -792,7 +816,7 @@ dependencies = [
 [[package]]
 name = "commonware-macros-impl"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -804,7 +828,7 @@ dependencies = [
 [[package]]
 name = "commonware-math"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -817,7 +841,7 @@ dependencies = [
 [[package]]
 name = "commonware-p2p"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "commonware-codec",
  "commonware-cryptography",
@@ -843,7 +867,7 @@ dependencies = [
 [[package]]
 name = "commonware-parallel"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "cfg-if",
  "commonware-macros",
@@ -853,7 +877,7 @@ dependencies = [
 [[package]]
 name = "commonware-resolver"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -873,7 +897,7 @@ dependencies = [
 [[package]]
 name = "commonware-runtime"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "axum",
  "bytes",
@@ -908,7 +932,7 @@ dependencies = [
 [[package]]
 name = "commonware-storage"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "anyhow",
  "bytes",
@@ -931,7 +955,7 @@ dependencies = [
 [[package]]
 name = "commonware-stream"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "chacha20poly1305",
  "commonware-codec",
@@ -950,7 +974,7 @@ dependencies = [
 [[package]]
 name = "commonware-utils"
 version = "2026.2.0"
-source = "git+https://github.com/commonwarexyz/monorepo.git?rev=16e98b5247c513361ef791d1556a01e1dfd4eb9e#16e98b5247c513361ef791d1556a01e1dfd4eb9e"
+source = "git+https://github.com/commonwarexyz/monorepo.git?branch=cl%2Fmarshal-minimmit#a3388636aef8cdd2eb7344e328d4de4404ec8d3c"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -1349,6 +1373,12 @@ name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+
+[[package]]
+name = "fixedbitset"
+version = "0.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
 name = "fnv"
@@ -2727,12 +2757,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "readme-rustdocifier"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08ad765b21a08b1a8e5cdce052719188a23772bcbefb3c439f0baaf62c56ceac"
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "reed-solomon-simd"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cffef0520d30fbd4151fb20e262947ae47fb0ab276a744a19b6398438105a072"
+dependencies = [
+ "cpufeatures",
+ "fixedbitset",
+ "once_cell",
+ "readme-rustdocifier",
 ]
 
 [[package]]
@@ -3115,6 +3163,16 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest 0.10.7",
+ "sha2-asm",
+]
+
+[[package]]
+name = "sha2-asm"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b845214d6175804686b2bd482bcffe96651bb2d1200742b712003504a2dac1ab"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

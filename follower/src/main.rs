@@ -250,7 +250,7 @@ fn main() {
         let strategy = context
             .create_strategy(config.signature_threads)
             .unwrap();
-        let (engine, mut mailbox, last_processed_height) = engine::Engine::new(
+        let (engine, mailbox, last_processed_height) = engine::Engine::new(
             context.with_label("engine"),
             scheme.clone(),
             config.mailbox_size.get(),

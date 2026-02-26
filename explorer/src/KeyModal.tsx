@@ -33,7 +33,7 @@ const KeyInfoModal: React.FC<KeyInfoModalProps> = ({ isOpen, onClose, publicKeyH
                     <section>
                         <h3>I'm verifying threshold signatures?</h3>
                         <p>
-                            When your browser receives a consensus message (seed, notarization, or finalization)
+                            When your browser receives a consensus message (m-notarization or finalization)
                             from the <a href="https://exoware.xyz">exoware::relay</a>:
                         </p>
                         <ol>

@@ -5,9 +5,9 @@ use alto_client::consensus::{Message, Payload};
 use alto_client::{IndexQuery, Query};
 use alto_types::{Block, Context, Finalized, Notarized, Scheme, EPOCH, NAMESPACE};
 use commonware_consensus::{
-    simplex::{
-        scheme::bls12381_threshold::vrf as bls12381_threshold,
-        types::{Finalize, Notarize, Proposal},
+    minimmit::{
+        scheme::bls12381_threshold,
+        types::{Notarize, Proposal},
     },
     types::{Height, Round, View},
 };
@@ -104,14 +104,16 @@ impl Source for MockSource {
 
 pub struct TestFixture {
     pub schemes: Vec<Scheme>,
+    verifier: Scheme,
 }
 
 impl TestFixture {
     pub fn new() -> Self {
         let mut rng = StdRng::seed_from_u64(0);
-        let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-        Self { schemes }
+        let Fixture {
+            schemes, verifier, ..
+        } = bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
+        Self { schemes, verifier }
     }
 
     pub fn create_block(&self, height: u64, view: u64) -> Block {
@@ -129,15 +131,16 @@ impl TestFixture {
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(view)),
             View::new(view.saturating_sub(1)),
+            block.parent,
             block.digest(),
         );
-        let finalizes: Vec<_> = self
+        let notarizes: Vec<_> = self
             .schemes
             .iter()
-            .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
+            .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
             .collect();
         let finalization =
-            alto_types::Finalization::from_finalizes(&self.schemes[0], &finalizes, &Sequential)
+            alto_types::Finalization::from_notarizes(&self.schemes[0], &notarizes, &Sequential)
                 .unwrap();
         Finalized::new(finalization, block)
     }
@@ -147,6 +150,7 @@ impl TestFixture {
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(view)),
             View::new(view.saturating_sub(1)),
+            block.parent,
             block.digest(),
         );
         let notarizes: Vec<_> = self
@@ -161,15 +165,13 @@ impl TestFixture {
     }
 
     pub fn verifier_scheme(&self) -> Scheme {
-        let identity = *self.schemes[0].polynomial().public();
-        Scheme::certificate_verifier(NAMESPACE, identity)
+        self.verifier.clone()
     }
 
     pub fn wrong_verifier_scheme(&self) -> Scheme {
         let mut rng = StdRng::seed_from_u64(42);
-        let Fixture { schemes, .. } =
+        let Fixture { verifier, .. } =
             bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-        let wrong_identity = *schemes[0].polynomial().public();
-        Scheme::certificate_verifier(NAMESPACE, wrong_identity)
+        verifier
     }
 }

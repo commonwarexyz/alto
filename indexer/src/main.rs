@@ -4,7 +4,7 @@ use clap::Parser;
 use commonware_codec::DecodeExt;
 use commonware_parallel::Sequential;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -36,13 +36,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize indexer
     let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity);
-    let indexer = Arc::new(Indexer::new(certificate_verifier, Sequential));
+    let indexer = Arc::new(Indexer::new_certificate_verifier(
+        certificate_verifier,
+        Sequential,
+    ));
     let api = Api::new(indexer);
     let app = api.router();
 
     // Start server
     let addr = format!("0.0.0.0:{}", args.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
+    warn!("running with certificate-only verifier: notarization signatures are not validated");
     info!(?identity, ?addr, "started indexer");
     axum::serve(listener, app).await?;
 

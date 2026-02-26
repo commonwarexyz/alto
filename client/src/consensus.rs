@@ -1,19 +1,11 @@
 use crate::{Client, Error, IndexQuery, Query};
-use alto_types::{Block, Finalized, Kind, Notarized, Seed};
+use alto_types::{Block, Finalized, Kind, Notarized};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::Viewable;
 use commonware_cryptography::Digestible;
 use commonware_parallel::Strategy;
 use futures::{channel::mpsc::unbounded, Stream, StreamExt};
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message as TMessage};
-
-fn seed_upload_path(base: String) -> String {
-    format!("{base}/seed")
-}
-
-fn seed_get_path(base: String, query: &IndexQuery) -> String {
-    format!("{base}/seed/{}", query.serialize())
-}
 
 fn notarization_upload_path(base: String) -> String {
     format!("{base}/notarization")
@@ -47,55 +39,11 @@ pub enum Payload {
 }
 
 pub enum Message {
-    Seed(Seed),
     Notarization(Notarized),
     Finalization(Finalized),
 }
 
 impl<S: Strategy> Client<S> {
-    pub async fn seed_upload(&self, seed: Seed) -> Result<(), Error> {
-        let result = self
-            .http_client
-            .post(seed_upload_path(self.uri.clone()))
-            .body(seed.encode().to_vec())
-            .send()
-            .await
-            .map_err(Error::Reqwest)?;
-        if !result.status().is_success() {
-            return Err(Error::Failed(result.status()));
-        }
-        Ok(())
-    }
-
-    pub async fn seed_get(&self, query: IndexQuery) -> Result<Seed, Error> {
-        // Get the seed
-        let result = self
-            .http_client
-            .get(seed_get_path(self.uri.clone(), &query))
-            .send()
-            .await
-            .map_err(Error::Reqwest)?;
-        if !result.status().is_success() {
-            return Err(Error::Failed(result.status()));
-        }
-        let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let seed = Seed::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if self.verify && !seed.verify(&self.certificate_verifier) {
-            return Err(Error::InvalidSignature);
-        }
-
-        // Verify the seed matches the query
-        match query {
-            IndexQuery::Latest => {}
-            IndexQuery::Index(index) => {
-                if seed.view().get() != index {
-                    return Err(Error::UnexpectedResponse);
-                }
-            }
-        }
-        Ok(seed)
-    }
-
     pub async fn notarized_upload(&self, notarized: Notarized) -> Result<(), Error> {
         let result = self
             .http_client
@@ -257,23 +205,6 @@ impl<S: Strategy> Client<S> {
 
                             // Deserialize the message
                             match kind {
-                                Kind::Seed => {
-                                    let result = Seed::decode(data);
-                                    match result {
-                                        Ok(seed) => {
-                                            if verify && !seed.verify(&certificate_verifier) {
-                                                let _ = sender
-                                                    .unbounded_send(Err(Error::InvalidSignature));
-                                                return;
-                                            }
-                                            let _ = sender.unbounded_send(Ok(Message::Seed(seed)));
-                                        }
-                                        Err(e) => {
-                                            let _ =
-                                                sender.unbounded_send(Err(Error::InvalidData(e)));
-                                        }
-                                    }
-                                }
                                 Kind::Notarization => {
                                     let result = Notarized::decode(data);
                                     match result {

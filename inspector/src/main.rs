@@ -88,8 +88,8 @@ use commonware_utils::from_hex_formatted;
 use futures::StreamExt;
 use tracing::{info, warn, Level};
 use utils::{
-    log_block, log_finalization, log_latency, log_notarization, log_seed, parse_index_query,
-    parse_query, IndexQueryKind, QueryKind,
+    log_block, log_finalization, log_latency, log_notarization, parse_index_query, parse_query,
+    IndexQueryKind, QueryKind,
 };
 
 mod utils;
@@ -185,7 +185,6 @@ async fn main() {
         while let Some(message) = stream.next().await {
             let message = message.expect("Failed to receive message");
             match message {
-                Message::Seed(seed) => log_seed(seed),
                 Message::Notarization(notarized) => log_notarization(notarized),
                 Message::Finalization(finalized) => log_finalization(finalized),
             }
@@ -206,32 +205,6 @@ async fn main() {
         }
 
         match type_.as_str() {
-            "seed" => {
-                let query_kind = parse_index_query(query_str).expect("Invalid query");
-                match query_kind {
-                    IndexQueryKind::Single(query) => {
-                        let start = std::time::Instant::now();
-                        let seed = client.seed_get(query).await.expect("Failed to get seed");
-                        log_latency(start);
-                        log_seed(seed);
-                    }
-                    IndexQueryKind::Range(start_view, end_view) => {
-                        for view in start_view..end_view {
-                            let start = std::time::Instant::now();
-                            let query = IndexQuery::Index(view);
-                            match client.seed_get(query).await {
-                                Ok(seed) => {
-                                    log_latency(start);
-                                    log_seed(seed);
-                                }
-                                Err(e) => {
-                                    warn!(view, error=?e, "failed to get seed");
-                                }
-                            }
-                        }
-                    }
-                }
-            }
             "notarization" => {
                 let query_kind = parse_index_query(query_str).expect("Invalid query");
                 match query_kind {

@@ -2,9 +2,17 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { DivIcon, LatLng } from "leaflet";
 import "leaflet/dist/leaflet.css";
-import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
-import { getClusterConfig, getClusters, Cluster, DEFAULT_CLUSTER, MODE } from "./config";
-import { SeedJs, NotarizedJs, FinalizedJs, ViewData } from "./types";
+import init, { parse_notarized, parse_finalized } from "./alto_types/alto_types.js";
+import {
+  getClusterConfig,
+  getClusters,
+  Cluster,
+  DEFAULT_CLUSTER,
+  getHttpBaseUrl,
+  getWsBaseUrl,
+  MODE,
+} from "./config";
+import { NotarizedJs, FinalizedJs, ViewData } from "./types";
 import { hexToUint8Array, hexUint8Array } from "./utils";
 import "./App.css";
 import AboutModal from './AboutModal';
@@ -93,7 +101,6 @@ const App: React.FC = () => {
   const PUBLIC_KEY = useMemo(() => hexToUint8Array(PUBLIC_KEY_HEX), [PUBLIC_KEY_HEX]);
 
   const [views, setViews] = useState<ViewData[]>([]);
-  const [lastObservedView, setLastObservedView] = useState<number | null>(null);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
   const [isKeyInfoModalOpen, setIsKeyInfoModalOpen] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
@@ -108,7 +115,6 @@ const App: React.FC = () => {
   const wsRef = useRef<WebSocket | null>(null);
 
   // Manage WebSocket lifecycle
-  const handleSeedRef = useRef<typeof handleSeed>(null!);
   const handleNotarizedRef = useRef<typeof handleNotarization>(null!);
   const handleFinalizedRef = useRef<typeof handleFinalization>(null!);
   const isInitializedRef = useRef(false);
@@ -161,7 +167,6 @@ const App: React.FC = () => {
   // Reset state when the cluster changes
   useEffect(() => {
     setViews([]);
-    setLastObservedView(null);
     setErrorMessage("");
     setShowError(false);
   }, [selectedCluster]);
@@ -169,8 +174,8 @@ const App: React.FC = () => {
   // Health check function
   const checkHealth = useCallback(async () => {
     try {
-      const protocol = MODE === 'local' ? 'http' : 'https';
-      const response = await fetch(`${protocol}://${BACKEND_URL}/health`, {
+      const baseUrl = getHttpBaseUrl(BACKEND_URL);
+      const response = await fetch(`${baseUrl}/health`, {
         method: "GET",
         headers: {
           "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -241,150 +246,16 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const handleSeed = useCallback((seed: SeedJs) => {
-    const view = seed.view + 1; // Next view is determined by seed - 1
-
-    setViews((prevViews) => {
-      // Create a copy of the current views that we'll modify
-      let newViews = [...prevViews];
-
-      // If we haven't observed any views yet, or if the new view is greater than the last observed view + 1,
-      // handle potentially missed views
-      if (lastObservedView === null || view > lastObservedView + 1) {
-        const startViewIndex = lastObservedView !== null ? lastObservedView + 1 : view;
-
-        // Add any missed views as skipped/timed out
-        for (let missedView = startViewIndex; missedView < view; missedView++) {
-          // Check if this view already exists
-          const existingIndex = newViews.findIndex(v => v.view === missedView);
-
-          if (existingIndex === -1) {
-            // Set a timeout for unknown views
-            const timeoutId = setTimeout(() => {
-              setViews((currentViews) => {
-                return currentViews.map((v) => {
-                  // Only time out this specific view if it's still in unknown state
-                  if (v.view === missedView && v.status === "unknown") {
-                    return { ...v, status: "timed_out", timeoutId: undefined };
-                  }
-                  return v;
-                });
-              });
-            }, TIMEOUT_DURATION);
-
-
-            // Only add if it doesn't already exist
-            newViews.unshift({
-              view: missedView,
-              location: undefined,
-              locationName: undefined,
-              status: "unknown",
-              startTime: adjustTime(Date.now()),
-              timeoutId: timeoutId
-            });
-          }
-        }
-      }
-
-      // Check if this view already exists
-      const existingIndex = newViews.findIndex(v => v.view === view);
-
-      if (existingIndex !== -1) {
-        // If it exists and is already finalized or notarized, just update
-        // the location and signature information without changing timing
-        const existingStatus = newViews[existingIndex].status;
-        if (existingStatus === "finalized" || existingStatus === "notarized") {
-          // Only update location if in public mode
-          const locationIndex = MODE === 'public' ? leader_index(seed, LOCATIONS.length) : -1;
-          const location = locationIndex >= 0 ? LOCATIONS[locationIndex][0] : undefined;
-          const locationName = locationIndex >= 0 ? LOCATIONS[locationIndex][1] : undefined;
-
-          // Only update location and signature info, preserve all timing and status
-          newViews[existingIndex] = {
-            ...newViews[existingIndex],
-            location,
-            locationName,
-            signature: seed.signature,
-          };
-
-          return newViews;
-        }
-
-        // Skip processing for views with "unknown" status
-        if (existingStatus === "unknown") {
-          return newViews;
-        }
-
-        // If it exists but is in another state, clear its timeout but preserve everything else
-        if (newViews[existingIndex].timeoutId) {
-          clearTimeout(newViews[existingIndex].timeoutId);
-        }
-      }
-
-      // Create the new view data
-      const locationIndex = MODE === 'public' ? leader_index(seed, LOCATIONS.length) : -1;
-      const location = locationIndex >= 0 ? LOCATIONS[locationIndex][0] : undefined;
-      const locationName = locationIndex >= 0 ? LOCATIONS[locationIndex][1] : undefined;
-      const newView: ViewData = {
-        view,
-        location,
-        locationName,
-        status: "growing",
-        startTime: adjustTime(Date.now()),
-        signature: seed.signature,
-      };
-
-      // Set a timeout for this specific view
-      const timeoutId = setTimeout(() => {
-        setViews((currentViews) => {
-          return currentViews.map((v) => {
-            // Only time out this specific view if it's still in growing state
-            if (v.view === view && v.status === "growing") {
-              return { ...v, status: "timed_out", timeoutId: undefined };
-            }
-            return v;
-          });
-        });
-      }, TIMEOUT_DURATION);
-
-      // Add timeoutId to the new view
-      const viewWithTimeout = { ...newView, timeoutId };
-
-      // Update or add the view
-      if (existingIndex !== -1) {
-        // Only update if necessary - preserve existing data that shouldn't change
-        newViews[existingIndex] = {
-          ...newViews[existingIndex],
-          status: "growing",
-          signature: seed.signature,
-          timeoutId: timeoutId,
-          location,
-          locationName,
-        };
-      } else {
-        // Add as new
-        newViews.unshift(viewWithTimeout);
-      }
-
-      // Update the last observed view if this is a new maximum
-      if (lastObservedView === null || view > lastObservedView) {
-        setLastObservedView(view);
-      }
-
-      // Limit the number of views to 50
-      if (newViews.length > 50) {
-        // Clean up any timeouts for views we're about to remove
-        for (let i = 50; i < newViews.length; i++) {
-          if (newViews[i].timeoutId) {
-            clearTimeout(newViews[i].timeoutId);
-          }
-        }
-        newViews = newViews.slice(0, 50);
-      }
-
-      return newViews;
-    });
-  }, [lastObservedView, adjustTime, LOCATIONS]);
+  const locationForView = useCallback((view: number) => {
+    if (MODE !== "public" || LOCATIONS.length === 0) {
+      return { location: undefined, locationName: undefined };
+    }
+    const index = (view - 1) % LOCATIONS.length;
+    return {
+      location: LOCATIONS[index][0],
+      locationName: LOCATIONS[index][1],
+    };
+  }, [LOCATIONS]);
 
   const handleNotarization = useCallback((notarized: NotarizedJs) => {
     const view = notarized.proof.view;
@@ -397,6 +268,7 @@ const App: React.FC = () => {
       }
       let newViews = [...prevViews];
       const currentTime = adjustTime(Date.now());
+      const { location, locationName } = locationForView(view);
 
       // Calculate a reasonable start time using the block timestamp if available
       let calculatedStartTime = currentTime;
@@ -425,11 +297,14 @@ const App: React.FC = () => {
         // Update the view with notarization data
         const updatedView: ViewData = {
           ...viewData,
+          location,
+          locationName,
           status: "notarized", // We already checked it's not finalized
           notarizationTime: currentTime,
           // If no start time exists, use the block timestamp
           startTime: viewData.startTime || calculatedStartTime,
           block: viewData.block || notarized.block, // Don't overwrite existing block data
+          signature: notarized.proof.signature,
           timeoutId: undefined,
           actualNotarizationLatency,
         };
@@ -450,12 +325,13 @@ const App: React.FC = () => {
         }
         newViews = [{
           view,
-          location: undefined,
-          locationName: undefined,
+          location,
+          locationName,
           status: "notarized",
           startTime: calculatedStartTime,
           notarizationTime: currentTime,
           block: notarized.block,
+          signature: notarized.proof.signature,
           actualNotarizationLatency,
         }, ...prevViews];
       }
@@ -473,7 +349,7 @@ const App: React.FC = () => {
 
       return newViews;
     });
-  }, [adjustTime]);
+  }, [adjustTime, locationForView]);
 
   const handleFinalization = useCallback((finalized: FinalizedJs) => {
     const view = finalized.proof.view;
@@ -481,6 +357,7 @@ const App: React.FC = () => {
       const index = prevViews.findIndex((v) => v.view === view);
       let newViews = [...prevViews];
       const currentTime = adjustTime(Date.now());
+      const { location, locationName } = locationForView(view);
 
       // Calculate a reasonable start time using the block timestamp if available
       let calculatedStartTime = currentTime;
@@ -514,12 +391,15 @@ const App: React.FC = () => {
         // Use existing data if available, without fabricating missing data
         const updatedView: ViewData = {
           ...viewData,
+          location,
+          locationName,
           status: "finalized",
           finalizationTime: currentTime,
           // Keep existing notarization time if available, but don't create one if missing
           // Keep existing start time or use block timestamp if none
           startTime: viewData.startTime || calculatedStartTime,
           block: finalized.block,
+          signature: finalized.proof.signature,
           timeoutId: undefined,
           actualNotarizationLatency: viewData.actualNotarizationLatency,
           actualFinalizationLatency,
@@ -541,13 +421,14 @@ const App: React.FC = () => {
         }
         newViews = [{
           view,
-          location: undefined,
-          locationName: undefined,
+          location,
+          locationName,
           status: "finalized",
           startTime: calculatedStartTime,
           // No notarization time observed yet
           finalizationTime: currentTime,
           block: finalized.block,
+          signature: finalized.proof.signature,
           actualFinalizationLatency,
         }, ...prevViews];
       }
@@ -565,7 +446,7 @@ const App: React.FC = () => {
 
       return newViews;
     });
-  }, [adjustTime]);
+  }, [adjustTime, locationForView]);
 
   // Update current time every 50ms to force re-render for growing bars
   useEffect(() => {
@@ -578,10 +459,6 @@ const App: React.FC = () => {
   }, [adjustTime]);
 
   // Update handler refs when the handlers change
-  useEffect(() => {
-    handleSeedRef.current = handleSeed;
-  }, [handleSeed]);
-
   useEffect(() => {
     handleNotarizedRef.current = handleNotarization;
   }, [handleNotarization]);
@@ -634,8 +511,8 @@ const App: React.FC = () => {
 
       // Create new WebSocket connection
       const wsCreationTime = Date.now();
-      const protocol = MODE === 'local' ? 'ws' : 'wss';
-      const ws = new WebSocket(`${protocol}://${BACKEND_URL}/consensus/ws`);
+      const wsBaseUrl = getWsBaseUrl(BACKEND_URL);
+      const ws = new WebSocket(`${wsBaseUrl}/consensus/ws`);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
@@ -650,15 +527,11 @@ const App: React.FC = () => {
         const kind = data[0];
         const payload = data.slice(1);
         switch (kind) {
-          case 0: // Seed
-            const seed = parse_seed(PUBLIC_KEY, payload);
-            if (seed) handleSeedRef.current(seed);
-            break;
-          case 1: // Notarization
+          case 0: // M-Notarization
             const notarized = parse_notarized(PUBLIC_KEY, payload);
             if (notarized) handleNotarizedRef.current(notarized);
             break;
-          case 2: // Finalization
+          case 1: // Finalization
             const finalized = parse_finalized(PUBLIC_KEY, payload);
             if (finalized) handleFinalizedRef.current(finalized);
             break;
@@ -854,8 +727,8 @@ const App: React.FC = () => {
           <div className="bars-header">
             <h2 className="bars-title">Timeline</h2>
             <div className="legend-container">
-              <LegendItem color={"#0000eeff"} label="Seeded" />
-              <LegendItem color={"#000"} label="Locked" />
+              <LegendItem color={"#0000eeff"} label="Proposed" />
+              <LegendItem color={"#000"} label="M-Notarized" />
               <LegendItem color={"#228B22ff"} label="Finalized" />
             </div>
           </div>
@@ -1154,7 +1027,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
           {/* Finalized state with notarization */}
           {status === "finalized" && !renderFinalizedWithoutNotarization && (
             <>
-              {/* Base segment (seed to notarization) */}
+              {/* Base segment (proposal to m-notarization) */}
               <div
                 className="bar-segment growing"
                 style={{ width: `${notarizedWidth}px` }}

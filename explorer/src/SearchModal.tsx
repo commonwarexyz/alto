@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import './SearchModal.css';
-import { ClusterConfig, MODE } from './config';
+import { ClusterConfig, getHttpBaseUrl } from './config';
 import { FinalizedJs, NotarizedJs, BlockJs, SearchType, SearchResult } from './types';
 import { hexToUint8Array, hexUint8Array, formatAge } from './utils';
-import init, { parse_seed, parse_notarized, parse_finalized, parse_block } from "./alto_types/alto_types.js";
+import init, { parse_notarized, parse_finalized, parse_block } from "./alto_types/alto_types.js";
 
 interface SearchModalProps {
     isOpen: boolean;
@@ -141,8 +141,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
         }
 
         const { BACKEND_URL, PUBLIC_KEY_HEX } = clusterConfig;
-        const protocol = MODE === 'local' ? 'http' : 'https';
-        const baseUrl = `${protocol}://${BACKEND_URL}`;
+        const baseUrl = getHttpBaseUrl(BACKEND_URL);
         const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
 
         let endpoint = '';
@@ -155,9 +154,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
                 break;
             case 'finalization':
                 endpoint = `/finalization/${typeof query === 'number' ? numberToU64Hex(query) : query}`;
-                break;
-            case 'seed':
-                endpoint = `/seed/${typeof query === 'number' ? numberToU64Hex(query) : query}`;
                 break;
         }
 
@@ -174,11 +170,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
             const data = new Uint8Array(arrayBuffer);
 
             try {
-                if (searchType === 'seed') {
-                    const result = parse_seed(PUBLIC_KEY, data);
-                    if (!result) throw new Error("Failed to parse seed data");
-                    return result;
-                } else if (searchType === 'notarization') {
+                if (searchType === 'notarization') {
                     const result = parse_notarized(PUBLIC_KEY, data);
                     if (!result) throw new Error("Failed to parse notarization data");
                     return result;
@@ -218,13 +210,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
         let formattedResult: Record<string, any> = {};
         let resultType;
 
-        if ('view' in result && 'signature' in result && !('proof' in result)) {
-            resultType = 'Seed';
-            formattedResult = {
-                view: result.view,
-                signature: hexUint8Array(result.signature as Uint8Array, 64)
-            };
-        } else if ('proof' in result && 'block' in result) {
+        if ('proof' in result && 'block' in result) {
             resultType = (lastSearchType === 'finalization' || lastSearchType === 'block') ? 'Finalization' : 'Notarization';
             const dataObj = result as (NotarizedJs | FinalizedJs);
             const block = dataObj.block;
@@ -326,7 +312,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
                             <li><strong>Block</strong>: by height (number), digest (hex), or "latest"</li>
                             <li><strong>Notarization</strong>: by view number or "latest"</li>
                             <li><strong>Finalization</strong>: by view number or "latest"</li>
-                            <li><strong>Seed</strong>: by view number or "latest"</li>
                         </ul>
                         <p>You can also search for ranges (e.g., "10..20") to get multiple results.</p>
                     </div>
@@ -341,7 +326,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
                                     value={searchType}
                                     onChange={(e) => setSearchType(e.target.value as SearchType)}
                                 >
-                                    <option value="seed">Seed</option>
                                     <option value="notarization">Notarization</option>
                                     <option value="finalization">Finalization</option>
                                     <option value="block">Block</option>

@@ -203,6 +203,7 @@ mod tests {
 
             // Link all validators
             link_validators(&mut oracle, &participants, link, None).await;
+            let mut manager = oracle.manager();
 
             // Create instances
             let mut public_keys = HashSet::new();
@@ -262,7 +263,8 @@ mod tests {
                 );
 
                 // Start engine
-                let engine = Engine::new(validator_context.with_label("engine"), config).await;
+                let engine =
+                    Engine::new(validator_context.with_label("engine"), &mut manager, config).await;
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
@@ -317,8 +319,8 @@ mod tests {
             success_rate: 1.0,
         };
         for seed in 0..5 {
-            let state = all_online(5, seed, link.clone(), 25);
-            assert_eq!(state, all_online(5, seed, link.clone(), 25));
+            let state = all_online(6, seed, link.clone(), 25);
+            assert_eq!(state, all_online(6, seed, link.clone(), 25));
         }
     }
 
@@ -330,8 +332,8 @@ mod tests {
             success_rate: 0.75,
         };
         for seed in 0..5 {
-            let state = all_online(5, seed, link.clone(), 25);
-            assert_eq!(state, all_online(5, seed, link.clone(), 25));
+            let state = all_online(6, seed, link.clone(), 25);
+            assert_eq!(state, all_online(6, seed, link.clone(), 25));
         }
     }
 
@@ -348,7 +350,7 @@ mod tests {
     #[test_traced]
     fn test_backfill() {
         // Create context
-        let n = 5;
+        let n = 6;
         let initial_container_required = 10;
         let final_container_required = 20;
         let executor = Runner::timed(Duration::from_secs(30));
@@ -390,6 +392,7 @@ mod tests {
                 Some(|_, i, j| ![i, j].contains(&0usize)),
             )
             .await;
+            let mut manager = oracle.manager();
 
             // Create instances
             for (idx, (signer, scheme)) in private_keys.iter().zip(schemes.iter()).enumerate() {
@@ -450,7 +453,8 @@ mod tests {
                 );
 
                 // Start engine
-                let engine = Engine::new(validator_context.with_label("engine"), config).await;
+                let engine =
+                    Engine::new(validator_context.with_label("engine"), &mut manager, config).await;
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
@@ -557,7 +561,8 @@ mod tests {
             );
 
             // Start engine
-            let engine = Engine::new(validator_context.with_label("engine"), config).await;
+            let engine =
+                Engine::new(validator_context.with_label("engine"), &mut manager, config).await;
             engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
 
             // Poll metrics
@@ -605,7 +610,7 @@ mod tests {
     #[test_traced]
     fn test_unclean_shutdown() {
         // Create context
-        let n = 5;
+        let n = 6;
         let required_container = 100;
 
         // Derive threshold
@@ -648,6 +653,7 @@ mod tests {
                     success_rate: 1.0,
                 };
                 link_validators(&mut oracle, &participants, link, None).await;
+                let mut manager = oracle.manager();
 
                 // Create instances
                 let mut public_keys = HashSet::new();
@@ -707,7 +713,9 @@ mod tests {
                     );
 
                     // Start engine
-                    let engine = Engine::new(validator_context.with_label("engine"), config).await;
+                    let engine =
+                        Engine::new(validator_context.with_label("engine"), &mut manager, config)
+                            .await;
                     engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
                 }
 
@@ -796,7 +804,7 @@ mod tests {
     #[test_traced]
     fn test_indexer() {
         // Create context
-        let n = 5;
+        let n = 6;
         let required_container = 10;
         let executor = Runner::timed(Duration::from_secs(30));
         executor.start(|mut context| async move {
@@ -830,6 +838,7 @@ mod tests {
                 success_rate: 1.0,
             };
             link_validators(&mut oracle, &participants, link, None).await;
+            let mut manager = oracle.manager();
 
             // Derive threshold
             let identity = *schemes[0].polynomial().public();
@@ -895,7 +904,8 @@ mod tests {
                 );
 
                 // Start engine
-                let engine = Engine::new(validator_context.with_label("engine"), config).await;
+                let engine =
+                    Engine::new(validator_context.with_label("engine"), &mut manager, config).await;
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
@@ -940,7 +950,6 @@ mod tests {
             }
 
             // Check indexer uploads
-            assert!(indexer.seed_seen.load(std::sync::atomic::Ordering::Relaxed));
             assert!(indexer
                 .notarization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));

@@ -13,7 +13,7 @@ _To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/
 _To configure indexer upload, add `--indexer-port <port>` to the `generate local` command. The first validator is configured to push data to it._
 
 ```bash
-cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --signature-threads 2 --output test local --start-port 3000 --indexer-port 8080
+cargo run --bin deploy -- generate --peers 6 --bootstrappers 1 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --signature-threads 2 --output test local --start-port 3000 --indexer-port 8080
 ```
 
 _If the command succeeds, you should see the following output:_
