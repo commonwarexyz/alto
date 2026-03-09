@@ -673,8 +673,11 @@ mod tests {
                         participants: participants_set.clone(),
                         mailbox_size: 1024,
                         deque_size: 10,
-                        leader_timeout: Duration::from_secs(1),
-                        certification_timeout: Duration::from_secs(2),
+                        // This test restarts validators every 250..1_000ms of simulated time.
+                        // Keep recovery timeouts below that window so a recovered view can
+                        // either certify or timeout/nullify before the next forced shutdown.
+                        leader_timeout: Duration::from_millis(250),
+                        certification_timeout: Duration::from_millis(500),
                         nullify_retry: Duration::from_secs(10),
                         fetch_timeout: Duration::from_secs(1),
                         activity_timeout: ViewDelta::new(10),
@@ -761,7 +764,7 @@ mod tests {
 
                 // Exit at random points until finished
                 let wait =
-                    context.gen_range(Duration::from_millis(10)..Duration::from_millis(1_000));
+                    context.gen_range(Duration::from_millis(250)..Duration::from_millis(1_000));
 
                 // Wait for one to finish
                 select! {
