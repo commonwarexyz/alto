@@ -1,6 +1,9 @@
 use alto_types::{Block, Context, Scheme, EPOCH};
 use commonware_consensus::{
-    marshal::{ingress::mailbox::AncestorStream, Update},
+    marshal::{
+        ancestry::{AncestorStream, BlockProvider},
+        Update,
+    },
     types::{Height, Round, View},
     Heightable, Reporter,
 };
@@ -55,10 +58,10 @@ where
         self.genesis.as_ref().clone()
     }
 
-    async fn propose(
+    async fn propose<A: BlockProvider<Block = Self::Block>>(
         &mut self,
         (runtime_context, context): (E, Self::Context),
-        mut ancestry: AncestorStream<Self::SigningScheme, Self::Block>,
+        mut ancestry: AncestorStream<A, Self::Block>,
     ) -> Option<Self::Block> {
         let parent = ancestry.next().await?;
 
@@ -81,10 +84,10 @@ impl<E> commonware_consensus::VerifyingApplication<E> for Application
 where
     E: Rng + Spawner + Metrics + Clock,
 {
-    async fn verify(
+    async fn verify<A: BlockProvider<Block = Self::Block>>(
         &mut self,
         (runtime_context, _): (E, Context),
-        mut ancestry: AncestorStream<Self::SigningScheme, Self::Block>,
+        mut ancestry: AncestorStream<A, Self::Block>,
     ) -> bool {
         let Some(block) = ancestry.next().await else {
             return false;

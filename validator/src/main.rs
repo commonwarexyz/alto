@@ -5,7 +5,11 @@ use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt};
 use commonware_consensus::{marshal, types::ViewDelta};
 use commonware_cryptography::{
-    bls12381::primitives::{group, sharing::Sharing, variant::MinSig},
+    bls12381::primitives::{
+        group,
+        sharing::{ModeVersion, Sharing},
+        variant::MinSig,
+    },
     ed25519::{PrivateKey, PublicKey},
     Signer,
 };
@@ -32,7 +36,7 @@ const BROADCASTER_CHANNEL: u64 = 3;
 const MARSHAL_CHANNEL: u64 = 4;
 
 const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
-const NOTARIZATION_TIMEOUT: Duration = Duration::from_secs(2);
+const CERTIFICATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NULLIFY_RETRY: Duration = Duration::from_secs(10);
 const ACTIVITY_TIMEOUT: ViewDelta = ViewDelta::new(256);
 const SKIP_TIMEOUT: ViewDelta = ViewDelta::new(32);
@@ -161,8 +165,11 @@ fn main() {
         let share = group::Share::decode(share.as_ref()).expect("Share is invalid");
         let polynomial =
             from_hex_formatted(&config.polynomial).expect("Could not parse polynomial");
-        let polynomial = Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(peers_u32))
-            .expect("polynomial is invalid");
+        let polynomial = Sharing::<MinSig>::decode_cfg(
+            polynomial.as_ref(),
+            &(NZU32!(peers_u32), ModeVersion::v0()),
+        )
+        .expect("polynomial is invalid");
         let identity = polynomial.public();
         info!(
             ?public_key,
@@ -244,6 +251,7 @@ fn main() {
         // Create engine
         let engine_cfg = engine::Config {
             blocker: oracle.clone(),
+            provider: oracle.clone(),
             partition_prefix: "engine".to_string(),
             blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
             finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
@@ -252,7 +260,7 @@ fn main() {
             mailbox_size: config.mailbox_size,
             deque_size: config.deque_size,
             leader_timeout: LEADER_TIMEOUT,
-            notarization_timeout: NOTARIZATION_TIMEOUT,
+            certification_timeout: CERTIFICATION_TIMEOUT,
             nullify_retry: NULLIFY_RETRY,
             activity_timeout: ACTIVITY_TIMEOUT,
             skip_timeout: SKIP_TIMEOUT,
@@ -270,7 +278,7 @@ fn main() {
 
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),
-            provider: oracle.clone(),
+            peer_provider: oracle.clone(),
             blocker: oracle,
             mailbox_size: config.mailbox_size,
             initial: Duration::from_secs(1),

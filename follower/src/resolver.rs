@@ -1,30 +1,28 @@
 use crate::Source;
 use alto_client::consensus::Payload;
 use alto_client::{IndexQuery, Query};
-use alto_types::Block;
 use bytes::Bytes;
 use commonware_codec::Encode;
-use commonware_consensus::{marshal::ingress::handler, types::Height};
+use commonware_consensus::{marshal::resolver::handler, types::Height};
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
 use commonware_macros::select_loop;
 use commonware_resolver::Consumer;
 use commonware_runtime::{spawn_cell, ContextCell, Handle, Spawner};
-use commonware_utils::channel::mpsc as tokio_mpsc;
+use commonware_utils::channel::mpsc;
 use commonware_utils::{
     futures::{AbortablePool, Aborter},
     vec::NonEmptyVec,
 };
-use futures::{channel::mpsc, SinkExt, StreamExt};
 use std::collections::HashMap;
 use tracing::{debug, trace, warn};
 
 /// Messages sent from the [Resolver] handle to the [Actor].
 #[allow(clippy::type_complexity)]
 pub enum Message {
-    Fetch(handler::Request<Block>),
-    Cancel(handler::Request<Block>),
+    Fetch(handler::Request<Digest>),
+    Cancel(handler::Request<Digest>),
     Clear,
-    Retain(Box<dyn Fn(&handler::Request<Block>) -> bool + Send>),
+    Retain(Box<dyn Fn(&handler::Request<Digest>) -> bool + Send>),
 }
 
 /// Handle to the [Actor] that implements [Resolver] for marshal.
@@ -36,7 +34,7 @@ pub struct Resolver {
 }
 
 impl commonware_resolver::Resolver for Resolver {
-    type Key = handler::Request<Block>;
+    type Key = handler::Request<Digest>;
     type PublicKey = PublicKey;
 
     async fn fetch(&mut self, key: Self::Key) {
@@ -100,9 +98,9 @@ pub struct Actor<E: Spawner, C: Source> {
     context: ContextCell<E>,
     client: C,
     mailbox_rx: mpsc::Receiver<Message>,
-    handler: handler::Handler<Block>,
-    in_flight: AbortablePool<handler::Request<Block>>,
-    in_flight_keys: HashMap<handler::Request<Block>, Aborter>,
+    handler: handler::Handler<Digest>,
+    in_flight: AbortablePool<handler::Request<Digest>>,
+    in_flight_keys: HashMap<handler::Request<Digest>, Aborter>,
 }
 
 impl<E: Spawner, C: Source> Actor<E, C> {
@@ -110,7 +108,7 @@ impl<E: Spawner, C: Source> Actor<E, C> {
     pub fn new(
         context: E,
         client: C,
-        ingress_tx: tokio_mpsc::Sender<handler::Message<Block>>,
+        ingress_tx: mpsc::Sender<handler::Message<Digest>>,
         mailbox_size: usize,
     ) -> (Self, Resolver) {
         let (mailbox_tx, mailbox_rx) = mpsc::channel(mailbox_size);
@@ -142,7 +140,7 @@ impl<E: Spawner, C: Source> Actor<E, C> {
             Ok(key) = self.in_flight.next_completed() else continue => {
                 self.in_flight_keys.remove(&key);
             },
-            Some(msg) = self.mailbox_rx.next() else break => {
+            Some(msg) = self.mailbox_rx.recv() else break => {
                 match msg {
                     Message::Fetch(key) => {
                         if self.in_flight_keys.contains_key(&key) {
@@ -179,10 +177,10 @@ impl<E: Spawner, C: Source> Actor<E, C> {
     }
 
     async fn process_fetch(
-        key: handler::Request<Block>,
+        key: handler::Request<Digest>,
         client: C,
-        handler: handler::Handler<Block>,
-    ) -> handler::Request<Block> {
+        handler: handler::Handler<Digest>,
+    ) -> handler::Request<Digest> {
         match &key {
             handler::Request::Block(digest) => {
                 Self::fetch_block_by_digest(*digest, client, handler).await;
@@ -200,7 +198,7 @@ impl<E: Spawner, C: Source> Actor<E, C> {
     async fn fetch_block_by_digest(
         digest: Digest,
         client: C,
-        mut handler: handler::Handler<Block>,
+        mut handler: handler::Handler<Digest>,
     ) {
         debug!(?digest, "fetching block by digest");
 
@@ -225,7 +223,7 @@ impl<E: Spawner, C: Source> Actor<E, C> {
     async fn fetch_finalized_by_height(
         height: Height,
         client: C,
-        mut handler: handler::Handler<Block>,
+        mut handler: handler::Handler<Digest>,
     ) {
         debug!(height = height.get(), "fetching finalized block by height");
 
@@ -256,7 +254,7 @@ impl<E: Spawner, C: Source> Actor<E, C> {
     async fn fetch_notarized_by_round(
         round: commonware_consensus::types::Round,
         client: C,
-        mut handler: handler::Handler<Block>,
+        mut handler: handler::Handler<Digest>,
     ) {
         let view = round.view().get();
         debug!(view, "fetching notarized block by round");
@@ -285,12 +283,11 @@ mod tests {
     use super::*;
     use crate::test_utils::{MockSource, TestFixture};
     use alto_client::{consensus::Payload, Query};
-    use alto_types::Block;
     use commonware_consensus::{
-        marshal::ingress::handler,
+        marshal::resolver::handler,
         types::{Height, Round, View},
     };
-    use commonware_cryptography::Digestible;
+    use commonware_cryptography::{sha256::Digest, Digestible};
     use commonware_macros::test_traced;
     use commonware_resolver::Resolver as _;
     use commonware_runtime::{deterministic::Runner, Clock, Metrics, Runner as _};
@@ -310,7 +307,7 @@ mod tests {
 
             let _actor_handle = actor.start();
 
-            let key = handler::Request::<Block>::Finalized {
+            let key = handler::Request::<Digest>::Finalized {
                 height: Height::new(1),
             };
 
@@ -584,7 +581,7 @@ mod tests {
             let _actor_handle = actor.start();
 
             // Send the same request twice
-            let key = handler::Request::<Block>::Block(digest);
+            let key = handler::Request::<Digest>::Block(digest);
             resolver.fetch(key.clone()).await;
             resolver.fetch(key).await;
 

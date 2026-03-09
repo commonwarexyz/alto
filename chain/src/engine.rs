@@ -5,8 +5,12 @@ use crate::{
 use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
-    application::marshaled::Marshaled as ConsensusMarshaled,
-    marshal::{self, ingress::handler},
+    marshal::{
+        self,
+        core::{Actor as MarshalActor, Mailbox as MarshalMailbox},
+        resolver::handler,
+        standard::{Deferred, Standard},
+    },
     simplex::{self, elector::Random, Engine as Consensus},
     types::{Epoch, FixedEpocher, ViewDelta},
     Reporters,
@@ -17,7 +21,7 @@ use commonware_cryptography::{
     ed25519::PublicKey,
     sha256::Digest,
 };
-use commonware_p2p::{Blocker, Receiver, Sender};
+use commonware_p2p::{Blocker, Provider, Receiver, Sender};
 use commonware_parallel::Strategy;
 use commonware_resolver::Resolver;
 use commonware_runtime::{
@@ -40,7 +44,7 @@ use tracing::{error, info, warn};
 
 /// Reporter type for [simplex::Engine].
 type Reporter<E, I> =
-    Reporters<Activity, marshal::Mailbox<Scheme, Block>, Option<indexer::Pusher<E, I>>>;
+    Reporters<Activity, MarshalMailbox<Scheme, Standard<Block>>, Option<indexer::Pusher<E, I>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -59,8 +63,14 @@ const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(16);
 
 /// Configuration for the [Engine].
-pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer, S: Strategy> {
+pub struct Config<
+    B: Blocker<PublicKey = PublicKey>,
+    P: Provider<PublicKey = PublicKey>,
+    I: Indexer,
+    S: Strategy,
+> {
     pub blocker: B,
+    pub provider: P,
     pub partition_prefix: String,
     pub blocks_freezer_table_initial_size: u32,
     pub finalized_freezer_table_initial_size: u32,
@@ -72,7 +82,7 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer, S: Strategy> {
     pub deque_size: usize,
 
     pub leader_timeout: Duration,
-    pub notarization_timeout: Duration,
+    pub certification_timeout: Duration,
     pub nullify_retry: Duration,
     pub fetch_timeout: Duration,
     pub activity_timeout: ViewDelta,
@@ -87,24 +97,25 @@ pub struct Config<B: Blocker<PublicKey = PublicKey>, I: Indexer, S: Strategy> {
     pub indexer: Option<I>,
 }
 
-type Marshaled<E> = ConsensusMarshaled<E, Scheme, Application, Block, FixedEpocher>;
+type Marshaled<E> = Deferred<E, Scheme, Application, Block, FixedEpocher>;
 
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
-pub struct Engine<E, B, S, I>
+pub struct Engine<E, B, P, S, I>
 where
     E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
+    P: Provider<PublicKey = PublicKey>,
     S: Strategy,
     I: Indexer,
 {
     context: ContextCell<E>,
 
-    buffer: buffered::Engine<E, PublicKey, Block>,
+    buffer: buffered::Engine<E, PublicKey, Block, P>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
-    marshal: marshal::Actor<
+    marshal: MarshalActor<
         E,
-        Block,
+        Standard<Block>,
         ConstantProvider<Scheme, Epoch>,
         immutable::Archive<E, Digest, Finalization>,
         immutable::Archive<E, Digest, Block>,
@@ -117,15 +128,16 @@ where
         Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
 }
 
-impl<E, B, S, I> Engine<E, B, S, I>
+impl<E, B, P, S, I> Engine<E, B, P, S, I>
 where
     E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + ThreadPooler + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
+    P: Provider<PublicKey = PublicKey>,
     S: Strategy,
     I: Indexer,
 {
     /// Create a new [Engine].
-    pub async fn new(context: E, cfg: Config<B, I, S>) -> Self {
+    pub async fn new(context: E, cfg: Config<B, P, I, S>) -> Self {
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
@@ -135,6 +147,7 @@ where
                 deque_size: cfg.deque_size,
                 priority: true,
                 codec_config: (),
+                peer_provider: cfg.provider,
             },
         );
 
@@ -226,7 +239,7 @@ where
             .expect("failed to create scheme");
         let provider = ConstantProvider::new(scheme.clone());
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-        let (marshal, marshal_mailbox, _) = marshal::Actor::init(
+        let (marshal, marshal_mailbox, _) = MarshalActor::init(
             context.with_label("marshal"),
             finalizations_by_height,
             finalized_blocks,
@@ -287,8 +300,8 @@ where
                 partition: format!("{}-consensus", cfg.partition_prefix),
                 mailbox_size: cfg.mailbox_size,
                 leader_timeout: cfg.leader_timeout,
-                notarization_timeout: cfg.notarization_timeout,
-                nullify_retry: cfg.nullify_retry,
+                certification_timeout: cfg.certification_timeout,
+                timeout_retry: cfg.nullify_retry,
                 fetch_timeout: cfg.fetch_timeout,
                 activity_timeout: cfg.activity_timeout,
                 skip_timeout: cfg.skip_timeout,
@@ -335,8 +348,8 @@ where
             impl Receiver<PublicKey = PublicKey>,
         ),
         marshal: (
-            mpsc::Receiver<handler::Message<Block>>,
-            impl Resolver<Key = handler::Request<Block>, PublicKey = PublicKey>,
+            mpsc::Receiver<handler::Message<Digest>>,
+            impl Resolver<Key = handler::Request<Digest>, PublicKey = PublicKey>,
         ),
     ) -> Handle<()> {
         spawn_cell!(
@@ -366,8 +379,8 @@ where
             impl Receiver<PublicKey = PublicKey>,
         ),
         marshal: (
-            mpsc::Receiver<handler::Message<Block>>,
-            impl Resolver<Key = handler::Request<Block>, PublicKey = PublicKey>,
+            mpsc::Receiver<handler::Message<Digest>>,
+            impl Resolver<Key = handler::Request<Digest>, PublicKey = PublicKey>,
         ),
     ) {
         // Start the buffer

@@ -1,7 +1,11 @@
 use crate::Source;
 use alto_client::consensus::Message;
 use alto_types::{Block, Scheme};
-use commonware_consensus::{marshal, simplex::types::Activity, Reporter, Viewable};
+use commonware_consensus::{
+    marshal::{core::Mailbox as MarshalMailbox, standard::Standard},
+    simplex::types::Activity,
+    Reporter, Viewable,
+};
 use commonware_parallel::Sequential;
 use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Spawner};
 use futures::StreamExt;
@@ -18,7 +22,8 @@ pub enum Error {
     Stream(String),
 }
 
-/// Feeds certificates from a [Source] stream into [marshal::Actor] via its [marshal::Mailbox].
+/// Feeds certificates from a [Source] stream into [MarshalActor](commonware_consensus::marshal::core::Actor)
+/// via its [MarshalMailbox].
 ///
 /// Listens for seed, notarization, and finalization messages, verifies their threshold
 /// signatures, caches the associated blocks, and reports the proofs to marshal.
@@ -31,7 +36,7 @@ pub struct Feeder<E: Clock, C: Source> {
     context: ContextCell<E>,
     client: C,
     scheme: Scheme,
-    marshal_mailbox: marshal::Mailbox<Scheme, Block>,
+    marshal_mailbox: MarshalMailbox<Scheme, Standard<Block>>,
 }
 
 impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
@@ -40,7 +45,7 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
         context: E,
         client: C,
         scheme: Scheme,
-        marshal_mailbox: marshal::Mailbox<Scheme, Block>,
+        marshal_mailbox: MarshalMailbox<Scheme, Standard<Block>>,
     ) -> Self {
         Self {
             context: ContextCell::new(context),

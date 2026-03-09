@@ -1,7 +1,10 @@
 #[cfg(test)]
 use alto_types::Identity;
 use alto_types::{Activity, Block, Finalized, Notarized, Scheme, Seed, Seedable};
-use commonware_consensus::{marshal, Reporter, Viewable};
+use commonware_consensus::{
+    marshal::{core::Mailbox as MarshalMailbox, standard::Standard},
+    Reporter, Viewable,
+};
 use commonware_parallel::Strategy;
 use commonware_runtime::{Metrics, Spawner};
 use std::future::Future;
@@ -99,12 +102,12 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
 pub struct Pusher<E: Spawner + Metrics, I: Indexer> {
     context: E,
     indexer: I,
-    marshal: marshal::Mailbox<Scheme, Block>,
+    marshal: MarshalMailbox<Scheme, Standard<Block>>,
 }
 
 impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
     /// Create a new [Pusher].
-    pub fn new(context: E, indexer: I, marshal: marshal::Mailbox<Scheme, Block>) -> Self {
+    pub fn new(context: E, indexer: I, marshal: MarshalMailbox<Scheme, Standard<Block>>) -> Self {
         Self {
             context,
             indexer,
@@ -137,11 +140,14 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                 // Upload block to indexer (once we have it)
                 self.context.with_label("notarized_block").spawn({
                     let indexer = self.indexer.clone();
-                    let mut marshal = self.marshal.clone();
+                    let marshal = self.marshal.clone();
                     move |_| async move {
                         // Wait for block
                         let block = marshal
-                            .subscribe(Some(notarization.round()), notarization.proposal.payload)
+                            .subscribe_by_digest(
+                                Some(notarization.round()),
+                                notarization.proposal.payload,
+                            )
                             .await
                             .await;
                         let Ok(block) = block else {
@@ -179,10 +185,13 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                 // Upload block to indexer (once we have it)
                 self.context.with_label("finalized_block").spawn({
                     let indexer = self.indexer.clone();
-                    let mut marshal = self.marshal.clone();
+                    let marshal = self.marshal.clone();
                     move |_| async move {
                         let block = marshal
-                            .subscribe(Some(finalization.round()), finalization.proposal.payload)
+                            .subscribe_by_digest(
+                                Some(finalization.round()),
+                                finalization.proposal.payload,
+                            )
                             .await
                             .await;
                         let Ok(block) = block else {

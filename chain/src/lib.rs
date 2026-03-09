@@ -213,8 +213,9 @@ mod tests {
 
                 // Configure engine
                 let uid = format!("validator_{public_key}");
-                let config: Config<_, Mock, _> = engine::Config {
+                let config: Config<_, _, Mock, _> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
+                    provider: oracle.manager(),
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -225,7 +226,7 @@ mod tests {
                     mailbox_size: 1024,
                     deque_size: 10,
                     leader_timeout: Duration::from_secs(1),
-                    notarization_timeout: Duration::from_secs(2),
+                    certification_timeout: Duration::from_secs(2),
                     nullify_retry: Duration::from_secs(10),
                     fetch_timeout: Duration::from_secs(1),
                     activity_timeout: ViewDelta::new(10),
@@ -246,7 +247,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    provider: oracle.manager(),
+                    peer_provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),
@@ -401,8 +402,9 @@ mod tests {
                 // Configure engine
                 let public_key = signer.public_key();
                 let uid = format!("validator_{public_key}");
-                let config: Config<_, Mock, _> = engine::Config {
+                let config: Config<_, _, Mock, _> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
+                    provider: oracle.manager(),
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -413,7 +415,7 @@ mod tests {
                     mailbox_size: 1024,
                     deque_size: 10,
                     leader_timeout: Duration::from_secs(1),
-                    notarization_timeout: Duration::from_secs(2),
+                    certification_timeout: Duration::from_secs(2),
                     nullify_retry: Duration::from_secs(10),
                     fetch_timeout: Duration::from_secs(1),
                     activity_timeout: ViewDelta::new(10),
@@ -434,7 +436,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    provider: oracle.manager(),
+                    peer_provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),
@@ -508,8 +510,9 @@ mod tests {
             let share = schemes[0].share().cloned().unwrap();
             let public_key = signer.public_key();
             let uid = format!("validator_{public_key}");
-            let config: Config<_, Mock, _> = engine::Config {
+            let config: Config<_, _, Mock, _> = engine::Config {
                 blocker: oracle.control(public_key.clone()),
+                provider: oracle.manager(),
                 partition_prefix: uid.clone(),
                 blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                 finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -520,7 +523,7 @@ mod tests {
                 mailbox_size: 1024,
                 deque_size: 10,
                 leader_timeout: Duration::from_secs(1),
-                notarization_timeout: Duration::from_secs(2),
+                certification_timeout: Duration::from_secs(2),
                 nullify_retry: Duration::from_secs(10),
                 fetch_timeout: Duration::from_secs(1),
                 activity_timeout: ViewDelta::new(10),
@@ -541,7 +544,7 @@ mod tests {
             // Configure marshal resolver
             let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                 public_key: public_key.clone(),
-                provider: oracle.manager(),
+                peer_provider: oracle.manager(),
                 blocker: oracle.control(public_key.clone()),
                 mailbox_size: 1024,
                 initial: Duration::from_secs(1),
@@ -658,8 +661,9 @@ mod tests {
 
                     // Configure engine
                     let uid = format!("validator_{public_key}");
-                    let config: Config<_, Mock, _> = engine::Config {
+                    let config: Config<_, _, Mock, _> = engine::Config {
                         blocker: oracle.control(public_key.clone()),
+                        provider: oracle.manager(),
                         partition_prefix: uid.clone(),
                         blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                         finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -669,8 +673,11 @@ mod tests {
                         participants: participants_set.clone(),
                         mailbox_size: 1024,
                         deque_size: 10,
-                        leader_timeout: Duration::from_secs(1),
-                        notarization_timeout: Duration::from_secs(2),
+                        // This test restarts validators every 250..1_000ms of simulated time.
+                        // Keep recovery timeouts below that window so a recovered view can
+                        // either certify or timeout/nullify before the next forced shutdown.
+                        leader_timeout: Duration::from_millis(250),
+                        certification_timeout: Duration::from_millis(500),
                         nullify_retry: Duration::from_secs(10),
                         fetch_timeout: Duration::from_secs(1),
                         activity_timeout: ViewDelta::new(10),
@@ -691,7 +698,7 @@ mod tests {
                     // Configure marshal resolver
                     let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                         public_key: public_key.clone(),
-                        provider: oracle.manager(),
+                        peer_provider: oracle.manager(),
                         blocker: oracle.control(public_key.clone()),
                         mailbox_size: 1024,
                         initial: Duration::from_secs(1),
@@ -757,7 +764,7 @@ mod tests {
 
                 // Exit at random points until finished
                 let wait =
-                    context.gen_range(Duration::from_millis(10)..Duration::from_millis(1_000));
+                    context.gen_range(Duration::from_millis(250)..Duration::from_millis(1_000));
 
                 // Wait for one to finish
                 select! {
@@ -846,8 +853,9 @@ mod tests {
 
                 // Configure engine
                 let uid = format!("validator_{public_key}");
-                let config: Config<_, Mock, _> = engine::Config {
+                let config: Config<_, _, Mock, _> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
+                    provider: oracle.manager(),
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -858,7 +866,7 @@ mod tests {
                     mailbox_size: 1024,
                     deque_size: 10,
                     leader_timeout: Duration::from_secs(1),
-                    notarization_timeout: Duration::from_secs(2),
+                    certification_timeout: Duration::from_secs(2),
                     nullify_retry: Duration::from_secs(10),
                     fetch_timeout: Duration::from_secs(1),
                     activity_timeout: ViewDelta::new(10),
@@ -879,7 +887,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    provider: oracle.manager(),
+                    peer_provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),

@@ -1,7 +1,7 @@
 use crate::throughput::Throughput;
 use alto_types::{Block, Scheme};
 use commonware_consensus::{
-    marshal::{self, Update},
+    marshal::{core::Mailbox as MarshalMailbox, standard::Standard, Update},
     types::Height,
     Reporter,
 };
@@ -61,14 +61,14 @@ pub(crate) struct Application<E: Clock + Spawner> {
     rx: mpsc::Receiver<Update<Block>>,
     throughput: Throughput,
     tip: Option<Height>,
-    mailbox: marshal::Mailbox<Scheme, Block>,
+    mailbox: MarshalMailbox<Scheme, Standard<Block>>,
     pruning_depth: Option<u64>,
 }
 
 impl<E: Clock + Spawner> Application<E> {
     pub(crate) fn new(
         context: E,
-        mailbox: marshal::Mailbox<Scheme, Block>,
+        mailbox: MarshalMailbox<Scheme, Standard<Block>>,
         mailbox_size: usize,
         pruning_depth: Option<u64>,
     ) -> (Self, Mailbox) {
