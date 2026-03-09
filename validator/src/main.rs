@@ -5,7 +5,11 @@ use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt};
 use commonware_consensus::{marshal, types::ViewDelta};
 use commonware_cryptography::{
-    bls12381::primitives::{group, sharing::{ModeVersion, Sharing}, variant::MinSig},
+    bls12381::primitives::{
+        group,
+        sharing::{ModeVersion, Sharing},
+        variant::MinSig,
+    },
     ed25519::{PrivateKey, PublicKey},
     Signer,
 };

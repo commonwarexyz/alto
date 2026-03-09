@@ -1,6 +1,9 @@
 use alto_types::{Block, Context, Scheme, EPOCH};
 use commonware_consensus::{
-    marshal::{ancestry::{AncestorStream, BlockProvider}, Update},
+    marshal::{
+        ancestry::{AncestorStream, BlockProvider},
+        Update,
+    },
     types::{Height, Round, View},
     Heightable, Reporter,
 };

@@ -4,7 +4,10 @@ use clap::{value_parser, Arg, ArgMatches, Command};
 use commonware_codec::{Decode, DecodeExt, Encode};
 use commonware_consensus::simplex::scheme::bls12381_threshold::vrf as bls12381_threshold;
 use commonware_cryptography::{
-    bls12381::primitives::{sharing::{ModeVersion, Sharing}, variant::MinSig},
+    bls12381::primitives::{
+        sharing::{ModeVersion, Sharing},
+        variant::MinSig,
+    },
     certificate::mocks::Fixture,
     ed25519::{PrivateKey, PublicKey},
     Signer,

@@ -107,11 +107,7 @@ pub struct Pusher<E: Spawner + Metrics, I: Indexer> {
 
 impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
     /// Create a new [Pusher].
-    pub fn new(
-        context: E,
-        indexer: I,
-        marshal: MarshalMailbox<Scheme, Standard<Block>>,
-    ) -> Self {
+    pub fn new(context: E, indexer: I, marshal: MarshalMailbox<Scheme, Standard<Block>>) -> Self {
         Self {
             context,
             indexer,
