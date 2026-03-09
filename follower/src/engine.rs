@@ -40,7 +40,7 @@ const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const DEQUE_SIZE: usize = 10;
 const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(1024);
 
-/// The engine that drives the follower's [marshal::Actor].
+/// The engine that drives the follower's [MarshalActor].
 ///
 /// Unlike the validator's engine, this does not run consensus. Instead, it
 /// relies on a [Feeder](crate::feeder::Feeder) to feed certificates from a

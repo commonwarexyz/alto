@@ -22,7 +22,8 @@ pub enum Error {
     Stream(String),
 }
 
-/// Feeds certificates from a [Source] stream into [marshal::Actor] via its [marshal::Mailbox].
+/// Feeds certificates from a [Source] stream into [MarshalActor](commonware_consensus::marshal::core::Actor)
+/// via its [MarshalMailbox].
 ///
 /// Listens for seed, notarization, and finalization messages, verifies their threshold
 /// signatures, caches the associated blocks, and reports the proofs to marshal.
