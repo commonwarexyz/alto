@@ -196,7 +196,6 @@ mod tests {
     use super::*;
     use crate::resolver::Actor;
     use crate::test_utils::TestFixture;
-    use alto_types::Block;
     use bytes::Bytes;
     use commonware_codec::Encode;
     use commonware_consensus::{
@@ -243,7 +242,7 @@ mod tests {
 
             // Manually inject a finalization into marshal's ingress channel,
             // bypassing the resolver actor to control the payload directly.
-            let key = handler::Request::<Block>::Finalized {
+            let key = handler::Request::<Digest>::Finalized {
                 height: Height::new(1),
             };
             let value = Bytes::from((finalized.proof, finalized.block).encode().to_vec());
@@ -297,7 +296,7 @@ mod tests {
 
             // Inject a notarization directly into marshal's ingress channel
             let round = Round::new(alto_types::EPOCH, View::new(1));
-            let key = handler::Request::<Block>::Notarized { round };
+            let key = handler::Request::<Digest>::Notarized { round };
             let value = Bytes::from((notarized.proof, notarized.block).encode().to_vec());
             let (response_tx, response_rx) = oneshot::channel();
             ingress_tx

@@ -283,12 +283,11 @@ mod tests {
     use super::*;
     use crate::test_utils::{MockSource, TestFixture};
     use alto_client::{consensus::Payload, Query};
-    use alto_types::Block;
     use commonware_consensus::{
-        marshal::ingress::handler,
+        marshal::resolver::handler,
         types::{Height, Round, View},
     };
-    use commonware_cryptography::Digestible;
+    use commonware_cryptography::{sha256::Digest, Digestible};
     use commonware_macros::test_traced;
     use commonware_resolver::Resolver as _;
     use commonware_runtime::{deterministic::Runner, Clock, Metrics, Runner as _};
@@ -308,7 +307,7 @@ mod tests {
 
             let _actor_handle = actor.start();
 
-            let key = handler::Request::<Block>::Finalized {
+            let key = handler::Request::<Digest>::Finalized {
                 height: Height::new(1),
             };
 
@@ -582,7 +581,7 @@ mod tests {
             let _actor_handle = actor.start();
 
             // Send the same request twice
-            let key = handler::Request::<Block>::Block(digest);
+            let key = handler::Request::<Digest>::Block(digest);
             resolver.fetch(key.clone()).await;
             resolver.fetch(key).await;
 

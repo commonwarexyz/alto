@@ -213,8 +213,9 @@ mod tests {
 
                 // Configure engine
                 let uid = format!("validator_{public_key}");
-                let config: Config<_, Mock, _> = engine::Config {
+                let config: Config<_, _, Mock, _> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
+                    provider: oracle.manager(),
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -246,7 +247,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    provider: oracle.manager(),
+                    peer_provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),
@@ -401,8 +402,9 @@ mod tests {
                 // Configure engine
                 let public_key = signer.public_key();
                 let uid = format!("validator_{public_key}");
-                let config: Config<_, Mock, _> = engine::Config {
+                let config: Config<_, _, Mock, _> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
+                    provider: oracle.manager(),
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -434,7 +436,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    provider: oracle.manager(),
+                    peer_provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),
@@ -508,8 +510,9 @@ mod tests {
             let share = schemes[0].share().cloned().unwrap();
             let public_key = signer.public_key();
             let uid = format!("validator_{public_key}");
-            let config: Config<_, Mock, _> = engine::Config {
+            let config: Config<_, _, Mock, _> = engine::Config {
                 blocker: oracle.control(public_key.clone()),
+                provider: oracle.manager(),
                 partition_prefix: uid.clone(),
                 blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                 finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -541,7 +544,7 @@ mod tests {
             // Configure marshal resolver
             let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                 public_key: public_key.clone(),
-                provider: oracle.manager(),
+                peer_provider: oracle.manager(),
                 blocker: oracle.control(public_key.clone()),
                 mailbox_size: 1024,
                 initial: Duration::from_secs(1),
@@ -658,8 +661,9 @@ mod tests {
 
                     // Configure engine
                     let uid = format!("validator_{public_key}");
-                    let config: Config<_, Mock, _> = engine::Config {
+                    let config: Config<_, _, Mock, _> = engine::Config {
                         blocker: oracle.control(public_key.clone()),
+                        provider: oracle.manager(),
                         partition_prefix: uid.clone(),
                         blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                         finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -691,7 +695,7 @@ mod tests {
                     // Configure marshal resolver
                     let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                         public_key: public_key.clone(),
-                        provider: oracle.manager(),
+                        peer_provider: oracle.manager(),
                         blocker: oracle.control(public_key.clone()),
                         mailbox_size: 1024,
                         initial: Duration::from_secs(1),
@@ -846,8 +850,9 @@ mod tests {
 
                 // Configure engine
                 let uid = format!("validator_{public_key}");
-                let config: Config<_, Mock, _> = engine::Config {
+                let config: Config<_, _, Mock, _> = engine::Config {
                     blocker: oracle.control(public_key.clone()),
+                    provider: oracle.manager(),
                     partition_prefix: uid.clone(),
                     blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
                     finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
@@ -879,7 +884,7 @@ mod tests {
                 // Configure marshal resolver
                 let marshal_resolver_cfg = marshal::resolver::p2p::Config {
                     public_key: public_key.clone(),
-                    provider: oracle.manager(),
+                    peer_provider: oracle.manager(),
                     blocker: oracle.control(public_key.clone()),
                     mailbox_size: 1024,
                     initial: Duration::from_secs(1),
