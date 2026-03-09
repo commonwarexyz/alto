@@ -102,7 +102,7 @@ where
             return false;
         }
 
-        // Immediate ancestry invariants are enforced by marshal's standard wrapper:
+        // The height and digest invariants are enforced in `Marshaled`:
         // - The block height must be one greater than the parent's height.
         // - The block's parent digest must match the parent's digest.
 
