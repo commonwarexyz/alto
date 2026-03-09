@@ -2,7 +2,7 @@ use crate::consensus::{Context, Finalization, Notarization, Scheme};
 use bytes::{Buf, BufMut};
 use commonware_codec::{varint::UInt, Encode, EncodeSize, Error, Read, ReadExt, Write};
 use commonware_consensus::{types::Height, CertifiableBlock, Heightable};
-use commonware_cryptography::{sha256::Digest, Committable, Digestible, Hasher, Sha256};
+use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256};
 use commonware_parallel::Strategy;
 use rand::rngs::OsRng;
 
@@ -93,14 +93,6 @@ impl Digestible for Block {
     type Digest = Digest;
 
     fn digest(&self) -> Digest {
-        self.digest
-    }
-}
-
-impl Committable for Block {
-    type Commitment = Digest;
-
-    fn commitment(&self) -> Digest {
         self.digest
     }
 }

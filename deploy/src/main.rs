@@ -4,7 +4,7 @@ use clap::{value_parser, Arg, ArgMatches, Command};
 use commonware_codec::{Decode, DecodeExt, Encode};
 use commonware_consensus::simplex::scheme::bls12381_threshold::vrf as bls12381_threshold;
 use commonware_cryptography::{
-    bls12381::primitives::{sharing::Sharing, variant::MinSig},
+    bls12381::primitives::{sharing::{ModeVersion, Sharing}, variant::MinSig},
     certificate::mocks::Fixture,
     ed25519::{PrivateKey, PublicKey},
     Signer,
@@ -650,8 +650,11 @@ fn explorer_local(dir: String, backend_url: String) {
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex_formatted(&polynomial_hex).expect("invalid polynomial");
-    let polynomial = Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(num_peers as u32))
-        .expect("polynomial is invalid");
+    let polynomial = Sharing::<MinSig>::decode_cfg(
+        polynomial.as_ref(),
+        &(NZU32!(num_peers as u32), ModeVersion::v0()),
+    )
+    .expect("polynomial is invalid");
     let identity = polynomial.public();
 
     // Generate config.ts with empty locations (explorer will hide map)
@@ -703,9 +706,11 @@ fn explorer_remote(dir: String, backend_url: String) {
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex_formatted(&polynomial_hex).expect("invalid polynomial");
-    let polynomial =
-        Sharing::<MinSig>::decode_cfg(polynomial.as_ref(), &NZU32!(locations.len() as u32))
-            .expect("polynomial is invalid");
+    let polynomial = Sharing::<MinSig>::decode_cfg(
+        polynomial.as_ref(),
+        &(NZU32!(locations.len() as u32), ModeVersion::v0()),
+    )
+    .expect("polynomial is invalid");
     let identity = polynomial.public();
     let config_ts = format!(
         "export const BACKEND_URL = \"{}\";\n\

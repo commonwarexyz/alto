@@ -5,6 +5,7 @@ use clap::{Arg, Command};
 use commonware_codec::DecodeExt;
 use commonware_consensus::types::Height;
 use commonware_cryptography::ed25519::PublicKey;
+use commonware_cryptography::sha256::Digest;
 use commonware_macros::select;
 use commonware_p2p::Recipients;
 use commonware_parallel::Sequential;
@@ -250,7 +251,7 @@ fn main() {
         let strategy = context
             .create_strategy(config.signature_threads)
             .unwrap();
-        let (engine, mut mailbox, last_processed_height) = engine::Engine::new(
+        let (engine, mailbox, last_processed_height) = engine::Engine::new(
             context.with_label("engine"),
             scheme.clone(),
             config.mailbox_size.get(),
@@ -281,7 +282,9 @@ fn main() {
         }
 
         // Create resolver
-        let (ingress_tx, ingress_rx) = mpsc::channel(config.mailbox_size.get());
+        let (ingress_tx, ingress_rx) = mpsc::channel::<
+            commonware_consensus::marshal::resolver::handler::Message<Digest>,
+        >(config.mailbox_size.get());
         let (resolver_actor, resolver) = resolver::Actor::new(
             context.with_label("resolver"),
             client.clone(),

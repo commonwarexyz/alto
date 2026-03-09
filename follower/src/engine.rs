@@ -9,20 +9,27 @@ use crate::{
 use alto_types::{Block, Scheme, EPOCH_LENGTH};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
-    marshal::{self, ingress::handler},
+    marshal::{
+        self,
+        core::{Actor as MarshalActor, Mailbox as MarshalMailbox},
+        resolver::handler,
+        standard::Standard,
+    },
     types::{FixedEpocher, Height, ViewDelta},
 };
 use commonware_cryptography::{
     certificate::ConstantProvider,
     ed25519::{PrivateKey, PublicKey},
+    sha256::Digest,
     Signer,
 };
 use commonware_math::algebra::Random;
+use commonware_p2p::utils::StaticProvider;
 use commonware_parallel::Strategy;
 use commonware_runtime::{
     spawn_cell, BufferPooler, ContextCell, Handle, Metrics, Spawner, Storage,
 };
-use commonware_utils::{channel::mpsc, NZUsize};
+use commonware_utils::{channel::mpsc, ordered::Set, NZUsize};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
@@ -53,11 +60,11 @@ where
     T: Strategy,
 {
     context: ContextCell<E>,
-    buffer: buffered::Engine<E, PublicKey, Block>,
+    buffer: buffered::Engine<E, PublicKey, Block, StaticProvider<PublicKey>>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
-    marshal: marshal::Actor<
+    marshal: MarshalActor<
         E,
-        Block,
+        Standard<Block>,
         ConstantProvider<Scheme, commonware_consensus::types::Epoch>,
         Certificates<E>,
         Blocks<E>,
@@ -65,7 +72,7 @@ where
         T,
     >,
     pruning_depth: Option<u64>,
-    marshal_mailbox: marshal::Mailbox<Scheme, Block>,
+    marshal_mailbox: MarshalMailbox<Scheme, Standard<Block>>,
     mailbox_size: usize,
 }
 
@@ -89,7 +96,7 @@ where
         max_repair: NonZero<usize>,
         strategy: T,
         pruning_depth: Option<u64>,
-    ) -> (Self, marshal::Mailbox<Scheme, Block>, Height) {
+    ) -> (Self, MarshalMailbox<Scheme, Standard<Block>>, Height) {
         // Create the buffer
         //
         // The follower does not participate in p2p broadcast, so we use a dummy
@@ -103,6 +110,7 @@ where
                 deque_size: DEQUE_SIZE,
                 priority: false,
                 codec_config: (),
+                peer_provider: StaticProvider::new(0, Set::from_iter_dedup([])),
             },
         );
 
@@ -114,7 +122,7 @@ where
         // Create marshal
         let provider = ConstantProvider::new(scheme);
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-        let (marshal, mailbox, last_processed_height) = marshal::Actor::init(
+        let (marshal, mailbox, last_processed_height) = MarshalActor::init(
             context.with_label("marshal"),
             finalizations_by_height,
             finalized_blocks,
@@ -153,12 +161,12 @@ where
     /// Start the [Engine].
     pub fn start(
         mut self,
-        marshal: (mpsc::Receiver<handler::Message<Block>>, Resolver),
+        marshal: (mpsc::Receiver<handler::Message<Digest>>, Resolver),
     ) -> Handle<()> {
         spawn_cell!(self.context, self.run(marshal).await)
     }
 
-    async fn run(mut self, marshal: (mpsc::Receiver<handler::Message<Block>>, Resolver)) {
+    async fn run(mut self, marshal: (mpsc::Receiver<handler::Message<Digest>>, Resolver)) {
         // Start the buffer
         let buffer_handle = self.buffer.start((NoopSender, NoopReceiver));
 
@@ -192,7 +200,7 @@ mod tests {
     use bytes::Bytes;
     use commonware_codec::Encode;
     use commonware_consensus::{
-        marshal::ingress::handler,
+        marshal::resolver::handler,
         types::{Height, Round, View},
     };
     use commonware_macros::test_traced;

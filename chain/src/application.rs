@@ -1,12 +1,13 @@
 use alto_types::{Block, Context, Scheme, EPOCH};
 use commonware_consensus::{
-    marshal::{ingress::mailbox::AncestorStream, Update},
+    marshal::{ancestry::{AncestorStream, BlockProvider}, Update},
     types::{Height, Round, View},
     Heightable, Reporter,
 };
 use commonware_cryptography::{ed25519, sha256, Digest, Digestible, Hasher, Sha256, Signer};
 use commonware_runtime::{Clock, Metrics, Spawner};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
+use std::future::Future;
 use futures::StreamExt;
 use rand::Rng;
 use std::sync::Arc;
@@ -55,25 +56,27 @@ where
         self.genesis.as_ref().clone()
     }
 
-    async fn propose(
+    fn propose<A: BlockProvider<Block = Self::Block>>(
         &mut self,
         (runtime_context, context): (E, Self::Context),
-        mut ancestry: AncestorStream<Self::SigningScheme, Self::Block>,
-    ) -> Option<Self::Block> {
-        let parent = ancestry.next().await?;
+        mut ancestry: AncestorStream<A, Self::Block>,
+    ) -> impl Future<Output = Option<Self::Block>> + Send {
+        async move {
+            let parent = ancestry.next().await?;
 
-        // Create a new block
-        let mut current = runtime_context.current().epoch_millis();
-        if current <= parent.timestamp {
-            current = parent.timestamp + 1;
+            // Create a new block
+            let mut current = runtime_context.current().epoch_millis();
+            if current <= parent.timestamp {
+                current = parent.timestamp + 1;
+            }
+
+            Some(Block::new(
+                context,
+                parent.digest(),
+                parent.height.next(),
+                current,
+            ))
         }
-
-        Some(Block::new(
-            context,
-            parent.digest(),
-            parent.height.next(),
-            current,
-        ))
     }
 }
 
@@ -81,32 +84,34 @@ impl<E> commonware_consensus::VerifyingApplication<E> for Application
 where
     E: Rng + Spawner + Metrics + Clock,
 {
-    async fn verify(
+    fn verify<A: BlockProvider<Block = Self::Block>>(
         &mut self,
         (runtime_context, _): (E, Context),
-        mut ancestry: AncestorStream<Self::SigningScheme, Self::Block>,
-    ) -> bool {
-        let Some(block) = ancestry.next().await else {
-            return false;
-        };
-        let Some(parent) = ancestry.next().await else {
-            return false;
-        };
+        mut ancestry: AncestorStream<A, Self::Block>,
+    ) -> impl Future<Output = bool> + Send {
+        async move {
+            let Some(block) = ancestry.next().await else {
+                return false;
+            };
+            let Some(parent) = ancestry.next().await else {
+                return false;
+            };
 
-        // Verify the block
-        if block.timestamp <= parent.timestamp {
-            return false;
+            // Verify the block
+            if block.timestamp <= parent.timestamp {
+                return false;
+            }
+            let current = runtime_context.current().epoch_millis();
+            if block.timestamp > current + SYNCHRONY_BOUND {
+                return false;
+            }
+
+            // Immediate ancestry invariants are enforced by marshal's standard wrapper:
+            // - The block height must be one greater than the parent's height.
+            // - The block's parent digest must match the parent's digest.
+
+            true
         }
-        let current = runtime_context.current().epoch_millis();
-        if block.timestamp > current + SYNCHRONY_BOUND {
-            return false;
-        }
-
-        // The height and digest invariants are enforced in `Marshaled`:
-        // - The block height must be one greater than the parent's height.
-        // - The block's parent digest must match the parent's digest.
-
-        true
     }
 }
 

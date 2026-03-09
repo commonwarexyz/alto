@@ -16,7 +16,7 @@
 
 use alto_types::{Block, Finalization, Scheme};
 use commonware_consensus::{marshal, types::Height};
-use commonware_cryptography::{certificate::Scheme as CertScheme, sha256::Digest, Committable};
+use commonware_cryptography::{certificate::Scheme as CertScheme, sha256::Digest, Digestible};
 use commonware_runtime::{buffer::paged::CacheRef, BufferPooler, Clock, Metrics, Storage};
 use commonware_storage::{
     archive::{self, immutable, prunable, Archive, Identifier},
@@ -193,6 +193,7 @@ pub(crate) enum Certificates<E: BufferPooler + Storage + Metrics + Clock> {
 }
 
 impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates for Certificates<E> {
+    type BlockDigest = Digest;
     type Commitment = Digest;
     type Scheme = Scheme;
     type Error = archive::Error;
@@ -252,10 +253,10 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Blocks for Blo
 
     async fn put(&mut self, block: Block) -> Result<(), Self::Error> {
         let height = block.height.get();
-        let commitment = block.commitment();
+        let digest = block.digest();
         match self {
-            Self::Immutable(a) => Archive::put(a, height, commitment, block).await,
-            Self::Prunable(a) => Archive::put(a, height, commitment, block).await,
+            Self::Immutable(a) => Archive::put(a, height, digest, block).await,
+            Self::Prunable(a) => Archive::put(a, height, digest, block).await,
         }
     }
 
