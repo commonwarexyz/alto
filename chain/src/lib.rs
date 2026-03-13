@@ -1364,12 +1364,15 @@ mod tests {
                         >= 2,
                     "drainer never had multiple uploads in flight before restart",
                 );
-                assert_eq!(
-                    indexer
-                        .block_upload_completed
-                        .load(std::sync::atomic::Ordering::SeqCst),
-                    0,
-                    "blocked uploads should remain unacked before shutdown",
+
+                let started_digests = indexer.block_upload_started_digests.lock().clone();
+                let blocked_digests = started_digests[..2].to_vec();
+                let completed_digests = indexer.block_upload_completed_digests.lock().clone();
+                assert!(
+                    blocked_digests
+                        .iter()
+                        .all(|digest| !completed_digests.contains(digest)),
+                    "blocked uploads should remain in flight before shutdown",
                 );
 
                 false

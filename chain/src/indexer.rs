@@ -8,16 +8,16 @@ use commonware_consensus::{
     Reporter, Viewable,
 };
 use commonware_cryptography::{sha256::Digest, Digestible};
+use commonware_macros::select;
 use commonware_parallel::Strategy;
 use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
 use commonware_storage::queue;
 #[cfg(test)]
 use commonware_utils::channel::oneshot;
-use commonware_utils::{sync::Mutex, PrioritySet};
-use futures::{
-    future::{select, FutureExt as _},
-    pin_mut,
-    stream::{FuturesUnordered, StreamExt},
+use commonware_utils::{
+    futures::{OptionFuture, Pool},
+    sync::Mutex,
+    PrioritySet,
 };
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -217,7 +217,7 @@ impl commonware_codec::Read for FinalizedEntry {
 /// Tracks raw block uploads and the oldest finalized view that still needs them.
 pub(crate) struct UploadTracker {
     uploaded: PrioritySet<Digest, u64>,
-    pending_finalized: BTreeMap<u64, usize>,
+    pending_finalized: BTreeMap<u64, u64>,
     latest_finalized: Option<u64>,
 }
 
@@ -247,24 +247,16 @@ impl UploadTracker {
         self.prune_uploaded();
     }
 
-    pub(crate) fn queue_finalized(&mut self, view: u64) {
-        *self.pending_finalized.entry(view).or_default() += 1;
+    pub(crate) fn queue_finalized(&mut self, position: u64, view: u64) {
+        if let Some(previous) = self.pending_finalized.insert(position, view) {
+            assert_eq!(previous, view, "pending finalized view changed");
+        }
     }
 
-    pub(crate) fn finish_finalized(&mut self, view: u64) {
-        let remove = {
-            let pending = self
-                .pending_finalized
-                .get_mut(&view)
-                .expect("missing pending finalized view");
-            *pending = pending
-                .checked_sub(1)
-                .expect("pending finalized view underflow");
-            *pending == 0
-        };
-        if remove {
-            self.pending_finalized.remove(&view);
-        }
+    pub(crate) fn finish_finalized(&mut self, position: u64) {
+        self.pending_finalized
+            .remove(&position)
+            .expect("missing pending finalized view");
         self.prune_uploaded();
     }
 
@@ -272,7 +264,7 @@ impl UploadTracker {
         let prune_before = match (
             self.pending_finalized
                 .first_key_value()
-                .map(|(&view, _)| view),
+                .map(|(_, &view)| view),
             self.latest_finalized,
         ) {
             (Some(pending), Some(latest)) => pending.min(latest),
@@ -299,12 +291,6 @@ struct DrainCompletion {
     position: u64,
     view: u64,
     digest: Option<Digest>,
-}
-
-enum DrainerEvent {
-    Item(u64, FinalizedEntry),
-    Completion(DrainCompletion),
-    QueueClosed,
 }
 
 /// An implementation of [Indexer] for the [Reporter] trait.
@@ -347,53 +333,48 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
         context
             .with_label("drainer")
             .spawn(move |context| async move {
-                let mut workers: FuturesUnordered<Handle<DrainCompletion>> =
-                    FuturesUnordered::new();
+                let mut uploads: Pool<DrainCompletion> = Pool::default();
                 let mut queue_closed = false;
 
                 loop {
+                    Self::fill_drainer_slots(
+                        &context,
+                        &indexer,
+                        &marshal,
+                        &uploaded,
+                        &writer,
+                        &mut reader,
+                        &mut uploads,
+                    )
+                    .await;
+
                     if queue_closed {
-                        let Some(completion) = workers.next().await else {
+                        if uploads.is_empty() {
                             warn!("drainer queue closed");
                             return;
-                        };
-                        Self::complete_drained(
-                            &uploaded,
-                            &writer,
-                            &reader,
-                            completion.expect("drainer worker failed"),
-                        )
-                        .await;
-                        continue;
-                    }
-
-                    if workers.len() >= DRAINER_MAX_IN_FLIGHT {
-                        let completion = workers
-                            .next()
-                            .await
-                            .expect("drainer worker set should not be empty")
-                            .expect("drainer worker failed");
+                        }
+                        let completion = uploads.next_completed().await;
                         Self::complete_drained(&uploaded, &writer, &reader, completion).await;
                         continue;
                     }
 
-                    if workers.is_empty() {
+                    if uploads.is_empty() {
                         let item = reader
                             .recv()
                             .await
                             .expect("failed to recv from finalized queue");
                         let Some((position, entry)) = item else {
-                            warn!("drainer queue closed");
-                            return;
+                            queue_closed = true;
+                            continue;
                         };
-                        Self::handle_drained_item(
+                        Self::start_drained_upload(
                             &context,
                             &indexer,
                             &marshal,
                             &uploaded,
                             &writer,
                             &reader,
-                            &mut workers,
+                            &mut uploads,
                             position,
                             entry,
                         )
@@ -401,65 +382,84 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                         continue;
                     }
 
-                    let event = {
-                        let recv = reader.recv().fuse();
-                        let next_worker = workers.next().fuse();
-                        pin_mut!(recv);
-                        pin_mut!(next_worker);
-                        match select(recv, next_worker).await {
-                            futures::future::Either::Left((item, _)) => {
-                                match item.expect("failed to recv from finalized queue") {
-                                    Some((position, entry)) => DrainerEvent::Item(position, entry),
-                                    None => DrainerEvent::QueueClosed,
+                    let wait_for_item = uploads.len() < DRAINER_MAX_IN_FLIGHT;
+                    let item = OptionFuture::from(wait_for_item.then(|| reader.recv()));
+
+                    select! {
+                        completion = uploads.next_completed() => {
+                            Self::complete_drained(&uploaded, &writer, &reader, completion).await;
+                        },
+                        item = item => {
+                            match item.expect("failed to recv from finalized queue") {
+                                Some((position, entry)) => {
+                                    Self::start_drained_upload(
+                                        &context,
+                                        &indexer,
+                                        &marshal,
+                                        &uploaded,
+                                        &writer,
+                                        &reader,
+                                        &mut uploads,
+                                        position,
+                                        entry,
+                                    )
+                                    .await;
+                                }
+                                None => {
+                                    queue_closed = true;
                                 }
                             }
-                            futures::future::Either::Right((Some(completion), _)) => {
-                                DrainerEvent::Completion(completion.expect("drainer worker failed"))
-                            }
-                            futures::future::Either::Right((None, _)) => {
-                                panic!("drainer worker set should not be empty");
-                            }
-                        }
-                    };
-
-                    match event {
-                        DrainerEvent::Item(position, entry) => {
-                            Self::handle_drained_item(
-                                &context,
-                                &indexer,
-                                &marshal,
-                                &uploaded,
-                                &writer,
-                                &reader,
-                                &mut workers,
-                                position,
-                                entry,
-                            )
-                            .await;
-                        }
-                        DrainerEvent::Completion(completion) => {
-                            Self::complete_drained(&uploaded, &writer, &reader, completion).await;
-                        }
-                        DrainerEvent::QueueClosed => {
-                            queue_closed = true;
                         }
                     }
                 }
             })
     }
 
-    async fn handle_drained_item(
+    async fn fill_drainer_slots(
+        context: &E,
+        indexer: &I,
+        marshal: &MarshalMailbox<Scheme, Standard<Block>>,
+        uploaded: &SharedUploadTracker,
+        writer: &queue::Writer<E, FinalizedEntry>,
+        reader: &mut queue::Reader<E, FinalizedEntry>,
+        uploads: &mut Pool<DrainCompletion>,
+    ) {
+        let mut slots = DRAINER_MAX_IN_FLIGHT.saturating_sub(uploads.len());
+        if slots == 0 {
+            return;
+        }
+
+        while slots > 0 {
+            let item = reader
+                .try_recv()
+                .await
+                .expect("failed to recv from finalized queue");
+            let Some((position, entry)) = item else {
+                break;
+            };
+
+            Self::start_drained_upload(
+                context, indexer, marshal, uploaded, writer, reader, uploads, position, entry,
+            )
+            .await;
+
+            slots = DRAINER_MAX_IN_FLIGHT.saturating_sub(uploads.len());
+        }
+    }
+
+    async fn start_drained_upload(
         context: &E,
         indexer: &I,
         marshal: &MarshalMailbox<Scheme, Standard<Block>>,
         uploaded: &SharedUploadTracker,
         writer: &queue::Writer<E, FinalizedEntry>,
         reader: &queue::Reader<E, FinalizedEntry>,
-        workers: &mut FuturesUnordered<Handle<DrainCompletion>>,
+        uploads: &mut Pool<DrainCompletion>,
         position: u64,
         entry: FinalizedEntry,
     ) {
         let FinalizedEntry { view, digest } = entry;
+        uploaded.lock().queue_finalized(position, view);
 
         // Skip queue entries that already succeeded through a live
         // notarization/finalization upload path.
@@ -482,10 +482,11 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
             return;
         }
 
-        workers.push(context.with_label("upload").spawn({
+        uploads.push({
             let indexer = indexer.clone();
             let marshal = marshal.clone();
-            move |context| async move {
+            let context = context.with_label("upload");
+            async move {
                 // The queue only stores the digest, so rehydrate the full block
                 // from marshal before attempting the upload.
                 let block = loop {
@@ -514,7 +515,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                     }
                 }
             }
-        }));
+        });
     }
 
     async fn complete_drained(
@@ -534,7 +535,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
             .await
             .expect("failed to ack");
         writer.sync().await.expect("failed to sync after ack");
-        uploaded.lock().finish_finalized(completion.view);
+        uploaded.lock().finish_finalized(completion.position);
     }
 }
 
@@ -601,24 +602,21 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Reporter for Pusher<E, 
                 let already_uploaded = {
                     let mut uploaded = self.uploaded.lock();
                     uploaded.observe_finalization(view_raw);
-
-                    let already_uploaded = uploaded.contains(&digest);
-                    if !already_uploaded {
-                        uploaded.queue_finalized(view_raw);
-                    }
-                    already_uploaded
+                    uploaded.contains(&digest)
                 };
 
                 // Persist the finalized digest before spawning any uploads so
                 // the drainer can recover the block after a crash or restart.
                 if !already_uploaded {
-                    self.writer
+                    let position = self
+                        .writer
                         .enqueue(FinalizedEntry {
                             view: view_raw,
                             digest,
                         })
                         .await
                         .expect("failed to enqueue finalized digest");
+                    self.uploaded.lock().queue_finalized(position, view_raw);
                     self.writer
                         .sync()
                         .await
@@ -689,23 +687,23 @@ mod tests {
         let digest_11 = Sha256::hash(b"view-11");
         let digest_12 = Sha256::hash(b"view-12");
 
-        for view in [10, 11, 12] {
+        for (position, view) in [(3, 10), (4, 11), (5, 12)] {
             tracker.observe_finalization(view);
-            tracker.queue_finalized(view);
+            tracker.queue_finalized(position, view);
         }
 
         // Later views may complete first, but they must remain in the dedupe set
         // until the oldest queued view has been retired.
         tracker.mark_uploaded(digest_11, 11);
-        tracker.finish_finalized(11);
+        tracker.finish_finalized(4);
         tracker.mark_uploaded(digest_12, 12);
-        tracker.finish_finalized(12);
+        tracker.finish_finalized(5);
 
         assert!(tracker.contains(&digest_11));
         assert!(tracker.contains(&digest_12));
 
         tracker.mark_uploaded(digest_10, 10);
-        tracker.finish_finalized(10);
+        tracker.finish_finalized(3);
 
         assert!(!tracker.contains(&digest_10));
         assert!(!tracker.contains(&digest_11));
