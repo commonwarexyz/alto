@@ -49,6 +49,7 @@ pub struct Mock {
     pub notarization_seen: Arc<AtomicBool>,
     pub finalization_seen: Arc<AtomicBool>,
     pub block_upload_seen: Arc<AtomicBool>,
+    pub fail_certs: bool,
 }
 
 #[cfg(test)]
@@ -59,7 +60,13 @@ impl Mock {
             notarization_seen: Arc::new(AtomicBool::new(false)),
             finalization_seen: Arc::new(AtomicBool::new(false)),
             block_upload_seen: Arc::new(AtomicBool::new(false)),
+            fail_certs: false,
         }
+    }
+
+    pub fn with_fail_certs(mut self) -> Self {
+        self.fail_certs = true;
+        self
     }
 }
 
@@ -74,12 +81,18 @@ impl Indexer for Mock {
     }
 
     async fn notarized_upload(&self, _: Notarized) -> Result<(), Self::Error> {
+        if self.fail_certs {
+            return Err(std::io::Error::other("cert upload disabled"));
+        }
         self.notarization_seen
             .store(true, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 
     async fn finalized_upload(&self, _: Finalized) -> Result<(), Self::Error> {
+        if self.fail_certs {
+            return Err(std::io::Error::other("cert upload disabled"));
+        }
         self.finalization_seen
             .store(true, std::sync::atomic::Ordering::Relaxed);
         Ok(())
@@ -205,14 +218,18 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                     continue;
                 }
 
-                // Get block from marshal
-                let block = self.marshal.get_block(Identifier::Digest(digest)).await;
-                let Some(block) = block else {
-                    warn!(?digest, "drainer could not find block in marshal");
-                    continue;
+                // Get block from marshal, retrying until available
+                let block = loop {
+                    if let Some(block) =
+                        self.marshal.get_block(Identifier::Digest(digest)).await
+                    {
+                        break block;
+                    }
+                    warn!(?digest, "drainer could not find block in marshal, retrying");
+                    self.context.sleep(std::time::Duration::from_secs(1)).await;
                 };
 
-                // Retry upload until success
+                // Upload block, retrying until success
                 loop {
                     match self.indexer.block_upload(block.clone()).await {
                         Ok(()) => break,
