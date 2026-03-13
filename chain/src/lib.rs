@@ -955,6 +955,9 @@ mod tests {
             assert!(indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
+            assert!(!indexer
+                .block_upload_seen
+                .load(std::sync::atomic::Ordering::Relaxed));
         });
     }
 
@@ -1099,10 +1102,7 @@ mod tests {
         use indexer::FinalizedEntry;
 
         let digest = Sha256::hash(b"test block");
-        let entry = FinalizedEntry {
-            view: 42,
-            digest,
-        };
+        let entry = FinalizedEntry { view: 42, digest };
 
         let encoded = entry.encode();
         let decoded = FinalizedEntry::decode(encoded.as_ref()).unwrap();

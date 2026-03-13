@@ -220,9 +220,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
 
                 // Get block from marshal, retrying until available
                 let block = loop {
-                    if let Some(block) =
-                        self.marshal.get_block(Identifier::Digest(digest)).await
-                    {
+                    if let Some(block) = self.marshal.get_block(Identifier::Digest(digest)).await {
                         break block;
                     }
                     warn!(?digest, "drainer could not find block in marshal, retrying");
