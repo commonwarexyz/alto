@@ -204,8 +204,11 @@ impl<S: Strategy> Indexer<S> {
         }
     }
 
+    /// Store a raw block body for digest lookups used by the fallback drainer.
     pub fn submit_block(&self, block: Block) {
         let mut state = self.state.write().unwrap();
+        // These uploads are not certificate-bearing; verified certificate data
+        // still enters through the seed/notarization/finalization endpoints.
         state.blocks_by_digest.insert(block.digest(), block);
     }
 
@@ -325,6 +328,8 @@ async fn block_upload<S: Strategy>(
 ) -> impl IntoResponse {
     match Block::decode(&mut body.as_ref()) {
         Ok(block) => {
+            // Accept uncertified block bodies for fallback recovery. Certificate
+            // verification remains on the seed/notarization/finalization paths.
             indexer.submit_block(block);
             StatusCode::OK
         }

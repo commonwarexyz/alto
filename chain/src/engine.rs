@@ -30,7 +30,7 @@ use commonware_runtime::{
 };
 use commonware_storage::{archive::immutable, queue};
 use commonware_utils::channel::mpsc;
-use commonware_utils::{ordered::Set, PrioritySet, NZU16};
+use commonware_utils::{ordered::Set, sync::Mutex, NZU16};
 use commonware_utils::{NZUsize, NZU64};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
@@ -38,7 +38,7 @@ use governor::Quota;
 use rand::{CryptoRng, Rng};
 use std::{
     num::NonZero,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{error, info, warn};
@@ -279,7 +279,8 @@ where
             epocher,
         );
 
-        // Create the reporter and optional queue
+        // Create the reporter and, when indexing is enabled, a durable queue of
+        // finalized digests so block uploads can resume after restarts.
         let (pusher, queue_reader) = if let Some(indexer) = cfg.indexer {
             let (writer, reader) = queue::shared::init(
                 context.with_label("finalized_queue"),
@@ -295,7 +296,8 @@ where
             .await
             .expect("failed to initialize finalized queue");
 
-            let uploaded: indexer::UploadedSet = Arc::new(Mutex::new(PrioritySet::new()));
+            let uploaded: indexer::SharedUploadTracker =
+                Arc::new(Mutex::new(indexer::UploadTracker::new()));
             let pusher = indexer::Pusher::new(
                 context.with_label("indexer"),
                 indexer,
@@ -416,7 +418,8 @@ where
             .marshal
             .start(self.marshaled, self.buffer_mailbox, marshal);
 
-        // Start drainer (if indexer is configured)
+        // Start draining queued block uploads before consensus so recovered work
+        // resumes immediately on startup.
         let drainer_handle = match (self.pusher, self.queue_reader) {
             (Some(pusher), Some(reader)) => Some(pusher.start_drainer(reader)),
             _ => None,
