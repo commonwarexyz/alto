@@ -38,6 +38,7 @@ use governor::Quota;
 use rand::{CryptoRng, Rng};
 use std::{
     num::NonZero,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tracing::{error, info, warn};
@@ -128,7 +129,7 @@ where
         Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
 
     pusher: Option<indexer::Pusher<E, I>>,
-    queue_reader: Option<queue::Reader<E, Digest>>,
+    queue_reader: Option<queue::Reader<E, indexer::FinalizedEntry>>,
 }
 
 impl<E, B, P, S, I> Engine<E, B, P, S, I>
@@ -294,7 +295,8 @@ where
             .await
             .expect("failed to initialize finalized queue");
 
-            let uploaded = indexer::UploadedSet::default();
+            let uploaded: indexer::UploadedSet =
+                Arc::new(Mutex::new(commonware_utils::PrioritySet::new()));
             let pusher = indexer::Pusher::new(
                 context.with_label("indexer"),
                 indexer,
@@ -428,8 +430,7 @@ where
         let consensus_handle = self.consensus.start(pending, recovered, resolver);
 
         // Wait for any actor to finish
-        let mut handles: Vec<Handle<()>> =
-            vec![buffer_handle, marshal_handle, consensus_handle];
+        let mut handles: Vec<Handle<()>> = vec![buffer_handle, marshal_handle, consensus_handle];
         if let Some(h) = drainer_handle {
             handles.push(h);
         }

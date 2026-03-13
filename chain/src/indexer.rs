@@ -1,21 +1,21 @@
 #[cfg(test)]
 use alto_types::Identity;
 use alto_types::{Activity, Block, Finalized, Notarized, Scheme, Seed, Seedable};
+use bytes::{Buf, BufMut};
+use commonware_codec::{self, FixedSize};
 use commonware_consensus::{
-    marshal::{
-        core::Mailbox as MarshalMailbox, standard::Standard, Identifier,
-    },
+    marshal::{core::Mailbox as MarshalMailbox, standard::Standard, Identifier},
     Reporter, Viewable,
 };
 use commonware_cryptography::sha256::Digest;
 use commonware_parallel::Strategy;
 use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
 use commonware_storage::queue;
-use std::collections::HashSet;
+use commonware_utils::PrioritySet;
 use std::future::Future;
-use std::sync::{Arc, Mutex};
 #[cfg(test)]
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, warn};
 
 /// Trait for interacting with an indexer.
@@ -118,7 +118,33 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
     }
 }
 
-pub type UploadedSet = Arc<Mutex<HashSet<Digest>>>;
+/// Entry stored in the durable finalization queue.
+pub struct FinalizedEntry {
+    pub view: u64,
+    pub digest: Digest,
+}
+
+impl FixedSize for FinalizedEntry {
+    const SIZE: usize = u64::SIZE + Digest::SIZE;
+}
+
+impl commonware_codec::Write for FinalizedEntry {
+    fn write(&self, buf: &mut impl BufMut) {
+        self.view.write(buf);
+        self.digest.write(buf);
+    }
+}
+
+impl commonware_codec::Read for FinalizedEntry {
+    type Cfg = ();
+    fn read_cfg(buf: &mut impl Buf, _: &()) -> Result<Self, commonware_codec::Error> {
+        let view = u64::read_cfg(buf, &())?;
+        let digest = Digest::read_cfg(buf, &())?;
+        Ok(Self { view, digest })
+    }
+}
+
+pub type UploadedSet = Arc<Mutex<PrioritySet<Digest, u64>>>;
 
 /// An implementation of [Indexer] for the [Reporter] trait.
 #[derive(Clone)]
@@ -127,7 +153,7 @@ pub struct Pusher<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
     indexer: I,
     marshal: MarshalMailbox<Scheme, Standard<Block>>,
     uploaded: UploadedSet,
-    writer: queue::Writer<E, Digest>,
+    writer: queue::Writer<E, FinalizedEntry>,
 }
 
 impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
@@ -137,7 +163,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
         indexer: I,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
         uploaded: UploadedSet,
-        writer: queue::Writer<E, Digest>,
+        writer: queue::Writer<E, FinalizedEntry>,
     ) -> Self {
         Self {
             context,
@@ -149,14 +175,26 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
     }
 
     /// Start the drainer loop that reads from the queue and uploads blocks.
-    pub fn start_drainer(self, mut reader: queue::Reader<E, Digest>) -> Handle<()> {
+    pub fn start_drainer(self, mut reader: queue::Reader<E, FinalizedEntry>) -> Handle<()> {
         self.context.with_label("drainer").spawn(|_| async move {
             loop {
                 let item = reader.recv().await;
-                let Ok(Some((position, digest))) = item else {
+                let Ok(Some((position, entry))) = item else {
                     warn!("drainer queue closed");
                     return;
                 };
+                let FinalizedEntry { view, digest } = entry;
+
+                // Prune uploaded entries with views below this one
+                {
+                    let mut uploaded = self.uploaded.lock().unwrap();
+                    while let Some((_, &v)) = uploaded.peek() {
+                        if v >= view {
+                            break;
+                        }
+                        uploaded.pop();
+                    }
+                }
 
                 // Skip if already uploaded
                 let already_uploaded = self.uploaded.lock().unwrap().contains(&digest);
@@ -186,7 +224,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                 }
 
                 // Mark uploaded, ack, and sync
-                self.uploaded.lock().unwrap().insert(digest);
+                self.uploaded.lock().unwrap().put(digest, view);
                 reader.ack(position).await.expect("failed to ack");
                 self.writer.sync().await.expect("failed to sync after ack");
                 debug!(?digest, "drainer uploaded block");
@@ -218,6 +256,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Reporter for Pusher<E, 
 
                 // Upload block to indexer (once we have it)
                 let digest = notarization.proposal.payload;
+                let view_raw = view.get();
                 self.context.with_label("notarized_block").spawn({
                     let indexer = self.indexer.clone();
                     let marshal = self.marshal.clone();
@@ -242,23 +281,24 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Reporter for Pusher<E, 
                             return;
                         }
 
-                        // Mark as uploaded so drainer can skip
-                        {
-                            let mut uploaded = uploaded.lock().unwrap();
-                            uploaded.insert(digest);
-                        }
+                        uploaded.lock().unwrap().put(digest, view_raw);
                         debug!(%view, "notarization uploaded to indexer");
                     }
                 });
             }
             Activity::Finalization(finalization) => {
                 let digest = finalization.proposal.payload;
+                let view = finalization.view();
+                let view_raw = view.get();
 
                 // Ensure digest is durably enqueued before proceeding
                 let already_uploaded = self.uploaded.lock().unwrap().contains(&digest);
                 if !already_uploaded {
                     self.writer
-                        .enqueue(digest)
+                        .enqueue(FinalizedEntry {
+                            view: view_raw,
+                            digest,
+                        })
                         .await
                         .expect("failed to enqueue finalized digest");
                     self.writer
@@ -268,7 +308,6 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Reporter for Pusher<E, 
                 }
 
                 // Upload seed to indexer
-                let view = finalization.view();
                 self.context.with_label("finalized_seed").spawn({
                     let indexer = self.indexer.clone();
                     let seed = finalization.seed();
@@ -307,11 +346,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Reporter for Pusher<E, 
                             return;
                         }
 
-                        // Mark as uploaded so drainer can skip
-                        {
-                            let mut uploaded = uploaded.lock().unwrap();
-                            uploaded.insert(digest);
-                        }
+                        uploaded.lock().unwrap().put(digest, view_raw);
                         debug!(%view, "finalization uploaded to indexer");
                     }
                 });

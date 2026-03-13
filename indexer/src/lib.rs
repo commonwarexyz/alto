@@ -616,11 +616,7 @@ mod tests {
 
         ctx.client.block_upload(block).await.unwrap();
 
-        let payload = ctx
-            .client
-            .block_get(Query::Digest(digest))
-            .await
-            .unwrap();
+        let payload = ctx.client.block_get(Query::Digest(digest)).await.unwrap();
         match payload {
             alto_client::consensus::Payload::Block(b) => {
                 assert_eq!(b.digest(), digest);
