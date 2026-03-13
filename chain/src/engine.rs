@@ -30,7 +30,7 @@ use commonware_runtime::{
 };
 use commonware_storage::{archive::immutable, queue};
 use commonware_utils::channel::mpsc;
-use commonware_utils::{ordered::Set, NZU16, PrioritySet};
+use commonware_utils::{ordered::Set, PrioritySet, NZU16};
 use commonware_utils::{NZUsize, NZU64};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
@@ -295,8 +295,7 @@ where
             .await
             .expect("failed to initialize finalized queue");
 
-            let uploaded: indexer::UploadedSet =
-                Arc::new(Mutex::new(PrioritySet::new()));
+            let uploaded: indexer::UploadedSet = Arc::new(Mutex::new(PrioritySet::new()));
             let pusher = indexer::Pusher::new(
                 context.with_label("indexer"),
                 indexer,
