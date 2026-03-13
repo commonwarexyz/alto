@@ -10,7 +10,10 @@ use commonware_consensus::{
 use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_macros::select;
 use commonware_parallel::Strategy;
-use commonware_runtime::{Clock, Handle, Metrics, Spawner, Storage};
+use commonware_runtime::{
+    telemetry::metrics::status::{self, CounterExt},
+    Clock, Handle, Metrics, Spawner, Storage,
+};
 use commonware_storage::queue;
 #[cfg(test)]
 use commonware_utils::channel::oneshot;
@@ -19,6 +22,7 @@ use commonware_utils::{
     sync::Mutex,
     PrioritySet,
 };
+use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
 use std::collections::BTreeMap;
 use std::future::Future;
 #[cfg(test)]
@@ -27,6 +31,55 @@ use std::sync::Arc;
 use tracing::{debug, warn};
 
 const DRAINER_MAX_IN_FLIGHT: usize = 16;
+
+#[derive(Clone)]
+struct DrainerMetrics {
+    depth: Gauge,
+    enqueued: Counter,
+    uploads: status::Counter,
+    ack_floor: Gauge,
+    in_flight: Gauge,
+}
+
+impl DrainerMetrics {
+    fn new<E: Metrics>(context: &E) -> Self {
+        let metrics = Self {
+            depth: Gauge::default(),
+            enqueued: Counter::default(),
+            uploads: status::Counter::default(),
+            ack_floor: Gauge::default(),
+            in_flight: Gauge::default(),
+        };
+
+        context.register(
+            "depth",
+            "Current number of pending finalized block uploads in the durable queue",
+            metrics.depth.clone(),
+        );
+        context.register(
+            "enqueued",
+            "Total number of finalized block uploads enqueued durably",
+            metrics.enqueued.clone(),
+        );
+        context.register(
+            "uploads",
+            "Total number of finalized block upload attempt outcomes by status",
+            metrics.uploads.clone(),
+        );
+        context.register(
+            "ack_floor",
+            "Durable queue positions below this value have been acknowledged and pruned",
+            metrics.ack_floor.clone(),
+        );
+        context.register(
+            "in_flight",
+            "Current number of block uploads in flight from the durable queue",
+            metrics.in_flight.clone(),
+        );
+
+        metrics
+    }
+}
 
 /// Trait for interacting with an indexer.
 pub trait Indexer: Clone + Send + Sync + 'static {
@@ -299,6 +352,7 @@ pub(crate) struct Pusher<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
     context: E,
     indexer: I,
     marshal: MarshalMailbox<Scheme, Standard<Block>>,
+    metrics: DrainerMetrics,
     uploaded: SharedUploadTracker,
     writer: queue::Writer<E, FinalizedEntry>,
 }
@@ -309,13 +363,20 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
         context: E,
         indexer: I,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
+        initial_depth: u64,
+        initial_ack_floor: u64,
         uploaded: SharedUploadTracker,
         writer: queue::Writer<E, FinalizedEntry>,
     ) -> Self {
+        let metrics = DrainerMetrics::new(&context.with_label("queue"));
+        metrics.depth.set(initial_depth as i64);
+        metrics.ack_floor.set(initial_ack_floor as i64);
+        metrics.in_flight.set(0);
         Self {
             context,
             indexer,
             marshal,
+            metrics,
             uploaded,
             writer,
         }
@@ -327,6 +388,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
             context,
             indexer,
             marshal,
+            metrics,
             uploaded,
             writer,
         } = self;
@@ -341,6 +403,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                         &context,
                         &indexer,
                         &marshal,
+                        &metrics,
                         &uploaded,
                         &writer,
                         &mut reader,
@@ -354,7 +417,8 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                             return;
                         }
                         let completion = uploads.next_completed().await;
-                        Self::complete_drained(&uploaded, &writer, &reader, completion).await;
+                        Self::complete_drained(&metrics, &uploaded, &writer, &reader, completion)
+                            .await;
                         continue;
                     }
 
@@ -371,6 +435,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                             &context,
                             &indexer,
                             &marshal,
+                            &metrics,
                             &uploaded,
                             &writer,
                             &reader,
@@ -387,7 +452,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
 
                     select! {
                         completion = uploads.next_completed() => {
-                            Self::complete_drained(&uploaded, &writer, &reader, completion).await;
+                            Self::complete_drained(&metrics, &uploaded, &writer, &reader, completion).await;
                         },
                         item = item => {
                             match item.expect("failed to recv from finalized queue") {
@@ -396,6 +461,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                                         &context,
                                         &indexer,
                                         &marshal,
+                                        &metrics,
                                         &uploaded,
                                         &writer,
                                         &reader,
@@ -419,6 +485,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
         context: &E,
         indexer: &I,
         marshal: &MarshalMailbox<Scheme, Standard<Block>>,
+        metrics: &DrainerMetrics,
         uploaded: &SharedUploadTracker,
         writer: &queue::Writer<E, FinalizedEntry>,
         reader: &mut queue::Reader<E, FinalizedEntry>,
@@ -439,7 +506,8 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
             };
 
             Self::start_drained_upload(
-                context, indexer, marshal, uploaded, writer, reader, uploads, position, entry,
+                context, indexer, marshal, metrics, uploaded, writer, reader, uploads, position,
+                entry,
             )
             .await;
 
@@ -451,6 +519,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
         context: &E,
         indexer: &I,
         marshal: &MarshalMailbox<Scheme, Standard<Block>>,
+        metrics: &DrainerMetrics,
         uploaded: &SharedUploadTracker,
         writer: &queue::Writer<E, FinalizedEntry>,
         reader: &queue::Reader<E, FinalizedEntry>,
@@ -468,6 +537,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
             // Persist the ack before moving on so a restart does not resurrect
             // work we already know completed.
             Self::complete_drained(
+                metrics,
                 uploaded,
                 writer,
                 reader,
@@ -482,10 +552,12 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
             return;
         }
 
+        metrics.in_flight.inc();
         uploads.push({
             let indexer = indexer.clone();
             let marshal = marshal.clone();
             let context = context.with_label("upload");
+            let metrics = metrics.clone();
             async move {
                 // The queue only stores the digest, so rehydrate the full block
                 // from marshal before attempting the upload.
@@ -501,6 +573,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                 loop {
                     match indexer.block_upload(block.clone()).await {
                         Ok(()) => {
+                            metrics.uploads.inc(status::Status::Success);
                             debug!(?digest, "drainer uploaded block");
                             return DrainCompletion {
                                 position,
@@ -509,6 +582,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                             };
                         }
                         Err(e) => {
+                            metrics.uploads.inc(status::Status::Failure);
                             warn!(?e, ?digest, "drainer failed to upload block, retrying");
                             context.sleep(std::time::Duration::from_secs(1)).await;
                         }
@@ -519,6 +593,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
     }
 
     async fn complete_drained(
+        metrics: &DrainerMetrics,
         uploaded: &SharedUploadTracker,
         writer: &queue::Writer<E, FinalizedEntry>,
         reader: &queue::Reader<E, FinalizedEntry>,
@@ -528,6 +603,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
             // Record the success before acking so the in-memory dedupe tracker
             // stays aligned with the durable queue state.
             uploaded.lock().mark_uploaded(digest, completion.view);
+            metrics.in_flight.dec();
         }
 
         reader
@@ -535,6 +611,8 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
             .await
             .expect("failed to ack");
         writer.sync().await.expect("failed to sync after ack");
+        metrics.depth.dec();
+        metrics.ack_floor.set(reader.ack_floor().await as i64);
         uploaded.lock().finish_finalized(completion.position);
     }
 }
@@ -616,6 +694,8 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Reporter for Pusher<E, 
                         })
                         .await
                         .expect("failed to enqueue finalized digest");
+                    self.metrics.enqueued.inc();
+                    self.metrics.depth.inc();
                     self.uploaded.lock().queue_finalized(position, view_raw);
                     self.writer
                         .sync()

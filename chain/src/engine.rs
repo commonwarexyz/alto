@@ -295,6 +295,9 @@ where
             )
             .await
             .expect("failed to initialize finalized queue");
+            let queue_size = writer.size().await;
+            let ack_floor = reader.ack_floor().await;
+            let pending = queue_size.saturating_sub(ack_floor);
 
             let uploaded: indexer::SharedUploadTracker =
                 Arc::new(Mutex::new(indexer::UploadTracker::new()));
@@ -302,6 +305,8 @@ where
                 context.with_label("indexer"),
                 indexer,
                 marshal_mailbox.clone(),
+                pending,
+                ack_floor,
                 uploaded,
                 writer,
             );
