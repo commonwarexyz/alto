@@ -204,6 +204,14 @@ impl<S: Strategy> Indexer<S> {
         }
     }
 
+    /// Store a raw block body for digest lookups used by the fallback drainer.
+    pub fn submit_block(&self, block: Block) {
+        let mut state = self.state.write().unwrap();
+        // These uploads are not certificate-bearing; verified certificate data
+        // still enters through the seed/notarization/finalization endpoints.
+        state.blocks_by_digest.insert(block.digest(), block);
+    }
+
     pub fn consensus_subscriber(&self) -> broadcast::Receiver<Vec<u8>> {
         self.consensus_tx.subscribe()
     }
@@ -233,6 +241,7 @@ impl<S: Strategy> Api<S> {
             .route("/notarization/{query}", get(notarization_get))
             .route("/finalization", post(finalization_upload))
             .route("/finalization/{query}", get(finalization_get))
+            .route("/block", post(block_upload))
             .route("/block/{query}", get(block_get))
             .route("/consensus/ws", get(consensus_ws))
             .layer(CorsLayer::permissive())
@@ -310,6 +319,21 @@ async fn finalization_get<S: Strategy>(
     match indexer.get_finalization(&query) {
         Some(finalized) => (StatusCode::OK, finalized.encode().to_vec()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn block_upload<S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+    body: Bytes,
+) -> impl IntoResponse {
+    match Block::decode(&mut body.as_ref()) {
+        Ok(block) => {
+            // Accept uncertified block bodies for fallback recovery. Certificate
+            // verification remains on the seed/notarization/finalization paths.
+            indexer.submit_block(block);
+            StatusCode::OK
+        }
+        Err(_) => StatusCode::BAD_REQUEST,
     }
 }
 
@@ -584,6 +608,23 @@ mod tests {
         match payload {
             alto_client::consensus::Payload::Block(b) => {
                 assert_eq!(b.digest(), block.digest());
+            }
+            _ => panic!("Expected block"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_block_upload() {
+        let ctx = TestContext::new().await;
+        let block = ctx.test_block();
+        let digest = block.digest();
+
+        ctx.client.block_upload(block).await.unwrap();
+
+        let payload = ctx.client.block_get(Query::Digest(digest)).await.unwrap();
+        match payload {
+            alto_client::consensus::Payload::Block(b) => {
+                assert_eq!(b.digest(), digest);
             }
             _ => panic!("Expected block"),
         }

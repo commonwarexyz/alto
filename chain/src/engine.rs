@@ -28,9 +28,9 @@ use commonware_runtime::{
     buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
     Spawner, Storage, ThreadPooler,
 };
-use commonware_storage::archive::immutable;
+use commonware_storage::{archive::immutable, queue};
 use commonware_utils::channel::mpsc;
-use commonware_utils::{ordered::Set, NZU16};
+use commonware_utils::{ordered::Set, sync::Mutex, NZU16};
 use commonware_utils::{NZUsize, NZU64};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
@@ -38,6 +38,7 @@ use governor::Quota;
 use rand::{CryptoRng, Rng};
 use std::{
     num::NonZero,
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{error, info, warn};
@@ -126,6 +127,9 @@ where
 
     consensus:
         Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
+
+    pusher: Option<indexer::Pusher<E, I>>,
+    queue_reader: Option<queue::Reader<E, indexer::FinalizedEntry>>,
 }
 
 impl<E, B, P, S, I> Engine<E, B, P, S, I>
@@ -275,18 +279,43 @@ where
             epocher,
         );
 
-        // Create the reporter
-        let reporter = (
-            marshal_mailbox.clone(),
-            cfg.indexer.map(|indexer| {
-                indexer::Pusher::new(
-                    context.with_label("indexer"),
-                    indexer,
-                    marshal_mailbox.clone(),
-                )
-            }),
-        )
-            .into();
+        // Create the reporter and, when indexing is enabled, a durable queue of
+        // finalized digests so block uploads can resume after restarts.
+        let (pusher, queue_reader) = if let Some(indexer) = cfg.indexer {
+            let (writer, reader) = queue::shared::init(
+                context.with_label("finalized_queue"),
+                queue::Config {
+                    partition: format!("{}-finalized-queue", cfg.partition_prefix),
+                    items_per_section: PRUNABLE_ITEMS_PER_SECTION,
+                    compression: None,
+                    codec_config: (),
+                    page_cache: page_cache.clone(),
+                    write_buffer: WRITE_BUFFER,
+                },
+            )
+            .await
+            .expect("failed to initialize finalized queue");
+            let queue_size = writer.size().await;
+            let ack_floor = reader.ack_floor().await;
+            let pending = queue_size.saturating_sub(ack_floor);
+
+            let uploaded: indexer::SharedUploadTracker =
+                Arc::new(Mutex::new(indexer::UploadTracker::new()));
+            let pusher = indexer::Pusher::new(
+                context.with_label("indexer"),
+                indexer,
+                marshal_mailbox.clone(),
+                pending,
+                ack_floor,
+                uploaded,
+                writer,
+            );
+            (Some(pusher), Some(reader))
+        } else {
+            (None, None)
+        };
+
+        let reporter = (marshal_mailbox.clone(), pusher.clone()).into();
 
         // Create the consensus engine
         let consensus = Consensus::new(
@@ -324,6 +353,9 @@ where
             marshal,
             marshaled,
             consensus,
+
+            pusher,
+            queue_reader,
         }
     }
 
@@ -391,6 +423,13 @@ where
             .marshal
             .start(self.marshaled, self.buffer_mailbox, marshal);
 
+        // Start draining queued block uploads before consensus so recovered work
+        // resumes immediately on startup.
+        let drainer_handle = match (self.pusher, self.queue_reader) {
+            (Some(pusher), Some(reader)) => Some(pusher.start_drainer(reader)),
+            _ => None,
+        };
+
         // Start consensus
         //
         // We start the application prior to consensus to ensure we can handle enqueued events from consensus (otherwise
@@ -398,7 +437,11 @@ where
         let consensus_handle = self.consensus.start(pending, recovered, resolver);
 
         // Wait for any actor to finish
-        if let Err(e) = try_join_all(vec![buffer_handle, marshal_handle, consensus_handle]).await {
+        let mut handles: Vec<Handle<()>> = vec![buffer_handle, marshal_handle, consensus_handle];
+        if let Some(h) = drainer_handle {
+            handles.push(h);
+        }
+        if let Err(e) = try_join_all(handles).await {
             error!(?e, "engine failed");
         } else {
             warn!("engine stopped");

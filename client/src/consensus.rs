@@ -31,8 +31,12 @@ fn finalization_get_path(base: String, query: &IndexQuery) -> String {
     format!("{base}/finalization/{}", query.serialize())
 }
 
-/// There is no block upload path. Blocks are uploaded as a byproduct of notarization
-/// and finalization uploads.
+// Raw block backfill endpoint used by the chain drainer. Reads still go through
+// `/block/{query}`, which returns certified data for `Latest` and `Index`.
+fn block_upload_path(base: String) -> String {
+    format!("{base}/block")
+}
+
 fn block_get_path(base: String, query: &Query) -> String {
     format!("{base}/block/{}", query.serialize())
 }
@@ -180,6 +184,21 @@ impl<S: Strategy> Client<S> {
             }
         }
         Ok(finalized)
+    }
+
+    pub async fn block_upload(&self, block: Block) -> Result<(), Error> {
+        // Upload the raw block body without a notarization/finalization wrapper.
+        let result = self
+            .http_client
+            .post(block_upload_path(self.uri.clone()))
+            .body(block.encode().to_vec())
+            .send()
+            .await
+            .map_err(Error::Reqwest)?;
+        if !result.status().is_success() {
+            return Err(Error::Failed(result.status()));
+        }
+        Ok(())
     }
 
     pub async fn block_get(&self, query: Query) -> Result<Payload, Error> {

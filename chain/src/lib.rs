@@ -61,7 +61,7 @@ mod tests {
         deterministic::{self, Runner},
         Clock, Metrics, Runner as _, Spawner,
     };
-    use commonware_utils::{ordered::Set, NZU32};
+    use commonware_utils::{channel::oneshot, ordered::Set, NZU32};
     use engine::{Config, Engine};
     use governor::Quota;
     use indexer::Mock;
@@ -171,6 +171,57 @@ mod tests {
                     .unwrap();
             }
         }
+    }
+
+    fn sum_validator_metric_u64(metrics: &str, suffix: &str, label_filter: Option<&str>) -> u64 {
+        metrics
+            .lines()
+            .filter_map(|line| {
+                if !line.starts_with("validator_") {
+                    return None;
+                }
+                let mut parts = line.split_whitespace();
+                let metric = parts.next()?;
+                let value = parts.next()?;
+                let (name, labels) = metric
+                    .split_once('{')
+                    .map_or((metric, None), |(name, labels)| {
+                        (name, Some(labels.trim_end_matches('}')))
+                    });
+                if !name.ends_with(suffix) {
+                    return None;
+                }
+                if let Some(filter) = label_filter {
+                    if !labels.is_some_and(|labels| {
+                        labels
+                            .to_ascii_lowercase()
+                            .contains(&filter.to_ascii_lowercase())
+                    }) {
+                        return None;
+                    }
+                }
+                Some(value.parse::<u64>().unwrap())
+            })
+            .sum()
+    }
+
+    fn sum_validator_metric_i64(metrics: &str, suffix: &str) -> i64 {
+        metrics
+            .lines()
+            .filter_map(|line| {
+                if !line.starts_with("validator_") {
+                    return None;
+                }
+                let mut parts = line.split_whitespace();
+                let metric = parts.next()?;
+                let value = parts.next()?;
+                let name = metric.split('{').next().unwrap();
+                if !name.ends_with(suffix) {
+                    return None;
+                }
+                Some(value.parse::<i64>().unwrap())
+            })
+            .sum()
     }
 
     fn all_online(n: u32, seed: u64, link: Link, required: u64) -> String {
@@ -955,6 +1006,706 @@ mod tests {
             assert!(indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
+            assert!(!indexer
+                .block_upload_seen
+                .load(std::sync::atomic::Ordering::Relaxed));
         });
+    }
+
+    #[test_traced]
+    fn test_drainer_fallback() {
+        let n = 5;
+        let required_container = 10;
+        let executor = Runner::timed(Duration::from_secs(30));
+        executor.start(|mut context| async move {
+            let (network, mut oracle) = Network::new(
+                context.with_label("network"),
+                simulated::Config {
+                    max_size: 1024 * 1024,
+                    disconnect_on_block: true,
+                    tracked_peer_sets: Some(1),
+                },
+            );
+            network.start();
+
+            let Fixture {
+                schemes,
+                private_keys,
+                participants,
+                ..
+            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            let mut registrations = register_validators(&mut oracle, &participants).await;
+            let participants_set = Set::from_iter_dedup(participants.clone());
+
+            let link = Link {
+                latency: Duration::from_millis(10),
+                jitter: Duration::from_millis(1),
+                success_rate: 1.0,
+            };
+            link_validators(&mut oracle, &participants, link, None).await;
+
+            let identity = *schemes[0].polynomial().public();
+            let indexer = Mock::new("", identity).with_fail_certs();
+
+            let mut public_keys = HashSet::new();
+            for (signer, scheme) in private_keys.into_iter().zip(schemes) {
+                let public_key = signer.public_key();
+                public_keys.insert(public_key.clone());
+
+                let uid = format!("validator_{public_key}");
+                let config: Config<_, _, Mock, _> = engine::Config {
+                    blocker: oracle.control(public_key.clone()),
+                    provider: oracle.manager(),
+                    partition_prefix: uid.clone(),
+                    blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                    finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                    me: signer.public_key(),
+                    polynomial: scheme.polynomial().clone(),
+                    share: scheme.share().cloned().unwrap(),
+                    participants: participants_set.clone(),
+                    mailbox_size: 1024,
+                    deque_size: 10,
+                    leader_timeout: Duration::from_secs(1),
+                    certification_timeout: Duration::from_secs(2),
+                    nullify_retry: Duration::from_secs(10),
+                    fetch_timeout: Duration::from_secs(1),
+                    activity_timeout: ViewDelta::new(10),
+                    skip_timeout: ViewDelta::new(5),
+                    max_fetch_count: 10,
+                    max_fetch_size: 1024 * 512,
+                    fetch_concurrent: 10,
+                    fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                    indexer: Some(indexer.clone()),
+                    strategy: Sequential,
+                };
+                let validator_context = context.with_label(&uid);
+
+                let (pending, recovered, resolver, broadcast, backfill) =
+                    registrations.remove(&public_key).unwrap();
+
+                let marshal_resolver_cfg = marshal::resolver::p2p::Config {
+                    public_key: public_key.clone(),
+                    peer_provider: oracle.manager(),
+                    blocker: oracle.control(public_key.clone()),
+                    mailbox_size: 1024,
+                    initial: Duration::from_secs(1),
+                    timeout: Duration::from_secs(2),
+                    fetch_retry_timeout: Duration::from_millis(100),
+                    priority_requests: false,
+                    priority_responses: false,
+                };
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &validator_context.with_label("backfill"),
+                    marshal_resolver_cfg,
+                    backfill,
+                );
+
+                let engine = Engine::new(validator_context.with_label("engine"), config).await;
+                engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
+            }
+
+            loop {
+                let metrics = context.encode();
+                let mut success = false;
+                for line in metrics.lines() {
+                    if !line.starts_with("validator_") {
+                        continue;
+                    }
+                    let mut parts = line.split_whitespace();
+                    let metric = parts.next().unwrap();
+                    let value = parts.next().unwrap();
+                    if metric.ends_with("_peers_blocked") {
+                        let value = value.parse::<u64>().unwrap();
+                        assert_eq!(value, 0);
+                    }
+                    if metric.ends_with("_marshal_processed_height") {
+                        let value = value.parse::<u64>().unwrap();
+                        if value >= required_container {
+                            success = true;
+                            break;
+                        }
+                    }
+                }
+                if success {
+                    break;
+                }
+                context.sleep(Duration::from_secs(1)).await;
+            }
+
+            // Cert uploads should have failed
+            assert!(!indexer
+                .notarization_seen
+                .load(std::sync::atomic::Ordering::Relaxed));
+            assert!(!indexer
+                .finalization_seen
+                .load(std::sync::atomic::Ordering::Relaxed));
+            // Drainer should have uploaded blocks directly
+            assert!(indexer
+                .block_upload_seen
+                .load(std::sync::atomic::Ordering::Relaxed));
+        });
+    }
+
+    #[test_traced]
+    fn test_drainer_uploads_in_parallel() {
+        let n = 5;
+        let executor = Runner::timed(Duration::from_secs(30));
+        executor.start(|mut context| async move {
+            let (network, mut oracle) = Network::new(
+                context.with_label("network"),
+                simulated::Config {
+                    max_size: 1024 * 1024,
+                    disconnect_on_block: true,
+                    tracked_peer_sets: Some(1),
+                },
+            );
+            network.start();
+
+            let Fixture {
+                schemes,
+                private_keys,
+                participants,
+                ..
+            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            let mut registrations = register_validators(&mut oracle, &participants).await;
+            let participants_set = Set::from_iter_dedup(participants.clone());
+
+            let link = Link {
+                latency: Duration::from_millis(10),
+                jitter: Duration::from_millis(1),
+                success_rate: 1.0,
+            };
+            link_validators(&mut oracle, &participants, link, None).await;
+
+            let (release_first, wait_first) = oneshot::channel();
+            let (release_second, wait_second) = oneshot::channel();
+            let identity = *schemes[0].polynomial().public();
+            let indexer = Mock::new("", identity)
+                .with_fail_certs()
+                .with_block_upload_waiters(vec![wait_first, wait_second]);
+
+            let mut public_keys = HashSet::new();
+            for (signer, scheme) in private_keys.into_iter().zip(schemes) {
+                let public_key = signer.public_key();
+                public_keys.insert(public_key.clone());
+
+                let uid = format!("validator_{public_key}");
+                let config: Config<_, _, Mock, _> = engine::Config {
+                    blocker: oracle.control(public_key.clone()),
+                    provider: oracle.manager(),
+                    partition_prefix: uid.clone(),
+                    blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                    finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                    me: signer.public_key(),
+                    polynomial: scheme.polynomial().clone(),
+                    share: scheme.share().cloned().unwrap(),
+                    participants: participants_set.clone(),
+                    mailbox_size: 1024,
+                    deque_size: 10,
+                    leader_timeout: Duration::from_secs(1),
+                    certification_timeout: Duration::from_secs(2),
+                    nullify_retry: Duration::from_secs(10),
+                    fetch_timeout: Duration::from_secs(1),
+                    activity_timeout: ViewDelta::new(10),
+                    skip_timeout: ViewDelta::new(5),
+                    max_fetch_count: 10,
+                    max_fetch_size: 1024 * 512,
+                    fetch_concurrent: 10,
+                    fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                    indexer: Some(indexer.clone()),
+                    strategy: Sequential,
+                };
+                let validator_context = context.with_label(&uid);
+
+                let (pending, recovered, resolver, broadcast, backfill) =
+                    registrations.remove(&public_key).unwrap();
+
+                let marshal_resolver_cfg = marshal::resolver::p2p::Config {
+                    public_key: public_key.clone(),
+                    peer_provider: oracle.manager(),
+                    blocker: oracle.control(public_key.clone()),
+                    mailbox_size: 1024,
+                    initial: Duration::from_secs(1),
+                    timeout: Duration::from_secs(2),
+                    fetch_retry_timeout: Duration::from_millis(100),
+                    priority_requests: false,
+                    priority_responses: false,
+                };
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &validator_context.with_label("backfill"),
+                    marshal_resolver_cfg,
+                    backfill,
+                );
+
+                let engine = Engine::new(validator_context.with_label("engine"), config).await;
+                engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
+            }
+
+            for _ in 0..10 {
+                if indexer
+                    .block_upload_started
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    >= 2
+                {
+                    break;
+                }
+                context.sleep(Duration::from_secs(1)).await;
+            }
+
+            assert!(
+                indexer
+                    .block_upload_started
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    >= 2,
+                "drainer never started a second block upload while the first was blocked",
+            );
+            assert!(
+                indexer
+                    .block_upload_max_inflight
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    >= 2,
+                "drainer never had multiple block uploads in flight",
+            );
+
+            let mut metrics = String::new();
+            for _ in 0..10 {
+                metrics = context.encode();
+                if sum_validator_metric_i64(&metrics, "_queue_in_flight") >= 2 {
+                    break;
+                }
+                context.sleep(Duration::from_secs(1)).await;
+            }
+
+            let queue_in_flight = sum_validator_metric_i64(&metrics, "_queue_in_flight");
+            assert!(
+                queue_in_flight >= 2,
+                "queue in_flight metric never reflected parallel drainer uploads",
+            );
+            assert_eq!(
+                queue_in_flight as usize,
+                indexer.current_block_upload_inflight(),
+                "queue in_flight metric diverged from the mock indexer's live upload count",
+            );
+            let queue_depth = sum_validator_metric_i64(&metrics, "_queue_depth");
+            assert!(
+                queue_depth >= queue_in_flight,
+                "queue depth should include uploads currently in flight",
+            );
+            let queue_enqueued = sum_validator_metric_u64(&metrics, "_queue_enqueued_total", None);
+            assert!(
+                queue_enqueued >= queue_in_flight as u64,
+                "queue enqueued metric did not account for the blocked uploads",
+            );
+
+            let _ = release_first.send(());
+            let _ = release_second.send(());
+
+            for _ in 0..10 {
+                if indexer
+                    .block_upload_completed
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    >= 2
+                {
+                    break;
+                }
+                context.sleep(Duration::from_secs(1)).await;
+            }
+
+            assert!(
+                indexer
+                    .block_upload_completed
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    >= 2,
+                "drainer did not complete the blocked uploads after release",
+            );
+
+            let metrics = context.encode();
+            let queue_upload_success = sum_validator_metric_u64(
+                &metrics,
+                "_queue_uploads_total",
+                Some("status=\"success\""),
+            );
+            assert_eq!(
+                queue_upload_success,
+                indexer
+                    .block_upload_completed
+                    .load(std::sync::atomic::Ordering::SeqCst) as u64,
+                "queue success counter did not match completed drainer uploads",
+            );
+            let queue_upload_failure = sum_validator_metric_u64(
+                &metrics,
+                "_queue_uploads_total",
+                Some("status=\"failure\""),
+            );
+            assert_eq!(
+                queue_upload_failure, 0,
+                "queue failure counter should stay at zero when block uploads succeed",
+            );
+            assert!(
+                sum_validator_metric_i64(&metrics, "_queue_ack_floor") > 0,
+                "queue ack floor metric never advanced after successful uploads",
+            );
+        });
+    }
+
+    #[test_traced]
+    fn test_drainer_replays_inflight_uploads_after_restart() {
+        let n = 5;
+        let mut rng = StdRng::seed_from_u64(7);
+        let fixture = bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
+        let identity = *fixture.schemes[0].polynomial().public();
+
+        // Keep these senders alive for the duration of the first run so the
+        // corresponding block uploads remain in flight until shutdown.
+        let mut blocked_senders = Vec::new();
+        let mut blocked_waiters = Vec::new();
+        for _ in 0..16 {
+            let (sender, receiver) = oneshot::channel();
+            blocked_senders.push(sender);
+            blocked_waiters.push(receiver);
+        }
+
+        let blocked_indexer = Mock::new("", identity)
+            .with_fail_certs()
+            .with_block_upload_waiters(blocked_waiters);
+        let recovery_indexer = Mock::new("", identity).with_fail_certs();
+
+        let Fixture {
+            schemes,
+            private_keys,
+            participants,
+            ..
+        } = fixture.clone();
+        let first_run_indexer = blocked_indexer.clone();
+        let first_run = move |context: deterministic::Context| {
+            let indexer = first_run_indexer.clone();
+            async move {
+                let (network, mut oracle) = Network::new(
+                    context.with_label("network"),
+                    simulated::Config {
+                        max_size: 1024 * 1024,
+                        disconnect_on_block: true,
+                        tracked_peer_sets: Some(1),
+                    },
+                );
+                network.start();
+
+                let mut registrations = register_validators(&mut oracle, &participants).await;
+                let participants_set = Set::from_iter_dedup(participants.clone());
+
+                let link = Link {
+                    latency: Duration::from_millis(10),
+                    jitter: Duration::from_millis(1),
+                    success_rate: 1.0,
+                };
+                link_validators(&mut oracle, &participants, link, None).await;
+
+                for (signer, scheme) in private_keys.into_iter().zip(schemes) {
+                    let public_key = signer.public_key();
+                    let uid = format!("validator_{public_key}");
+                    let config: Config<_, _, Mock, _> = engine::Config {
+                        blocker: oracle.control(public_key.clone()),
+                        provider: oracle.manager(),
+                        partition_prefix: uid.clone(),
+                        blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                        finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                        me: signer.public_key(),
+                        polynomial: scheme.polynomial().clone(),
+                        share: scheme.share().cloned().unwrap(),
+                        participants: participants_set.clone(),
+                        mailbox_size: 1024,
+                        deque_size: 10,
+                        leader_timeout: Duration::from_secs(1),
+                        certification_timeout: Duration::from_secs(2),
+                        nullify_retry: Duration::from_secs(10),
+                        fetch_timeout: Duration::from_secs(1),
+                        activity_timeout: ViewDelta::new(10),
+                        skip_timeout: ViewDelta::new(5),
+                        max_fetch_count: 10,
+                        max_fetch_size: 1024 * 512,
+                        fetch_concurrent: 10,
+                        fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                        indexer: Some(indexer.clone()),
+                        strategy: Sequential,
+                    };
+                    let validator_context = context.with_label(&uid);
+
+                    let (pending, recovered, resolver, broadcast, backfill) =
+                        registrations.remove(&public_key).unwrap();
+
+                    let marshal_resolver_cfg = marshal::resolver::p2p::Config {
+                        public_key: public_key.clone(),
+                        peer_provider: oracle.manager(),
+                        blocker: oracle.control(public_key.clone()),
+                        mailbox_size: 1024,
+                        initial: Duration::from_secs(1),
+                        timeout: Duration::from_secs(2),
+                        fetch_retry_timeout: Duration::from_millis(100),
+                        priority_requests: false,
+                        priority_responses: false,
+                    };
+                    let marshal_resolver = marshal::resolver::p2p::init(
+                        &validator_context.with_label("backfill"),
+                        marshal_resolver_cfg,
+                        backfill,
+                    );
+
+                    let engine = Engine::new(validator_context.with_label("engine"), config).await;
+                    engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
+                }
+
+                for _ in 0..10 {
+                    if indexer
+                        .block_upload_started
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                        >= 2
+                    {
+                        break;
+                    }
+                    context.sleep(Duration::from_secs(1)).await;
+                }
+
+                assert!(
+                    indexer
+                        .block_upload_started
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                        >= 2,
+                    "drainer never had multiple uploads in flight before restart",
+                );
+
+                let mut metrics = String::new();
+                for _ in 0..10 {
+                    metrics = context.encode();
+                    if sum_validator_metric_i64(&metrics, "_queue_in_flight") >= 2 {
+                        break;
+                    }
+                    context.sleep(Duration::from_secs(1)).await;
+                }
+
+                let queue_in_flight = sum_validator_metric_i64(&metrics, "_queue_in_flight");
+                assert!(
+                    queue_in_flight >= 2,
+                    "queue in_flight metric never reflected the blocked uploads before restart",
+                );
+                assert_eq!(
+                    queue_in_flight as usize,
+                    indexer.current_block_upload_inflight(),
+                    "queue in_flight metric diverged from the blocked uploads before restart",
+                );
+                assert!(
+                    sum_validator_metric_i64(&metrics, "_queue_depth") >= queue_in_flight,
+                    "queue depth should include blocked uploads before restart",
+                );
+
+                let started_digests = indexer.block_upload_started_digests.lock().clone();
+                let blocked_digests = started_digests[..2].to_vec();
+                let completed_digests = indexer.block_upload_completed_digests.lock().clone();
+                assert!(
+                    blocked_digests
+                        .iter()
+                        .all(|digest| !completed_digests.contains(digest)),
+                    "blocked uploads should remain in flight before shutdown",
+                );
+
+                false
+            }
+        };
+
+        let (complete, checkpoint) =
+            Runner::timed(Duration::from_secs(30)).start_and_recover(first_run);
+        assert!(!complete);
+
+        let blocked_digests = blocked_indexer.block_upload_started_digests.lock().clone();
+        assert!(
+            blocked_digests.len() >= 2,
+            "expected to capture at least two blocked drainer uploads",
+        );
+        let expected_digests = blocked_digests[..2].to_vec();
+
+        drop(blocked_senders);
+
+        let Fixture {
+            schemes,
+            private_keys,
+            participants,
+            ..
+        } = fixture;
+        let second_run_indexer = recovery_indexer.clone();
+        let expected_digests_for_recovery = expected_digests.clone();
+        let second_run = move |context: deterministic::Context| async move {
+            let indexer = second_run_indexer.clone();
+            let expected_digests = expected_digests_for_recovery.clone();
+            let (network, mut oracle) = Network::new(
+                context.with_label("network"),
+                simulated::Config {
+                    max_size: 1024 * 1024,
+                    disconnect_on_block: true,
+                    tracked_peer_sets: Some(1),
+                },
+            );
+            network.start();
+
+            let mut registrations = register_validators(&mut oracle, &participants).await;
+            let participants_set = Set::from_iter_dedup(participants.clone());
+
+            // Do not relink validators on restart. Any successful raw block
+            // uploads in this run must therefore come from replaying the
+            // durable queue and restored marshal state.
+            for (signer, scheme) in private_keys.into_iter().zip(schemes) {
+                let public_key = signer.public_key();
+                let uid = format!("validator_{public_key}");
+                let config: Config<_, _, Mock, _> = engine::Config {
+                    blocker: oracle.control(public_key.clone()),
+                    provider: oracle.manager(),
+                    partition_prefix: uid.clone(),
+                    blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                    finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                    me: signer.public_key(),
+                    polynomial: scheme.polynomial().clone(),
+                    share: scheme.share().cloned().unwrap(),
+                    participants: participants_set.clone(),
+                    mailbox_size: 1024,
+                    deque_size: 10,
+                    leader_timeout: Duration::from_secs(1),
+                    certification_timeout: Duration::from_secs(2),
+                    nullify_retry: Duration::from_secs(10),
+                    fetch_timeout: Duration::from_secs(1),
+                    activity_timeout: ViewDelta::new(10),
+                    skip_timeout: ViewDelta::new(5),
+                    max_fetch_count: 10,
+                    max_fetch_size: 1024 * 512,
+                    fetch_concurrent: 10,
+                    fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                    indexer: Some(indexer.clone()),
+                    strategy: Sequential,
+                };
+                let validator_context = context.with_label(&uid);
+
+                let (pending, recovered, resolver, broadcast, backfill) =
+                    registrations.remove(&public_key).unwrap();
+
+                let marshal_resolver_cfg = marshal::resolver::p2p::Config {
+                    public_key: public_key.clone(),
+                    peer_provider: oracle.manager(),
+                    blocker: oracle.control(public_key.clone()),
+                    mailbox_size: 1024,
+                    initial: Duration::from_secs(1),
+                    timeout: Duration::from_secs(2),
+                    fetch_retry_timeout: Duration::from_millis(100),
+                    priority_requests: false,
+                    priority_responses: false,
+                };
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &validator_context.with_label("backfill"),
+                    marshal_resolver_cfg,
+                    backfill,
+                );
+
+                let engine = Engine::new(validator_context.with_label("engine"), config).await;
+                engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
+            }
+
+            for _ in 0..10 {
+                let completed_digests = indexer.block_upload_completed_digests.lock().clone();
+                if expected_digests
+                    .iter()
+                    .all(|digest| completed_digests.contains(digest))
+                {
+                    break;
+                }
+                context.sleep(Duration::from_secs(1)).await;
+            }
+
+            let completed_digests = indexer.block_upload_completed_digests.lock().clone();
+            assert!(
+                expected_digests
+                    .iter()
+                    .all(|digest| completed_digests.contains(digest)),
+                "drainer did not replay the blocked in-flight uploads after restart",
+            );
+
+            let mut metrics = String::new();
+            for _ in 0..10 {
+                metrics = context.encode();
+                if sum_validator_metric_i64(&metrics, "_queue_depth") == 0
+                    && sum_validator_metric_i64(&metrics, "_queue_in_flight") == 0
+                {
+                    break;
+                }
+                context.sleep(Duration::from_secs(1)).await;
+            }
+
+            assert_eq!(
+                sum_validator_metric_i64(&metrics, "_queue_depth"),
+                0,
+                "queue depth metric should return to zero after replay drains the durable queue",
+            );
+            assert_eq!(
+                sum_validator_metric_i64(&metrics, "_queue_in_flight"),
+                0,
+                "queue in_flight metric should return to zero after replay completes",
+            );
+            let queue_upload_success = sum_validator_metric_u64(
+                &metrics,
+                "_queue_uploads_total",
+                Some("status=\"success\""),
+            );
+            assert_eq!(
+                queue_upload_success,
+                indexer
+                    .block_upload_completed
+                    .load(std::sync::atomic::Ordering::SeqCst) as u64,
+                "queue success counter did not match replayed drainer uploads",
+            );
+            let queue_upload_failure = sum_validator_metric_u64(
+                &metrics,
+                "_queue_uploads_total",
+                Some("status=\"failure\""),
+            );
+            assert_eq!(
+                queue_upload_failure, 0,
+                "queue failure counter should stay at zero while replayed block uploads succeed",
+            );
+            assert!(
+                sum_validator_metric_i64(&metrics, "_queue_ack_floor") > 0,
+                "queue ack floor metric never advanced during replay",
+            );
+
+            true
+        };
+
+        let (complete, _) = Runner::from(checkpoint).start_and_recover(second_run);
+        assert!(complete);
+
+        let completed_digests = recovery_indexer
+            .block_upload_completed_digests
+            .lock()
+            .clone();
+        for digest in expected_digests {
+            assert!(
+                completed_digests.contains(&digest),
+                "expected blocked digest to be replayed after restart",
+            );
+        }
+    }
+
+    #[test]
+    fn test_finalized_entry_codec() {
+        use commonware_codec::{DecodeExt, Encode};
+        use commonware_cryptography::{Hasher, Sha256};
+        use indexer::FinalizedEntry;
+
+        let digest = Sha256::hash(b"test block");
+        let entry = FinalizedEntry { view: 42, digest };
+
+        let encoded = entry.encode();
+        let decoded = FinalizedEntry::decode(encoded.as_ref()).unwrap();
+        assert_eq!(decoded.view, 42);
+        assert_eq!(decoded.digest, digest);
+
+        assert_eq!(
+            encoded.len(),
+            <FinalizedEntry as commonware_codec::FixedSize>::SIZE
+        );
     }
 }

@@ -33,3 +33,4 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt", "json"] }
 governor = { workspace = true }
 serde = { version = "1.0.218", features = ["derive"] }
+prometheus-client = { workspace = true }
