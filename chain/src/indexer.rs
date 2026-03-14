@@ -7,7 +7,9 @@ use commonware_consensus::{
     marshal::{core::Mailbox as MarshalMailbox, standard::Standard, Identifier},
     Reporter, Viewable,
 };
-use commonware_cryptography::{sha256::Digest, Digestible};
+use commonware_cryptography::sha256::Digest;
+#[cfg(test)]
+use commonware_cryptography::Digestible;
 use commonware_macros::select;
 use commonware_parallel::Strategy;
 use commonware_runtime::{
@@ -149,6 +151,11 @@ impl Mock {
     pub fn with_block_upload_waiters(self, waiters: Vec<oneshot::Receiver<()>>) -> Self {
         *self.block_upload_waiters.lock() = waiters.into_iter().rev().collect();
         self
+    }
+
+    pub fn current_block_upload_inflight(&self) -> usize {
+        self.block_upload_inflight
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -346,6 +353,15 @@ struct DrainCompletion {
     digest: Option<Digest>,
 }
 
+struct DrainerShared<'a, E: Spawner + Clock + Storage + Metrics, I: Indexer> {
+    context: &'a E,
+    indexer: &'a I,
+    marshal: &'a MarshalMailbox<Scheme, Standard<Block>>,
+    metrics: &'a DrainerMetrics,
+    uploaded: &'a SharedUploadTracker,
+    writer: &'a queue::Writer<E, FinalizedEntry>,
+}
+
 /// An implementation of [Indexer] for the [Reporter] trait.
 #[derive(Clone)]
 pub(crate) struct Pusher<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
@@ -397,19 +413,17 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
             .spawn(move |context| async move {
                 let mut uploads: Pool<DrainCompletion> = Pool::default();
                 let mut queue_closed = false;
+                let shared = DrainerShared {
+                    context: &context,
+                    indexer: &indexer,
+                    marshal: &marshal,
+                    metrics: &metrics,
+                    uploaded: &uploaded,
+                    writer: &writer,
+                };
 
                 loop {
-                    Self::fill_drainer_slots(
-                        &context,
-                        &indexer,
-                        &marshal,
-                        &metrics,
-                        &uploaded,
-                        &writer,
-                        &mut reader,
-                        &mut uploads,
-                    )
-                    .await;
+                    Self::fill_drainer_slots(&shared, &mut reader, &mut uploads).await;
 
                     if queue_closed {
                         if uploads.is_empty() {
@@ -417,8 +431,14 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                             return;
                         }
                         let completion = uploads.next_completed().await;
-                        Self::complete_drained(&metrics, &uploaded, &writer, &reader, completion)
-                            .await;
+                        Self::complete_drained(
+                            shared.metrics,
+                            shared.uploaded,
+                            shared.writer,
+                            &reader,
+                            completion,
+                        )
+                        .await;
                         continue;
                     }
 
@@ -431,19 +451,8 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                             queue_closed = true;
                             continue;
                         };
-                        Self::start_drained_upload(
-                            &context,
-                            &indexer,
-                            &marshal,
-                            &metrics,
-                            &uploaded,
-                            &writer,
-                            &reader,
-                            &mut uploads,
-                            position,
-                            entry,
-                        )
-                        .await;
+                        Self::start_drained_upload(&shared, &reader, &mut uploads, position, entry)
+                            .await;
                         continue;
                     }
 
@@ -452,18 +461,20 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
 
                     select! {
                         completion = uploads.next_completed() => {
-                            Self::complete_drained(&metrics, &uploaded, &writer, &reader, completion).await;
+                            Self::complete_drained(
+                                shared.metrics,
+                                shared.uploaded,
+                                shared.writer,
+                                &reader,
+                                completion,
+                            )
+                            .await;
                         },
                         item = item => {
                             match item.expect("failed to recv from finalized queue") {
                                 Some((position, entry)) => {
                                     Self::start_drained_upload(
-                                        &context,
-                                        &indexer,
-                                        &marshal,
-                                        &metrics,
-                                        &uploaded,
-                                        &writer,
+                                        &shared,
                                         &reader,
                                         &mut uploads,
                                         position,
@@ -482,12 +493,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
     }
 
     async fn fill_drainer_slots(
-        context: &E,
-        indexer: &I,
-        marshal: &MarshalMailbox<Scheme, Standard<Block>>,
-        metrics: &DrainerMetrics,
-        uploaded: &SharedUploadTracker,
-        writer: &queue::Writer<E, FinalizedEntry>,
+        shared: &DrainerShared<'_, E, I>,
         reader: &mut queue::Reader<E, FinalizedEntry>,
         uploads: &mut Pool<DrainCompletion>,
     ) {
@@ -505,41 +511,32 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                 break;
             };
 
-            Self::start_drained_upload(
-                context, indexer, marshal, metrics, uploaded, writer, reader, uploads, position,
-                entry,
-            )
-            .await;
+            Self::start_drained_upload(shared, reader, uploads, position, entry).await;
 
             slots = DRAINER_MAX_IN_FLIGHT.saturating_sub(uploads.len());
         }
     }
 
     async fn start_drained_upload(
-        context: &E,
-        indexer: &I,
-        marshal: &MarshalMailbox<Scheme, Standard<Block>>,
-        metrics: &DrainerMetrics,
-        uploaded: &SharedUploadTracker,
-        writer: &queue::Writer<E, FinalizedEntry>,
+        shared: &DrainerShared<'_, E, I>,
         reader: &queue::Reader<E, FinalizedEntry>,
         uploads: &mut Pool<DrainCompletion>,
         position: u64,
         entry: FinalizedEntry,
     ) {
         let FinalizedEntry { view, digest } = entry;
-        uploaded.lock().queue_finalized(position, view);
+        shared.uploaded.lock().queue_finalized(position, view);
 
         // Skip queue entries that already succeeded through a live
         // notarization/finalization upload path.
-        let already_uploaded = uploaded.lock().contains(&digest);
+        let already_uploaded = shared.uploaded.lock().contains(&digest);
         if already_uploaded {
             // Persist the ack before moving on so a restart does not resurrect
             // work we already know completed.
             Self::complete_drained(
-                metrics,
-                uploaded,
-                writer,
+                shared.metrics,
+                shared.uploaded,
+                shared.writer,
                 reader,
                 DrainCompletion {
                     position,
@@ -552,12 +549,12 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
             return;
         }
 
-        metrics.in_flight.inc();
+        shared.metrics.in_flight.inc();
         uploads.push({
-            let indexer = indexer.clone();
-            let marshal = marshal.clone();
-            let context = context.with_label("upload");
-            let metrics = metrics.clone();
+            let indexer = (*shared.indexer).clone();
+            let marshal = (*shared.marshal).clone();
+            let context = shared.context.with_label("upload");
+            let metrics = (*shared.metrics).clone();
             async move {
                 // The queue only stores the digest, so rehydrate the full block
                 // from marshal before attempting the upload.
