@@ -128,7 +128,7 @@ where
     consensus:
         Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
 
-    drainer: Option<(indexer::Pusher<E, I>, queue::Reader<E, indexer::FinalizedEntry>)>,
+    drainer: Option<(indexer::Drainer<E, I>, queue::Reader<E, indexer::FinalizedEntry>)>,
 }
 
 impl<E, B, P, S, I> Engine<E, B, P, S, I>
@@ -305,13 +305,19 @@ where
             let app = Application::new().with_enqueuer(enqueuer);
             let pusher = indexer::Pusher::new(
                 context.with_label("indexer"),
+                indexer.clone(),
+                marshal_mailbox.clone(),
+                uploaded.clone(),
+            );
+            let drainer = indexer::Drainer::new(
+                context.with_label("indexer"),
                 indexer,
                 marshal_mailbox.clone(),
                 metrics,
                 uploaded,
                 writer,
             );
-            (app, Some((pusher, reader)))
+            (app, Some((pusher, drainer, reader)))
         } else {
             (Application::new(), None)
         };
@@ -324,9 +330,10 @@ where
             epocher,
         );
 
+        // Create the reporter.
         let reporter = (
             marshal_mailbox.clone(),
-            drainer.as_ref().map(|(pusher, _)| pusher.clone()),
+            drainer.as_ref().map(|(pusher, _, _)| pusher.clone()),
         )
             .into();
 
@@ -367,7 +374,7 @@ where
             marshaled,
             consensus,
 
-            drainer,
+            drainer: drainer.map(|(_, drainer, reader)| (drainer, reader)),
         }
     }
 
@@ -439,7 +446,7 @@ where
         // resumes immediately on startup.
         let drainer_handle = self
             .drainer
-            .map(|(pusher, reader)| pusher.start_drainer(reader));
+            .map(|(drainer, reader)| drainer.start(reader));
 
         // Start consensus
         //

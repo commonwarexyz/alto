@@ -1009,6 +1009,13 @@ mod tests {
             assert!(!indexer
                 .block_upload_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
+            assert_eq!(
+                indexer
+                    .block_upload_started
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                0,
+                "raw block uploads should stay idle when certified uploads succeed",
+            );
         });
     }
 

@@ -48,6 +48,12 @@ impl<E: Clock + Storage + Metrics> Application<E> {
     }
 }
 
+impl<E: Clock + Storage + Metrics> Default for Application<E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<E: Clock + Storage + Metrics> commonware_consensus::Application<E> for Application<E>
 where
     E: Rng + Spawner + Metrics + Clock + Storage,
@@ -67,6 +73,7 @@ where
     ) -> Option<Self::Block> {
         let parent = ancestry.next().await?;
 
+        // Create a new block.
         let mut current = runtime_context.current().epoch_millis();
         if current <= parent.timestamp {
             current = parent.timestamp + 1;
@@ -97,6 +104,7 @@ where
             return false;
         };
 
+        // Verify the block.
         if block.timestamp <= parent.timestamp {
             return false;
         }
@@ -105,6 +113,9 @@ where
             return false;
         }
 
+        // The height and digest invariants are enforced in `Marshaled`:
+        // - The block height must be one greater than the parent's height.
+        // - The block's parent digest must match the parent's digest.
         true
     }
 }
@@ -115,6 +126,9 @@ impl<E: Clock + Storage + Metrics> Reporter for Application<E> {
     async fn report(&mut self, activity: Self::Activity) {
         if let Update::Block(block, ack_rx) = activity {
             if let Some(enqueuer) = &self.enqueuer {
+                // Enqueue before acking so the drainer can recover this finalized
+                // block after a restart. Duplicate finalize notifications do not
+                // enqueue duplicate rows while an upload is already pending.
                 enqueuer
                     .enqueue_if_needed(block.digest(), block.height.get())
                     .await;

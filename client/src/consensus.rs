@@ -31,12 +31,13 @@ fn finalization_get_path(base: String, query: &IndexQuery) -> String {
     format!("{base}/finalization/{}", query.serialize())
 }
 
-// Raw block backfill endpoint used by the chain drainer. Reads still go through
-// `/block/{query}`, which returns certified data for `Latest` and `Index`.
+/// Raw block backfill endpoint used by the chain drainer.
 fn block_upload_path(base: String) -> String {
     format!("{base}/block")
 }
 
+/// Block reads still go through this path. `Latest` and `Index` return certified
+/// data; digest lookups may return a raw block body recovered by the drainer.
 fn block_get_path(base: String, query: &Query) -> String {
     format!("{base}/block/{}", query.serialize())
 }
