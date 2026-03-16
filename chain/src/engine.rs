@@ -30,7 +30,7 @@ use commonware_runtime::{
 };
 use commonware_storage::{archive::immutable, queue};
 use commonware_utils::channel::mpsc;
-use commonware_utils::{ordered::Set, sync::Mutex, NZU16};
+use commonware_utils::{ordered::Set, NZU16};
 use commonware_utils::{NZUsize, NZU64};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
@@ -38,7 +38,6 @@ use governor::Quota;
 use rand::{CryptoRng, Rng};
 use std::{
     num::NonZero,
-    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{error, info, warn};
@@ -285,38 +284,17 @@ where
             )
             .await
             .expect("failed to initialize finalized queue");
-            let queue_size = writer.size().await;
-            let ack_floor = reader.ack_floor().await;
-            let pending = queue_size.saturating_sub(ack_floor);
-
-            let uploaded: indexer::SharedUploadTracker =
-                Arc::new(Mutex::new(indexer::UploadTracker::new()));
-            let metrics = indexer::DrainerMetrics::new(
-                &context.with_label("indexer").with_label("queue"),
-            );
-            metrics.depth.set(pending as i64);
-            metrics.ack_floor.set(ack_floor as i64);
-
-            let enqueuer = indexer::Enqueuer::new(
-                uploaded.clone(),
-                writer.clone(),
-                metrics.clone(),
-            );
-            let app = Application::new().with_enqueuer(enqueuer);
-            let pusher = indexer::Pusher::new(
-                context.with_label("indexer"),
-                indexer.clone(),
-                marshal_mailbox.clone(),
-                uploaded.clone(),
-            );
-            let drainer = indexer::Drainer::new(
+            let uploads = indexer::Uploads::new(
                 context.with_label("indexer"),
                 indexer,
                 marshal_mailbox.clone(),
-                metrics,
-                uploaded,
                 writer,
-            );
+                reader,
+            )
+            .await;
+            let app = Application::new().with_enqueuer(uploads.enqueuer());
+            let pusher = uploads.pusher();
+            let (drainer, reader) = uploads.into_drainer();
             (app, Some((pusher, drainer, reader)))
         } else {
             (Application::new(), None)

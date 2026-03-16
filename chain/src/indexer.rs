@@ -10,15 +10,14 @@ use commonware_cryptography::sha256::Digest;
 #[cfg(test)]
 use commonware_cryptography::Digestible;
 use commonware_parallel::Strategy;
-use commonware_runtime::{Metrics, Spawner};
+use commonware_runtime::{Clock, Metrics, Spawner, Storage};
+use commonware_storage::queue;
 #[cfg(test)]
 use commonware_utils::channel::oneshot;
-#[cfg(test)]
 use commonware_utils::sync::Mutex;
 use std::future::Future;
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, AtomicUsize};
-#[cfg(test)]
 use std::sync::Arc;
 use tracing::{debug, warn};
 
@@ -190,6 +189,61 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
 
     fn block_upload(&self, block: Block) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.block_upload(block)
+    }
+}
+
+/// Bundles the shared durable-upload state and the actors built from it.
+pub(crate) struct Uploads<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
+    enqueuer: Enqueuer<E>,
+    pusher: Pusher<E, I>,
+    drainer: Drainer<E, I>,
+    reader: queue::Reader<E, FinalizedEntry>,
+}
+
+impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Uploads<E, I> {
+    pub(crate) async fn new(
+        context: E,
+        indexer: I,
+        marshal: MarshalMailbox<Scheme, Standard<Block>>,
+        writer: queue::Writer<E, FinalizedEntry>,
+        reader: queue::Reader<E, FinalizedEntry>,
+    ) -> Self {
+        let queue_size = writer.size().await;
+        let ack_floor = reader.ack_floor().await;
+        let pending = queue_size.saturating_sub(ack_floor);
+
+        let uploaded: SharedUploadTracker = Arc::new(Mutex::new(UploadTracker::new()));
+        let metrics = DrainerMetrics::new(&context.with_label("queue"));
+        metrics.depth.set(pending as i64);
+        metrics.ack_floor.set(ack_floor as i64);
+
+        let enqueuer = Enqueuer::new(uploaded.clone(), writer.clone(), metrics.clone());
+        let pusher = Pusher::new(
+            context.clone(),
+            indexer.clone(),
+            marshal.clone(),
+            uploaded.clone(),
+        );
+        let drainer = Drainer::new(context, indexer, marshal, metrics, uploaded, writer);
+
+        Self {
+            enqueuer,
+            pusher,
+            drainer,
+            reader,
+        }
+    }
+
+    pub(crate) fn enqueuer(&self) -> Enqueuer<E> {
+        self.enqueuer.clone()
+    }
+
+    pub(crate) fn pusher(&self) -> Pusher<E, I> {
+        self.pusher.clone()
+    }
+
+    pub(crate) fn into_drainer(self) -> (Drainer<E, I>, queue::Reader<E, FinalizedEntry>) {
+        (self.drainer, self.reader)
     }
 }
 
