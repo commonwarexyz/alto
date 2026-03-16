@@ -1062,6 +1062,8 @@ mod tests {
             };
             link_validators(&mut oracle, &participants, link, None).await;
 
+            // Reject certificate uploads so the only way blocks can reach the
+            // indexer is through the durable raw block drainer.
             let identity = *schemes[0].polynomial().public();
             let indexer = Mock::new("", identity).with_fail_certs();
 
@@ -1122,6 +1124,8 @@ mod tests {
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
+            // Wait for consensus/marshal to process enough finalized blocks so
+            // the upload paths have had work to do.
             loop {
                 let metrics = context.encode();
                 let mut success = false;
@@ -1150,14 +1154,15 @@ mod tests {
                 context.sleep(Duration::from_secs(1)).await;
             }
 
-            // Cert uploads should have failed
+            // The mock rejects certified uploads, so both cert paths should
+            // remain unsuccessful throughout the run.
             assert!(!indexer
                 .notarization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
             assert!(!indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
-            // Drainer should have uploaded blocks directly
+            // The durable drainer should compensate by uploading raw blocks.
             assert!(indexer
                 .block_upload_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
@@ -1196,6 +1201,8 @@ mod tests {
             };
             link_validators(&mut oracle, &participants, link, None).await;
 
+            // Reject cert uploads and advertise that durable raw block uploads
+            // are unavailable. This isolates the "no token => no drainer" path.
             let identity = *schemes[0].polynomial().public();
             let indexer = Mock::new("", identity)
                 .with_fail_certs()
@@ -1258,6 +1265,8 @@ mod tests {
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
+            // Wait for finalized blocks to flow through marshal so the test can
+            // observe upload behavior under steady-state progress.
             loop {
                 let metrics = context.encode();
                 let mut success = false;
@@ -1286,7 +1295,7 @@ mod tests {
                 context.sleep(Duration::from_secs(1)).await;
             }
 
-            // Cert uploads are still attempted best-effort.
+            // The cert pushers still run, but the mock keeps failing them.
             assert!(!indexer
                 .notarization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
@@ -1340,6 +1349,8 @@ mod tests {
             };
             link_validators(&mut oracle, &participants, link, None).await;
 
+            // Hold the first two raw block uploads open so we can observe the
+            // drainer's parallelism before any upload completes.
             let (release_first, wait_first) = oneshot::channel();
             let (release_second, wait_second) = oneshot::channel();
             let identity = *schemes[0].polynomial().public();
@@ -1404,6 +1415,7 @@ mod tests {
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
+            // Wait until the drainer starts at least two uploads concurrently.
             for _ in 0..10 {
                 if indexer
                     .block_upload_started
@@ -1430,6 +1442,7 @@ mod tests {
                 "drainer never had multiple block uploads in flight",
             );
 
+            // The queue metrics should reflect the blocked in-flight uploads.
             let mut metrics = String::new();
             for _ in 0..10 {
                 metrics = context.encode();
@@ -1459,6 +1472,8 @@ mod tests {
                 "queue enqueued metric did not account for the blocked uploads",
             );
 
+            // Allow both blocked uploads to finish so the drainer can retire
+            // their queue entries.
             let _ = release_first.send(());
             let _ = release_second.send(());
 
@@ -1527,6 +1542,8 @@ mod tests {
             blocked_waiters.push(receiver);
         }
 
+        // The recovery run uses an indexer that still rejects cert uploads, but
+        // allows raw block uploads so replay can succeed.
         let blocked_indexer = Mock::new("", identity)
             .with_fail_certs()
             .with_block_upload_waiters(blocked_waiters);
@@ -1616,6 +1633,8 @@ mod tests {
                     engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
                 }
 
+                // Wait until the drainer has definitely started blocked uploads
+                // before forcing recovery.
                 for _ in 0..10 {
                     if indexer
                         .block_upload_started
@@ -1635,6 +1654,8 @@ mod tests {
                     "drainer never had multiple uploads in flight before restart",
                 );
 
+                // Confirm the queue still considers those uploads in flight at
+                // the moment the first run shuts down.
                 let mut metrics = String::new();
                 for _ in 0..10 {
                     metrics = context.encode();
@@ -1673,6 +1694,8 @@ mod tests {
             }
         };
 
+        // The blocked uploads keep the first run from draining cleanly, so the
+        // runtime should hand us a recoverable checkpoint instead of completion.
         let (complete, checkpoint) =
             Runner::timed(Duration::from_secs(30)).start_and_recover(first_run);
         assert!(!complete);
@@ -1684,6 +1707,8 @@ mod tests {
         );
         let expected_digests = blocked_digests[..2].to_vec();
 
+        // Release the original waiters before restart so replayed uploads are
+        // free to complete in the recovery run.
         drop(blocked_senders);
 
         let Fixture {
@@ -1767,6 +1792,8 @@ mod tests {
                 engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
             }
 
+            // The recovery run should replay the previously blocked digests
+            // from durable state, even without fresh network activity.
             for _ in 0..10 {
                 let completed_digests = indexer.block_upload_completed_digests.lock().clone();
                 if expected_digests
@@ -1786,6 +1813,7 @@ mod tests {
                 "drainer did not replay the blocked in-flight uploads after restart",
             );
 
+            // After replay succeeds, the durable queue should drain completely.
             let mut metrics = String::new();
             for _ in 0..10 {
                 metrics = context.encode();
