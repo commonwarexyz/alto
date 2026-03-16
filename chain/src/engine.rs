@@ -98,7 +98,7 @@ pub struct Config<
     pub indexer: Option<I>,
 }
 
-type Marshaled<E> = Deferred<E, Scheme, Application, Block, FixedEpocher>;
+type Marshaled<E> = Deferred<E, Scheme, Application<E>, Block, FixedEpocher>;
 
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
@@ -270,18 +270,9 @@ where
         )
         .await;
 
-        // Create the application
-        let app = Application::new();
-        let marshaled = Marshaled::new(
-            context.with_label("marshaled"),
-            app,
-            marshal_mailbox.clone(),
-            epocher,
-        );
-
         // Create the reporter and, when indexing is enabled, a durable queue of
         // finalized digests so block uploads can resume after restarts.
-        let (pusher, queue_reader) = if let Some(indexer) = cfg.indexer {
+        let (app, pusher, queue_reader) = if let Some(indexer) = cfg.indexer {
             let (writer, reader) = queue::shared::init(
                 context.with_label("finalized_queue"),
                 queue::Config {
@@ -301,19 +292,38 @@ where
 
             let uploaded: indexer::SharedUploadTracker =
                 Arc::new(Mutex::new(indexer::UploadTracker::new()));
+            let metrics = indexer::DrainerMetrics::new(
+                &context.with_label("indexer").with_label("queue"),
+            );
+            metrics.depth.set(pending as i64);
+            metrics.ack_floor.set(ack_floor as i64);
+
+            let enqueuer = indexer::Enqueuer::new(
+                uploaded.clone(),
+                writer.clone(),
+                metrics.clone(),
+            );
+            let app = Application::new().with_enqueuer(enqueuer);
             let pusher = indexer::Pusher::new(
                 context.with_label("indexer"),
                 indexer,
                 marshal_mailbox.clone(),
-                pending,
-                ack_floor,
+                metrics,
                 uploaded,
                 writer,
             );
-            (Some(pusher), Some(reader))
+            (app, Some(pusher), Some(reader))
         } else {
-            (None, None)
+            (Application::new(), None, None)
         };
+
+        // Create the application
+        let marshaled = Marshaled::new(
+            context.with_label("marshaled"),
+            app,
+            marshal_mailbox.clone(),
+            epocher,
+        );
 
         let reporter = (marshal_mailbox.clone(), pusher.clone()).into();
 

@@ -35,16 +35,16 @@ use tracing::{debug, warn};
 const DRAINER_MAX_IN_FLIGHT: usize = 16;
 
 #[derive(Clone)]
-struct DrainerMetrics {
-    depth: Gauge,
-    enqueued: Counter,
-    uploads: status::Counter,
-    ack_floor: Gauge,
-    in_flight: Gauge,
+pub(crate) struct DrainerMetrics {
+    pub(crate) depth: Gauge,
+    pub(crate) enqueued: Counter,
+    pub(crate) uploads: status::Counter,
+    pub(crate) ack_floor: Gauge,
+    pub(crate) in_flight: Gauge,
 }
 
 impl DrainerMetrics {
-    fn new<E: Metrics>(context: &E) -> Self {
+    pub(crate) fn new<E: Metrics>(context: &E) -> Self {
         let metrics = Self {
             depth: Gauge::default(),
             enqueued: Counter::default(),
@@ -250,7 +250,7 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
 
 /// Entry stored in the durable finalization queue.
 pub struct FinalizedEntry {
-    pub view: u64,
+    pub height: u64,
     pub digest: Digest,
 }
 
@@ -260,7 +260,7 @@ impl FixedSize for FinalizedEntry {
 
 impl commonware_codec::Write for FinalizedEntry {
     fn write(&self, buf: &mut impl BufMut) {
-        self.view.write(buf);
+        self.height.write(buf);
         self.digest.write(buf);
     }
 }
@@ -268,13 +268,13 @@ impl commonware_codec::Write for FinalizedEntry {
 impl commonware_codec::Read for FinalizedEntry {
     type Cfg = ();
     fn read_cfg(buf: &mut impl Buf, _: &()) -> Result<Self, commonware_codec::Error> {
-        let view = u64::read_cfg(buf, &())?;
+        let height = u64::read_cfg(buf, &())?;
         let digest = Digest::read_cfg(buf, &())?;
-        Ok(Self { view, digest })
+        Ok(Self { height, digest })
     }
 }
 
-/// Tracks raw block uploads and the oldest finalized view that still needs them.
+/// Tracks raw block uploads and the oldest finalized height that still needs them.
 pub(crate) struct UploadTracker {
     uploaded: PrioritySet<Digest, u64>,
     pending_finalized: BTreeMap<u64, u64>,
@@ -294,29 +294,29 @@ impl UploadTracker {
         self.uploaded.contains(digest)
     }
 
-    pub(crate) fn mark_uploaded(&mut self, digest: Digest, view: u64) {
-        self.uploaded.put(digest, view);
+    pub(crate) fn mark_uploaded(&mut self, digest: Digest, height: u64) {
+        self.uploaded.put(digest, height);
         self.prune_uploaded();
     }
 
-    pub(crate) fn observe_finalization(&mut self, view: u64) {
+    pub(crate) fn observe_finalization(&mut self, height: u64) {
         self.latest_finalized = Some(
             self.latest_finalized
-                .map_or(view, |latest| latest.max(view)),
+                .map_or(height, |latest| latest.max(height)),
         );
         self.prune_uploaded();
     }
 
-    pub(crate) fn queue_finalized(&mut self, position: u64, view: u64) {
-        if let Some(previous) = self.pending_finalized.insert(position, view) {
-            assert_eq!(previous, view, "pending finalized view changed");
+    pub(crate) fn queue_finalized(&mut self, position: u64, height: u64) {
+        if let Some(previous) = self.pending_finalized.insert(position, height) {
+            assert_eq!(previous, height, "pending finalized height changed");
         }
     }
 
     pub(crate) fn finish_finalized(&mut self, position: u64) {
         self.pending_finalized
             .remove(&position)
-            .expect("missing pending finalized view");
+            .expect("missing pending finalized height");
         self.prune_uploaded();
     }
 
@@ -324,7 +324,7 @@ impl UploadTracker {
         let prune_before = match (
             self.pending_finalized
                 .first_key_value()
-                .map(|(_, &view)| view),
+                .map(|(_, &height)| height),
             self.latest_finalized,
         ) {
             (Some(pending), Some(latest)) => pending.min(latest),
@@ -333,11 +333,8 @@ impl UploadTracker {
             (None, None) => return,
         };
 
-        // Keep uploaded digests at or above the oldest finalized view that is
-        // still queued (or, when the queue is empty, the latest finalized view
-        // we have observed on the live path).
-        while let Some((_, &view)) = self.uploaded.peek() {
-            if view >= prune_before {
+        while let Some((_, &height)) = self.uploaded.peek() {
+            if height >= prune_before {
                 break;
             }
             self.uploaded.pop();
@@ -347,9 +344,54 @@ impl UploadTracker {
 
 pub(crate) type SharedUploadTracker = Arc<Mutex<UploadTracker>>;
 
+/// Durably enqueues finalized block digests from the application's block stream.
+#[derive(Clone)]
+pub(crate) struct Enqueuer<E: Clock + Storage + Metrics> {
+    pub(crate) uploaded: SharedUploadTracker,
+    writer: queue::Writer<E, FinalizedEntry>,
+    metrics: DrainerMetrics,
+}
+
+impl<E: Clock + Storage + Metrics> Enqueuer<E> {
+    pub(crate) fn new(
+        uploaded: SharedUploadTracker,
+        writer: queue::Writer<E, FinalizedEntry>,
+        metrics: DrainerMetrics,
+    ) -> Self {
+        Self {
+            uploaded,
+            writer,
+            metrics,
+        }
+    }
+
+    pub(crate) async fn enqueue_if_needed(&self, digest: Digest, height: u64) {
+        let already_uploaded = {
+            let mut uploaded = self.uploaded.lock();
+            uploaded.observe_finalization(height);
+            uploaded.contains(&digest)
+        };
+        if already_uploaded {
+            return;
+        }
+        let position = self
+            .writer
+            .enqueue(FinalizedEntry { height, digest })
+            .await
+            .expect("failed to enqueue finalized digest");
+        self.metrics.enqueued.inc();
+        self.metrics.depth.inc();
+        self.uploaded.lock().queue_finalized(position, height);
+        self.writer
+            .sync()
+            .await
+            .expect("failed to sync after enqueue");
+    }
+}
+
 struct DrainCompletion {
     position: u64,
-    view: u64,
+    height: u64,
     digest: Option<Digest>,
 }
 
@@ -379,15 +421,10 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
         context: E,
         indexer: I,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
-        initial_depth: u64,
-        initial_ack_floor: u64,
+        metrics: DrainerMetrics,
         uploaded: SharedUploadTracker,
         writer: queue::Writer<E, FinalizedEntry>,
     ) -> Self {
-        let metrics = DrainerMetrics::new(&context.with_label("queue"));
-        metrics.depth.set(initial_depth as i64);
-        metrics.ack_floor.set(initial_ack_floor as i64);
-        metrics.in_flight.set(0);
         Self {
             context,
             indexer,
@@ -524,15 +561,13 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
         position: u64,
         entry: FinalizedEntry,
     ) {
-        let FinalizedEntry { view, digest } = entry;
-        shared.uploaded.lock().queue_finalized(position, view);
+        let FinalizedEntry { height, digest } = entry;
+        shared.uploaded.lock().queue_finalized(position, height);
 
         // Skip queue entries that already succeeded through a live
         // notarization/finalization upload path.
         let already_uploaded = shared.uploaded.lock().contains(&digest);
         if already_uploaded {
-            // Persist the ack before moving on so a restart does not resurrect
-            // work we already know completed.
             Self::complete_drained(
                 shared.metrics,
                 shared.uploaded,
@@ -540,7 +575,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                 reader,
                 DrainCompletion {
                     position,
-                    view,
+                    height,
                     digest: None,
                 },
             )
@@ -556,8 +591,6 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
             let context = shared.context.with_label("upload");
             let metrics = (*shared.metrics).clone();
             async move {
-                // The queue only stores the digest, so rehydrate the full block
-                // from marshal before attempting the upload.
                 let block = loop {
                     if let Some(block) = marshal.get_block(Identifier::Digest(digest)).await {
                         break block;
@@ -566,7 +599,6 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                     context.sleep(std::time::Duration::from_secs(1)).await;
                 };
 
-                // Upload block, retrying until success.
                 loop {
                     match indexer.block_upload(block.clone()).await {
                         Ok(()) => {
@@ -574,7 +606,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
                             debug!(?digest, "drainer uploaded block");
                             return DrainCompletion {
                                 position,
-                                view,
+                                height,
                                 digest: Some(digest),
                             };
                         }
@@ -599,7 +631,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Pusher<E, I> {
         if let Some(digest) = completion.digest {
             // Record the success before acking so the in-memory dedupe tracker
             // stays aligned with the durable queue state.
-            uploaded.lock().mark_uploaded(digest, completion.view);
+            uploaded.lock().mark_uploaded(digest, completion.height);
             metrics.in_flight.dec();
         }
 
@@ -635,15 +667,13 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Reporter for Pusher<E, 
                     }
                 });
 
-                // Upload block to indexer (once we have it)
+                // Upload certificate to indexer (once we have it)
                 let digest = notarization.proposal.payload;
-                let view_raw = view.get();
                 self.context.with_label("notarized_block").spawn({
                     let indexer = self.indexer.clone();
                     let marshal = self.marshal.clone();
                     let uploaded = self.uploaded.clone();
                     move |_| async move {
-                        // Wait for block
                         let block = marshal
                             .subscribe_by_digest(
                                 Some(notarization.round()),
@@ -656,7 +686,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Reporter for Pusher<E, 
                             return;
                         };
 
-                        // Upload to indexer once we have it
+                        let height = block.height.get();
                         let notarized = Notarized::new(notarization, block);
                         let result = indexer.notarized_upload(notarized).await;
                         if let Err(e) = result {
@@ -664,41 +694,13 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Reporter for Pusher<E, 
                             return;
                         }
 
-                        uploaded.lock().mark_uploaded(digest, view_raw);
+                        uploaded.lock().mark_uploaded(digest, height);
                         debug!(%view, "notarization uploaded to indexer");
                     }
                 });
             }
             Activity::Finalization(finalization) => {
-                let digest = finalization.proposal.payload;
                 let view = finalization.view();
-                let view_raw = view.get();
-
-                let already_uploaded = {
-                    let mut uploaded = self.uploaded.lock();
-                    uploaded.observe_finalization(view_raw);
-                    uploaded.contains(&digest)
-                };
-
-                // Persist the finalized digest before spawning any uploads so
-                // the drainer can recover the block after a crash or restart.
-                if !already_uploaded {
-                    let position = self
-                        .writer
-                        .enqueue(FinalizedEntry {
-                            view: view_raw,
-                            digest,
-                        })
-                        .await
-                        .expect("failed to enqueue finalized digest");
-                    self.metrics.enqueued.inc();
-                    self.metrics.depth.inc();
-                    self.uploaded.lock().queue_finalized(position, view_raw);
-                    self.writer
-                        .sync()
-                        .await
-                        .expect("failed to sync after enqueue");
-                }
 
                 // Upload seed to indexer
                 self.context.with_label("finalized_seed").spawn({
@@ -714,13 +716,13 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Reporter for Pusher<E, 
                     }
                 });
 
-                // Upload block to indexer (once we have it)
+                // Upload certificate to indexer (once we have it)
+                let digest = finalization.proposal.payload;
                 self.context.with_label("finalized_block").spawn({
                     let indexer = self.indexer.clone();
                     let marshal = self.marshal.clone();
                     let uploaded = self.uploaded.clone();
                     move |_| async move {
-                        // Wait for block
                         let block = marshal
                             .subscribe_by_digest(
                                 Some(finalization.round()),
@@ -733,7 +735,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Reporter for Pusher<E, 
                             return;
                         };
 
-                        // Upload to indexer once we have it
+                        let height = block.height.get();
                         let finalization = Finalized::new(finalization, block);
                         let result = indexer.finalized_upload(finalization).await;
                         if let Err(e) = result {
@@ -741,7 +743,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Reporter for Pusher<E, 
                             return;
                         }
 
-                        uploaded.lock().mark_uploaded(digest, view_raw);
+                        uploaded.lock().mark_uploaded(digest, height);
                         debug!(%view, "finalization uploaded to indexer");
                     }
                 });

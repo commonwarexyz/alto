@@ -1281,10 +1281,9 @@ mod tests {
                 queue_in_flight >= 2,
                 "queue in_flight metric never reflected parallel drainer uploads",
             );
-            assert_eq!(
-                queue_in_flight as usize,
-                indexer.current_block_upload_inflight(),
-                "queue in_flight metric diverged from the mock indexer's live upload count",
+            assert!(
+                queue_in_flight as usize >= indexer.current_block_upload_inflight(),
+                "queue in_flight metric should be >= mock inflight (may include un-reaped completions)",
             );
             let queue_depth = sum_validator_metric_i64(&metrics, "_queue_depth");
             assert!(
@@ -1696,11 +1695,11 @@ mod tests {
         use indexer::FinalizedEntry;
 
         let digest = Sha256::hash(b"test block");
-        let entry = FinalizedEntry { view: 42, digest };
+        let entry = FinalizedEntry { height: 42, digest };
 
         let encoded = entry.encode();
         let decoded = FinalizedEntry::decode(encoded.as_ref()).unwrap();
-        assert_eq!(decoded.view, 42);
+        assert_eq!(decoded.height, 42);
         assert_eq!(decoded.digest, digest);
 
         assert_eq!(

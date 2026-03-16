@@ -1,3 +1,4 @@
+use crate::indexer;
 use alto_types::{Block, Context, Scheme, EPOCH};
 use commonware_consensus::{
     marshal::{
@@ -8,7 +9,7 @@ use commonware_consensus::{
     Heightable, Reporter,
 };
 use commonware_cryptography::{ed25519, sha256, Digest, Digestible, Hasher, Sha256, Signer};
-use commonware_runtime::{Clock, Metrics, Spawner};
+use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
 use rand::Rng;
@@ -22,11 +23,12 @@ const GENESIS: &[u8] = b"commonware is neat";
 const SYNCHRONY_BOUND: u64 = 500;
 
 #[derive(Clone)]
-pub struct Application {
+pub struct Application<E: Clock + Storage + Metrics> {
     genesis: Arc<Block>,
+    enqueuer: Option<indexer::Enqueuer<E>>,
 }
 
-impl Application {
+impl<E: Clock + Storage + Metrics> Application<E> {
     pub fn new() -> Self {
         let genesis_context = Context {
             round: Round::new(EPOCH, View::zero()),
@@ -36,19 +38,19 @@ impl Application {
         let genesis = Block::new(genesis_context, Sha256::hash(GENESIS), Height::zero(), 0);
         Self {
             genesis: Arc::new(genesis),
+            enqueuer: None,
         }
     }
-}
 
-impl Default for Application {
-    fn default() -> Self {
-        Self::new()
+    pub(crate) fn with_enqueuer(mut self, enqueuer: indexer::Enqueuer<E>) -> Self {
+        self.enqueuer = Some(enqueuer);
+        self
     }
 }
 
-impl<E> commonware_consensus::Application<E> for Application
+impl<E: Clock + Storage + Metrics> commonware_consensus::Application<E> for Application<E>
 where
-    E: Rng + Spawner + Metrics + Clock,
+    E: Rng + Spawner + Metrics + Clock + Storage,
 {
     type SigningScheme = Scheme;
     type Context = Context;
@@ -65,7 +67,6 @@ where
     ) -> Option<Self::Block> {
         let parent = ancestry.next().await?;
 
-        // Create a new block
         let mut current = runtime_context.current().epoch_millis();
         if current <= parent.timestamp {
             current = parent.timestamp + 1;
@@ -80,9 +81,9 @@ where
     }
 }
 
-impl<E> commonware_consensus::VerifyingApplication<E> for Application
+impl<E: Clock + Storage + Metrics> commonware_consensus::VerifyingApplication<E> for Application<E>
 where
-    E: Rng + Spawner + Metrics + Clock,
+    E: Rng + Spawner + Metrics + Clock + Storage,
 {
     async fn verify<A: BlockProvider<Block = Self::Block>>(
         &mut self,
@@ -96,7 +97,6 @@ where
             return false;
         };
 
-        // Verify the block
         if block.timestamp <= parent.timestamp {
             return false;
         }
@@ -105,19 +105,20 @@ where
             return false;
         }
 
-        // The height and digest invariants are enforced in `Marshaled`:
-        // - The block height must be one greater than the parent's height.
-        // - The block's parent digest must match the parent's digest.
-
         true
     }
 }
 
-impl Reporter for Application {
+impl<E: Clock + Storage + Metrics> Reporter for Application<E> {
     type Activity = Update<Block>;
 
     async fn report(&mut self, activity: Self::Activity) {
         if let Update::Block(block, ack_rx) = activity {
+            if let Some(enqueuer) = &self.enqueuer {
+                enqueuer
+                    .enqueue_if_needed(block.digest(), block.height.get())
+                    .await;
+            }
             info!(height = %block.height(), "finalized block");
             ack_rx.acknowledge();
         }
