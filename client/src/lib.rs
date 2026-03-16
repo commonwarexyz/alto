@@ -110,6 +110,8 @@ impl<S: Strategy> ClientBuilder<S> {
     }
 
     /// Add a bearer token sent on all indexer HTTP requests and WebSocket handshakes.
+    ///
+    /// The indexer currently enforces this token only for raw `/block` uploads.
     pub fn with_token(mut self, token: impl Into<String>) -> Self {
         self.token = Some(token.into());
         self

@@ -244,7 +244,10 @@ impl<S: Strategy> Api<S> {
         }
     }
 
-    /// Require a bearer token for API requests and WebSocket connections.
+    /// Require a bearer token for raw `/block` upload requests.
+    ///
+    /// Other upload endpoints remain gated by certificate verification, and
+    /// read/streaming endpoints do not require this token.
     pub fn with_token(mut self, token: impl Into<String>) -> Self {
         self.token = Some(token.into().into());
         self
@@ -284,24 +287,14 @@ fn has_valid_token(headers: &HeaderMap, expected: Option<&str>) -> bool {
         .is_some_and(|provided| provided == expected)
 }
 
-async fn health_check<S: Strategy>(
-    AxumState(state): AxumState<ApiState<S>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
-    if !has_valid_token(&headers, state.token.as_deref()) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
+async fn health_check<S: Strategy>(AxumState(_state): AxumState<ApiState<S>>) -> impl IntoResponse {
     (StatusCode::OK, "ok").into_response()
 }
 
 async fn seed_upload<S: Strategy>(
     AxumState(state): AxumState<ApiState<S>>,
-    headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
-    if !has_valid_token(&headers, state.token.as_deref()) {
-        return StatusCode::UNAUTHORIZED;
-    }
     match Seed::decode(&mut body.as_ref()) {
         Ok(seed) => match state.indexer.submit_seed(seed) {
             Ok(_) => StatusCode::OK,
@@ -313,12 +306,8 @@ async fn seed_upload<S: Strategy>(
 
 async fn seed_get<S: Strategy>(
     AxumState(state): AxumState<ApiState<S>>,
-    headers: HeaderMap,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
-    if !has_valid_token(&headers, state.token.as_deref()) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
     match state.indexer.get_seed(&query) {
         Some(seed) => (StatusCode::OK, seed.encode().to_vec()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
@@ -327,12 +316,8 @@ async fn seed_get<S: Strategy>(
 
 async fn notarization_upload<S: Strategy>(
     AxumState(state): AxumState<ApiState<S>>,
-    headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
-    if !has_valid_token(&headers, state.token.as_deref()) {
-        return StatusCode::UNAUTHORIZED;
-    }
     match Notarized::decode(&mut body.as_ref()) {
         Ok(notarized) => match state.indexer.submit_notarization(notarized) {
             Ok(_) => StatusCode::OK,
@@ -344,12 +329,8 @@ async fn notarization_upload<S: Strategy>(
 
 async fn notarization_get<S: Strategy>(
     AxumState(state): AxumState<ApiState<S>>,
-    headers: HeaderMap,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
-    if !has_valid_token(&headers, state.token.as_deref()) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
     match state.indexer.get_notarization(&query) {
         Some(notarized) => (StatusCode::OK, notarized.encode().to_vec()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
@@ -358,12 +339,8 @@ async fn notarization_get<S: Strategy>(
 
 async fn finalization_upload<S: Strategy>(
     AxumState(state): AxumState<ApiState<S>>,
-    headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
-    if !has_valid_token(&headers, state.token.as_deref()) {
-        return StatusCode::UNAUTHORIZED;
-    }
     match Finalized::decode(&mut body.as_ref()) {
         Ok(finalized) => match state.indexer.submit_finalization(finalized) {
             Ok(_) => StatusCode::OK,
@@ -375,12 +352,8 @@ async fn finalization_upload<S: Strategy>(
 
 async fn finalization_get<S: Strategy>(
     AxumState(state): AxumState<ApiState<S>>,
-    headers: HeaderMap,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
-    if !has_valid_token(&headers, state.token.as_deref()) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
     match state.indexer.get_finalization(&query) {
         Some(finalized) => (StatusCode::OK, finalized.encode().to_vec()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
@@ -408,12 +381,8 @@ async fn block_upload<S: Strategy>(
 
 async fn block_get<S: Strategy>(
     AxumState(state): AxumState<ApiState<S>>,
-    headers: HeaderMap,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
-    if !has_valid_token(&headers, state.token.as_deref()) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
     match state.indexer.get_block(&query) {
         Some(BlockResult::Block(block)) => {
             (StatusCode::OK, block.encode().to_vec()).into_response()
@@ -427,12 +396,8 @@ async fn block_get<S: Strategy>(
 
 async fn consensus_ws<S: Strategy>(
     AxumState(state): AxumState<ApiState<S>>,
-    headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    if !has_valid_token(&headers, state.token.as_deref()) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
     ws.on_upgrade(move |socket| handle_consensus_ws(socket, state.indexer))
         .into_response()
 }
@@ -733,17 +698,12 @@ mod tests {
         let (addr, _handle) =
             start_server_with_token(schemes[0].clone(), Sequential, "secret-token").await;
 
+        let client = Client::new(&format!("http://{addr}"), identity, Sequential);
+        wait_for_ready(&client).await;
+
         let authorized_client = ClientBuilder::new(&format!("http://{addr}"), identity, Sequential)
             .with_token("secret-token")
             .build();
-        wait_for_ready(&authorized_client).await;
-
-        let client = Client::new(&format!("http://{addr}"), identity, Sequential);
-        let err = client.health().await.unwrap_err();
-        assert!(matches!(
-            err,
-            alto_client::Error::Failed(StatusCode::UNAUTHORIZED)
-        ));
         let block = {
             let context = Context {
                 round: Round::new(EPOCH, View::new(1)),
@@ -774,7 +734,7 @@ mod tests {
 
         authorized_client.block_upload(block.clone()).await.unwrap();
 
-        let payload = authorized_client
+        let payload = client
             .block_get(Query::Digest(block.digest()))
             .await
             .unwrap();
@@ -787,13 +747,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_websocket_streaming_with_token() {
+    async fn test_websocket_streaming_with_block_upload_token() {
         let (schemes, identity) = fixture(0);
         let (addr, _handle) =
             start_server_with_token(schemes[0].clone(), Sequential, "secret-token").await;
-        let client = ClientBuilder::new(&format!("http://{addr}"), identity, Sequential)
-            .with_token("secret-token")
-            .build();
+        let client = Client::new(&format!("http://{addr}"), identity, Sequential);
         wait_for_ready(&client).await;
 
         let block = {

@@ -22,6 +22,8 @@ indexer:
 
 Set `token` when the validator should do durable raw block uploads. Without it,
 certificate uploads remain best-effort and raw block uploads are not queued durably.
+The indexer only enforces this token on raw `/block` uploads; certificate
+uploads are verified by signature, and reads/streaming remain open.
 
 ```bash
 cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --signature-threads 2 --output test local --start-port 3000 --indexer-port 8080
@@ -106,6 +108,8 @@ indexer:
 
 Set `token` when the validator should do durable raw block uploads. Without it,
 certificate uploads remain best-effort and raw block uploads are not queued durably.
+The indexer only enforces this token on raw `/block` uploads; certificate
+uploads are verified by signature, and reads/streaming remain open.
 
 ##### Global
 

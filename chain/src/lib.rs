@@ -37,8 +37,9 @@ pub struct Config {
 pub struct IndexerConfig {
     /// Base HTTP(S) URL for the indexer API.
     pub uri: String,
-    /// Optional bearer token sent on all indexer requests.
+    /// Optional bearer token sent by the validator's indexer client.
     ///
+    /// The indexer currently enforces this token only for raw `/block` uploads.
     /// When present, the validator also enables durable raw block uploads.
     pub token: Option<String>,
 }

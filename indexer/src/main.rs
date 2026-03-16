@@ -18,7 +18,10 @@ struct Args {
     )]
     identity: String,
 
-    #[clap(long, help = "Optional bearer token required for indexer API requests")]
+    #[clap(
+        long,
+        help = "Optional bearer token required for raw block upload requests"
+    )]
     token: Option<String>,
 }
 
