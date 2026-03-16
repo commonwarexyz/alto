@@ -128,8 +128,7 @@ where
     consensus:
         Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
 
-    pusher: Option<indexer::Pusher<E, I>>,
-    queue_reader: Option<queue::Reader<E, indexer::FinalizedEntry>>,
+    drainer: Option<(indexer::Pusher<E, I>, queue::Reader<E, indexer::FinalizedEntry>)>,
 }
 
 impl<E, B, P, S, I> Engine<E, B, P, S, I>
@@ -272,7 +271,7 @@ where
 
         // Create the reporter and, when indexing is enabled, a durable queue of
         // finalized digests so block uploads can resume after restarts.
-        let (app, pusher, queue_reader) = if let Some(indexer) = cfg.indexer {
+        let (app, drainer) = if let Some(indexer) = cfg.indexer {
             let (writer, reader) = queue::shared::init(
                 context.with_label("finalized_queue"),
                 queue::Config {
@@ -312,9 +311,9 @@ where
                 uploaded,
                 writer,
             );
-            (app, Some(pusher), Some(reader))
+            (app, Some((pusher, reader)))
         } else {
-            (Application::new(), None, None)
+            (Application::new(), None)
         };
 
         // Create the application
@@ -325,7 +324,11 @@ where
             epocher,
         );
 
-        let reporter = (marshal_mailbox.clone(), pusher.clone()).into();
+        let reporter = (
+            marshal_mailbox.clone(),
+            drainer.as_ref().map(|(pusher, _)| pusher.clone()),
+        )
+            .into();
 
         // Create the consensus engine
         let consensus = Consensus::new(
@@ -364,8 +367,7 @@ where
             marshaled,
             consensus,
 
-            pusher,
-            queue_reader,
+            drainer,
         }
     }
 
@@ -435,10 +437,9 @@ where
 
         // Start draining queued block uploads before consensus so recovered work
         // resumes immediately on startup.
-        let drainer_handle = match (self.pusher, self.queue_reader) {
-            (Some(pusher), Some(reader)) => Some(pusher.start_drainer(reader)),
-            _ => None,
-        };
+        let drainer_handle = self
+            .drainer
+            .map(|(pusher, reader)| pusher.start_drainer(reader));
 
         // Start consensus
         //
