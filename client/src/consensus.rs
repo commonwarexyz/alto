@@ -5,7 +5,14 @@ use commonware_consensus::Viewable;
 use commonware_cryptography::Digestible;
 use commonware_parallel::Strategy;
 use futures::{channel::mpsc::unbounded, Stream, StreamExt};
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message as TMessage};
+use tokio_tungstenite::{
+    connect_async_tls_with_config,
+    tungstenite::{
+        client::IntoClientRequest,
+        http::header::{HeaderValue, AUTHORIZATION},
+        Message as TMessage,
+    },
+};
 
 fn seed_upload_path(base: String) -> String {
     format!("{base}/seed")
@@ -60,8 +67,7 @@ pub enum Message {
 impl<S: Strategy> Client<S> {
     pub async fn seed_upload(&self, seed: Seed) -> Result<(), Error> {
         let result = self
-            .http_client
-            .post(seed_upload_path(self.uri.clone()))
+            .request(reqwest::Method::POST, seed_upload_path(self.uri.clone()))
             .body(seed.encode().to_vec())
             .send()
             .await
@@ -75,8 +81,10 @@ impl<S: Strategy> Client<S> {
     pub async fn seed_get(&self, query: IndexQuery) -> Result<Seed, Error> {
         // Get the seed
         let result = self
-            .http_client
-            .get(seed_get_path(self.uri.clone(), &query))
+            .request(
+                reqwest::Method::GET,
+                seed_get_path(self.uri.clone(), &query),
+            )
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -103,8 +111,10 @@ impl<S: Strategy> Client<S> {
 
     pub async fn notarized_upload(&self, notarized: Notarized) -> Result<(), Error> {
         let result = self
-            .http_client
-            .post(notarization_upload_path(self.uri.clone()))
+            .request(
+                reqwest::Method::POST,
+                notarization_upload_path(self.uri.clone()),
+            )
             .body(notarized.encode().to_vec())
             .send()
             .await
@@ -118,8 +128,10 @@ impl<S: Strategy> Client<S> {
     pub async fn notarized_get(&self, query: IndexQuery) -> Result<Notarized, Error> {
         // Get the notarization
         let result = self
-            .http_client
-            .get(notarization_get_path(self.uri.clone(), &query))
+            .request(
+                reqwest::Method::GET,
+                notarization_get_path(self.uri.clone(), &query),
+            )
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -146,8 +158,10 @@ impl<S: Strategy> Client<S> {
 
     pub async fn finalized_upload(&self, finalized: Finalized) -> Result<(), Error> {
         let result = self
-            .http_client
-            .post(finalization_upload_path(self.uri.clone()))
+            .request(
+                reqwest::Method::POST,
+                finalization_upload_path(self.uri.clone()),
+            )
             .body(finalized.encode().to_vec())
             .send()
             .await
@@ -161,8 +175,10 @@ impl<S: Strategy> Client<S> {
     pub async fn finalized_get(&self, query: IndexQuery) -> Result<Finalized, Error> {
         // Get the finalization
         let result = self
-            .http_client
-            .get(finalization_get_path(self.uri.clone(), &query))
+            .request(
+                reqwest::Method::GET,
+                finalization_get_path(self.uri.clone(), &query),
+            )
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -190,8 +206,7 @@ impl<S: Strategy> Client<S> {
     pub async fn block_upload(&self, block: Block) -> Result<(), Error> {
         // Upload the raw block body without a notarization/finalization wrapper.
         let result = self
-            .http_client
-            .post(block_upload_path(self.uri.clone()))
+            .request(reqwest::Method::POST, block_upload_path(self.uri.clone()))
             .body(block.encode().to_vec())
             .send()
             .await
@@ -205,8 +220,10 @@ impl<S: Strategy> Client<S> {
     pub async fn block_get(&self, query: Query) -> Result<Payload, Error> {
         // Get the block
         let result = self
-            .http_client
-            .get(block_get_path(self.uri.clone(), &query))
+            .request(
+                reqwest::Method::GET,
+                block_get_path(self.uri.clone(), &query),
+            )
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -247,14 +264,19 @@ impl<S: Strategy> Client<S> {
 
     pub async fn listen(&self) -> Result<impl Stream<Item = Result<Message, Error>>, Error> {
         // Connect to the websocket endpoint
-        let (stream, _) = connect_async_tls_with_config(
-            listen_path(self.ws_uri.clone()),
-            None,
-            false,
-            Some(self.ws_connector.clone()),
-        )
-        .await
-        .map_err(Error::from)?;
+        let mut request = listen_path(self.ws_uri.clone())
+            .into_client_request()
+            .map_err(Error::from)?;
+        if let Some(token) = &self.token {
+            request.headers_mut().insert(
+                AUTHORIZATION,
+                HeaderValue::from_str(&format!("Bearer {token}")).expect("invalid auth header"),
+            );
+        }
+        let (stream, _) =
+            connect_async_tls_with_config(request, None, false, Some(self.ws_connector.clone()))
+                .await
+                .map_err(Error::from)?;
         let (_, read) = stream.split();
 
         // Create an unbounded channel for streaming consensus messages

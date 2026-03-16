@@ -1,4 +1,4 @@
-use alto_chain::{Config, Peers};
+use alto_chain::{Config, IndexerConfig, Peers};
 use alto_types::NAMESPACE;
 use clap::{value_parser, Arg, ArgMatches, Command};
 use commonware_codec::{Decode, DecodeExt, Encode};
@@ -346,7 +346,10 @@ fn generate_local(
 
     // Ask the first participant to push to the indexer if specified.
     let (_, _, first_config) = &mut configurations[0];
-    first_config.indexer = indexer_port.map(|port| format!("http://localhost:{}", port));
+    first_config.indexer = indexer_port.map(|port| IndexerConfig {
+        uri: format!("http://localhost:{port}"),
+        token: None,
+    });
 
     // Create required output directories
     fs::create_dir_all(&output).unwrap();
@@ -576,7 +579,10 @@ fn generate_remote(
 
         // Update selected peer configs
         for idx in &selected_indices {
-            peer_configs[*idx].1.indexer = Some(url.clone());
+            peer_configs[*idx].1.indexer = Some(IndexerConfig {
+                uri: url.clone(),
+                token: None,
+            });
         }
 
         info!(assignments = ?assigned_regions, "configured indexers");

@@ -3,7 +3,7 @@ use alto_types::{Block, Finalized, Kind, Notarized, Scheme, Seed};
 use axum::{
     body::Bytes,
     extract::{ws::WebSocketUpgrade, Path, State as AxumState},
-    http::StatusCode,
+    http::{header::AUTHORIZATION, HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Router,
@@ -20,6 +20,8 @@ use std::{
 };
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
+
+const DIGEST_UPLOAD_AUTH_SCHEME: &str = "Bearer";
 
 #[derive(Default)]
 pub struct State {
@@ -225,14 +227,34 @@ pub enum BlockResult {
 
 pub struct Api<S: Strategy> {
     indexer: Arc<Indexer<S>>,
+    token: Option<Arc<str>>,
+}
+
+#[derive(Clone)]
+struct ApiState<S: Strategy> {
+    indexer: Arc<Indexer<S>>,
+    token: Option<Arc<str>>,
 }
 
 impl<S: Strategy> Api<S> {
     pub fn new(indexer: Arc<Indexer<S>>) -> Self {
-        Self { indexer }
+        Self {
+            indexer,
+            token: None,
+        }
+    }
+
+    /// Require a bearer token for API requests and WebSocket connections.
+    pub fn with_token(mut self, token: impl Into<String>) -> Self {
+        self.token = Some(token.into().into());
+        self
     }
 
     pub fn router(self) -> Router {
+        let state = ApiState {
+            indexer: self.indexer,
+            token: self.token,
+        };
         Router::new()
             .route("/health", get(health_check))
             .route("/seed", post(seed_upload))
@@ -245,20 +267,43 @@ impl<S: Strategy> Api<S> {
             .route("/block/{query}", get(block_get))
             .route("/consensus/ws", get(consensus_ws))
             .layer(CorsLayer::permissive())
-            .with_state(self.indexer)
+            .with_state(state)
     }
 }
 
-async fn health_check() -> impl IntoResponse {
-    (StatusCode::OK, "ok")
+fn has_valid_token(headers: &HeaderMap, expected: Option<&str>) -> bool {
+    let Some(expected) = expected else {
+        return true;
+    };
+
+    headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix(DIGEST_UPLOAD_AUTH_SCHEME))
+        .and_then(|value| value.strip_prefix(' '))
+        .is_some_and(|provided| provided == expected)
+}
+
+async fn health_check<S: Strategy>(
+    AxumState(state): AxumState<ApiState<S>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if !has_valid_token(&headers, state.token.as_deref()) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    (StatusCode::OK, "ok").into_response()
 }
 
 async fn seed_upload<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+    AxumState(state): AxumState<ApiState<S>>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
+    if !has_valid_token(&headers, state.token.as_deref()) {
+        return StatusCode::UNAUTHORIZED;
+    }
     match Seed::decode(&mut body.as_ref()) {
-        Ok(seed) => match indexer.submit_seed(seed) {
+        Ok(seed) => match state.indexer.submit_seed(seed) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
         },
@@ -267,21 +312,29 @@ async fn seed_upload<S: Strategy>(
 }
 
 async fn seed_get<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+    AxumState(state): AxumState<ApiState<S>>,
+    headers: HeaderMap,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
-    match indexer.get_seed(&query) {
+    if !has_valid_token(&headers, state.token.as_deref()) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match state.indexer.get_seed(&query) {
         Some(seed) => (StatusCode::OK, seed.encode().to_vec()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 async fn notarization_upload<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+    AxumState(state): AxumState<ApiState<S>>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
+    if !has_valid_token(&headers, state.token.as_deref()) {
+        return StatusCode::UNAUTHORIZED;
+    }
     match Notarized::decode(&mut body.as_ref()) {
-        Ok(notarized) => match indexer.submit_notarization(notarized) {
+        Ok(notarized) => match state.indexer.submit_notarization(notarized) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
         },
@@ -290,21 +343,29 @@ async fn notarization_upload<S: Strategy>(
 }
 
 async fn notarization_get<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+    AxumState(state): AxumState<ApiState<S>>,
+    headers: HeaderMap,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
-    match indexer.get_notarization(&query) {
+    if !has_valid_token(&headers, state.token.as_deref()) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match state.indexer.get_notarization(&query) {
         Some(notarized) => (StatusCode::OK, notarized.encode().to_vec()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 async fn finalization_upload<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+    AxumState(state): AxumState<ApiState<S>>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
+    if !has_valid_token(&headers, state.token.as_deref()) {
+        return StatusCode::UNAUTHORIZED;
+    }
     match Finalized::decode(&mut body.as_ref()) {
-        Ok(finalized) => match indexer.submit_finalization(finalized) {
+        Ok(finalized) => match state.indexer.submit_finalization(finalized) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
         },
@@ -313,24 +374,32 @@ async fn finalization_upload<S: Strategy>(
 }
 
 async fn finalization_get<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+    AxumState(state): AxumState<ApiState<S>>,
+    headers: HeaderMap,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
-    match indexer.get_finalization(&query) {
+    if !has_valid_token(&headers, state.token.as_deref()) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match state.indexer.get_finalization(&query) {
         Some(finalized) => (StatusCode::OK, finalized.encode().to_vec()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
 async fn block_upload<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+    AxumState(state): AxumState<ApiState<S>>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
+    if !has_valid_token(&headers, state.token.as_deref()) {
+        return StatusCode::UNAUTHORIZED;
+    }
     match Block::decode(&mut body.as_ref()) {
         Ok(block) => {
             // Accept uncertified block bodies for fallback recovery. Certificate
             // verification remains on the seed/notarization/finalization paths.
-            indexer.submit_block(block);
+            state.indexer.submit_block(block);
             StatusCode::OK
         }
         Err(_) => StatusCode::BAD_REQUEST,
@@ -338,10 +407,14 @@ async fn block_upload<S: Strategy>(
 }
 
 async fn block_get<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+    AxumState(state): AxumState<ApiState<S>>,
+    headers: HeaderMap,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
-    match indexer.get_block(&query) {
+    if !has_valid_token(&headers, state.token.as_deref()) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match state.indexer.get_block(&query) {
         Some(BlockResult::Block(block)) => {
             (StatusCode::OK, block.encode().to_vec()).into_response()
         }
@@ -353,10 +426,15 @@ async fn block_get<S: Strategy>(
 }
 
 async fn consensus_ws<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+    AxumState(state): AxumState<ApiState<S>>,
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_consensus_ws(socket, indexer))
+    if !has_valid_token(&headers, state.token.as_deref()) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    ws.on_upgrade(move |socket| handle_consensus_ws(socket, state.indexer))
+        .into_response()
 }
 
 async fn handle_consensus_ws<S: Strategy>(
@@ -506,6 +584,25 @@ mod tests {
         (addr, handle)
     }
 
+    async fn start_server_with_token(
+        scheme: Scheme,
+        strategy: impl Strategy,
+        token: impl Into<String>,
+    ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+        let indexer = Arc::new(Indexer::new(scheme, strategy));
+        let api = Api::new(indexer).with_token(token);
+        let app = api.router();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        (addr, handle)
+    }
+
     async fn wait_for_ready(client: &Client<Sequential>) {
         loop {
             if client.health().await.is_ok() {
@@ -627,6 +724,111 @@ mod tests {
                 assert_eq!(b.digest(), digest);
             }
             _ => panic!("Expected block"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_block_upload_requires_token() {
+        let (schemes, identity) = fixture(0);
+        let (addr, _handle) =
+            start_server_with_token(schemes[0].clone(), Sequential, "secret-token").await;
+
+        let authorized_client = ClientBuilder::new(&format!("http://{addr}"), identity, Sequential)
+            .with_token("secret-token")
+            .build();
+        wait_for_ready(&authorized_client).await;
+
+        let client = Client::new(&format!("http://{addr}"), identity, Sequential);
+        let err = client.health().await.unwrap_err();
+        assert!(matches!(
+            err,
+            alto_client::Error::Failed(StatusCode::UNAUTHORIZED)
+        ));
+        let block = {
+            let context = Context {
+                round: Round::new(EPOCH, View::new(1)),
+                leader: ed25519::PrivateKey::from_seed(0).public_key(),
+                parent: (View::new(0), sha256::Digest::EMPTY),
+            };
+            Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000)
+        };
+
+        let err = client.block_upload(block.clone()).await.unwrap_err();
+        assert!(matches!(
+            err,
+            alto_client::Error::Failed(StatusCode::UNAUTHORIZED)
+        ));
+
+        let wrong_token_client =
+            ClientBuilder::new(&format!("http://{addr}"), identity, Sequential)
+                .with_token("wrong-token")
+                .build();
+        let err = wrong_token_client
+            .block_upload(block.clone())
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            alto_client::Error::Failed(StatusCode::UNAUTHORIZED)
+        ));
+
+        authorized_client.block_upload(block.clone()).await.unwrap();
+
+        let payload = authorized_client
+            .block_get(Query::Digest(block.digest()))
+            .await
+            .unwrap();
+        match payload {
+            alto_client::consensus::Payload::Block(b) => {
+                assert_eq!(b.digest(), block.digest());
+            }
+            _ => panic!("Expected block"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_websocket_streaming_with_token() {
+        let (schemes, identity) = fixture(0);
+        let (addr, _handle) =
+            start_server_with_token(schemes[0].clone(), Sequential, "secret-token").await;
+        let client = ClientBuilder::new(&format!("http://{addr}"), identity, Sequential)
+            .with_token("secret-token")
+            .build();
+        wait_for_ready(&client).await;
+
+        let block = {
+            let context = Context {
+                round: Round::new(EPOCH, View::new(1)),
+                leader: ed25519::PrivateKey::from_seed(0).public_key(),
+                parent: (View::new(0), sha256::Digest::EMPTY),
+            };
+            Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000)
+        };
+        let proposal = Proposal::new(
+            Round::new(EPOCH, View::new(1)),
+            View::new(0),
+            block.digest(),
+        );
+        let seed = create_notarization(&schemes, proposal).seed();
+
+        let mut stream = client.listen().await.unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let upload_client = client.clone();
+        tokio::spawn(async move {
+            rx.await.unwrap();
+            upload_client.seed_upload(seed).await.unwrap();
+        });
+
+        tx.send(()).unwrap();
+        if let Some(Ok(msg)) = stream.next().await {
+            match msg {
+                alto_client::consensus::Message::Seed(s) => {
+                    assert_eq!(s.view().get(), 1);
+                }
+                _ => panic!("Expected seed message"),
+            }
+        } else {
+            panic!("Expected to receive a message");
         }
     }
 

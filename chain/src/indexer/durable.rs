@@ -2,7 +2,9 @@ use super::Indexer;
 use alto_types::{Block, Scheme};
 use bytes::{Buf, BufMut};
 use commonware_codec::{self, FixedSize};
-use commonware_consensus::marshal::{core::Mailbox as MarshalMailbox, standard::Standard, Identifier};
+use commonware_consensus::marshal::{
+    core::Mailbox as MarshalMailbox, standard::Standard, Identifier,
+};
 use commonware_cryptography::sha256::Digest;
 use commonware_macros::select;
 use commonware_runtime::{
@@ -172,8 +174,14 @@ impl UploadTracker {
 
     fn queue_finalized(&mut self, position: u64, entry: FinalizedEntry) -> QueueFinalized {
         if let Some(previous) = self.pending_finalized.get(&position) {
-            assert_eq!(previous.height, entry.height, "pending finalized height changed");
-            assert_eq!(previous.digest, entry.digest, "pending finalized digest changed");
+            assert_eq!(
+                previous.height, entry.height,
+                "pending finalized height changed"
+            );
+            assert_eq!(
+                previous.digest, entry.digest,
+                "pending finalized digest changed"
+            );
             return QueueFinalized::KnownPosition;
         }
         let already_pending = self.pending_digests.contains_key(&entry.digest);
@@ -499,7 +507,10 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
             async move {
                 let block = loop {
                     if uploaded.lock().contains(&digest) {
-                        debug!(?digest, "drainer observed live upload before fetching block");
+                        debug!(
+                            ?digest,
+                            "drainer observed live upload before fetching block"
+                        );
                         return DrainCompletion {
                             position,
                             height,

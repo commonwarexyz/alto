@@ -12,6 +12,17 @@ _To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/
 
 _To configure indexer upload, add `--indexer-port <port>` to the `generate local` command. The first validator is configured to push data to it._
 
+Generated validator configs use:
+
+```yaml
+indexer:
+  uri: http://localhost:8080
+  token: <optional bearer token>
+```
+
+Set `token` when the validator should do durable raw block uploads. Without it,
+certificate uploads remain best-effort and raw block uploads are not queued durably.
+
 ```bash
 cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --signature-threads 2 --output test local --start-port 3000 --indexer-port 8080
 ```
@@ -84,6 +95,17 @@ cargo install commonware-deployer
 #### Create Artifacts
 
 _To configure indexer upload, add `--indexer-url <URL> --indexer-count <count>` to the `generate remote` command. Indexers are selected in round-robin fashion across regions._
+
+Each selected validator config will contain:
+
+```yaml
+indexer:
+  uri: https://your-indexer.example.com
+  token: <optional bearer token>
+```
+
+Set `token` when the validator should do durable raw block uploads. Without it,
+certificate uploads remain best-effort and raw block uploads are not queued durably.
 
 ##### Global
 

@@ -17,6 +17,9 @@ struct Args {
         help = "Identity public key in hex format (BLS12-381 public key)"
     )]
     identity: String,
+
+    #[clap(long, help = "Optional bearer token required for indexer API requests")]
+    token: Option<String>,
 }
 
 #[tokio::main]
@@ -37,13 +40,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize indexer
     let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity);
     let indexer = Arc::new(Indexer::new(certificate_verifier, Sequential));
+    let token_enabled = args.token.is_some();
     let api = Api::new(indexer);
+    let api = if let Some(token) = args.token {
+        api.with_token(token)
+    } else {
+        api
+    };
     let app = api.router();
 
     // Start server
     let addr = format!("0.0.0.0:{}", args.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    info!(?identity, ?addr, "started indexer");
+    info!(?identity, ?addr, token = token_enabled, "started indexer");
     axum::serve(listener, app).await?;
 
     Ok(())

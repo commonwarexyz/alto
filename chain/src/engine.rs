@@ -127,7 +127,10 @@ where
     consensus:
         Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
 
-    drainer: Option<(indexer::Drainer<E, I>, queue::Reader<E, indexer::FinalizedEntry>)>,
+    drainer: Option<(
+        indexer::Drainer<E, I>,
+        queue::Reader<E, indexer::FinalizedEntry>,
+    )>,
 }
 
 impl<E, B, P, S, I> Engine<E, B, P, S, I>
@@ -268,36 +271,46 @@ where
         )
         .await;
 
-        // Create the reporter and, when indexing is enabled, a durable queue of
-        // finalized digests so block uploads can resume after restarts.
-        let (app, drainer) = if let Some(indexer) = cfg.indexer {
-            let (writer, reader) = queue::shared::init(
-                context.with_label("finalized_queue"),
-                queue::Config {
-                    partition: format!("{}-finalized-queue", cfg.partition_prefix),
-                    items_per_section: PRUNABLE_ITEMS_PER_SECTION,
-                    compression: None,
-                    codec_config: (),
-                    page_cache: page_cache.clone(),
-                    write_buffer: WRITE_BUFFER,
-                },
-            )
-            .await
-            .expect("failed to initialize finalized queue");
+        // Create the reporter and, when the indexer is authorized for raw block
+        // upload, a durable queue of finalized digests so block uploads can
+        // resume after restarts.
+        let (app, pusher, drainer) = if let Some(indexer) = cfg.indexer {
+            let durable_queue = if indexer.supports_durable_block_uploads() {
+                Some(
+                    queue::shared::init(
+                        context.with_label("finalized_queue"),
+                        queue::Config {
+                            partition: format!("{}-finalized-queue", cfg.partition_prefix),
+                            items_per_section: PRUNABLE_ITEMS_PER_SECTION,
+                            compression: None,
+                            codec_config: (),
+                            page_cache: page_cache.clone(),
+                            write_buffer: WRITE_BUFFER,
+                        },
+                    )
+                    .await
+                    .expect("failed to initialize finalized queue"),
+                )
+            } else {
+                None
+            };
             let uploads = indexer::Uploads::new(
                 context.with_label("indexer"),
                 indexer,
                 marshal_mailbox.clone(),
-                writer,
-                reader,
+                durable_queue,
             )
             .await;
-            let app = Application::new().with_enqueuer(uploads.enqueuer());
+            let app = if let Some(enqueuer) = uploads.enqueuer() {
+                Application::new().with_enqueuer(enqueuer)
+            } else {
+                Application::new()
+            };
             let pusher = uploads.pusher();
-            let (drainer, reader) = uploads.into_drainer();
-            (app, Some((pusher, drainer, reader)))
+            let drainer = uploads.into_drainer();
+            (app, Some(pusher), drainer)
         } else {
-            (Application::new(), None)
+            (Application::new(), None, None)
         };
 
         // Create the application
@@ -309,11 +322,7 @@ where
         );
 
         // Create the reporter.
-        let reporter = (
-            marshal_mailbox.clone(),
-            drainer.as_ref().map(|(pusher, _, _)| pusher.clone()),
-        )
-            .into();
+        let reporter = (marshal_mailbox.clone(), pusher).into();
 
         // Create the consensus engine
         let consensus = Consensus::new(
@@ -352,7 +361,7 @@ where
             marshaled,
             consensus,
 
-            drainer: drainer.map(|(_, drainer, reader)| (drainer, reader)),
+            drainer,
         }
     }
 
@@ -422,9 +431,7 @@ where
 
         // Start draining queued block uploads before consensus so recovered work
         // resumes immediately on startup.
-        let drainer_handle = self
-            .drainer
-            .map(|(drainer, reader)| drainer.start(reader));
+        let drainer_handle = self.drainer.map(|(drainer, reader)| drainer.start(reader));
 
         // Start consensus
         //

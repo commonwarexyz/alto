@@ -1,5 +1,5 @@
 use alto_chain::{engine, Config, Peers};
-use alto_client::Client;
+use alto_client::ClientBuilder;
 use alto_types::{EPOCH, NAMESPACE};
 use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt};
@@ -244,8 +244,12 @@ fn main() {
 
         // Create indexer
         let mut indexer = None;
-        if let Some(uri) = config.indexer {
-            indexer = Some(Client::new(&uri, *identity, strategy.clone()));
+        if let Some(indexer_config) = config.indexer.as_ref() {
+            let mut builder = ClientBuilder::new(&indexer_config.uri, *identity, strategy.clone());
+            if let Some(token) = indexer_config.token.as_deref() {
+                builder = builder.with_token(token);
+            }
+            indexer = Some(builder.build());
         }
 
         // Create engine
