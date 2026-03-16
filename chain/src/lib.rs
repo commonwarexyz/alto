@@ -1542,8 +1542,9 @@ mod tests {
             blocked_waiters.push(receiver);
         }
 
-        // The recovery run uses an indexer that still rejects cert uploads, but
-        // allows raw block uploads so replay can succeed.
+        // Use one mock that keeps raw uploads blocked during the first run, and
+        // a second mock that still rejects cert uploads but lets replayed raw
+        // uploads complete during recovery.
         let blocked_indexer = Mock::new("", identity)
             .with_fail_certs()
             .with_block_upload_waiters(blocked_waiters);
