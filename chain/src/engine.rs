@@ -271,29 +271,23 @@ where
         )
         .await;
 
-        // Create the reporter and, when the indexer is authorized for raw block
-        // upload, a durable queue of finalized digests so block uploads can
-        // resume after restarts.
+        // Create the reporter and, when an indexer is configured, a durable
+        // queue of finalized digests so raw block uploads can resume after
+        // restarts.
         let (app, pusher, drainer) = if let Some(indexer) = cfg.indexer {
-            let durable_queue = if indexer.supports_durable_block_uploads() {
-                Some(
-                    queue::shared::init(
-                        context.with_label("finalized_queue"),
-                        queue::Config {
-                            partition: format!("{}-finalized-queue", cfg.partition_prefix),
-                            items_per_section: PRUNABLE_ITEMS_PER_SECTION,
-                            compression: None,
-                            codec_config: (),
-                            page_cache: page_cache.clone(),
-                            write_buffer: WRITE_BUFFER,
-                        },
-                    )
-                    .await
-                    .expect("failed to initialize finalized queue"),
-                )
-            } else {
-                None
-            };
+            let durable_queue = queue::shared::init(
+                context.with_label("finalized_queue"),
+                queue::Config {
+                    partition: format!("{}-finalized-queue", cfg.partition_prefix),
+                    items_per_section: PRUNABLE_ITEMS_PER_SECTION,
+                    compression: None,
+                    codec_config: (),
+                    page_cache: page_cache.clone(),
+                    write_buffer: WRITE_BUFFER,
+                },
+            )
+            .await
+            .expect("failed to initialize finalized queue");
             let uploads = indexer::Uploads::new(
                 context.with_label("indexer"),
                 indexer,
@@ -301,14 +295,10 @@ where
                 durable_queue,
             )
             .await;
-            let app = if let Some(enqueuer) = uploads.enqueuer() {
-                Application::new().with_enqueuer(enqueuer)
-            } else {
-                Application::new()
-            };
+            let app = Application::new().with_enqueuer(uploads.enqueuer());
             let pusher = uploads.pusher();
             let drainer = uploads.into_drainer();
-            (app, Some(pusher), drainer)
+            (app, Some(pusher), Some(drainer))
         } else {
             (Application::new(), None, None)
         };

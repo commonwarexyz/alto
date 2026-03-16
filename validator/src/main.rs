@@ -244,12 +244,8 @@ fn main() {
 
         // Create indexer
         let mut indexer = None;
-        if let Some(indexer_config) = config.indexer.as_ref() {
-            let mut builder = ClientBuilder::new(&indexer_config.uri, *identity, strategy.clone());
-            if let Some(token) = indexer_config.token.as_deref() {
-                builder = builder.with_token(token);
-            }
-            indexer = Some(builder.build());
+        if let Some(indexer_url) = config.indexer.as_deref() {
+            indexer = Some(ClientBuilder::new(indexer_url, *identity, strategy.clone()).build());
         }
 
         // Create engine

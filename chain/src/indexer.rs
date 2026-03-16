@@ -48,11 +48,6 @@ pub trait Indexer: Clone + Send + Sync + 'static {
 
     /// Upload a block (without certificate) to the indexer.
     fn block_upload(&self, block: Block) -> impl Future<Output = Result<(), Self::Error>> + Send;
-
-    /// Whether durable raw block uploads should be enabled for this indexer.
-    fn supports_durable_block_uploads(&self) -> bool {
-        true
-    }
 }
 
 /// A mock indexer implementation for testing.
@@ -71,7 +66,6 @@ pub struct Mock {
     block_upload_inflight: Arc<AtomicUsize>,
     block_upload_waiters: Arc<Mutex<Vec<oneshot::Receiver<()>>>>,
     pub fail_certs: bool,
-    pub durable_block_uploads: bool,
 }
 
 #[cfg(test)]
@@ -90,7 +84,6 @@ impl Mock {
             block_upload_inflight: Arc::new(AtomicUsize::new(0)),
             block_upload_waiters: Arc::new(Mutex::new(Vec::new())),
             fail_certs: false,
-            durable_block_uploads: true,
         }
     }
 
@@ -101,11 +94,6 @@ impl Mock {
 
     pub fn with_block_upload_waiters(self, waiters: Vec<oneshot::Receiver<()>>) -> Self {
         *self.block_upload_waiters.lock() = waiters.into_iter().rev().collect();
-        self
-    }
-
-    pub fn without_durable_block_uploads(mut self) -> Self {
-        self.durable_block_uploads = false;
         self
     }
 
@@ -176,10 +164,6 @@ impl Indexer for Mock {
         self.block_upload_completed_digests.lock().push(digest);
         Ok(())
     }
-
-    fn supports_durable_block_uploads(&self) -> bool {
-        self.durable_block_uploads
-    }
 }
 
 impl<S: Strategy> Indexer for alto_client::Client<S> {
@@ -206,19 +190,13 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
     fn block_upload(&self, block: Block) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.block_upload(block)
     }
-
-    fn supports_durable_block_uploads(&self) -> bool {
-        self.has_token()
-    }
 }
 
 /// Bundles the shared upload state and the actors built from it.
-///
-/// Durable raw block upload is only assembled when the indexer supports it.
 pub(crate) struct Uploads<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
-    enqueuer: Option<Enqueuer<E>>,
+    enqueuer: Enqueuer<E>,
     pusher: Pusher<E, I>,
-    drainer: Option<(Drainer<E, I>, queue::Reader<E, FinalizedEntry>)>,
+    drainer: (Drainer<E, I>, queue::Reader<E, FinalizedEntry>),
 }
 
 impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Uploads<E, I> {
@@ -226,10 +204,10 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Uploads<E, I> {
         context: E,
         indexer: I,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
-        durable_queue: Option<(
+        durable_queue: (
             queue::Writer<E, FinalizedEntry>,
             queue::Reader<E, FinalizedEntry>,
-        )>,
+        ),
     ) -> Self {
         let uploaded: SharedUploadTracker = Arc::new(Mutex::new(UploadTracker::new()));
         let pusher = Pusher::new(
@@ -238,20 +216,19 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Uploads<E, I> {
             marshal.clone(),
             uploaded.clone(),
         );
-        let (enqueuer, drainer) = if let Some((writer, reader)) = durable_queue {
-            let queue_size = writer.size().await;
-            let ack_floor = reader.ack_floor().await;
-            let pending = queue_size.saturating_sub(ack_floor);
-            let metrics = DrainerMetrics::new(&context.with_label("queue"));
-            metrics.depth.set(pending as i64);
-            metrics.ack_floor.set(ack_floor as i64);
+        let (writer, reader) = durable_queue;
+        let queue_size = writer.size().await;
+        let ack_floor = reader.ack_floor().await;
+        let pending = queue_size.saturating_sub(ack_floor);
+        let metrics = DrainerMetrics::new(&context.with_label("queue"));
+        metrics.depth.set(pending as i64);
+        metrics.ack_floor.set(ack_floor as i64);
 
-            let enqueuer = Enqueuer::new(uploaded.clone(), writer.clone(), metrics.clone());
-            let drainer = Drainer::new(context, indexer, marshal, metrics, uploaded, writer);
-            (Some(enqueuer), Some((drainer, reader)))
-        } else {
-            (None, None)
-        };
+        let enqueuer = Enqueuer::new(uploaded.clone(), writer.clone(), metrics.clone());
+        let drainer = (
+            Drainer::new(context, indexer, marshal, metrics, uploaded, writer),
+            reader,
+        );
 
         Self {
             enqueuer,
@@ -260,7 +237,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Uploads<E, I> {
         }
     }
 
-    pub(crate) fn enqueuer(&self) -> Option<Enqueuer<E>> {
+    pub(crate) fn enqueuer(&self) -> Enqueuer<E> {
         self.enqueuer.clone()
     }
 
@@ -268,7 +245,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Uploads<E, I> {
         self.pusher.clone()
     }
 
-    pub(crate) fn into_drainer(self) -> Option<(Drainer<E, I>, queue::Reader<E, FinalizedEntry>)> {
+    pub(crate) fn into_drainer(self) -> (Drainer<E, I>, queue::Reader<E, FinalizedEntry>) {
         self.drainer
     }
 }

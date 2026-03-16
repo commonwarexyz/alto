@@ -68,7 +68,6 @@ pub struct ClientBuilder<S: Strategy> {
     ws_uri: String,
     identity: Identity,
     tls_certs: Vec<Vec<u8>>,
-    token: Option<String>,
     strategy: S,
     verify: bool,
 }
@@ -89,7 +88,6 @@ impl<S: Strategy> ClientBuilder<S> {
             ws_uri,
             identity,
             tls_certs: Vec::new(),
-            token: None,
             strategy,
             verify: true,
         }
@@ -106,14 +104,6 @@ impl<S: Strategy> ClientBuilder<S> {
     /// Use this for self-signed certificates that should be trusted.
     pub fn with_tls_cert(mut self, cert_der: Vec<u8>) -> Self {
         self.tls_certs.push(cert_der);
-        self
-    }
-
-    /// Add a bearer token sent on all indexer HTTP requests and WebSocket handshakes.
-    ///
-    /// The indexer currently enforces this token only for raw `/block` uploads.
-    pub fn with_token(mut self, token: impl Into<String>) -> Self {
-        self.token = Some(token.into());
         self
     }
 
@@ -164,7 +154,6 @@ impl<S: Strategy> ClientBuilder<S> {
             verify: self.verify,
             http_client,
             ws_connector,
-            token: self.token,
             strategy: self.strategy,
         }
     }
@@ -179,7 +168,6 @@ pub struct Client<S: Strategy> {
 
     http_client: reqwest::Client,
     ws_connector: WsConnector,
-    token: Option<String>,
     strategy: S,
 }
 
@@ -196,17 +184,7 @@ impl<S: Strategy> Client<S> {
         ClientBuilder::new(uri, identity, strategy).build()
     }
 
-    /// Whether this client sends bearer auth on indexer requests.
-    pub fn has_token(&self) -> bool {
-        self.token.is_some()
-    }
-
     pub(crate) fn request(&self, method: Method, url: String) -> RequestBuilder {
-        let request = self.http_client.request(method, url);
-        if let Some(token) = &self.token {
-            request.bearer_auth(token)
-        } else {
-            request
-        }
+        self.http_client.request(method, url)
     }
 }

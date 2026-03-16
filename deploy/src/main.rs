@@ -1,4 +1,4 @@
-use alto_chain::{Config, IndexerConfig, Peers};
+use alto_chain::{Config, Peers};
 use alto_types::NAMESPACE;
 use clap::{value_parser, Arg, ArgMatches, Command};
 use commonware_codec::{Decode, DecodeExt, Encode};
@@ -32,7 +32,6 @@ const DASHBOARD_FILE: &str = "dashboard.json";
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ConfiguredIndexer {
     url: String,
-    token: String,
     count: usize,
 }
 
@@ -54,23 +53,18 @@ fn parse_indexers(specs: Option<&String>) -> Vec<ConfiguredIndexer> {
         .map(str::trim)
         .filter(|spec| !spec.is_empty())
         .map(|spec| {
-            let mut parts = spec.rsplitn(3, ':');
+            let mut parts = spec.rsplitn(2, ':');
             let Some(count) = parts.next() else {
-                error!("invalid indexer spec '{spec}', expected <url>:<token>:<count>");
-                std::process::exit(1);
-            };
-            let Some(token) = parts.next() else {
-                error!("invalid indexer spec '{spec}', expected <url>:<token>:<count>");
+                error!("invalid indexer spec '{spec}', expected <url>:<count>");
                 std::process::exit(1);
             };
             let Some(url) = parts.next() else {
-                error!("invalid indexer spec '{spec}', expected <url>:<token>:<count>");
+                error!("invalid indexer spec '{spec}', expected <url>:<count>");
                 std::process::exit(1);
             };
             let url = url.trim();
-            let token = token.trim();
             let count = count.trim().parse::<usize>().unwrap_or_else(|_| {
-                error!("invalid indexer count in '{spec}', expected <url>:<token>:<count>");
+                error!("invalid indexer count in '{spec}', expected <url>:<count>");
                 std::process::exit(1);
             });
             if count == 0 {
@@ -83,7 +77,6 @@ fn parse_indexers(specs: Option<&String>) -> Vec<ConfiguredIndexer> {
             }
             ConfiguredIndexer {
                 url: url.to_string(),
-                token: token.to_string(),
                 count,
             }
         })
@@ -408,17 +401,11 @@ fn generate_local(
         total_indexer_count <= configurations.len(),
         "indexer count exceeds number of peers"
     );
-    let indexer_assignments = configured_indexers.iter().flat_map(|indexer| {
-        std::iter::repeat_n(
-            (
-                indexer.url.clone(),
-                (!indexer.token.is_empty()).then(|| indexer.token.clone()),
-            ),
-            indexer.count,
-        )
-    });
-    for ((_, _, peer_config), (uri, token)) in configurations.iter_mut().zip(indexer_assignments) {
-        peer_config.indexer = Some(IndexerConfig { uri, token });
+    let indexer_assignments = configured_indexers
+        .iter()
+        .flat_map(|indexer| std::iter::repeat_n(indexer.url.clone(), indexer.count));
+    for ((_, _, peer_config), uri) in configurations.iter_mut().zip(indexer_assignments) {
+        peer_config.indexer = Some(uri);
     }
 
     // Create required output directories
@@ -442,19 +429,16 @@ fn generate_local(
     info!(?bootstrappers, "setup complete");
     let mut configured_local_indexers = configured_indexers
         .iter()
-        .map(|indexer| (indexer.url.clone(), indexer.token.clone()))
+        .map(|indexer| indexer.url.clone())
         .collect::<Vec<_>>();
     configured_local_indexers.sort();
     configured_local_indexers.dedup();
     if !configured_local_indexers.is_empty() {
         println!("To start local indexers, run:");
-        for (url, token) in &configured_local_indexers {
+        for url in &configured_local_indexers {
             if let Some(port) = local_indexer_port(url) {
-                let mut command =
+                let command =
                     format!("cargo run --bin indexer -- --port {port} --identity {identity}");
-                if !token.is_empty() {
-                    command.push_str(&format!(" --token {token}"));
-                }
                 println!("{url}: {command}");
             }
         }
@@ -470,7 +454,7 @@ fn generate_local(
         println!("Configured indexers:");
         for (name, _, peer_config) in &configurations {
             if let Some(indexer) = &peer_config.indexer {
-                println!("{name}: {} token={}", indexer.uri, indexer.token.is_some());
+                println!("{name}: {indexer}");
             }
         }
     }
@@ -660,17 +644,11 @@ fn generate_remote(
         }
 
         // Update selected peer configs
-        let indexer_assignments = configured_indexers.iter().flat_map(|indexer| {
-            std::iter::repeat_n(
-                (
-                    indexer.url.clone(),
-                    (!indexer.token.is_empty()).then(|| indexer.token.clone()),
-                ),
-                indexer.count,
-            )
-        });
-        for (idx, (url, token)) in selected_indices.iter().zip(indexer_assignments) {
-            peer_configs[*idx].1.indexer = Some(IndexerConfig { uri: url, token });
+        let indexer_assignments = configured_indexers
+            .iter()
+            .flat_map(|indexer| std::iter::repeat_n(indexer.url.clone(), indexer.count));
+        for (idx, url) in selected_indices.iter().zip(indexer_assignments) {
+            peer_configs[*idx].1.indexer = Some(url);
         }
 
         info!(assignments = ?assigned_regions, "configured indexers");
@@ -831,19 +809,17 @@ mod tests {
     #[test]
     fn parse_indexers_supports_multiple_specs() {
         let specs = parse_indexers(Some(
-            &"https://idx-a.example.com::2;https://idx-b.example.com:token-b:1".to_string(),
+            &"https://idx-a.example.com:2;https://idx-b.example.com:1".to_string(),
         ));
         assert_eq!(
             specs,
             vec![
                 ConfiguredIndexer {
                     url: "https://idx-a.example.com".to_string(),
-                    token: "".to_string(),
                     count: 2,
                 },
                 ConfiguredIndexer {
                     url: "https://idx-b.example.com".to_string(),
-                    token: "token-b".to_string(),
                     count: 1,
                 },
             ]

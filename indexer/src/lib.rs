@@ -3,7 +3,7 @@ use alto_types::{Block, Finalized, Kind, Notarized, Scheme, Seed};
 use axum::{
     body::Bytes,
     extract::{ws::WebSocketUpgrade, Path, State as AxumState},
-    http::{header::AUTHORIZATION, HeaderMap, StatusCode},
+    http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
     Router,
@@ -20,8 +20,6 @@ use std::{
 };
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
-
-const DIGEST_UPLOAD_AUTH_SCHEME: &str = "Bearer";
 
 #[derive(Default)]
 pub struct State {
@@ -227,36 +225,21 @@ pub enum BlockResult {
 
 pub struct Api<S: Strategy> {
     indexer: Arc<Indexer<S>>,
-    token: Option<Arc<str>>,
 }
 
 #[derive(Clone)]
 struct ApiState<S: Strategy> {
     indexer: Arc<Indexer<S>>,
-    token: Option<Arc<str>>,
 }
 
 impl<S: Strategy> Api<S> {
     pub fn new(indexer: Arc<Indexer<S>>) -> Self {
-        Self {
-            indexer,
-            token: None,
-        }
-    }
-
-    /// Require a bearer token for raw `/block` upload requests.
-    ///
-    /// Other upload endpoints remain gated by certificate verification, and
-    /// read/streaming endpoints do not require this token.
-    pub fn with_token(mut self, token: impl Into<String>) -> Self {
-        self.token = Some(token.into().into());
-        self
+        Self { indexer }
     }
 
     pub fn router(self) -> Router {
         let state = ApiState {
             indexer: self.indexer,
-            token: self.token,
         };
         Router::new()
             .route("/health", get(health_check))
@@ -272,19 +255,6 @@ impl<S: Strategy> Api<S> {
             .layer(CorsLayer::permissive())
             .with_state(state)
     }
-}
-
-fn has_valid_token(headers: &HeaderMap, expected: Option<&str>) -> bool {
-    let Some(expected) = expected else {
-        return true;
-    };
-
-    headers
-        .get(AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix(DIGEST_UPLOAD_AUTH_SCHEME))
-        .and_then(|value| value.strip_prefix(' '))
-        .is_some_and(|provided| provided == expected)
 }
 
 async fn health_check<S: Strategy>(AxumState(_state): AxumState<ApiState<S>>) -> impl IntoResponse {
@@ -362,16 +332,13 @@ async fn finalization_get<S: Strategy>(
 
 async fn block_upload<S: Strategy>(
     AxumState(state): AxumState<ApiState<S>>,
-    headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
-    if !has_valid_token(&headers, state.token.as_deref()) {
-        return StatusCode::UNAUTHORIZED;
-    }
     match Block::decode(&mut body.as_ref()) {
         Ok(block) => {
-            // Accept uncertified block bodies for fallback recovery. Certificate
-            // verification remains on the seed/notarization/finalization paths.
+            // Accept uncertified block bodies for fallback recovery from any
+            // uploader. Certificate verification remains on the
+            // seed/notarization/finalization paths.
             state.indexer.submit_block(block);
             StatusCode::OK
         }
@@ -549,25 +516,6 @@ mod tests {
         (addr, handle)
     }
 
-    async fn start_server_with_token(
-        scheme: Scheme,
-        strategy: impl Strategy,
-        token: impl Into<String>,
-    ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-        let indexer = Arc::new(Indexer::new(scheme, strategy));
-        let api = Api::new(indexer).with_token(token);
-        let app = api.router();
-
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let handle = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-
-        (addr, handle)
-    }
-
     async fn wait_for_ready(client: &Client<Sequential>) {
         loop {
             if client.health().await.is_ok() {
@@ -693,64 +641,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_block_upload_requires_token() {
+    async fn test_websocket_streaming_with_block_upload() {
         let (schemes, identity) = fixture(0);
-        let (addr, _handle) =
-            start_server_with_token(schemes[0].clone(), Sequential, "secret-token").await;
-
-        let client = Client::new(&format!("http://{addr}"), identity, Sequential);
-        wait_for_ready(&client).await;
-
-        let authorized_client = ClientBuilder::new(&format!("http://{addr}"), identity, Sequential)
-            .with_token("secret-token")
-            .build();
-        let block = {
-            let context = Context {
-                round: Round::new(EPOCH, View::new(1)),
-                leader: ed25519::PrivateKey::from_seed(0).public_key(),
-                parent: (View::new(0), sha256::Digest::EMPTY),
-            };
-            Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000)
-        };
-
-        let err = client.block_upload(block.clone()).await.unwrap_err();
-        assert!(matches!(
-            err,
-            alto_client::Error::Failed(StatusCode::UNAUTHORIZED)
-        ));
-
-        let wrong_token_client =
-            ClientBuilder::new(&format!("http://{addr}"), identity, Sequential)
-                .with_token("wrong-token")
-                .build();
-        let err = wrong_token_client
-            .block_upload(block.clone())
-            .await
-            .unwrap_err();
-        assert!(matches!(
-            err,
-            alto_client::Error::Failed(StatusCode::UNAUTHORIZED)
-        ));
-
-        authorized_client.block_upload(block.clone()).await.unwrap();
-
-        let payload = client
-            .block_get(Query::Digest(block.digest()))
-            .await
-            .unwrap();
-        match payload {
-            alto_client::consensus::Payload::Block(b) => {
-                assert_eq!(b.digest(), block.digest());
-            }
-            _ => panic!("Expected block"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_websocket_streaming_with_block_upload_token() {
-        let (schemes, identity) = fixture(0);
-        let (addr, _handle) =
-            start_server_with_token(schemes[0].clone(), Sequential, "secret-token").await;
+        let (addr, _handle) = start_server(schemes[0].clone(), Sequential).await;
         let client = Client::new(&format!("http://{addr}"), identity, Sequential);
         wait_for_ready(&client).await;
 

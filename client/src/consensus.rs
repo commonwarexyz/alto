@@ -7,11 +7,7 @@ use commonware_parallel::Strategy;
 use futures::{channel::mpsc::unbounded, Stream, StreamExt};
 use tokio_tungstenite::{
     connect_async_tls_with_config,
-    tungstenite::{
-        client::IntoClientRequest,
-        http::header::{HeaderValue, AUTHORIZATION},
-        Message as TMessage,
-    },
+    tungstenite::{client::IntoClientRequest, Message as TMessage},
 };
 
 fn seed_upload_path(base: String) -> String {
@@ -264,15 +260,9 @@ impl<S: Strategy> Client<S> {
 
     pub async fn listen(&self) -> Result<impl Stream<Item = Result<Message, Error>>, Error> {
         // Connect to the websocket endpoint
-        let mut request = listen_path(self.ws_uri.clone())
+        let request = listen_path(self.ws_uri.clone())
             .into_client_request()
             .map_err(Error::from)?;
-        if let Some(token) = &self.token {
-            request.headers_mut().insert(
-                AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {token}")).expect("invalid auth header"),
-            );
-        }
         let (stream, _) =
             connect_async_tls_with_config(request, None, false, Some(self.ws_connector.clone()))
                 .await
