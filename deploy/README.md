@@ -10,7 +10,7 @@ _To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/
 
 #### Create Artifacts
 
-_To configure indexer upload, add `--indexer-port <port>` to the `generate local` command. The first validator is configured to push data to it._
+_To configure local indexer upload, add `--indexers '<url>:<token>:<count>[;<url>:<token>:<count>...]'` to the `generate local` command. Use an empty token slot for best-effort-only indexers, for example `http://localhost:8080::1` or `http://localhost:8080:secret-token:1`._
 
 Generated validator configs use:
 
@@ -26,7 +26,13 @@ The indexer only enforces this token on raw `/block` uploads; certificate
 uploads are verified by signature, and reads/streaming remain open.
 
 ```bash
-cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --signature-threads 2 --output test local --start-port 3000 --indexer-port 8080
+cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --signature-threads 2 --output test local --start-port 3000 --indexers 'http://localhost:8080::1'
+```
+
+If the indexer uses `--token`, generate matching validator configs with:
+
+```bash
+cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --signature-threads 2 --output test local --start-port 3000 --indexers 'http://localhost:8080:secret-token:1'
 ```
 
 _If the command succeeds, you should see the following output:_
@@ -96,7 +102,7 @@ cargo install commonware-deployer
 
 #### Create Artifacts
 
-_To configure indexer upload, add `--indexer-url <URL> --indexer-count <count>` to the `generate remote` command. Indexers are selected in round-robin fashion across regions._
+_To configure remote indexer upload, add `--indexers '<url>:<token>:<count>[;<url>:<token>:<count>...]'` to the `generate remote` command. Use an empty token slot for best-effort-only indexers, for example `https://idx-a.example.com::2;https://idx-b.example.com:secret-token:1`. Indexers are selected in round-robin fashion across regions._
 
 Each selected validator config will contain:
 

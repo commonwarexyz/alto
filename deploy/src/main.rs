@@ -29,6 +29,67 @@ const PORT: u16 = 4545;
 const STORAGE_CLASS: &str = "gp3";
 const DASHBOARD_FILE: &str = "dashboard.json";
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ConfiguredIndexer {
+    url: String,
+    token: String,
+    count: usize,
+}
+
+fn local_indexer_port(url: &str) -> Option<u16> {
+    let rest = url
+        .strip_prefix("http://localhost:")
+        .or_else(|| url.strip_prefix("http://127.0.0.1:"))?;
+    let port = rest.split('/').next()?;
+    port.parse().ok()
+}
+
+fn parse_indexers(specs: Option<&String>) -> Vec<ConfiguredIndexer> {
+    let Some(specs) = specs else {
+        return Vec::new();
+    };
+
+    specs
+        .split(';')
+        .map(str::trim)
+        .filter(|spec| !spec.is_empty())
+        .map(|spec| {
+            let mut parts = spec.rsplitn(3, ':');
+            let Some(count) = parts.next() else {
+                error!("invalid indexer spec '{spec}', expected <url>:<token>:<count>");
+                std::process::exit(1);
+            };
+            let Some(token) = parts.next() else {
+                error!("invalid indexer spec '{spec}', expected <url>:<token>:<count>");
+                std::process::exit(1);
+            };
+            let Some(url) = parts.next() else {
+                error!("invalid indexer spec '{spec}', expected <url>:<token>:<count>");
+                std::process::exit(1);
+            };
+            let url = url.trim();
+            let token = token.trim();
+            let count = count.trim().parse::<usize>().unwrap_or_else(|_| {
+                error!("invalid indexer count in '{spec}', expected <url>:<token>:<count>");
+                std::process::exit(1);
+            });
+            if count == 0 {
+                error!("indexer count must be greater than zero: '{spec}'");
+                std::process::exit(1);
+            }
+            if url.is_empty() {
+                error!("indexer url must be non-empty: '{spec}'");
+                std::process::exit(1);
+            }
+            ConfiguredIndexer {
+                url: url.to_string(),
+                token: token.to_string(),
+                count,
+            }
+        })
+        .collect()
+}
+
 fn main() {
     // Initialize logger
     tracing_subscriber::fmt().init();
@@ -100,10 +161,11 @@ fn main() {
                             .required(true)
                             .value_parser(value_parser!(u16)),
                     )
-                    .arg(Arg::new("indexer_port")
-                        .long("indexer-port")
-                        .required(false)
-                        .value_parser(value_parser!(u16)),
+                    .arg(
+                        Arg::new("indexers")
+                            .long("indexers")
+                            .required(false)
+                            .value_parser(value_parser!(String)),
                     )
                 )
                 .subcommand(
@@ -147,16 +209,10 @@ fn main() {
                                 .value_parser(value_parser!(String)),
                         )
                         .arg(
-                            Arg::new("indexer_url")
-                                .long("indexer-url")
+                            Arg::new("indexers")
+                                .long("indexers")
                                 .required(false)
                                 .value_parser(value_parser!(String)),
-                        )
-                        .arg(
-                            Arg::new("indexer_count")
-                                .long("indexer-count")
-                                .required(false)
-                                .value_parser(value_parser!(usize)),
                         ),
                 ),
         )
@@ -262,7 +318,7 @@ fn generate_local(
 ) {
     // Extract arguments
     let start_port = *sub_matches.get_one::<u16>("start_port").unwrap();
-    let indexer_port = sub_matches.get_one::<u16>("indexer_port").copied();
+    let configured_indexers = parse_indexers(sub_matches.get_one::<String>("indexers"));
 
     // Construct output path
     let raw_current_dir = std::env::current_dir().unwrap();
@@ -344,12 +400,26 @@ fn generate_local(
         port += 2;
     }
 
-    // Ask the first participant to push to the indexer if specified.
-    let (_, _, first_config) = &mut configurations[0];
-    first_config.indexer = indexer_port.map(|port| IndexerConfig {
-        uri: format!("http://localhost:{port}"),
-        token: None,
+    let total_indexer_count: usize = configured_indexers
+        .iter()
+        .map(|indexer| indexer.count)
+        .sum();
+    assert!(
+        total_indexer_count <= configurations.len(),
+        "indexer count exceeds number of peers"
+    );
+    let indexer_assignments = configured_indexers.iter().flat_map(|indexer| {
+        std::iter::repeat_n(
+            (
+                indexer.url.clone(),
+                (!indexer.token.is_empty()).then(|| indexer.token.clone()),
+            ),
+            indexer.count,
+        )
     });
+    for ((_, _, peer_config), (uri, token)) in configurations.iter_mut().zip(indexer_assignments) {
+        peer_config.indexer = Some(IndexerConfig { uri, token });
+    }
 
     // Create required output directories
     fs::create_dir_all(&output).unwrap();
@@ -370,10 +440,24 @@ fn generate_local(
 
     // Emit start commands
     info!(?bootstrappers, "setup complete");
-    if let Some(indexer_port) = &indexer_port {
-        let command =
-            format!("cargo run --bin indexer -- --port {indexer_port} --identity {identity}",);
-        println!("To start local indexer, run:\n{command}");
+    let mut configured_local_indexers = configured_indexers
+        .iter()
+        .map(|indexer| (indexer.url.clone(), indexer.token.clone()))
+        .collect::<Vec<_>>();
+    configured_local_indexers.sort();
+    configured_local_indexers.dedup();
+    if !configured_local_indexers.is_empty() {
+        println!("To start local indexers, run:");
+        for (url, token) in &configured_local_indexers {
+            if let Some(port) = local_indexer_port(url) {
+                let mut command =
+                    format!("cargo run --bin indexer -- --port {port} --identity {identity}");
+                if !token.is_empty() {
+                    command.push_str(&format!(" --token {token}"));
+                }
+                println!("{url}: {command}");
+            }
+        }
     }
     println!("To start validators, run:");
     for (name, peer_config_file, _) in &configurations {
@@ -382,11 +466,13 @@ fn generate_local(
             format!("cargo run --bin {BINARY_NAME} -- --peers={peers_path} --config={path}");
         println!("{name}: {command}");
     }
-    if let Some(indexer_port) = &indexer_port {
-        println!(
-            "Indexer URL: http://localhost:{indexer_port} (pushed by {})",
-            configurations[0].0
-        );
+    if !configured_indexers.is_empty() {
+        println!("Configured indexers:");
+        for (name, _, peer_config) in &configurations {
+            if let Some(indexer) = &peer_config.indexer {
+                println!("{name}: {} token={}", indexer.uri, indexer.token.is_some());
+            }
+        }
     }
     println!("To view metrics, run:");
     for (name, _, peer_config) in configurations {
@@ -429,14 +515,7 @@ fn generate_remote(
         .get_one::<i32>("monitoring_storage_size")
         .unwrap();
     let dashboard = sub_matches.get_one::<String>("dashboard").unwrap().clone();
-    let indexer_url = sub_matches.get_one::<String>("indexer_url").cloned();
-    let indexer_count = sub_matches.get_one::<usize>("indexer_count").copied();
-
-    // Validate indexer arguments
-    if indexer_url.is_some() != indexer_count.is_some() {
-        error!("--indexer-url and --indexer-count must be specified together");
-        std::process::exit(1);
-    }
+    let configured_indexers = parse_indexers(sub_matches.get_one::<String>("indexers"));
 
     // Construct output path
     let raw_current_dir = std::env::current_dir().unwrap();
@@ -534,10 +613,13 @@ fn generate_remote(
     }
 
     // Configure indexers if specified
-    if let (Some(url), Some(count)) = (&indexer_url, indexer_count) {
-        assert!(count > 0, "indexer count must be greater than zero");
+    if !configured_indexers.is_empty() {
+        let total_indexer_count: usize = configured_indexers
+            .iter()
+            .map(|indexer| indexer.count)
+            .sum();
         assert!(
-            count <= peer_configs.len(),
+            total_indexer_count <= peer_configs.len(),
             "indexer count exceeds number of peers"
         );
 
@@ -562,7 +644,7 @@ fn generate_remote(
         let mut selected_indices = Vec::new();
         let mut region_index = 0;
         let mut assigned_regions: BTreeMap<&String, usize> = BTreeMap::new();
-        while selected_indices.len() < count && !region_to_peers.is_empty() {
+        while selected_indices.len() < total_indexer_count && !region_to_peers.is_empty() {
             let region = &region_list[region_index % region_list.len()];
             if let Some(peers) = region_to_peers.get_mut(region) {
                 if !peers.is_empty() {
@@ -578,11 +660,17 @@ fn generate_remote(
         }
 
         // Update selected peer configs
-        for idx in &selected_indices {
-            peer_configs[*idx].1.indexer = Some(IndexerConfig {
-                uri: url.clone(),
-                token: None,
-            });
+        let indexer_assignments = configured_indexers.iter().flat_map(|indexer| {
+            std::iter::repeat_n(
+                (
+                    indexer.url.clone(),
+                    (!indexer.token.is_empty()).then(|| indexer.token.clone()),
+                ),
+                indexer.count,
+            )
+        });
+        for (idx, (url, token)) in selected_indices.iter().zip(indexer_assignments) {
+            peer_configs[*idx].1.indexer = Some(IndexerConfig { uri: url, token });
         }
 
         info!(assignments = ?assigned_regions, "configured indexers");
@@ -734,4 +822,36 @@ fn explorer_remote(dir: String, backend_url: String) {
     let config_ts_path = format!("{dir}/config.ts");
     fs::write(&config_ts_path, config_ts).expect("failed to write config.ts");
     info!(path = "config.ts", "wrote explorer configuration file");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_indexers, ConfiguredIndexer};
+
+    #[test]
+    fn parse_indexers_supports_multiple_specs() {
+        let specs = parse_indexers(Some(
+            &"https://idx-a.example.com::2;https://idx-b.example.com:token-b:1".to_string(),
+        ));
+        assert_eq!(
+            specs,
+            vec![
+                ConfiguredIndexer {
+                    url: "https://idx-a.example.com".to_string(),
+                    token: "".to_string(),
+                    count: 2,
+                },
+                ConfiguredIndexer {
+                    url: "https://idx-b.example.com".to_string(),
+                    token: "token-b".to_string(),
+                    count: 1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_indexers_allows_empty_configuration() {
+        assert!(parse_indexers(None).is_empty());
+    }
 }
