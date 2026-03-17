@@ -1483,11 +1483,6 @@ mod tests {
                 queue_depth >= queue_in_flight,
                 "queue depth should include uploads currently in flight",
             );
-            let queue_enqueued = sum_validator_metric_u64(&metrics, "_queue_enqueued_total", None);
-            assert!(
-                queue_enqueued >= queue_in_flight as u64,
-                "queue enqueued metric did not account for the blocked uploads",
-            );
 
             // Allow both blocked uploads to finish so the drainer can retire
             // their queue entries.
@@ -1534,10 +1529,6 @@ mod tests {
             assert_eq!(
                 queue_upload_failure, 0,
                 "queue failure counter should stay at zero when block uploads succeed",
-            );
-            assert!(
-                sum_validator_metric_i64(&metrics, "_queue_ack_floor") > 0,
-                "queue ack floor metric never advanced after successful uploads",
             );
         });
     }
@@ -1875,10 +1866,6 @@ mod tests {
             assert_eq!(
                 queue_upload_failure, 0,
                 "queue failure counter should stay at zero while replayed block uploads succeed",
-            );
-            assert!(
-                sum_validator_metric_i64(&metrics, "_queue_ack_floor") > 0,
-                "queue ack floor metric never advanced during replay",
             );
 
             true

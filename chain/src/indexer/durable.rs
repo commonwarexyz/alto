@@ -17,7 +17,7 @@ use commonware_utils::{
     sync::Mutex,
     PrioritySet,
 };
-use prometheus_client::metrics::{counter::Counter, gauge::Gauge};
+use prometheus_client::metrics::gauge::Gauge;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use tracing::{debug, warn};
 
@@ -27,9 +27,7 @@ const DRAINER_RETRY_DELAY: Duration = Duration::from_secs(1);
 #[derive(Clone)]
 pub(crate) struct DrainerMetrics {
     pub(crate) depth: Gauge,
-    pub(crate) enqueued: Counter,
     pub(crate) uploads: status::Counter,
-    pub(crate) ack_floor: Gauge,
     pub(crate) in_flight: Gauge,
 }
 
@@ -37,9 +35,7 @@ impl DrainerMetrics {
     pub(crate) fn new<E: Metrics>(context: &E) -> Self {
         let metrics = Self {
             depth: Gauge::default(),
-            enqueued: Counter::default(),
             uploads: status::Counter::default(),
-            ack_floor: Gauge::default(),
             in_flight: Gauge::default(),
         };
 
@@ -49,19 +45,9 @@ impl DrainerMetrics {
             metrics.depth.clone(),
         );
         context.register(
-            "enqueued",
-            "Total number of durable queue rows created for finalized block uploads",
-            metrics.enqueued.clone(),
-        );
-        context.register(
             "uploads",
             "Total number of finalized block upload attempt outcomes by status",
             metrics.uploads.clone(),
-        );
-        context.register(
-            "ack_floor",
-            "Durable queue positions below this value have been acknowledged and pruned",
-            metrics.ack_floor.clone(),
         );
         context.register(
             "in_flight",
@@ -109,7 +95,7 @@ impl Read for FinalizedEntry {
 ///   duplicate finalize notifications must not enqueue another row;
 /// - uploaded: the block was already uploaded successfully, so further finalize
 ///   notifications can be ignored.
-pub(crate) struct UploadTracker {
+struct UploadTracker {
     uploaded: PrioritySet<Digest, u64>,
     pending_finalized: BTreeMap<u64, FinalizedEntry>,
     pending_digests: BTreeMap<Digest, usize>,
@@ -117,7 +103,7 @@ pub(crate) struct UploadTracker {
 }
 
 impl UploadTracker {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             uploaded: PrioritySet::new(),
             pending_finalized: BTreeMap::new(),
@@ -126,11 +112,11 @@ impl UploadTracker {
         }
     }
 
-    pub(crate) fn contains(&self, digest: &Digest) -> bool {
+    fn contains(&self, digest: &Digest) -> bool {
         self.uploaded.contains(digest)
     }
 
-    pub(crate) fn needs_enqueue(&mut self, digest: &Digest, height: u64) -> bool {
+    fn needs_enqueue(&mut self, digest: &Digest, height: u64) -> bool {
         self.observe_finalization(height);
         // A pending digest already has a durable queue row backing retries and
         // crash recovery, so a duplicate finalize notification must not enqueue
@@ -138,12 +124,12 @@ impl UploadTracker {
         !(self.contains(digest) || self.pending_digests.contains_key(digest))
     }
 
-    pub(crate) fn mark_uploaded(&mut self, digest: Digest, height: u64) {
+    fn mark_uploaded(&mut self, digest: Digest, height: u64) {
         self.uploaded.put(digest, height);
         self.prune_uploaded();
     }
 
-    pub(crate) fn observe_finalization(&mut self, height: u64) {
+    fn observe_finalization(&mut self, height: u64) {
         self.latest_finalized = Some(
             self.latest_finalized
                 .map_or(height, |latest| latest.max(height)),
@@ -169,7 +155,7 @@ impl UploadTracker {
         duplicate_digest
     }
 
-    pub(crate) fn finish_finalized(&mut self, position: u64) {
+    fn finish_finalized(&mut self, position: u64) {
         let pending = self
             .pending_finalized
             .remove(&position)
@@ -226,14 +212,16 @@ impl UploadState {
         self.tracker.contains(digest)
     }
 
-    pub(crate) fn needs_enqueue(&mut self, block: &Block) -> bool {
-        let digest = block.digest();
-        let height = block.height.get();
-        let needs_enqueue = self.tracker.needs_enqueue(&digest, height);
-        if needs_enqueue || self.tracker.pending_digests.contains_key(&digest) {
+    pub(crate) fn prepare_enqueue(&mut self, block: &Block) -> Option<FinalizedEntry> {
+        let entry = FinalizedEntry {
+            height: block.height.get(),
+            digest: block.digest(),
+        };
+        let needs_enqueue = self.tracker.needs_enqueue(&entry.digest, entry.height);
+        if needs_enqueue || self.tracker.pending_digests.contains_key(&entry.digest) {
             self.cache_block(block.clone());
         }
-        needs_enqueue
+        needs_enqueue.then_some(entry)
     }
 
     pub(crate) fn register_finalized(&mut self, position: u64, entry: FinalizedEntry) -> bool {
@@ -301,23 +289,18 @@ impl<E: Clock + Storage + Metrics> Enqueuer<E> {
     }
 
     pub(crate) async fn enqueue_if_needed(&self, block: &Block) {
-        if !self.uploads.lock().needs_enqueue(block) {
+        let Some(entry) = self.uploads.lock().prepare_enqueue(block) else {
             return;
-        }
+        };
 
         // Persist exactly one queue row per digest while it is pending. The
         // drainer retries from this row until it either uploads successfully or
         // observes that the live certificate path already uploaded the block.
-        let entry = FinalizedEntry {
-            height: block.height.get(),
-            digest: block.digest(),
-        };
         let position = self
             .writer
             .enqueue(entry)
             .await
             .expect("failed to enqueue finalized digest");
-        self.metrics.enqueued.inc();
         self.metrics.depth.inc();
         let _ = self.uploads.lock().register_finalized(position, entry);
         self.writer
@@ -676,7 +659,6 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
             .expect("failed to ack");
         writer.sync().await.expect("failed to sync after ack");
         metrics.depth.dec();
-        metrics.ack_floor.set(reader.ack_floor().await as i64);
         uploads.lock().finish_finalized(completion.position);
     }
 }
@@ -782,10 +764,10 @@ mod tests {
         let block = test_block(7, 7, b"view-7");
         let digest = block.digest();
 
-        assert!(uploads.needs_enqueue(&block));
+        assert!(uploads.prepare_enqueue(&block).is_some());
         uploads.mark_uploaded(digest, block.height.get());
         assert!(uploads.cached_block(&digest).is_none());
-        assert!(!uploads.needs_enqueue(&block));
+        assert!(uploads.prepare_enqueue(&block).is_none());
         assert!(uploads.cached_block(&digest).is_none());
     }
 }

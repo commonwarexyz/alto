@@ -260,7 +260,6 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Uploads<E, I> {
         let pending = queue_size.saturating_sub(ack_floor);
         let metrics = DrainerMetrics::new(&context.with_label("queue"));
         metrics.depth.set(pending as i64);
-        metrics.ack_floor.set(ack_floor as i64);
 
         let enqueuer = Enqueuer::new(uploads.clone(), writer.clone(), metrics.clone());
         let drainer = (
