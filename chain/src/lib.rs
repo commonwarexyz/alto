@@ -713,10 +713,10 @@ mod tests {
             link_validators(&mut oracle, &participants, link, None).await;
 
             // Derive threshold
-            let identity = *schemes[0].polynomial().public();
+
 
             // Define mock indexer
-            let indexer = Mock::new("", identity);
+            let indexer = Mock::new();
 
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
                 let registration = registrations.remove(&signer.public_key()).unwrap();
@@ -788,8 +788,8 @@ mod tests {
 
             // Reject certificate uploads so the only way blocks can reach the
             // indexer is through the durable raw block consumer.
-            let identity = *schemes[0].polynomial().public();
-            let indexer = Mock::new("", identity).with_fail_certs();
+
+            let indexer = Mock::new().with_fail_certs();
 
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
                 let registration = registrations.remove(&signer.public_key()).unwrap();
@@ -877,8 +877,8 @@ mod tests {
                 cert_upload_senders.push(sender);
                 cert_upload_waiters.push(receiver);
             }
-            let identity = *schemes[0].polynomial().public();
-            let indexer = Mock::new("", identity).with_cert_upload_waiters(cert_upload_waiters);
+
+            let indexer = Mock::new().with_cert_upload_waiters(cert_upload_waiters);
 
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
                 let registration = registrations.remove(&signer.public_key()).unwrap();
@@ -990,8 +990,8 @@ mod tests {
             // consumer's parallelism before any upload completes.
             let (release_first, wait_first) = oneshot::channel();
             let (release_second, wait_second) = oneshot::channel();
-            let identity = *schemes[0].polynomial().public();
-            let indexer = Mock::new("", identity)
+
+            let indexer = Mock::new()
                 .with_fail_certs()
                 .with_block_upload_waiters(vec![wait_first, wait_second]);
 
@@ -1115,7 +1115,7 @@ mod tests {
         let n = 5;
         let mut rng = StdRng::seed_from_u64(7);
         let fixture = bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
-        let identity = *fixture.schemes[0].polynomial().public();
+
 
         // Keep these senders alive for the duration of the first run so the
         // corresponding block uploads remain in flight until shutdown.
@@ -1130,10 +1130,10 @@ mod tests {
         // Use one mock that keeps raw uploads blocked during the first run, and
         // a second mock that still rejects cert uploads but lets replayed raw
         // uploads complete during recovery.
-        let blocked_indexer = Mock::new("", identity)
+        let blocked_indexer = Mock::new()
             .with_fail_certs()
             .with_block_upload_waiters(blocked_waiters);
-        let recovery_indexer = Mock::new("", identity).with_fail_certs();
+        let recovery_indexer = Mock::new().with_fail_certs();
 
         let Fixture {
             schemes,

@@ -83,7 +83,7 @@ impl State {
         }
     }
 
-    fn contains(&self, digest: &Digest) -> bool {
+    fn is_uploaded(&self, digest: &Digest) -> bool {
         self.uploaded.contains(digest)
     }
 
@@ -148,7 +148,7 @@ impl State {
     }
 
     pub fn upload_decision(&self, digest: &Digest) -> Decision {
-        if self.contains(digest) {
+        if self.is_uploaded(digest) {
             Decision::Retire
         } else if self.certificate_uploads.contains_key(digest) {
             Decision::Wait
@@ -182,7 +182,7 @@ impl State {
         // A pending digest already has a backfill queue row backing retries and
         // crash recovery, so a duplicate finalize notification must not enqueue
         // another row.
-        !(self.contains(digest) || self.pending_digests.contains_key(digest))
+        !(self.is_uploaded(digest) || self.pending_digests.contains_key(digest))
     }
 
     fn observe_finalization(&mut self, height: u64) {
@@ -307,15 +307,15 @@ mod tests {
         uploads.mark_uploaded(digest_12, 12);
         uploads.finish_finalized(5);
 
-        assert!(uploads.contains(&digest_11));
-        assert!(uploads.contains(&digest_12));
+        assert!(uploads.is_uploaded(&digest_11));
+        assert!(uploads.is_uploaded(&digest_12));
 
         uploads.mark_uploaded(digest_10, 10);
         uploads.finish_finalized(3);
 
-        assert!(!uploads.contains(&digest_10));
-        assert!(!uploads.contains(&digest_11));
-        assert!(uploads.contains(&digest_12));
+        assert!(!uploads.is_uploaded(&digest_10));
+        assert!(!uploads.is_uploaded(&digest_11));
+        assert!(uploads.is_uploaded(&digest_12));
     }
 
     #[test]

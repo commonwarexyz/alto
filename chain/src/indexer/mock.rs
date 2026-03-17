@@ -1,5 +1,5 @@
 use super::Client;
-use alto_types::{Block, Finalized, Identity, Notarized, Seed};
+use alto_types::{Block, Finalized, Notarized, Seed};
 use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_utils::{channel::oneshot, sync::Mutex};
 use std::sync::{
@@ -34,7 +34,7 @@ pub struct Mock {
 }
 
 impl Mock {
-    pub fn new(_: &str, _: Identity) -> Self {
+    pub fn new() -> Self {
         Self {
             seed_seen: Arc::new(AtomicBool::new(false)),
             notarization_seen: Arc::new(AtomicBool::new(false)),

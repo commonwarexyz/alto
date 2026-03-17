@@ -93,9 +93,7 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
             }
         });
     }
-}
 
-impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
     fn spawn_certificate_upload<F, Fut>(
         &self,
         label: &'static str,
