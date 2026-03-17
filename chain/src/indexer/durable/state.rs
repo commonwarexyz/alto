@@ -256,7 +256,7 @@ impl<E: Clock + Storage + Metrics> Recorder<E> {
         }
     }
 
-    pub(crate) async fn record_if_needed(&self, block: &Block) {
+    pub(crate) async fn record(&self, block: &Block) {
         let Some(entry) = self.uploads.lock().prepare_enqueue(block) else {
             return;
         };

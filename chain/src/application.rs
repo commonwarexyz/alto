@@ -130,7 +130,7 @@ impl<E: Clock + Storage + Metrics> Reporter for Application<E> {
                 // before acking so the drainer can recover it across restarts.
                 // Duplicate finalize notifications still collapse to a single
                 // durable row while an upload is pending.
-                recorder.record_if_needed(&block).await;
+                recorder.record(&block).await;
             }
             info!(height = %block.height(), "finalized block");
             ack_rx.acknowledge();
