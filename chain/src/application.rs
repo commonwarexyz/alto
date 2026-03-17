@@ -25,7 +25,7 @@ const SYNCHRONY_BOUND: u64 = 500;
 #[derive(Clone)]
 pub struct Application<E: Clock + Storage + Metrics> {
     genesis: Arc<Block>,
-    durable_uploads: Option<indexer::Enqueuer<E>>,
+    recorder: Option<indexer::Recorder<E>>,
 }
 
 impl<E: Clock + Storage + Metrics> Application<E> {
@@ -38,12 +38,12 @@ impl<E: Clock + Storage + Metrics> Application<E> {
         let genesis = Block::new(genesis_context, Sha256::hash(GENESIS), Height::zero(), 0);
         Self {
             genesis: Arc::new(genesis),
-            durable_uploads: None,
+            recorder: None,
         }
     }
 
-    pub(crate) fn with_durable_uploads(mut self, durable_uploads: indexer::Enqueuer<E>) -> Self {
-        self.durable_uploads = Some(durable_uploads);
+    pub(crate) fn with_recorder(mut self, recorder: indexer::Recorder<E>) -> Self {
+        self.recorder = Some(recorder);
         self
     }
 }
@@ -125,12 +125,12 @@ impl<E: Clock + Storage + Metrics> Reporter for Application<E> {
 
     async fn report(&mut self, activity: Self::Activity) {
         if let Update::Block(block, ack_rx) = activity {
-            if let Some(durable_uploads) = &self.durable_uploads {
+            if let Some(recorder) = &self.recorder {
                 // Cache the finalized block in memory and enqueue its digest
                 // before acking so the drainer can recover it across restarts.
                 // Duplicate finalize notifications still collapse to a single
                 // durable row while an upload is pending.
-                durable_uploads.enqueue_if_needed(&block).await;
+                recorder.record_if_needed(&block).await;
             }
             info!(height = %block.height(), "finalized block");
             ack_rx.acknowledge();

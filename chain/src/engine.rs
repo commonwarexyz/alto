@@ -295,9 +295,9 @@ where
                 durable_queue,
             )
             .await;
-            let app = Application::new().with_durable_uploads(indexer_runtime.enqueuer());
-            let pusher = indexer_runtime.pusher();
-            let drainer = indexer_runtime.into_drainer();
+            let app = Application::new().with_recorder(indexer_runtime.recorder());
+            let pusher = indexer_runtime.live_pusher();
+            let drainer = indexer_runtime.into_durable_drainer();
             (app, Some(pusher), Some(drainer))
         } else {
             (Application::new(), None, None)

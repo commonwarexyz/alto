@@ -8,7 +8,13 @@ use commonware_cryptography::sha256::Digest;
 use commonware_runtime::{Metrics, Spawner};
 use tracing::{debug, warn};
 
-/// An implementation of [Indexer] for the [Reporter] trait.
+/// Uploads live seeds and certificate-bearing objects to the indexer.
+///
+/// This is the live upload path. It reacts directly to consensus activity,
+/// waits for marshal to make the corresponding block available, caches that
+/// block in shared state, and uploads the certificate-bearing object. The
+/// shared state lets the durable raw-block drainer reuse blocks and back off
+/// when the live path is already handling a digest.
 #[derive(Clone)]
 pub(crate) struct Pusher<E: Spawner + Metrics, I: Indexer> {
     context: E,
@@ -34,6 +40,12 @@ impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
     }
 }
 
+/// Tracks one in-flight live certificate upload for a digest.
+///
+/// While the guard is alive, the digest is marked as having a certificate
+/// upload in flight so the durable drainer waits instead of racing it. On
+/// successful upload, the guard records the uploaded height and marks the
+/// digest uploaded on drop; on failure, it only clears the in-flight marker.
 struct CertificateUploadGuard {
     uploads: SharedUploadState,
     digest: Digest,

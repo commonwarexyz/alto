@@ -1,3 +1,19 @@
+//! Indexer upload integration for the chain engine.
+//!
+//! The indexer integration has two cooperating upload paths:
+//! - the live path, where [`Pusher`] uploads seeds and certificate-bearing
+//!   objects as consensus activity happens;
+//! - the durable path, where [`Recorder`] persists finalized block digests and
+//!   [`Drainer`] retries raw block uploads from the durable queue across
+//!   restarts.
+//!
+//! [`IndexerRuntime`] is the top-level abstraction over those pieces. It owns
+//! the shared [`UploadState`] used to deduplicate uploads, cache blocks, and
+//! coordinate the live and durable paths. The actors are still exposed
+//! separately because they plug into three different integration points:
+//! the application's finalized block stream, the consensus reporter, and a
+//! background drainer task.
+
 use alto_types::{Block, Finalized, Notarized, Scheme, Seed};
 use commonware_consensus::marshal::{core::Mailbox as MarshalMailbox, standard::Standard};
 use commonware_parallel::Strategy;
@@ -11,7 +27,7 @@ mod durable;
 mod mock;
 mod pusher;
 
-pub(crate) use durable::{Drainer, Enqueuer, FinalizedEntry};
+pub(crate) use durable::{Drainer, FinalizedEntry, Recorder};
 use durable::{DrainerMetrics, SharedUploadState, UploadState};
 #[cfg(test)]
 pub use mock::Mock;
@@ -66,9 +82,16 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
     }
 }
 
-/// Bundles the shared upload state and the actors built from it.
+/// Builds and owns the indexer's live and durable upload actors.
+///
+/// This is the high-level abstraction over the indexer upload subsystem. It
+/// constructs the shared upload state once, then hands out the specific actor
+/// handles needed by the engine:
+/// - a recorder for the application's finalized block stream;
+/// - a live pusher for consensus activity;
+/// - a durable drainer plus queue reader for the background retry task.
 pub(crate) struct IndexerRuntime<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
-    enqueuer: Enqueuer<E>,
+    recorder: Recorder<E>,
     pusher: Pusher<E, I>,
     drainer: (Drainer<E, I>, queue::Reader<E, FinalizedEntry>),
 }
@@ -97,28 +120,31 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> IndexerRuntime<E, I> {
         let metrics = DrainerMetrics::new(&context.with_label("queue"));
         metrics.depth.set(pending as i64);
 
-        let enqueuer = Enqueuer::new(uploads.clone(), writer.clone(), metrics.clone());
+        let recorder = Recorder::new(uploads.clone(), writer.clone(), metrics.clone());
         let drainer = (
             Drainer::new(context, indexer, marshal, metrics, uploads, writer),
             reader,
         );
 
         Self {
-            enqueuer,
+            recorder,
             pusher,
             drainer,
         }
     }
 
-    pub(crate) fn enqueuer(&self) -> Enqueuer<E> {
-        self.enqueuer.clone()
+    /// Returns the application-side recorder.
+    pub(crate) fn recorder(&self) -> Recorder<E> {
+        self.recorder.clone()
     }
 
-    pub(crate) fn pusher(&self) -> Pusher<E, I> {
+    /// Returns the live consensus-activity pusher.
+    pub(crate) fn live_pusher(&self) -> Pusher<E, I> {
         self.pusher.clone()
     }
 
-    pub(crate) fn into_drainer(self) -> (Drainer<E, I>, queue::Reader<E, FinalizedEntry>) {
+    /// Consumes the runtime and returns the durable queue drainer task inputs.
+    pub(crate) fn into_durable_drainer(self) -> (Drainer<E, I>, queue::Reader<E, FinalizedEntry>) {
         self.drainer
     }
 }

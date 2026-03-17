@@ -231,17 +231,19 @@ impl UploadState {
     }
 }
 
+/// State shared by the live certificate path and the durable raw-block path.
 pub(crate) type SharedUploadState = Arc<Mutex<UploadState>>;
 
-/// Durably enqueues finalized block digests from the application's block stream.
+/// Records finalized block digests in the durable queue from the application's
+/// block stream.
 #[derive(Clone)]
-pub(crate) struct Enqueuer<E: Clock + Storage + Metrics> {
+pub(crate) struct Recorder<E: Clock + Storage + Metrics> {
     uploads: SharedUploadState,
     writer: queue::Writer<E, FinalizedEntry>,
     metrics: DrainerMetrics,
 }
 
-impl<E: Clock + Storage + Metrics> Enqueuer<E> {
+impl<E: Clock + Storage + Metrics> Recorder<E> {
     pub(crate) fn new(
         uploads: SharedUploadState,
         writer: queue::Writer<E, FinalizedEntry>,
@@ -254,7 +256,7 @@ impl<E: Clock + Storage + Metrics> Enqueuer<E> {
         }
     }
 
-    pub(crate) async fn enqueue_if_needed(&self, block: &Block) {
+    pub(crate) async fn record_if_needed(&self, block: &Block) {
         let Some(entry) = self.uploads.lock().prepare_enqueue(block) else {
             return;
         };
