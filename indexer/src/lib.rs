@@ -208,7 +208,7 @@ impl<S: Strategy> Indexer<S> {
         }
     }
 
-    /// Store a raw block body for digest lookups used by the fallback drainer.
+    /// Store a raw block body for digest lookups used by the backfiller.
     pub fn submit_block(&self, block: Block) {
         let mut state = self.state.write().unwrap();
         // These uploads are not certificate-bearing; verified certificate data
