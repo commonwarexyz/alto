@@ -157,13 +157,13 @@ impl UploadState {
         if *count == 0 {
             self.pending_digests.remove(&pending.digest);
         }
-        self.prune_uploaded();
+        self.prune();
     }
 
     pub(crate) fn mark_uploaded(&mut self, digest: Digest, height: u64) {
         self.cached_blocks.remove(&digest);
         self.uploaded.put(digest, height);
-        self.prune_uploaded();
+        self.prune();
     }
 
     pub(crate) fn cache_block(&mut self, block: Block) {
@@ -187,6 +187,7 @@ impl UploadState {
         if *count == 0 {
             self.certificate_uploads.remove(digest);
         }
+        self.prune();
     }
 
     pub(crate) fn certificate_upload_in_flight(&self, digest: &Digest) -> bool {
@@ -206,27 +207,52 @@ impl UploadState {
             self.latest_finalized
                 .map_or(height, |latest| latest.max(height)),
         );
-        self.prune_uploaded();
+        self.prune();
     }
 
-    fn prune_uploaded(&mut self) {
-        let prune_before = match (
+    fn prune(&mut self) {
+        let uploaded_prune_before = match (
             self.pending_finalized
                 .first_key_value()
                 .map(|(_, pending)| pending.height),
             self.latest_finalized,
         ) {
-            (Some(pending), Some(latest)) => pending.min(latest),
-            (Some(pending), None) => pending,
-            (None, Some(latest)) => latest,
-            (None, None) => return,
+            (Some(pending), Some(latest)) => Some(pending.min(latest)),
+            (Some(pending), None) => Some(pending),
+            (None, Some(latest)) => Some(latest),
+            (None, None) => None,
         };
 
-        while let Some((_, &height)) = self.uploaded.peek() {
-            if height >= prune_before {
-                break;
+        if let Some(prune_before) = uploaded_prune_before {
+            while let Some((_, &height)) = self.uploaded.peek() {
+                if height >= prune_before {
+                    break;
+                }
+                self.uploaded.pop();
             }
-            self.uploaded.pop();
+        }
+
+        let mut cached_prune_before = self
+            .pending_finalized
+            .values()
+            .map(|pending| pending.height)
+            .min();
+        for digest in self.certificate_uploads.keys() {
+            let Some(block) = self.cached_blocks.get(digest) else {
+                continue;
+            };
+            cached_prune_before = Some(
+                cached_prune_before
+                    .map_or(block.height.get(), |current| current.min(block.height.get())),
+            );
+        }
+        if cached_prune_before.is_none() {
+            cached_prune_before = self.latest_finalized;
+        }
+
+        if let Some(prune_before) = cached_prune_before {
+            self.cached_blocks
+                .retain(|_, block| block.height.get() >= prune_before);
         }
     }
 }
@@ -384,5 +410,44 @@ mod tests {
         assert!(uploads.cached_block(&digest).is_none());
         assert!(uploads.prepare_enqueue(&block).is_none());
         assert!(uploads.cached_block(&digest).is_none());
+    }
+
+    #[test]
+    fn test_upload_state_eventually_drops_cached_block_after_failed_certificate_upload() {
+        let mut uploads = UploadState::new();
+        let block = test_block(7, 7, b"view-7");
+        let digest = block.digest();
+
+        uploads.start_certificate_upload(digest);
+        uploads.cache_block(block);
+        uploads.finish_certificate_upload(&digest);
+
+        assert!(uploads.cached_block(&digest).is_some());
+
+        uploads.observe_finalization(8);
+        assert!(uploads.cached_block(&digest).is_none());
+    }
+
+    #[test]
+    fn test_upload_state_keeps_cached_block_while_durable_row_is_pending() {
+        let mut uploads = UploadState::new();
+        let block = test_block(7, 7, b"view-7");
+        let entry = FinalizedEntry {
+            height: block.height.get(),
+            digest: block.digest(),
+        };
+
+        uploads.start_certificate_upload(entry.digest);
+        uploads.cache_block(block);
+        uploads.register_finalized(3, entry);
+        uploads.finish_certificate_upload(&entry.digest);
+
+        assert!(uploads.cached_block(&entry.digest).is_some());
+
+        uploads.finish_finalized(3);
+        assert!(uploads.cached_block(&entry.digest).is_some());
+
+        uploads.observe_finalization(entry.height + 1);
+        assert!(uploads.cached_block(&entry.digest).is_none());
     }
 }
