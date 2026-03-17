@@ -1,14 +1,14 @@
 //! Indexer upload integration for the chain engine.
 //!
 //! The indexer integration has two cooperating upload paths:
-//! - the live path, where [`Pusher`] uploads seeds and certificate-bearing
+//! - the live path, where `Pusher` uploads seeds and certificate-bearing
 //!   objects as consensus activity happens;
-//! - the backfiller path, where [`Producer`] persists finalized block digests and
-//!   [`Consumer`] retries block uploads from the backfill queue across
+//! - the backfiller path, where `Producer` persists finalized block digests and
+//!   `Consumer` retries block uploads from the backfill queue across
 //!   restarts.
 //!
-//! [`Indexer`] is the top-level abstraction over those pieces. It owns
-//! the shared [`State`] used to deduplicate uploads, cache blocks, and
+//! `Indexer` is the top-level abstraction over those pieces. It owns
+//! the shared `State` used to deduplicate uploads, cache blocks, and
 //! coordinate the live and backfiller paths. The actors are still exposed
 //! separately because they plug into three different integration points:
 //! the application's finalized block stream, the consensus reporter, and a
