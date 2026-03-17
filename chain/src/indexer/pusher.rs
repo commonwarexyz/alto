@@ -1,12 +1,13 @@
 use super::{Indexer, SharedUploadState};
-use alto_types::{Activity, Block, Finalized, Notarized, Scheme, Seed, Seedable};
+use alto_types::{Activity, Block, Scheme, Seed, Seedable};
 use commonware_consensus::{
     marshal::{core::Mailbox as MarshalMailbox, standard::Standard},
-    types::View,
+    types::{Round, View},
     Reporter, Viewable,
 };
 use commonware_cryptography::sha256::Digest;
 use commonware_runtime::{Metrics, Spawner};
+use std::future::Future;
 use tracing::{debug, warn};
 
 /// Uploads live seeds and certificate-bearing objects to the indexer.
@@ -75,10 +76,10 @@ impl CertificateUploadGuard {
 impl Drop for CertificateUploadGuard {
     fn drop(&mut self) {
         let mut uploads = self.uploads.lock();
-        if let Some(height) = self.uploaded_height {
-            uploads.mark_uploaded(self.digest, height);
-        }
-        uploads.finish_certificate_upload(&self.digest);
+        uploads.finish_certificate_upload(
+            &self.digest,
+            self.uploaded_height,
+        );
     }
 }
 
@@ -97,6 +98,48 @@ impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
     }
 }
 
+impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
+    fn spawn_certificate_upload<F, Fut>(
+        &self,
+        label: &'static str,
+        view: View,
+        round: Round,
+        digest: Digest,
+        upload_fn: F,
+    ) where
+        F: FnOnce(I, Block) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(), I::Error>> + Send,
+    {
+        self.context.with_label(label).spawn({
+            let indexer = self.indexer.clone();
+            let marshal = self.marshal.clone();
+            let uploads = self.uploads.clone();
+            move |_| async move {
+                let mut guard = CertificateUploadGuard::new(uploads, digest);
+
+                let block = marshal
+                    .subscribe_by_digest(Some(round), digest)
+                    .await
+                    .await;
+                let Ok(block) = block else {
+                    warn!(%view, "subscription for block cancelled");
+                    return;
+                };
+
+                let height = block.height.get();
+                guard.cache_block(block.clone());
+                if let Err(e) = upload_fn(indexer, block).await {
+                    warn!(?e, %view, label, "failed to upload certificate");
+                    return;
+                }
+
+                guard.mark_uploaded(height);
+                debug!(%view, label, "certificate uploaded to indexer");
+            }
+        });
+    }
+}
+
 impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
     type Activity = Activity;
 
@@ -105,76 +148,32 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
             Activity::Notarization(notarization) => {
                 let view = notarization.view();
                 self.spawn_seed_upload("notarized_seed", notarization.seed(), view);
-
-                let digest = notarization.proposal.payload;
-                self.context.with_label("notarized_block").spawn({
-                    let indexer = self.indexer.clone();
-                    let marshal = self.marshal.clone();
-                    let uploads = self.uploads.clone();
-                    move |_| async move {
-                        let mut guard = CertificateUploadGuard::new(uploads, digest);
-
-                        let block = marshal
-                            .subscribe_by_digest(
-                                Some(notarization.round()),
-                                notarization.proposal.payload,
-                            )
+                self.spawn_certificate_upload(
+                    "notarized_block",
+                    view,
+                    notarization.round(),
+                    notarization.proposal.payload,
+                    |indexer, block| async move {
+                        indexer
+                            .notarized_upload(alto_types::Notarized::new(notarization, block))
                             .await
-                            .await;
-                        let Ok(block) = block else {
-                            warn!(%view, "subscription for block cancelled");
-                            return;
-                        };
-
-                        let height = block.height.get();
-                        guard.cache_block(block.clone());
-                        let notarized = Notarized::new(notarization, block);
-                        if let Err(e) = indexer.notarized_upload(notarized).await {
-                            warn!(?e, "failed to upload notarization");
-                            return;
-                        }
-
-                        guard.mark_uploaded(height);
-                        debug!(%view, "notarization uploaded to indexer");
-                    }
-                });
+                    },
+                );
             }
             Activity::Finalization(finalization) => {
                 let view = finalization.view();
                 self.spawn_seed_upload("finalized_seed", finalization.seed(), view);
-
-                let digest = finalization.proposal.payload;
-                self.context.with_label("finalized_block").spawn({
-                    let indexer = self.indexer.clone();
-                    let marshal = self.marshal.clone();
-                    let uploads = self.uploads.clone();
-                    move |_| async move {
-                        let mut guard = CertificateUploadGuard::new(uploads, digest);
-
-                        let block = marshal
-                            .subscribe_by_digest(
-                                Some(finalization.round()),
-                                finalization.proposal.payload,
-                            )
+                self.spawn_certificate_upload(
+                    "finalized_block",
+                    view,
+                    finalization.round(),
+                    finalization.proposal.payload,
+                    |indexer, block| async move {
+                        indexer
+                            .finalized_upload(alto_types::Finalized::new(finalization, block))
                             .await
-                            .await;
-                        let Ok(block) = block else {
-                            warn!(%view, "subscription for block cancelled");
-                            return;
-                        };
-
-                        let height = block.height.get();
-                        guard.cache_block(block.clone());
-                        let finalization = Finalized::new(finalization, block);
-                        if let Err(e) = indexer.finalized_upload(finalization).await {
-                            warn!(?e, "failed to upload finalization");
-                            return;
-                        }
-
-                        guard.mark_uploaded(height);
-                        debug!(%view, "finalization uploaded to indexer");
-                    }
-                });
+                    },
+                );
             }
             _ => {}
         }

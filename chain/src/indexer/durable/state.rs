@@ -163,7 +163,11 @@ impl UploadState {
         *self.certificate_uploads.entry(digest).or_default() += 1;
     }
 
-    pub(crate) fn finish_certificate_upload(&mut self, digest: &Digest) {
+    pub(crate) fn finish_certificate_upload(
+        &mut self,
+        digest: &Digest,
+        uploaded_height: Option<u64>,
+    ) {
         let count = self
             .certificate_uploads
             .get_mut(digest)
@@ -171,6 +175,10 @@ impl UploadState {
         *count -= 1;
         if *count == 0 {
             self.certificate_uploads.remove(digest);
+        }
+        if let Some(height) = uploaded_height {
+            self.cached_blocks.remove(digest);
+            self.uploaded.put(*digest, height);
         }
         self.prune();
     }
@@ -393,7 +401,7 @@ mod tests {
 
         uploads.start_certificate_upload(digest);
         uploads.cache_block(block);
-        uploads.finish_certificate_upload(&digest);
+        uploads.finish_certificate_upload(&digest, None);
 
         assert!(uploads.cached_block(&digest).is_some());
 
@@ -413,7 +421,7 @@ mod tests {
         uploads.start_certificate_upload(entry.digest);
         uploads.cache_block(block);
         uploads.register_finalized(3, entry);
-        uploads.finish_certificate_upload(&entry.digest);
+        uploads.finish_certificate_upload(&entry.digest, None);
 
         assert!(uploads.cached_block(&entry.digest).is_some());
 
