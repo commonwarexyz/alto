@@ -82,7 +82,7 @@ mod tests {
     use commonware_utils::{channel::oneshot, ordered::Set, NZU32};
     use engine::{Config, Engine};
     use governor::Quota;
-    use indexer::Mock;
+    use indexer::mocks;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use std::{collections::HashMap, num::NonZeroU32, time::Duration};
     use tracing::info;
@@ -241,7 +241,7 @@ mod tests {
         certification_timeout: Duration,
         backfiller_max_in_flight: NonZeroUsize,
         backfiller_retry: Duration,
-        indexer: Option<Mock>,
+        indexer: Option<mocks::Client>,
     }
 
     impl Default for ValidatorConfig {
@@ -263,7 +263,7 @@ mod tests {
         scheme: &bls12381_threshold::Scheme<PublicKey, MinSig>,
         participants: Set<PublicKey>,
         registration: Registration,
-        indexer: Option<Mock>,
+        indexer: Option<mocks::Client>,
     ) {
         start_validator_with(
             context,
@@ -291,7 +291,7 @@ mod tests {
     ) {
         let public_key = signer.public_key();
         let uid = format!("validator_{public_key}");
-        let config: Config<_, _, Mock, _> = engine::Config {
+        let config: Config<_, _, mocks::Client, _> = engine::Config {
             blocker: oracle.control(public_key.clone()),
             provider: oracle.manager(),
             partition_prefix: uid.clone(),
@@ -725,7 +725,7 @@ mod tests {
             // Derive threshold
 
             // Define mock indexer
-            let indexer = Mock::new();
+            let indexer = mocks::Client::new();
 
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
                 let registration = registrations.remove(&signer.public_key()).unwrap();
@@ -798,7 +798,7 @@ mod tests {
             // Reject certificate uploads so the only way blocks can reach the
             // indexer is through the durable raw block consumer.
 
-            let indexer = Mock::new().with_fail_certs();
+            let indexer = mocks::Client::new().with_fail_certs();
 
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
                 let registration = registrations.remove(&signer.public_key()).unwrap();
@@ -887,7 +887,7 @@ mod tests {
                 cert_upload_waiters.push(receiver);
             }
 
-            let indexer = Mock::new().with_cert_upload_waiters(cert_upload_waiters);
+            let indexer = mocks::Client::new().with_cert_upload_waiters(cert_upload_waiters);
 
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
                 let registration = registrations.remove(&signer.public_key()).unwrap();
@@ -1000,7 +1000,7 @@ mod tests {
             let (release_first, wait_first) = oneshot::channel();
             let (release_second, wait_second) = oneshot::channel();
 
-            let indexer = Mock::new()
+            let indexer = mocks::Client::new()
                 .with_fail_certs()
                 .with_block_upload_waiters(vec![wait_first, wait_second]);
 
@@ -1138,10 +1138,10 @@ mod tests {
         // Use one mock that keeps raw uploads blocked during the first run, and
         // a second mock that still rejects cert uploads but lets replayed raw
         // uploads complete during recovery.
-        let blocked_indexer = Mock::new()
+        let blocked_indexer = mocks::Client::new()
             .with_fail_certs()
             .with_block_upload_waiters(blocked_waiters);
-        let recovery_indexer = Mock::new().with_fail_certs();
+        let recovery_indexer = mocks::Client::new().with_fail_certs();
 
         let Fixture {
             schemes,
