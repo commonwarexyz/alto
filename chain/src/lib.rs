@@ -202,6 +202,16 @@ mod tests {
             .sum()
     }
 
+    fn queue_outstanding(metrics: &str) -> i64 {
+        sum_validator_metric::<i64>(metrics, "_queue_tip", None)
+            - sum_validator_metric::<i64>(metrics, "_queue_floor", None)
+    }
+
+    fn queue_held(metrics: &str) -> i64 {
+        sum_validator_metric::<i64>(metrics, "_queue_next", None)
+            - sum_validator_metric::<i64>(metrics, "_queue_floor", None)
+    }
+
     type Registration = (
         (
             Sender<PublicKey, deterministic::Context>,
@@ -714,7 +724,6 @@ mod tests {
 
             // Derive threshold
 
-
             // Define mock indexer
             let indexer = Mock::new();
 
@@ -901,7 +910,7 @@ mod tests {
             for _ in 0..10 {
                 metrics = context.encode();
                 if indexer.current_cert_upload_inflight() > 0
-                    && sum_validator_metric::<i64>(&metrics, "_queue_depth", None) > 0
+                    && queue_outstanding(&metrics) > 0
                     && sum_validator_metric::<u64>(&metrics, "_marshal_processed_height", None)
                         >= required_container
                 {
@@ -915,7 +924,7 @@ mod tests {
                 "expected at least one certificate upload to remain blocked",
             );
             assert!(
-                sum_validator_metric::<i64>(&metrics, "_queue_depth", None) > 0,
+                queue_outstanding(&metrics) > 0,
                 "expected finalized queue work while certificate uploads were blocked",
             );
             assert_eq!(
@@ -1040,24 +1049,24 @@ mod tests {
             let mut metrics = String::new();
             for _ in 0..10 {
                 metrics = context.encode();
-                if sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None) >= 2 {
+                if queue_held(&metrics) >= 2 {
                     break;
                 }
                 context.sleep(Duration::from_secs(1)).await;
             }
 
-            let queue_in_flight = sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None);
+            let queue_held = queue_held(&metrics);
             assert!(
-                queue_in_flight >= 2,
-                "queue in_flight metric never reflected parallel consumer uploads",
+                queue_held >= 2,
+                "queue next-floor metrics never reflected parallel consumer uploads",
             );
             assert!(
-                queue_in_flight as usize >= indexer.current_block_upload_inflight(),
-                "queue in_flight metric should be >= mock inflight (may include un-reaped completions)",
+                queue_held as usize >= indexer.current_block_upload_inflight(),
+                "queue next-floor should be >= mock inflight (may include un-reaped completions)",
             );
-            let queue_depth = sum_validator_metric::<i64>(&metrics, "_queue_depth", None);
+            let queue_depth = queue_outstanding(&metrics);
             assert!(
-                queue_depth >= queue_in_flight,
+                queue_depth >= queue_held,
                 "queue depth should include uploads currently in flight",
             );
 
@@ -1115,7 +1124,6 @@ mod tests {
         let n = 5;
         let mut rng = StdRng::seed_from_u64(7);
         let fixture = bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
-
 
         // Keep these senders alive for the duration of the first run so the
         // corresponding block uploads remain in flight until shutdown.
@@ -1207,24 +1215,23 @@ mod tests {
                 let mut metrics = String::new();
                 for _ in 0..10 {
                     metrics = context.encode();
-                    if sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None) >= 2 {
+                    if queue_held(&metrics) >= 2 {
                         break;
                     }
                     context.sleep(Duration::from_secs(1)).await;
                 }
 
-                let queue_in_flight =
-                    sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None);
+                let queue_held = queue_held(&metrics);
                 assert!(
-                    queue_in_flight >= 2,
-                    "queue in_flight metric never reflected the blocked uploads before restart",
+                    queue_held >= 2,
+                    "queue next-floor metrics never reflected the blocked uploads before restart",
                 );
                 assert!(
-                    queue_in_flight as usize >= indexer.current_block_upload_inflight(),
-                    "queue in_flight metric should be >= mock inflight before restart (may include occupied consumer slots that have not reached block upload yet)",
+                    queue_held as usize >= indexer.current_block_upload_inflight(),
+                    "queue next-floor should be >= mock inflight before restart (may include occupied consumer slots that have not reached block upload yet)",
                 );
                 assert!(
-                    sum_validator_metric::<i64>(&metrics, "_queue_depth", None) >= queue_in_flight,
+                    queue_outstanding(&metrics) >= queue_held,
                     "queue depth should include blocked uploads before restart",
                 );
 
@@ -1325,23 +1332,21 @@ mod tests {
             let mut metrics = String::new();
             for _ in 0..10 {
                 metrics = context.encode();
-                if sum_validator_metric::<i64>(&metrics, "_queue_depth", None) == 0
-                    && sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None) == 0
-                {
+                if queue_outstanding(&metrics) == 0 && queue_held(&metrics) == 0 {
                     break;
                 }
                 context.sleep(Duration::from_secs(1)).await;
             }
 
             assert_eq!(
-                sum_validator_metric::<i64>(&metrics, "_queue_depth", None),
+                queue_outstanding(&metrics),
                 0,
                 "queue depth metric should return to zero after replay drains the durable queue",
             );
             assert_eq!(
-                sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None),
+                queue_held(&metrics),
                 0,
-                "queue in_flight metric should return to zero after replay completes",
+                "queue next-floor should return to zero after replay completes",
             );
             let queue_upload_success = sum_validator_metric::<u64>(
                 &metrics,

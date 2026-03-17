@@ -13,7 +13,6 @@ use commonware_runtime::{
 };
 use commonware_storage::queue;
 use commonware_utils::futures::{OptionFuture, Pool};
-use prometheus_client::metrics::gauge::Gauge;
 use std::{num::NonZeroUsize, time::Duration};
 use tracing::{debug, warn};
 
@@ -36,7 +35,6 @@ pub struct Consumer<E: Spawner + Clock + Storage + Metrics, C: Client> {
     client: C,
     marshal: MarshalMailbox<Scheme, Standard<Block>>,
     upload_results: status::Counter,
-    in_flight_uploads: Gauge,
     uploads: SharedState,
     writer: queue::Writer<E, Entry>,
     reader: queue::Reader<E, Entry>,
@@ -63,18 +61,11 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
             "Total number of finalized block upload attempt outcomes by status",
             upload_results.clone(),
         );
-        let in_flight_uploads = Gauge::default();
-        queue_metrics.register(
-            "in_flight",
-            "Current number of occupied upload slots in the consumer",
-            in_flight_uploads.clone(),
-        );
         Self {
             context: ContextCell::new(context.with_label("consumer")),
             client,
             marshal,
             upload_results,
-            in_flight_uploads,
             uploads,
             writer,
             reader,
@@ -177,7 +168,6 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
 
         // Hand the upload/retry loop off to the in-flight pool so the consumer
         // can continue dequeuing and retiring other queue rows concurrently.
-        self.in_flight_uploads.inc();
         self.in_flight.push({
             let client = self.client.clone();
             let marshal = self.marshal.clone();
@@ -293,7 +283,6 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
     }
 
     async fn complete(&mut self, completion: Completion) {
-        self.in_flight_uploads.dec();
         let position = match completion {
             // Record the success before acking so the in-memory dedupe tracker
             // stays aligned with the queue state.
