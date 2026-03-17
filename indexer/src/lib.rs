@@ -253,10 +253,8 @@ impl<S: Strategy> Api<S> {
     }
 }
 
-async fn health_check<S: Strategy>(
-    AxumState(_indexer): AxumState<Arc<Indexer<S>>>,
-) -> impl IntoResponse {
-    (StatusCode::OK, "ok").into_response()
+async fn health_check() -> impl IntoResponse {
+    (StatusCode::OK, "ok")
 }
 
 async fn seed_upload<S: Strategy>(
@@ -364,7 +362,6 @@ async fn consensus_ws<S: Strategy>(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_consensus_ws(socket, indexer))
-        .into_response()
 }
 
 async fn handle_consensus_ws<S: Strategy>(
