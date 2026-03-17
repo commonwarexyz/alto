@@ -67,13 +67,13 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
 }
 
 /// Bundles the shared upload state and the actors built from it.
-pub(crate) struct Uploads<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
+pub(crate) struct IndexerRuntime<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
     enqueuer: Enqueuer<E>,
     pusher: Pusher<E, I>,
     drainer: (Drainer<E, I>, queue::Reader<E, FinalizedEntry>),
 }
 
-impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Uploads<E, I> {
+impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> IndexerRuntime<E, I> {
     pub(crate) async fn new(
         context: E,
         indexer: I,

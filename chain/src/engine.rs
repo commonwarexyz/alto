@@ -288,16 +288,16 @@ where
             )
             .await
             .expect("failed to initialize finalized queue");
-            let uploads = indexer::Uploads::new(
+            let indexer_runtime = indexer::IndexerRuntime::new(
                 context.with_label("indexer"),
                 indexer,
                 marshal_mailbox.clone(),
                 durable_queue,
             )
             .await;
-            let app = Application::new().with_durable_uploads(uploads.enqueuer());
-            let pusher = uploads.pusher();
-            let drainer = uploads.into_drainer();
+            let app = Application::new().with_durable_uploads(indexer_runtime.enqueuer());
+            let pusher = indexer_runtime.pusher();
+            let drainer = indexer_runtime.into_drainer();
             (app, Some(pusher), Some(drainer))
         } else {
             (Application::new(), None, None)
