@@ -127,7 +127,7 @@ where
     consensus:
         Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, C>, S>,
 
-    backfiller: Option<indexer::Drainer<E, C>>,
+    consumer: Option<indexer::Consumer<E, C>>,
 }
 
 impl<E, B, P, S, C> Engine<E, B, P, S, C>
@@ -271,7 +271,7 @@ where
         // Create the reporter and, when an indexer is configured, a backfill
         // queue of finalized digests so block uploads can resume after
         // restarts.
-        let (app, pusher, backfiller) = if let Some(indexer) = cfg.indexer {
+        let (app, pusher, consumer) = if let Some(indexer) = cfg.indexer {
             let backfill_queue = queue::shared::init(
                 context.with_label("finalized_queue"),
                 queue::Config {
@@ -292,9 +292,9 @@ where
                 backfill_queue,
             )
             .await;
-            let (recorder, pusher, backfiller) = indexer_runtime.split();
-            let app = Application::new().with_recorder(recorder);
-            (app, Some(pusher), Some(backfiller))
+            let (producer, pusher, consumer) = indexer_runtime.split();
+            let app = Application::new().with_backfiller(producer);
+            (app, Some(pusher), Some(consumer))
         } else {
             (Application::new(), None, None)
         };
@@ -347,7 +347,7 @@ where
             marshaled,
             consensus,
 
-            backfiller,
+            consumer,
         }
     }
 
@@ -417,7 +417,7 @@ where
 
         // Start draining queued block uploads before consensus so recovered work
         // resumes immediately on startup.
-        let backfiller_handle = self.backfiller.map(indexer::Drainer::start);
+        let consumer_handle = self.consumer.map(indexer::Consumer::start);
 
         // Start consensus
         //
@@ -427,7 +427,7 @@ where
 
         // Wait for any actor to finish
         let mut handles: Vec<Handle<()>> = vec![buffer_handle, marshal_handle, consensus_handle];
-        if let Some(h) = backfiller_handle {
+        if let Some(h) = consumer_handle {
             handles.push(h);
         }
         if let Err(e) = try_join_all(handles).await {

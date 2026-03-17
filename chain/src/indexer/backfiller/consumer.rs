@@ -17,12 +17,12 @@ use prometheus_client::metrics::gauge::Gauge;
 use std::time::Duration;
 use tracing::{debug, warn};
 
-const DRAINER_MAX_IN_FLIGHT: usize = 16;
-const DRAINER_RETRY_DELAY: Duration = Duration::from_secs(1);
+const CONSUMER_MAX_IN_FLIGHT: usize = 16;
+const CONSUMER_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Final outcome for one backfill queue row.
 enum Completion {
-    /// The drainer uploaded the block itself and must mark the digest
+    /// The consumer uploaded the block itself and must mark the digest
     /// uploaded before retiring the queue row.
     Uploaded {
         position: u64,
@@ -34,7 +34,7 @@ enum Completion {
     Retired { position: u64 },
 }
 
-pub struct Drainer<E: Spawner + Clock + Storage + Metrics, C: Client> {
+pub struct Consumer<E: Spawner + Clock + Storage + Metrics, C: Client> {
     context: ContextCell<E>,
     client: C,
     marshal: MarshalMailbox<Scheme, Standard<Block>>,
@@ -47,7 +47,7 @@ pub struct Drainer<E: Spawner + Clock + Storage + Metrics, C: Client> {
     queue_closed: bool,
 }
 
-impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
+impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
     pub fn new(
         context: E,
         client: C,
@@ -66,11 +66,11 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
         let in_flight_uploads = Gauge::default();
         queue_metrics.register(
             "in_flight",
-            "Current number of occupied upload slots in the backfiller",
+            "Current number of occupied upload slots in the consumer",
             in_flight_uploads.clone(),
         );
         Self {
-            context: ContextCell::new(context.with_label("drainer")),
+            context: ContextCell::new(context.with_label("consumer")),
             client,
             marshal,
             upload_results,
@@ -83,7 +83,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
         }
     }
 
-    /// Start the drainer loop that reads from the queue and uploads blocks.
+    /// Start the consumer loop that reads from the queue and uploads blocks.
     pub fn start(mut self) -> Handle<()> {
         spawn_cell!(self.context, self.run().await)
     }
@@ -97,7 +97,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
                 self.fill_slots().await;
 
                 if self.queue_closed && self.in_flight.is_empty() {
-                    warn!("drainer queue closed");
+                    warn!("consumer queue closed");
                     break;
                 }
 
@@ -117,10 +117,10 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
                     continue;
                 }
 
-                // Once the drainer is busy, race newly dequeued rows against
+                // Once the consumer is busy, race newly dequeued rows against
                 // completions from already-running uploads.
                 let item = OptionFuture::from(
-                    (!self.queue_closed && self.in_flight.len() < DRAINER_MAX_IN_FLIGHT)
+                    (!self.queue_closed && self.in_flight.len() < CONSUMER_MAX_IN_FLIGHT)
                         .then(|| self.reader.recv()),
                 );
             },
@@ -143,8 +143,8 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
 
     async fn fill_slots(&mut self) {
         // Consume all queue rows that are already available without waiting so
-        // the drainer keeps as many upload slots busy as it can.
-        while self.in_flight.len() < DRAINER_MAX_IN_FLIGHT {
+        // the consumer keeps as many upload slots busy as it can.
+        while self.in_flight.len() < CONSUMER_MAX_IN_FLIGHT {
             let item = self
                 .reader
                 .try_recv()
@@ -166,9 +166,9 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
             // what to do with it. That keeps crash recovery idempotent: replayed
             // rows rebuild the same pending state the original process had.
             if uploads.register_finalized(position, entry) {
-                Some("drainer skipping duplicate queued block")
+                Some("consumer skipping duplicate queued block")
             } else if matches!(uploads.upload_decision(&digest), UploadDecision::Retire) {
-                Some("drainer skipping already-uploaded block")
+                Some("consumer skipping already-uploaded block")
             } else {
                 None
             }
@@ -179,7 +179,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
             return;
         }
 
-        // Hand the upload/retry loop off to the in-flight pool so the drainer
+        // Hand the upload/retry loop off to the in-flight pool so the consumer
         // can continue dequeuing and retiring other queue rows concurrently.
         self.in_flight_uploads.inc();
         self.in_flight.push({
@@ -192,7 +192,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
                 let Some(block) =
                     Self::wait_for_uploadable_block(&context, &marshal, &uploads, digest).await
                 else {
-                    debug!(?digest, "drainer observed live upload before block upload");
+                    debug!(?digest, "consumer observed live upload before block upload");
                     return Completion::Retired { position };
                 };
 
@@ -205,11 +205,11 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
                     };
                     match decision {
                         UploadDecision::Retire => {
-                            debug!(?digest, "drainer observed live upload before block upload");
+                            debug!(?digest, "consumer observed live upload before block upload");
                             return Completion::Retired { position };
                         }
                         UploadDecision::Wait => {
-                            context.sleep(DRAINER_RETRY_DELAY).await;
+                            context.sleep(CONSUMER_RETRY_DELAY).await;
                             continue;
                         }
                         UploadDecision::Proceed => {}
@@ -218,7 +218,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
                     match client.block_upload(block.clone()).await {
                         Ok(()) => {
                             upload_results.inc(status::Status::Success);
-                            debug!(?digest, "drainer uploaded block");
+                            debug!(?digest, "consumer uploaded block");
                             return Completion::Uploaded {
                                 position,
                                 height,
@@ -230,8 +230,8 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
                             // not ack the row until success or until the live
                             // certificate path proves the block was uploaded.
                             upload_results.inc(status::Status::Failure);
-                            warn!(?e, ?digest, "drainer failed to upload block, retrying");
-                            context.sleep(DRAINER_RETRY_DELAY).await;
+                            warn!(?e, ?digest, "consumer failed to upload block, retrying");
+                            context.sleep(CONSUMER_RETRY_DELAY).await;
                         }
                     }
                 }
@@ -275,7 +275,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
             match next {
                 NextBlock::AlreadyUploaded => return None,
                 NextBlock::WaitForCertificate => {
-                    context.sleep(DRAINER_RETRY_DELAY).await;
+                    context.sleep(CONSUMER_RETRY_DELAY).await;
                 }
                 NextBlock::Ready(block) => return Some(*block),
                 NextBlock::FetchFromMarshal => {
@@ -283,8 +283,11 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
                         uploads.lock().cache_block(block.clone());
                         return Some(block);
                     }
-                    warn!(?digest, "drainer could not find block in marshal, retrying");
-                    context.sleep(DRAINER_RETRY_DELAY).await;
+                    warn!(
+                        ?digest,
+                        "consumer could not find block in marshal, retrying"
+                    );
+                    context.sleep(CONSUMER_RETRY_DELAY).await;
                 }
             }
         }

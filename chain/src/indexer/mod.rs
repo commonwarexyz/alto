@@ -3,8 +3,8 @@
 //! The indexer integration has two cooperating upload paths:
 //! - the live path, where [`Pusher`] uploads seeds and certificate-bearing
 //!   objects as consensus activity happens;
-//! - the backfiller path, where [`Recorder`] persists finalized block digests and
-//!   [`Drainer`] retries block uploads from the backfill queue across
+//! - the backfiller path, where [`Producer`] persists finalized block digests and
+//!   [`Consumer`] retries block uploads from the backfill queue across
 //!   restarts.
 //!
 //! [`Indexer`] is the top-level abstraction over those pieces. It owns
@@ -12,7 +12,7 @@
 //! coordinate the live and backfiller paths. The actors are still exposed
 //! separately because they plug into three different integration points:
 //! the application's finalized block stream, the consensus reporter, and a
-//! background drainer task.
+//! background consumer task.
 
 use alto_types::{Block, Finalized, Notarized, Scheme, Seed};
 use commonware_consensus::marshal::{core::Mailbox as MarshalMailbox, standard::Standard};
@@ -27,7 +27,7 @@ mod backfiller;
 mod mock;
 mod pusher;
 
-pub(crate) use backfiller::{Drainer, FinalizedEntry, Recorder};
+pub(crate) use backfiller::{Consumer, FinalizedEntry, Producer};
 use backfiller::{SharedUploadState, UploadState};
 #[cfg(test)]
 pub use mock::Mock;
@@ -87,13 +87,13 @@ impl<S: Strategy> Client for alto_client::Client<S> {
 /// This is the high-level abstraction over the indexer upload subsystem. It
 /// constructs the shared upload state once, then hands out the specific actor
 /// handles needed by the engine:
-/// - a recorder for the application's finalized block stream;
+/// - a producer for the application's finalized block stream;
 /// - a pusher for consensus activity;
-/// - a backfiller for the background retry task.
+/// - a consumer for the background retry task.
 pub(crate) struct Indexer<E: Spawner + Clock + Storage + Metrics, C: Client> {
-    recorder: Recorder<E>,
+    producer: Producer<E>,
     pusher: Pusher<E, C>,
-    backfiller: Drainer<E, C>,
+    consumer: Consumer<E, C>,
 }
 
 impl<E: Spawner + Clock + Storage + Metrics, C: Client> Indexer<E, C> {
@@ -114,23 +114,23 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Indexer<E, C> {
             uploads.clone(),
         );
         let (writer, reader) = backfill_queue;
-        let recorder = Recorder::new(uploads.clone(), writer.clone());
-        let backfiller = Drainer::new(context, client, marshal, uploads, writer, reader);
+        let producer = Producer::new(uploads.clone(), writer.clone());
+        let consumer = Consumer::new(context, client, marshal, uploads, writer, reader);
 
         Self {
-            recorder,
+            producer,
             pusher,
-            backfiller,
+            consumer,
         }
     }
 
     /// Consumes the runtime and returns the actor handles it constructed.
-    pub(crate) fn split(self) -> (Recorder<E>, Pusher<E, C>, Drainer<E, C>) {
+    pub(crate) fn split(self) -> (Producer<E>, Pusher<E, C>, Consumer<E, C>) {
         let Self {
-            recorder,
+            producer,
             pusher,
-            backfiller,
+            consumer,
         } = self;
-        (recorder, pusher, backfiller)
+        (producer, pusher, consumer)
     }
 }

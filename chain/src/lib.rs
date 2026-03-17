@@ -764,7 +764,7 @@ mod tests {
             link_validators(&mut oracle, &participants, link, None).await;
 
             // Reject certificate uploads so the only way blocks can reach the
-            // indexer is through the durable raw block drainer.
+            // indexer is through the durable raw block consumer.
             let identity = *schemes[0].polynomial().public();
             let indexer = Mock::new("", identity).with_fail_certs();
 
@@ -792,7 +792,7 @@ mod tests {
             assert!(!indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
-            // The durable drainer should compensate by uploading raw blocks.
+            // The durable consumer should compensate by uploading raw blocks.
             for _ in 0..10 {
                 if indexer
                     .block_upload_completed
@@ -846,7 +846,7 @@ mod tests {
 
             // Hold the first few certificate uploads open so finalized queue
             // rows exist while a certificate path for the same digest is still
-            // in flight. The raw drainer should wait instead of racing them.
+            // in flight. The raw consumer should wait instead of racing them.
             let mut cert_upload_senders = Vec::new();
             let mut cert_upload_waiters = Vec::new();
             for _ in 0..8 {
@@ -904,7 +904,7 @@ mod tests {
             );
 
             // Release the blocked certificate uploads and confirm the
-            // certificate-bearing paths finish without the raw drainer ever
+            // certificate-bearing paths finish without the raw consumer ever
             // needing to step in.
             drop(cert_upload_senders);
             for _ in 0..10 {
@@ -946,7 +946,7 @@ mod tests {
             network.start();
 
             // Use the normal validator topology so the only source of
-            // concurrency is the drainer itself.
+            // concurrency is the consumer itself.
             let Fixture {
                 schemes,
                 private_keys,
@@ -964,7 +964,7 @@ mod tests {
             link_validators(&mut oracle, &participants, link, None).await;
 
             // Hold the first two raw block uploads open so we can observe the
-            // drainer's parallelism before any upload completes.
+            // consumer's parallelism before any upload completes.
             let (release_first, wait_first) = oneshot::channel();
             let (release_second, wait_second) = oneshot::channel();
             let identity = *schemes[0].polynomial().public();
@@ -986,7 +986,7 @@ mod tests {
                 .await;
             }
 
-            // Wait until the drainer starts at least two uploads concurrently.
+            // Wait until the consumer starts at least two uploads concurrently.
             for _ in 0..10 {
                 if indexer
                     .block_upload_started
@@ -1003,14 +1003,14 @@ mod tests {
                     .block_upload_started
                     .load(std::sync::atomic::Ordering::SeqCst)
                     >= 2,
-                "drainer never started a second block upload while the first was blocked",
+                "consumer never started a second block upload while the first was blocked",
             );
             assert!(
                 indexer
                     .block_upload_max_inflight
                     .load(std::sync::atomic::Ordering::SeqCst)
                     >= 2,
-                "drainer never had multiple block uploads in flight",
+                "consumer never had multiple block uploads in flight",
             );
 
             // The queue metrics should reflect the blocked in-flight uploads.
@@ -1026,7 +1026,7 @@ mod tests {
             let queue_in_flight = sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None);
             assert!(
                 queue_in_flight >= 2,
-                "queue in_flight metric never reflected parallel drainer uploads",
+                "queue in_flight metric never reflected parallel consumer uploads",
             );
             assert!(
                 queue_in_flight as usize >= indexer.current_block_upload_inflight(),
@@ -1038,7 +1038,7 @@ mod tests {
                 "queue depth should include uploads currently in flight",
             );
 
-            // Allow both blocked uploads to finish so the drainer can retire
+            // Allow both blocked uploads to finish so the consumer can retire
             // their queue entries.
             let _ = release_first.send(());
             let _ = release_second.send(());
@@ -1059,7 +1059,7 @@ mod tests {
                     .block_upload_completed
                     .load(std::sync::atomic::Ordering::SeqCst)
                     >= 2,
-                "drainer did not complete the blocked uploads after release",
+                "consumer did not complete the blocked uploads after release",
             );
 
             let metrics = context.encode();
@@ -1073,7 +1073,7 @@ mod tests {
                 indexer
                     .block_upload_completed
                     .load(std::sync::atomic::Ordering::SeqCst) as u64,
-                "queue success counter did not match completed drainer uploads",
+                "queue success counter did not match completed consumer uploads",
             );
             let queue_upload_failure = sum_validator_metric::<u64>(
                 &metrics,
@@ -1158,7 +1158,7 @@ mod tests {
                     .await;
                 }
 
-                // Wait until the drainer has definitely started blocked uploads
+                // Wait until the consumer has definitely started blocked uploads
                 // before forcing recovery.
                 for _ in 0..10 {
                     if indexer
@@ -1176,7 +1176,7 @@ mod tests {
                         .block_upload_started
                         .load(std::sync::atomic::Ordering::SeqCst)
                         >= 2,
-                    "drainer never had multiple uploads in flight before restart",
+                    "consumer never had multiple uploads in flight before restart",
                 );
 
                 // Confirm the queue still considers those uploads in flight at
@@ -1198,7 +1198,7 @@ mod tests {
                 );
                 assert!(
                     queue_in_flight as usize >= indexer.current_block_upload_inflight(),
-                    "queue in_flight metric should be >= mock inflight before restart (may include occupied drainer slots that have not reached block upload yet)",
+                    "queue in_flight metric should be >= mock inflight before restart (may include occupied consumer slots that have not reached block upload yet)",
                 );
                 assert!(
                     sum_validator_metric::<i64>(&metrics, "_queue_depth", None) >= queue_in_flight,
@@ -1228,7 +1228,7 @@ mod tests {
         let blocked_digests = blocked_indexer.block_upload_started_digests.lock().clone();
         assert!(
             blocked_digests.len() >= 2,
-            "expected to capture at least two blocked drainer uploads",
+            "expected to capture at least two blocked consumer uploads",
         );
         let expected_digests = blocked_digests[..2].to_vec();
 
@@ -1295,7 +1295,7 @@ mod tests {
                 expected_digests
                     .iter()
                     .all(|digest| completed_digests.contains(digest)),
-                "drainer did not replay the blocked in-flight uploads after restart",
+                "consumer did not replay the blocked in-flight uploads after restart",
             );
 
             // After replay succeeds, the durable queue should drain completely.
@@ -1330,7 +1330,7 @@ mod tests {
                 indexer
                     .block_upload_completed
                     .load(std::sync::atomic::Ordering::SeqCst) as u64,
-                "queue success counter did not match replayed drainer uploads",
+                "queue success counter did not match replayed consumer uploads",
             );
             let queue_upload_failure = sum_validator_metric::<u64>(
                 &metrics,

@@ -6,12 +6,12 @@ use commonware_storage::queue;
 /// Records finalized block digests in the backfill queue from the application's
 /// block stream.
 #[derive(Clone)]
-pub struct Recorder<E: Clock + Storage + Metrics> {
+pub struct Producer<E: Clock + Storage + Metrics> {
     uploads: SharedUploadState,
     writer: queue::Writer<E, FinalizedEntry>,
 }
 
-impl<E: Clock + Storage + Metrics> Recorder<E> {
+impl<E: Clock + Storage + Metrics> Producer<E> {
     pub fn new(uploads: SharedUploadState, writer: queue::Writer<E, FinalizedEntry>) -> Self {
         Self { uploads, writer }
     }

@@ -1,19 +1,16 @@
 //! Backfiller path for the indexer integration.
 //!
-//! The backfiller path is split into:
-//! - [`state`], which owns the shared upload state and the application-side
-//!   data structures used by the uploader actors;
-//! - [`recorder`], which persists finalized block digests; and
-//! - [`drainer`], which owns the background retry loop that drains those queue
-//!   rows and uploads blocks.
+//! [`Producer`] persists finalized block digests into the backfill queue, and
+//! [`Consumer`] drains that queue and retries block uploads.
 //!
-//! The parent module's live [`crate::indexer::Pusher`] cooperates with both via
-//! [`SharedUploadState`].
+//! Both cooperate through [`SharedUploadState`], which wraps the shared
+//! [`UploadState`] used to deduplicate uploads, cache blocks, and coordinate
+//! with the parent module's live [`crate::indexer::Pusher`].
 
-mod drainer;
-mod recorder;
+mod consumer;
+mod producer;
 mod state;
 
-pub use drainer::Drainer;
-pub use recorder::Recorder;
+pub use consumer::Consumer;
+pub use producer::Producer;
 pub use state::{FinalizedEntry, SharedUploadState, UploadDecision, UploadState};
