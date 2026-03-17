@@ -1,7 +1,8 @@
 use super::{Indexer, SharedUploadState};
-use alto_types::{Activity, Block, Finalized, Notarized, Scheme, Seedable};
+use alto_types::{Activity, Block, Finalized, Notarized, Scheme, Seed, Seedable};
 use commonware_consensus::{
     marshal::{core::Mailbox as MarshalMailbox, standard::Standard},
+    types::View,
     Reporter, Viewable,
 };
 use commonware_cryptography::sha256::Digest;
@@ -81,28 +82,30 @@ impl Drop for CertificateUploadGuard {
     }
 }
 
+impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
+    fn spawn_seed_upload(&self, label: &str, seed: Seed, view: View) {
+        self.context.with_label(label).spawn({
+            let indexer = self.indexer.clone();
+            move |_| async move {
+                if let Err(e) = indexer.seed_upload(seed).await {
+                    warn!(?e, "failed to upload seed");
+                    return;
+                }
+                debug!(%view, "seed uploaded to indexer");
+            }
+        });
+    }
+}
+
 impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
     type Activity = Activity;
 
     async fn report(&mut self, activity: Self::Activity) {
         match activity {
             Activity::Notarization(notarization) => {
-                // Upload seed to indexer.
                 let view = notarization.view();
-                self.context.with_label("notarized_seed").spawn({
-                    let indexer = self.indexer.clone();
-                    let seed = notarization.seed();
-                    move |_| async move {
-                        let result = indexer.seed_upload(seed).await;
-                        if let Err(e) = result {
-                            warn!(?e, "failed to upload seed");
-                            return;
-                        }
-                        debug!(%view, "seed uploaded to indexer");
-                    }
-                });
+                self.spawn_seed_upload("notarized_seed", notarization.seed(), view);
 
-                // Upload certificate to indexer once the block is available.
                 let digest = notarization.proposal.payload;
                 self.context.with_label("notarized_block").spawn({
                     let indexer = self.indexer.clone();
@@ -126,8 +129,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                         let height = block.height.get();
                         guard.cache_block(block.clone());
                         let notarized = Notarized::new(notarization, block);
-                        let result = indexer.notarized_upload(notarized).await;
-                        if let Err(e) = result {
+                        if let Err(e) = indexer.notarized_upload(notarized).await {
                             warn!(?e, "failed to upload notarization");
                             return;
                         }
@@ -139,22 +141,8 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
             }
             Activity::Finalization(finalization) => {
                 let view = finalization.view();
+                self.spawn_seed_upload("finalized_seed", finalization.seed(), view);
 
-                // Upload seed to indexer.
-                self.context.with_label("finalized_seed").spawn({
-                    let indexer = self.indexer.clone();
-                    let seed = finalization.seed();
-                    move |_| async move {
-                        let result = indexer.seed_upload(seed).await;
-                        if let Err(e) = result {
-                            warn!(?e, "failed to upload seed");
-                            return;
-                        }
-                        debug!(%view, "seed uploaded to indexer");
-                    }
-                });
-
-                // Upload certificate to indexer once the block is available.
                 let digest = finalization.proposal.payload;
                 self.context.with_label("finalized_block").spawn({
                     let indexer = self.indexer.clone();
@@ -178,8 +166,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                         let height = block.height.get();
                         guard.cache_block(block.clone());
                         let finalization = Finalized::new(finalization, block);
-                        let result = indexer.finalized_upload(finalization).await;
-                        if let Err(e) = result {
+                        if let Err(e) = indexer.finalized_upload(finalization).await {
                             warn!(?e, "failed to upload finalization");
                             return;
                         }

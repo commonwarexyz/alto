@@ -85,31 +85,7 @@ mod tests {
     async fn register_validators(
         oracle: &mut Oracle<PublicKey, deterministic::Context>,
         validators: &[PublicKey],
-    ) -> HashMap<
-        PublicKey,
-        (
-            (
-                Sender<PublicKey, deterministic::Context>,
-                Receiver<PublicKey>,
-            ),
-            (
-                Sender<PublicKey, deterministic::Context>,
-                Receiver<PublicKey>,
-            ),
-            (
-                Sender<PublicKey, deterministic::Context>,
-                Receiver<PublicKey>,
-            ),
-            (
-                Sender<PublicKey, deterministic::Context>,
-                Receiver<PublicKey>,
-            ),
-            (
-                Sender<PublicKey, deterministic::Context>,
-                Receiver<PublicKey>,
-            ),
-        ),
-    > {
+    ) -> HashMap<PublicKey, Registration> {
         oracle
             .manager()
             .track(0, Set::from_iter_dedup(validators.iter().cloned()))
@@ -211,6 +187,117 @@ mod tests {
                 Some(value.parse::<T>().unwrap())
             })
             .sum()
+    }
+
+    type Registration = (
+        (
+            Sender<PublicKey, deterministic::Context>,
+            Receiver<PublicKey>,
+        ),
+        (
+            Sender<PublicKey, deterministic::Context>,
+            Receiver<PublicKey>,
+        ),
+        (
+            Sender<PublicKey, deterministic::Context>,
+            Receiver<PublicKey>,
+        ),
+        (
+            Sender<PublicKey, deterministic::Context>,
+            Receiver<PublicKey>,
+        ),
+        (
+            Sender<PublicKey, deterministic::Context>,
+            Receiver<PublicKey>,
+        ),
+    );
+
+    async fn start_validator(
+        context: &deterministic::Context,
+        oracle: &Oracle<PublicKey, deterministic::Context>,
+        signer: &commonware_cryptography::ed25519::PrivateKey,
+        scheme: &bls12381_threshold::Scheme<PublicKey, MinSig>,
+        participants: Set<PublicKey>,
+        registration: Registration,
+        indexer: Option<Mock>,
+    ) {
+        let public_key = signer.public_key();
+        let uid = format!("validator_{public_key}");
+        let config: Config<_, _, Mock, _> = engine::Config {
+            blocker: oracle.control(public_key.clone()),
+            provider: oracle.manager(),
+            partition_prefix: uid.clone(),
+            blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+            finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+            me: signer.public_key(),
+            polynomial: scheme.polynomial().clone(),
+            share: scheme.share().cloned().unwrap(),
+            participants,
+            mailbox_size: 1024,
+            deque_size: 10,
+            leader_timeout: Duration::from_secs(1),
+            certification_timeout: Duration::from_secs(2),
+            nullify_retry: Duration::from_secs(10),
+            fetch_timeout: Duration::from_secs(1),
+            activity_timeout: ViewDelta::new(10),
+            skip_timeout: ViewDelta::new(5),
+            max_fetch_count: 10,
+            max_fetch_size: 1024 * 512,
+            fetch_concurrent: 10,
+            fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
+            indexer,
+            strategy: Sequential,
+        };
+        let validator_context = context.with_label(&uid);
+        let (pending, recovered, resolver, broadcast, backfill) = registration;
+        let marshal_resolver_cfg = marshal::resolver::p2p::Config {
+            public_key: public_key.clone(),
+            peer_provider: oracle.manager(),
+            blocker: oracle.control(public_key.clone()),
+            mailbox_size: 1024,
+            initial: Duration::from_secs(1),
+            timeout: Duration::from_secs(2),
+            fetch_retry_timeout: Duration::from_millis(100),
+            priority_requests: false,
+            priority_responses: false,
+        };
+        let marshal_resolver = marshal::resolver::p2p::init(
+            &validator_context.with_label("backfill"),
+            marshal_resolver_cfg,
+            backfill,
+        );
+        let engine = Engine::new(validator_context.with_label("engine"), config).await;
+        engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
+    }
+
+    async fn poll_until_height(context: &deterministic::Context, required: u64) {
+        loop {
+            let metrics = context.encode();
+            let mut success = false;
+            for line in metrics.lines() {
+                if !line.starts_with("validator_") {
+                    continue;
+                }
+                let mut parts = line.split_whitespace();
+                let metric = parts.next().unwrap();
+                let value = parts.next().unwrap();
+                if metric.ends_with("_peers_blocked") {
+                    let value = value.parse::<u64>().unwrap();
+                    assert_eq!(value, 0);
+                }
+                if metric.ends_with("_marshal_processed_height") {
+                    let value = value.parse::<u64>().unwrap();
+                    if value >= required {
+                        success = true;
+                        break;
+                    }
+                }
+            }
+            if success {
+                break;
+            }
+            context.sleep(Duration::from_secs(1)).await;
+        }
     }
 
     fn all_online(n: u32, seed: u64, link: Link, required: u64) -> String {
@@ -884,108 +971,21 @@ mod tests {
             // Define mock indexer
             let indexer = Mock::new("", identity);
 
-            // Create instances
-            let mut public_keys = HashSet::new();
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
-                // Create signer context
-                let public_key = signer.public_key();
-                public_keys.insert(public_key.clone());
-
-                // Configure engine
-                let uid = format!("validator_{public_key}");
-                let config: Config<_, _, Mock, _> = engine::Config {
-                    blocker: oracle.control(public_key.clone()),
-                    provider: oracle.manager(),
-                    partition_prefix: uid.clone(),
-                    blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                    finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                    me: signer.public_key(),
-                    polynomial: scheme.polynomial().clone(),
-                    share: scheme.share().cloned().unwrap(),
-                    participants: participants_set.clone(),
-                    mailbox_size: 1024,
-                    deque_size: 10,
-                    leader_timeout: Duration::from_secs(1),
-                    certification_timeout: Duration::from_secs(2),
-                    nullify_retry: Duration::from_secs(10),
-                    fetch_timeout: Duration::from_secs(1),
-                    activity_timeout: ViewDelta::new(10),
-                    skip_timeout: ViewDelta::new(5),
-                    max_fetch_count: 10,
-                    max_fetch_size: 1024 * 512,
-                    fetch_concurrent: 10,
-                    fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
-                    indexer: Some(indexer.clone()),
-                    strategy: Sequential,
-                };
-                let validator_context = context.with_label(&uid);
-
-                // Get networking
-                let (pending, recovered, resolver, broadcast, backfill) =
-                    registrations.remove(&public_key).unwrap();
-
-                // Configure marshal resolver
-                let marshal_resolver_cfg = marshal::resolver::p2p::Config {
-                    public_key: public_key.clone(),
-                    peer_provider: oracle.manager(),
-                    blocker: oracle.control(public_key.clone()),
-                    mailbox_size: 1024,
-                    initial: Duration::from_secs(1),
-                    timeout: Duration::from_secs(2),
-                    fetch_retry_timeout: Duration::from_millis(100),
-                    priority_requests: false,
-                    priority_responses: false,
-                };
-                let marshal_resolver = marshal::resolver::p2p::init(
-                    &validator_context.with_label("backfill"),
-                    marshal_resolver_cfg,
-                    backfill,
-                );
-
-                // Start engine
-                let engine = Engine::new(validator_context.with_label("engine"), config).await;
-                engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
+                let registration = registrations.remove(&signer.public_key()).unwrap();
+                start_validator(
+                    &context,
+                    &oracle,
+                    &signer,
+                    &scheme,
+                    participants_set.clone(),
+                    registration,
+                    Some(indexer.clone()),
+                )
+                .await;
             }
 
-            // Poll metrics
-            loop {
-                let metrics = context.encode();
-
-                // Iterate over all lines
-                let mut success = false;
-                for line in metrics.lines() {
-                    // Ensure it is a metrics line
-                    if !line.starts_with("validator_") {
-                        continue;
-                    }
-
-                    // Split metric and value
-                    let mut parts = line.split_whitespace();
-                    let metric = parts.next().unwrap();
-                    let value = parts.next().unwrap();
-
-                    // If ends with peers_blocked, ensure it is zero
-                    if metric.ends_with("_peers_blocked") {
-                        let value = value.parse::<u64>().unwrap();
-                        assert_eq!(value, 0);
-                    }
-
-                    // If ends with contiguous_height, ensure it is at least required_container
-                    if metric.ends_with("_marshal_processed_height") {
-                        let value = value.parse::<u64>().unwrap();
-                        if value >= required_container {
-                            success = true;
-                            break;
-                        }
-                    }
-                }
-                if success {
-                    break;
-                }
-
-                // Still waiting for all validators to complete
-                context.sleep(Duration::from_secs(1)).await;
-            }
+            poll_until_height(&context, required_container).await;
 
             // Check indexer uploads
             assert!(indexer.seed_seen.load(std::sync::atomic::Ordering::Relaxed));
@@ -1044,94 +1044,21 @@ mod tests {
             let identity = *schemes[0].polynomial().public();
             let indexer = Mock::new("", identity).with_fail_certs();
 
-            // Every validator points at the same mock indexer so we can assert
-            // that the fallback drainer compensates cluster-wide.
-            let mut public_keys = HashSet::new();
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
-                let public_key = signer.public_key();
-                public_keys.insert(public_key.clone());
-
-                let uid = format!("validator_{public_key}");
-                let config: Config<_, _, Mock, _> = engine::Config {
-                    blocker: oracle.control(public_key.clone()),
-                    provider: oracle.manager(),
-                    partition_prefix: uid.clone(),
-                    blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                    finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                    me: signer.public_key(),
-                    polynomial: scheme.polynomial().clone(),
-                    share: scheme.share().cloned().unwrap(),
-                    participants: participants_set.clone(),
-                    mailbox_size: 1024,
-                    deque_size: 10,
-                    leader_timeout: Duration::from_secs(1),
-                    certification_timeout: Duration::from_secs(2),
-                    nullify_retry: Duration::from_secs(10),
-                    fetch_timeout: Duration::from_secs(1),
-                    activity_timeout: ViewDelta::new(10),
-                    skip_timeout: ViewDelta::new(5),
-                    max_fetch_count: 10,
-                    max_fetch_size: 1024 * 512,
-                    fetch_concurrent: 10,
-                    fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
-                    indexer: Some(indexer.clone()),
-                    strategy: Sequential,
-                };
-                let validator_context = context.with_label(&uid);
-
-                let (pending, recovered, resolver, broadcast, backfill) =
-                    registrations.remove(&public_key).unwrap();
-
-                let marshal_resolver_cfg = marshal::resolver::p2p::Config {
-                    public_key: public_key.clone(),
-                    peer_provider: oracle.manager(),
-                    blocker: oracle.control(public_key.clone()),
-                    mailbox_size: 1024,
-                    initial: Duration::from_secs(1),
-                    timeout: Duration::from_secs(2),
-                    fetch_retry_timeout: Duration::from_millis(100),
-                    priority_requests: false,
-                    priority_responses: false,
-                };
-                let marshal_resolver = marshal::resolver::p2p::init(
-                    &validator_context.with_label("backfill"),
-                    marshal_resolver_cfg,
-                    backfill,
-                );
-
-                let engine = Engine::new(validator_context.with_label("engine"), config).await;
-                engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
+                let registration = registrations.remove(&signer.public_key()).unwrap();
+                start_validator(
+                    &context,
+                    &oracle,
+                    &signer,
+                    &scheme,
+                    participants_set.clone(),
+                    registration,
+                    Some(indexer.clone()),
+                )
+                .await;
             }
 
-            // Wait for consensus/marshal to process enough finalized blocks so
-            // the upload paths have had work to do.
-            loop {
-                let metrics = context.encode();
-                let mut success = false;
-                for line in metrics.lines() {
-                    if !line.starts_with("validator_") {
-                        continue;
-                    }
-                    let mut parts = line.split_whitespace();
-                    let metric = parts.next().unwrap();
-                    let value = parts.next().unwrap();
-                    if metric.ends_with("_peers_blocked") {
-                        let value = value.parse::<u64>().unwrap();
-                        assert_eq!(value, 0);
-                    }
-                    if metric.ends_with("_marshal_processed_height") {
-                        let value = value.parse::<u64>().unwrap();
-                        if value >= required_container {
-                            success = true;
-                            break;
-                        }
-                    }
-                }
-                if success {
-                    break;
-                }
-                context.sleep(Duration::from_secs(1)).await;
-            }
+            poll_until_height(&context, required_container).await;
 
             // The mock rejects certified uploads, so both cert paths should
             // remain unsuccessful throughout the run.
@@ -1206,61 +1133,18 @@ mod tests {
             let identity = *schemes[0].polynomial().public();
             let indexer = Mock::new("", identity).with_cert_upload_waiters(cert_upload_waiters);
 
-            let mut public_keys = HashSet::new();
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
-                let public_key = signer.public_key();
-                public_keys.insert(public_key.clone());
-
-                let uid = format!("validator_{public_key}");
-                let config: Config<_, _, Mock, _> = engine::Config {
-                    blocker: oracle.control(public_key.clone()),
-                    provider: oracle.manager(),
-                    partition_prefix: uid.clone(),
-                    blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                    finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                    me: signer.public_key(),
-                    polynomial: scheme.polynomial().clone(),
-                    share: scheme.share().cloned().unwrap(),
-                    participants: participants_set.clone(),
-                    mailbox_size: 1024,
-                    deque_size: 10,
-                    leader_timeout: Duration::from_secs(1),
-                    certification_timeout: Duration::from_secs(2),
-                    nullify_retry: Duration::from_secs(10),
-                    fetch_timeout: Duration::from_secs(1),
-                    activity_timeout: ViewDelta::new(10),
-                    skip_timeout: ViewDelta::new(5),
-                    max_fetch_count: 10,
-                    max_fetch_size: 1024 * 512,
-                    fetch_concurrent: 10,
-                    fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
-                    indexer: Some(indexer.clone()),
-                    strategy: Sequential,
-                };
-                let validator_context = context.with_label(&uid);
-
-                let (pending, recovered, resolver, broadcast, backfill) =
-                    registrations.remove(&public_key).unwrap();
-
-                let marshal_resolver_cfg = marshal::resolver::p2p::Config {
-                    public_key: public_key.clone(),
-                    peer_provider: oracle.manager(),
-                    blocker: oracle.control(public_key.clone()),
-                    mailbox_size: 1024,
-                    initial: Duration::from_secs(1),
-                    timeout: Duration::from_secs(2),
-                    fetch_retry_timeout: Duration::from_millis(100),
-                    priority_requests: false,
-                    priority_responses: false,
-                };
-                let marshal_resolver = marshal::resolver::p2p::init(
-                    &validator_context.with_label("backfill"),
-                    marshal_resolver_cfg,
-                    backfill,
-                );
-
-                let engine = Engine::new(validator_context.with_label("engine"), config).await;
-                engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
+                let registration = registrations.remove(&signer.public_key()).unwrap();
+                start_validator(
+                    &context,
+                    &oracle,
+                    &signer,
+                    &scheme,
+                    participants_set.clone(),
+                    registration,
+                    Some(indexer.clone()),
+                )
+                .await;
             }
 
             // Wait until consensus has finalized enough blocks for the queue to
@@ -1364,61 +1248,18 @@ mod tests {
                 .with_fail_certs()
                 .with_block_upload_waiters(vec![wait_first, wait_second]);
 
-            let mut public_keys = HashSet::new();
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
-                let public_key = signer.public_key();
-                public_keys.insert(public_key.clone());
-
-                let uid = format!("validator_{public_key}");
-                let config: Config<_, _, Mock, _> = engine::Config {
-                    blocker: oracle.control(public_key.clone()),
-                    provider: oracle.manager(),
-                    partition_prefix: uid.clone(),
-                    blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                    finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                    me: signer.public_key(),
-                    polynomial: scheme.polynomial().clone(),
-                    share: scheme.share().cloned().unwrap(),
-                    participants: participants_set.clone(),
-                    mailbox_size: 1024,
-                    deque_size: 10,
-                    leader_timeout: Duration::from_secs(1),
-                    certification_timeout: Duration::from_secs(2),
-                    nullify_retry: Duration::from_secs(10),
-                    fetch_timeout: Duration::from_secs(1),
-                    activity_timeout: ViewDelta::new(10),
-                    skip_timeout: ViewDelta::new(5),
-                    max_fetch_count: 10,
-                    max_fetch_size: 1024 * 512,
-                    fetch_concurrent: 10,
-                    fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
-                    indexer: Some(indexer.clone()),
-                    strategy: Sequential,
-                };
-                let validator_context = context.with_label(&uid);
-
-                let (pending, recovered, resolver, broadcast, backfill) =
-                    registrations.remove(&public_key).unwrap();
-
-                let marshal_resolver_cfg = marshal::resolver::p2p::Config {
-                    public_key: public_key.clone(),
-                    peer_provider: oracle.manager(),
-                    blocker: oracle.control(public_key.clone()),
-                    mailbox_size: 1024,
-                    initial: Duration::from_secs(1),
-                    timeout: Duration::from_secs(2),
-                    fetch_retry_timeout: Duration::from_millis(100),
-                    priority_requests: false,
-                    priority_responses: false,
-                };
-                let marshal_resolver = marshal::resolver::p2p::init(
-                    &validator_context.with_label("backfill"),
-                    marshal_resolver_cfg,
-                    backfill,
-                );
-
-                let engine = Engine::new(validator_context.with_label("engine"), config).await;
-                engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
+                let registration = registrations.remove(&signer.public_key()).unwrap();
+                start_validator(
+                    &context,
+                    &oracle,
+                    &signer,
+                    &scheme,
+                    participants_set.clone(),
+                    registration,
+                    Some(indexer.clone()),
+                )
+                .await;
             }
 
             // Wait until the drainer starts at least two uploads concurrently.
@@ -1580,57 +1421,17 @@ mod tests {
                 link_validators(&mut oracle, &participants, link, None).await;
 
                 for (signer, scheme) in private_keys.into_iter().zip(schemes) {
-                    let public_key = signer.public_key();
-                    let uid = format!("validator_{public_key}");
-                    let config: Config<_, _, Mock, _> = engine::Config {
-                        blocker: oracle.control(public_key.clone()),
-                        provider: oracle.manager(),
-                        partition_prefix: uid.clone(),
-                        blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                        finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                        me: signer.public_key(),
-                        polynomial: scheme.polynomial().clone(),
-                        share: scheme.share().cloned().unwrap(),
-                        participants: participants_set.clone(),
-                        mailbox_size: 1024,
-                        deque_size: 10,
-                        leader_timeout: Duration::from_secs(1),
-                        certification_timeout: Duration::from_secs(2),
-                        nullify_retry: Duration::from_secs(10),
-                        fetch_timeout: Duration::from_secs(1),
-                        activity_timeout: ViewDelta::new(10),
-                        skip_timeout: ViewDelta::new(5),
-                        max_fetch_count: 10,
-                        max_fetch_size: 1024 * 512,
-                        fetch_concurrent: 10,
-                        fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
-                        indexer: Some(indexer.clone()),
-                        strategy: Sequential,
-                    };
-                    let validator_context = context.with_label(&uid);
-
-                    let (pending, recovered, resolver, broadcast, backfill) =
-                        registrations.remove(&public_key).unwrap();
-
-                    let marshal_resolver_cfg = marshal::resolver::p2p::Config {
-                        public_key: public_key.clone(),
-                        peer_provider: oracle.manager(),
-                        blocker: oracle.control(public_key.clone()),
-                        mailbox_size: 1024,
-                        initial: Duration::from_secs(1),
-                        timeout: Duration::from_secs(2),
-                        fetch_retry_timeout: Duration::from_millis(100),
-                        priority_requests: false,
-                        priority_responses: false,
-                    };
-                    let marshal_resolver = marshal::resolver::p2p::init(
-                        &validator_context.with_label("backfill"),
-                        marshal_resolver_cfg,
-                        backfill,
-                    );
-
-                    let engine = Engine::new(validator_context.with_label("engine"), config).await;
-                    engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
+                    let registration = registrations.remove(&signer.public_key()).unwrap();
+                    start_validator(
+                        &context,
+                        &oracle,
+                        &signer,
+                        &scheme,
+                        participants_set.clone(),
+                        registration,
+                        Some(indexer.clone()),
+                    )
+                    .await;
                 }
 
                 // Wait until the drainer has definitely started blocked uploads
@@ -1740,57 +1541,17 @@ mod tests {
             // uploads in this run must therefore come from replaying the
             // durable queue and restored marshal state.
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
-                let public_key = signer.public_key();
-                let uid = format!("validator_{public_key}");
-                let config: Config<_, _, Mock, _> = engine::Config {
-                    blocker: oracle.control(public_key.clone()),
-                    provider: oracle.manager(),
-                    partition_prefix: uid.clone(),
-                    blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                    finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-                    me: signer.public_key(),
-                    polynomial: scheme.polynomial().clone(),
-                    share: scheme.share().cloned().unwrap(),
-                    participants: participants_set.clone(),
-                    mailbox_size: 1024,
-                    deque_size: 10,
-                    leader_timeout: Duration::from_secs(1),
-                    certification_timeout: Duration::from_secs(2),
-                    nullify_retry: Duration::from_secs(10),
-                    fetch_timeout: Duration::from_secs(1),
-                    activity_timeout: ViewDelta::new(10),
-                    skip_timeout: ViewDelta::new(5),
-                    max_fetch_count: 10,
-                    max_fetch_size: 1024 * 512,
-                    fetch_concurrent: 10,
-                    fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
-                    indexer: Some(indexer.clone()),
-                    strategy: Sequential,
-                };
-                let validator_context = context.with_label(&uid);
-
-                let (pending, recovered, resolver, broadcast, backfill) =
-                    registrations.remove(&public_key).unwrap();
-
-                let marshal_resolver_cfg = marshal::resolver::p2p::Config {
-                    public_key: public_key.clone(),
-                    peer_provider: oracle.manager(),
-                    blocker: oracle.control(public_key.clone()),
-                    mailbox_size: 1024,
-                    initial: Duration::from_secs(1),
-                    timeout: Duration::from_secs(2),
-                    fetch_retry_timeout: Duration::from_millis(100),
-                    priority_requests: false,
-                    priority_responses: false,
-                };
-                let marshal_resolver = marshal::resolver::p2p::init(
-                    &validator_context.with_label("backfill"),
-                    marshal_resolver_cfg,
-                    backfill,
-                );
-
-                let engine = Engine::new(validator_context.with_label("engine"), config).await;
-                engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
+                let registration = registrations.remove(&signer.public_key()).unwrap();
+                start_validator(
+                    &context,
+                    &oracle,
+                    &signer,
+                    &scheme,
+                    participants_set.clone(),
+                    registration,
+                    Some(indexer.clone()),
+                )
+                .await;
             }
 
             // The recovery run should replay the previously blocked digests
