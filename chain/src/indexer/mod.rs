@@ -20,7 +20,6 @@ use commonware_parallel::Strategy;
 use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use commonware_storage::queue;
 use commonware_utils::sync::Mutex;
-use prometheus_client::metrics::gauge::Gauge;
 use std::{future::Future, sync::Arc};
 
 mod durable;
@@ -115,28 +114,8 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> IndexerRuntime<E, I> {
             uploads.clone(),
         );
         let (writer, reader) = durable_queue;
-        let queue_size = writer.size().await;
-        let ack_floor = reader.ack_floor().await;
-        let pending = queue_size.saturating_sub(ack_floor);
-        let queue_metrics = context.with_label("queue");
-        let queue_depth = Gauge::default();
-        queue_metrics.register(
-            "depth",
-            "Current number of pending finalized block uploads in the durable queue",
-            queue_depth.clone(),
-        );
-        queue_depth.set(pending as i64);
-
-        let recorder = Recorder::new(uploads.clone(), writer.clone(), queue_depth.clone());
-        let drainer = Drainer::new(
-            context,
-            indexer,
-            marshal,
-            queue_depth,
-            uploads,
-            writer,
-            reader,
-        );
+        let recorder = Recorder::new(uploads.clone(), writer.clone());
+        let drainer = Drainer::new(context, indexer, marshal, uploads, writer, reader);
 
         Self {
             recorder,

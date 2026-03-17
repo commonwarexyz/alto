@@ -38,7 +38,6 @@ pub(crate) struct Drainer<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
     context: ContextCell<E>,
     indexer: I,
     marshal: MarshalMailbox<Scheme, Standard<Block>>,
-    queue_depth: Gauge,
     upload_results: status::Counter,
     in_flight_uploads: Gauge,
     uploads: SharedUploadState,
@@ -53,7 +52,6 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
         context: E,
         indexer: I,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
-        queue_depth: Gauge,
         uploads: SharedUploadState,
         writer: queue::Writer<E, FinalizedEntry>,
         reader: queue::Reader<E, FinalizedEntry>,
@@ -75,7 +73,6 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
             context: ContextCell::new(context.with_label("drainer")),
             indexer,
             marshal,
-            queue_depth,
             upload_results,
             in_flight_uploads,
             uploads,
@@ -318,7 +315,6 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
         // queue/UploadState pairing.
         self.reader.ack(position).await.expect("failed to ack");
         self.writer.sync().await.expect("failed to sync after ack");
-        self.queue_depth.dec();
         self.uploads.lock().finish_finalized(position);
     }
 }

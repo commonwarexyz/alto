@@ -5,7 +5,6 @@ use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_runtime::{Clock, Metrics, Storage};
 use commonware_storage::queue;
 use commonware_utils::{sync::Mutex, PrioritySet};
-use prometheus_client::metrics::gauge::Gauge;
 use std::{collections::BTreeMap, sync::Arc};
 
 /// What the durable drainer should do next for a digest.
@@ -247,20 +246,14 @@ pub(crate) type SharedUploadState = Arc<Mutex<UploadState>>;
 pub(crate) struct Recorder<E: Clock + Storage + Metrics> {
     uploads: SharedUploadState,
     writer: queue::Writer<E, FinalizedEntry>,
-    queue_depth: Gauge,
 }
 
 impl<E: Clock + Storage + Metrics> Recorder<E> {
     pub(crate) fn new(
         uploads: SharedUploadState,
         writer: queue::Writer<E, FinalizedEntry>,
-        queue_depth: Gauge,
     ) -> Self {
-        Self {
-            uploads,
-            writer,
-            queue_depth,
-        }
+        Self { uploads, writer }
     }
 
     pub(crate) async fn record(&self, block: &Block) {
@@ -276,7 +269,6 @@ impl<E: Clock + Storage + Metrics> Recorder<E> {
             .enqueue(entry)
             .await
             .expect("failed to enqueue finalized digest");
-        self.queue_depth.inc();
         let _ = self.uploads.lock().register_finalized(position, entry);
         self.writer
             .sync()
