@@ -15,7 +15,7 @@ use tracing::{debug, warn};
 /// This is the live upload path. It reacts directly to consensus activity,
 /// waits for marshal to make the corresponding block available, caches that
 /// block in shared state, and uploads the certificate-bearing object. The
-/// shared state lets the durable raw-block drainer reuse blocks and back off
+/// shared state lets the durable block drainer reuse blocks and back off
 /// when the live path is already handling a digest.
 #[derive(Clone)]
 pub(crate) struct Pusher<E: Spawner + Metrics, I: Indexer> {
@@ -76,10 +76,7 @@ impl CertificateUploadGuard {
 impl Drop for CertificateUploadGuard {
     fn drop(&mut self) {
         let mut uploads = self.uploads.lock();
-        uploads.finish_certificate_upload(
-            &self.digest,
-            self.uploaded_height,
-        );
+        uploads.finish_certificate_upload(&self.digest, self.uploaded_height);
     }
 }
 
@@ -117,10 +114,7 @@ impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
             move |_| async move {
                 let mut guard = CertificateUploadGuard::new(uploads, digest);
 
-                let block = marshal
-                    .subscribe_by_digest(Some(round), digest)
-                    .await
-                    .await;
+                let block = marshal.subscribe_by_digest(Some(round), digest).await.await;
                 let Ok(block) = block else {
                     warn!(%view, "subscription for block cancelled");
                     return;

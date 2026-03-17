@@ -1,4 +1,4 @@
-use super::{FinalizedEntry, RawUploadDecision, SharedUploadState};
+use super::{FinalizedEntry, SharedUploadState, UploadDecision};
 use crate::indexer::Indexer;
 use alto_types::{Block, Scheme};
 use commonware_consensus::marshal::{
@@ -22,7 +22,7 @@ const DRAINER_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Final outcome for one durable queue row.
 enum DrainCompletion {
-    /// The drainer uploaded the raw block itself and must mark the digest
+    /// The drainer uploaded the block itself and must mark the digest
     /// uploaded before retiring the durable row.
     Uploaded {
         position: u64,
@@ -167,10 +167,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
             // rows rebuild the same pending state the original process had.
             if uploads.register_finalized(position, entry) {
                 Some("drainer skipping duplicate queued block")
-            } else if matches!(
-                uploads.raw_upload_decision(&digest),
-                RawUploadDecision::Retire
-            ) {
+            } else if matches!(uploads.upload_decision(&digest), UploadDecision::Retire) {
                 Some("drainer skipping already-uploaded block")
             } else {
                 None
@@ -196,7 +193,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
                 let Some(block) =
                     Self::wait_for_uploadable_block(&context, &marshal, &uploads, digest).await
                 else {
-                    debug!(?digest, "drainer observed live upload before raw upload");
+                    debug!(?digest, "drainer observed live upload before block upload");
                     return DrainCompletion::Retired { position };
                 };
 
@@ -205,18 +202,18 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
                     // queue item is waiting for its block or retrying after failures.
                     let decision = {
                         let uploads = uploads.lock();
-                        uploads.raw_upload_decision(&digest)
+                        uploads.upload_decision(&digest)
                     };
                     match decision {
-                        RawUploadDecision::Retire => {
-                            debug!(?digest, "drainer observed live upload before raw upload");
+                        UploadDecision::Retire => {
+                            debug!(?digest, "drainer observed live upload before block upload");
                             return DrainCompletion::Retired { position };
                         }
-                        RawUploadDecision::Wait => {
+                        UploadDecision::Wait => {
                             context.sleep(DRAINER_RETRY_DELAY).await;
                             continue;
                         }
-                        RawUploadDecision::Proceed => {}
+                        UploadDecision::Proceed => {}
                     }
 
                     match indexer.block_upload(block.clone()).await {
@@ -252,7 +249,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
         // Prefer the in-process block cache populated by the application and
         // certificate uploaders. On restart that cache is empty, so we fall
         // back to marshal storage. If a certificate upload is still in flight,
-        // wait for it to either succeed or fail before starting the raw upload.
+        // wait for it to either succeed or fail before starting the block upload.
         enum NextBlock {
             AlreadyUploaded,
             WaitForCertificate,
@@ -263,10 +260,10 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
         loop {
             let next = {
                 let uploads = uploads.lock();
-                match uploads.raw_upload_decision(&digest) {
-                    RawUploadDecision::Retire => NextBlock::AlreadyUploaded,
-                    RawUploadDecision::Wait => NextBlock::WaitForCertificate,
-                    RawUploadDecision::Proceed => {
+                match uploads.upload_decision(&digest) {
+                    UploadDecision::Retire => NextBlock::AlreadyUploaded,
+                    UploadDecision::Wait => NextBlock::WaitForCertificate,
+                    UploadDecision::Proceed => {
                         if let Some(block) = uploads.cached_block(&digest) {
                             NextBlock::Ready(Box::new(block))
                         } else {

@@ -4,7 +4,7 @@
 //! - the live path, where [`Pusher`] uploads seeds and certificate-bearing
 //!   objects as consensus activity happens;
 //! - the durable path, where [`Recorder`] persists finalized block digests and
-//!   [`Drainer`] retries raw block uploads from the durable queue across
+//!   [`Drainer`] retries block uploads from the durable queue across
 //!   restarts.
 //!
 //! [`IndexerRuntime`] is the top-level abstraction over those pieces. It owns

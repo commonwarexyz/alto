@@ -67,11 +67,7 @@ mod tests {
     use governor::Quota;
     use indexer::Mock;
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use std::{
-        collections::HashMap,
-        num::NonZeroU32,
-        time::Duration,
-    };
+    use std::{collections::HashMap, num::NonZeroU32, time::Duration};
     use tracing::info;
 
     /// Limit the freezer table size to 1MB because the deterministic runtime stores

@@ -8,13 +8,13 @@ use commonware_utils::{sync::Mutex, PrioritySet};
 use std::{collections::BTreeMap, sync::Arc};
 
 /// What the durable drainer should do next for a digest.
-pub(crate) enum RawUploadDecision {
+pub(crate) enum UploadDecision {
     /// The block is already uploaded, so the durable row can be retired.
     Retire,
     /// The live certificate path is still handling this digest, so the drainer
     /// should wait instead of racing it.
     Wait,
-    /// The drainer should proceed with a raw upload attempt.
+    /// The drainer should proceed with a block upload attempt.
     Proceed,
 }
 
@@ -46,7 +46,7 @@ impl Read for FinalizedEntry {
     }
 }
 
-/// Tracks raw block uploads and the oldest finalized height that still needs them.
+/// Tracks block uploads and the oldest finalized height that still needs them.
 ///
 /// A digest can be in one of three states:
 /// - not seen yet: a finalized block should enqueue a new durable row;
@@ -66,7 +66,7 @@ pub(crate) struct UploadState {
     pending_digests: BTreeMap<Digest, usize>,
     // Highest finalized height observed from the live application stream.
     latest_finalized: Option<u64>,
-    // Blocks cached for the live certificate upload path and the raw drainer.
+    // Blocks cached for the live certificate upload path and the drainer.
     cached_blocks: BTreeMap<Digest, Block>,
     // Number of in-flight certificate uploads per digest so the drainer can
     // wait for the live path instead of racing it.
@@ -149,13 +149,13 @@ impl UploadState {
         self.cached_blocks.get(digest).cloned()
     }
 
-    pub(crate) fn raw_upload_decision(&self, digest: &Digest) -> RawUploadDecision {
+    pub(crate) fn upload_decision(&self, digest: &Digest) -> UploadDecision {
         if self.contains(digest) {
-            RawUploadDecision::Retire
+            UploadDecision::Retire
         } else if self.certificate_uploads.contains_key(digest) {
-            RawUploadDecision::Wait
+            UploadDecision::Wait
         } else {
-            RawUploadDecision::Proceed
+            UploadDecision::Proceed
         }
     }
 
@@ -245,7 +245,7 @@ impl UploadState {
     }
 }
 
-/// State shared by the live certificate path and the durable raw-block path.
+/// State shared by the live certificate path and the durable block path.
 pub(crate) type SharedUploadState = Arc<Mutex<UploadState>>;
 
 /// Records finalized block digests in the durable queue from the application's

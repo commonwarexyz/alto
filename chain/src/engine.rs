@@ -269,7 +269,7 @@ where
         .await;
 
         // Create the reporter and, when an indexer is configured, a durable
-        // queue of finalized digests so raw block uploads can resume after
+        // queue of finalized digests so block uploads can resume after
         // restarts.
         let (app, pusher, drainer) = if let Some(indexer) = cfg.indexer {
             let durable_queue = queue::shared::init(
