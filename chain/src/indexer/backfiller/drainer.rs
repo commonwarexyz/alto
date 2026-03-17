@@ -21,7 +21,7 @@ const DRAINER_MAX_IN_FLIGHT: usize = 16;
 const DRAINER_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Final outcome for one backfill queue row.
-enum DrainCompletion {
+enum Completion {
     /// The drainer uploaded the block itself and must mark the digest
     /// uploaded before retiring the queue row.
     Uploaded {
@@ -43,7 +43,7 @@ pub struct Drainer<E: Spawner + Clock + Storage + Metrics, C: Client> {
     uploads: SharedUploadState,
     writer: queue::Writer<E, FinalizedEntry>,
     reader: queue::Reader<E, FinalizedEntry>,
-    in_flight: Pool<DrainCompletion>,
+    in_flight: Pool<Completion>,
     queue_closed: bool,
 }
 
@@ -94,7 +94,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
             on_start => {
                 // Drain any backlog already sitting in the backfill queue before
                 // blocking so restarts resume with full parallelism immediately.
-                self.fill_drainer_slots().await;
+                self.fill_slots().await;
 
                 if self.queue_closed && self.in_flight.is_empty() {
                     warn!("drainer queue closed");
@@ -113,7 +113,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
                         self.queue_closed = true;
                         continue;
                     };
-                    self.start_drained_upload(position, entry).await;
+                    self.start_upload(position, entry).await;
                     continue;
                 }
 
@@ -126,12 +126,12 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
             },
             on_stopped => {},
             completion = self.in_flight.next_completed() => {
-                self.complete_drained(completion).await;
+                self.complete(completion).await;
             },
             item = item => {
                 match item.expect("failed to recv from finalized queue") {
                     Some((position, entry)) => {
-                        self.start_drained_upload(position, entry).await;
+                        self.start_upload(position, entry).await;
                     }
                     None => {
                         self.queue_closed = true;
@@ -141,7 +141,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
         }
     }
 
-    async fn fill_drainer_slots(&mut self) {
+    async fn fill_slots(&mut self) {
         // Consume all queue rows that are already available without waiting so
         // the drainer keeps as many upload slots busy as it can.
         while self.in_flight.len() < DRAINER_MAX_IN_FLIGHT {
@@ -154,11 +154,11 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
                 break;
             };
 
-            self.start_drained_upload(position, entry).await;
+            self.start_upload(position, entry).await;
         }
     }
 
-    async fn start_drained_upload(&mut self, position: u64, entry: FinalizedEntry) {
+    async fn start_upload(&mut self, position: u64, entry: FinalizedEntry) {
         let FinalizedEntry { height, digest } = entry;
         let skip = {
             let mut uploads = self.uploads.lock();
@@ -174,8 +174,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
             }
         };
         if let Some(reason) = skip {
-            self.complete_drained(DrainCompletion::Retired { position })
-                .await;
+            self.complete(Completion::Retired { position }).await;
             debug!(?digest, reason);
             return;
         }
@@ -194,7 +193,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
                     Self::wait_for_uploadable_block(&context, &marshal, &uploads, digest).await
                 else {
                     debug!(?digest, "drainer observed live upload before block upload");
-                    return DrainCompletion::Retired { position };
+                    return Completion::Retired { position };
                 };
 
                 loop {
@@ -207,7 +206,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
                     match decision {
                         UploadDecision::Retire => {
                             debug!(?digest, "drainer observed live upload before block upload");
-                            return DrainCompletion::Retired { position };
+                            return Completion::Retired { position };
                         }
                         UploadDecision::Wait => {
                             context.sleep(DRAINER_RETRY_DELAY).await;
@@ -220,7 +219,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
                         Ok(()) => {
                             upload_results.inc(status::Status::Success);
                             debug!(?digest, "drainer uploaded block");
-                            return DrainCompletion::Uploaded {
+                            return Completion::Uploaded {
                                 position,
                                 height,
                                 digest,
@@ -291,12 +290,12 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
         }
     }
 
-    async fn complete_drained(&mut self, completion: DrainCompletion) {
+    async fn complete(&mut self, completion: Completion) {
         self.in_flight_uploads.dec();
         let position = match completion {
             // Record the success before acking so the in-memory dedupe tracker
             // stays aligned with the queue state.
-            DrainCompletion::Uploaded {
+            Completion::Uploaded {
                 position,
                 height,
                 digest,
@@ -304,7 +303,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
                 self.uploads.lock().mark_uploaded(digest, height);
                 position
             }
-            DrainCompletion::Retired { position } => position,
+            Completion::Retired { position } => position,
         };
 
         // Persist retirement of the queue row before dropping the corresponding
