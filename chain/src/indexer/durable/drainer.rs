@@ -1,4 +1,4 @@
-use super::{DrainerMetrics, FinalizedEntry, SharedUploadState};
+use super::{DrainerMetrics, FinalizedEntry, RawUploadDecision, SharedUploadState};
 use crate::indexer::Indexer;
 use alto_types::{Block, Scheme};
 use commonware_consensus::marshal::{
@@ -19,15 +19,17 @@ const DRAINER_MAX_IN_FLIGHT: usize = 16;
 const DRAINER_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Final outcome for one durable queue row.
-///
-/// `digest` is `Some` only when this row's raw block upload actually succeeded.
-/// When it is `None`, the row is being retired because it was duplicate work or
-/// because the live certificate path already uploaded the block first.
-struct DrainCompletion {
-    position: u64,
-    height: u64,
-    digest: Option<Digest>,
-    counted_in_flight: bool,
+enum DrainCompletion {
+    /// The drainer uploaded the raw block itself and must mark the digest
+    /// uploaded before retiring the durable row.
+    Uploaded {
+        position: u64,
+        height: u64,
+        digest: Digest,
+    },
+    /// The durable row became redundant because it was duplicate work or
+    /// because the live certificate path uploaded the block first.
+    Retired { position: u64 },
 }
 
 #[derive(Clone)]
@@ -195,26 +197,21 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
             // rows rebuild the same pending state the original process had.
             if uploads.register_finalized(position, entry) {
                 Some("drainer skipping duplicate queued block")
-            } else if uploads.contains(&digest) {
+            } else if matches!(uploads.raw_upload_decision(&digest), RawUploadDecision::Retire) {
                 Some("drainer skipping already-uploaded block")
             } else {
                 None
             }
         };
         if let Some(reason) = skip {
-            self.complete_drained(DrainCompletion {
-                position,
-                height,
-                digest: None,
-                counted_in_flight: false,
-            })
-            .await;
+            self.complete_drained(DrainCompletion::Retired { position }).await;
             debug!(?digest, reason);
             return;
         }
 
         // Hand the upload/retry loop off to the in-flight pool so the drainer
         // can continue dequeuing and retiring other durable rows concurrently.
+        self.metrics.in_flight.inc();
         self.in_flight.push({
             let indexer = self.indexer.clone();
             let marshal = self.marshal.clone();
@@ -226,47 +223,36 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
                     Self::wait_for_uploadable_block(&context, &marshal, &uploads, digest).await
                 else {
                     debug!(?digest, "drainer observed live upload before raw upload");
-                    return DrainCompletion {
-                        position,
-                        height,
-                        digest: None,
-                        counted_in_flight: false,
-                    };
+                    return DrainCompletion::Retired { position };
                 };
-                // Count only active raw block upload attempts. Waiting for a
-                // block to appear in cache/marshal is not yet an in-flight upload.
-                metrics.in_flight.inc();
 
                 loop {
                     // A live notarization/finalization upload may complete while this
                     // queue item is waiting for its block or retrying after failures.
-                    let wait_for_certificate = {
+                    let decision = {
                         let uploads = uploads.lock();
-                        if uploads.contains(&digest) {
-                            debug!(?digest, "drainer observed live upload before raw upload");
-                            return DrainCompletion {
-                                position,
-                                height,
-                                digest: None,
-                                counted_in_flight: true,
-                            };
-                        }
-                        uploads.certificate_upload_in_flight(&digest)
+                        uploads.raw_upload_decision(&digest)
                     };
-                    if wait_for_certificate {
-                        context.sleep(DRAINER_RETRY_DELAY).await;
-                        continue;
+                    match decision {
+                        RawUploadDecision::Retire => {
+                            debug!(?digest, "drainer observed live upload before raw upload");
+                            return DrainCompletion::Retired { position };
+                        }
+                        RawUploadDecision::Wait => {
+                            context.sleep(DRAINER_RETRY_DELAY).await;
+                            continue;
+                        }
+                        RawUploadDecision::Proceed => {}
                     }
 
                     match indexer.block_upload(block.clone()).await {
                         Ok(()) => {
                             metrics.uploads.inc(status::Status::Success);
                             debug!(?digest, "drainer uploaded block");
-                            return DrainCompletion {
+                            return DrainCompletion::Uploaded {
                                 position,
                                 height,
-                                digest: Some(digest),
-                                counted_in_flight: true,
+                                digest,
                             };
                         }
                         Err(e) => {
@@ -303,14 +289,16 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
         loop {
             let next = {
                 let uploads = uploads.lock();
-                if uploads.contains(&digest) {
-                    NextBlock::AlreadyUploaded
-                } else if uploads.certificate_upload_in_flight(&digest) {
-                    NextBlock::WaitForCertificate
-                } else if let Some(block) = uploads.cached_block(&digest) {
-                    NextBlock::Ready(Box::new(block))
-                } else {
-                    NextBlock::FetchFromMarshal
+                match uploads.raw_upload_decision(&digest) {
+                    RawUploadDecision::Retire => NextBlock::AlreadyUploaded,
+                    RawUploadDecision::Wait => NextBlock::WaitForCertificate,
+                    RawUploadDecision::Proceed => {
+                        if let Some(block) = uploads.cached_block(&digest) {
+                            NextBlock::Ready(Box::new(block))
+                        } else {
+                            NextBlock::FetchFromMarshal
+                        }
+                    }
                 }
             };
 
@@ -333,24 +321,30 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
     }
 
     async fn complete_drained(&mut self, completion: DrainCompletion) {
-        if completion.counted_in_flight {
-            self.metrics.in_flight.dec();
-        }
-        if let Some(digest) = completion.digest {
+        self.metrics.in_flight.dec();
+        let position = match completion {
             // Record the success before acking so the in-memory dedupe tracker
             // stays aligned with the durable queue state.
-            self.uploads.lock().mark_uploaded(digest, completion.height);
-        }
+            DrainCompletion::Uploaded {
+                position,
+                height,
+                digest,
+            } => {
+                self.uploads.lock().mark_uploaded(digest, height);
+                position
+            }
+            DrainCompletion::Retired { position } => position,
+        };
 
         // Persist retirement of the durable row before dropping the corresponding
         // pending state from memory so replay after a crash sees a consistent
         // queue/UploadState pairing.
         self.reader
-            .ack(completion.position)
+            .ack(position)
             .await
             .expect("failed to ack");
         self.writer.sync().await.expect("failed to sync after ack");
         self.metrics.depth.dec();
-        self.uploads.lock().finish_finalized(completion.position);
+        self.uploads.lock().finish_finalized(position);
     }
 }

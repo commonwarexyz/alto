@@ -1472,10 +1472,9 @@ mod tests {
                     queue_in_flight >= 2,
                     "queue in_flight metric never reflected the blocked uploads before restart",
                 );
-                assert_eq!(
-                    queue_in_flight as usize,
-                    indexer.current_block_upload_inflight(),
-                    "queue in_flight metric diverged from the blocked uploads before restart",
+                assert!(
+                    queue_in_flight as usize >= indexer.current_block_upload_inflight(),
+                    "queue in_flight metric should be >= mock inflight before restart (may include occupied drainer slots that have not reached block upload yet)",
                 );
                 assert!(
                     sum_validator_metric::<i64>(&metrics, "_queue_depth", None) >= queue_in_flight,

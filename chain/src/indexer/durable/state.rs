@@ -35,12 +35,23 @@ impl DrainerMetrics {
         );
         context.register(
             "in_flight",
-            "Current number of block uploads in flight from the durable queue",
+            "Current number of occupied upload slots in the durable drainer",
             metrics.in_flight.clone(),
         );
 
         metrics
     }
+}
+
+/// What the durable drainer should do next for a digest.
+pub(crate) enum RawUploadDecision {
+    /// The block is already uploaded, so the durable row can be retired.
+    Retire,
+    /// The live certificate path is still handling this digest, so the drainer
+    /// should wait instead of racing it.
+    Wait,
+    /// The drainer should proceed with a raw upload attempt.
+    Proceed,
 }
 
 /// Entry stored in the durable finalization queue.
@@ -110,7 +121,7 @@ impl UploadState {
         }
     }
 
-    pub(crate) fn contains(&self, digest: &Digest) -> bool {
+    fn contains(&self, digest: &Digest) -> bool {
         self.uploaded.contains(digest)
     }
 
@@ -174,6 +185,16 @@ impl UploadState {
         self.cached_blocks.get(digest).cloned()
     }
 
+    pub(crate) fn raw_upload_decision(&self, digest: &Digest) -> RawUploadDecision {
+        if self.contains(digest) {
+            RawUploadDecision::Retire
+        } else if self.certificate_uploads.contains_key(digest) {
+            RawUploadDecision::Wait
+        } else {
+            RawUploadDecision::Proceed
+        }
+    }
+
     pub(crate) fn start_certificate_upload(&mut self, digest: Digest) {
         *self.certificate_uploads.entry(digest).or_default() += 1;
     }
@@ -188,10 +209,6 @@ impl UploadState {
             self.certificate_uploads.remove(digest);
         }
         self.prune();
-    }
-
-    pub(crate) fn certificate_upload_in_flight(&self, digest: &Digest) -> bool {
-        self.certificate_uploads.contains_key(digest)
     }
 
     fn needs_enqueue(&mut self, digest: &Digest, height: u64) -> bool {
