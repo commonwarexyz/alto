@@ -14,5 +14,5 @@ mod state;
 
 pub(crate) use drainer::Drainer;
 pub(crate) use state::{
-    DrainerMetrics, FinalizedEntry, RawUploadDecision, Recorder, SharedUploadState, UploadState,
+    FinalizedEntry, RawUploadDecision, Recorder, SharedUploadState, UploadState,
 };

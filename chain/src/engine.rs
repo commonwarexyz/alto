@@ -127,10 +127,7 @@ where
     consensus:
         Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
 
-    drainer: Option<(
-        indexer::Drainer<E, I>,
-        queue::Reader<E, indexer::FinalizedEntry>,
-    )>,
+    drainer: Option<indexer::Drainer<E, I>>,
 }
 
 impl<E, B, P, S, I> Engine<E, B, P, S, I>
@@ -421,7 +418,7 @@ where
 
         // Start draining queued block uploads before consensus so recovered work
         // resumes immediately on startup.
-        let drainer_handle = self.drainer.map(|(drainer, reader)| drainer.start(reader));
+        let drainer_handle = self.drainer.map(indexer::Drainer::start);
 
         // Start consensus
         //

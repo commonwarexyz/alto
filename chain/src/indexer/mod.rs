@@ -20,6 +20,7 @@ use commonware_parallel::Strategy;
 use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use commonware_storage::queue;
 use commonware_utils::sync::Mutex;
+use prometheus_client::metrics::gauge::Gauge;
 use std::{future::Future, sync::Arc};
 
 mod durable;
@@ -28,7 +29,7 @@ mod mock;
 mod pusher;
 
 pub(crate) use durable::{Drainer, FinalizedEntry, Recorder};
-use durable::{DrainerMetrics, SharedUploadState, UploadState};
+use durable::{SharedUploadState, UploadState};
 #[cfg(test)]
 pub use mock::Mock;
 pub(crate) use pusher::Pusher;
@@ -89,11 +90,11 @@ impl<S: Strategy> Indexer for alto_client::Client<S> {
 /// handles needed by the engine:
 /// - a recorder for the application's finalized block stream;
 /// - a live pusher for consensus activity;
-/// - a durable drainer plus queue reader for the background retry task.
+/// - a durable drainer for the background retry task.
 pub(crate) struct IndexerRuntime<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
     recorder: Recorder<E>,
     pusher: Pusher<E, I>,
-    drainer: (Drainer<E, I>, queue::Reader<E, FinalizedEntry>),
+    drainer: Drainer<E, I>,
 }
 
 impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> IndexerRuntime<E, I> {
@@ -117,12 +118,23 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> IndexerRuntime<E, I> {
         let queue_size = writer.size().await;
         let ack_floor = reader.ack_floor().await;
         let pending = queue_size.saturating_sub(ack_floor);
-        let metrics = DrainerMetrics::new(&context.with_label("queue"));
-        metrics.depth.set(pending as i64);
+        let queue_metrics = context.with_label("queue");
+        let queue_depth = Gauge::default();
+        queue_metrics.register(
+            "depth",
+            "Current number of pending finalized block uploads in the durable queue",
+            queue_depth.clone(),
+        );
+        queue_depth.set(pending as i64);
 
-        let recorder = Recorder::new(uploads.clone(), writer.clone(), metrics.clone());
-        let drainer = (
-            Drainer::new(context, indexer, marshal, metrics, uploads, writer),
+        let recorder = Recorder::new(uploads.clone(), writer.clone(), queue_depth.clone());
+        let drainer = Drainer::new(
+            context,
+            indexer,
+            marshal,
+            queue_depth,
+            uploads,
+            writer,
             reader,
         );
 
@@ -143,8 +155,8 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> IndexerRuntime<E, I> {
         self.pusher.clone()
     }
 
-    /// Consumes the runtime and returns the durable queue drainer task inputs.
-    pub(crate) fn into_durable_drainer(self) -> (Drainer<E, I>, queue::Reader<E, FinalizedEntry>) {
+    /// Consumes the runtime and returns the durable queue drainer task.
+    pub(crate) fn into_durable_drainer(self) -> Drainer<E, I> {
         self.drainer
     }
 }

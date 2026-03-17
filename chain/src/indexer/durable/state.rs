@@ -2,46 +2,11 @@ use alto_types::Block;
 use bytes::{Buf, BufMut};
 use commonware_codec::{self, FixedSize, Read, Write};
 use commonware_cryptography::{sha256::Digest, Digestible};
-use commonware_runtime::{telemetry::metrics::status, Clock, Metrics, Storage};
+use commonware_runtime::{Clock, Metrics, Storage};
 use commonware_storage::queue;
 use commonware_utils::{sync::Mutex, PrioritySet};
 use prometheus_client::metrics::gauge::Gauge;
 use std::{collections::BTreeMap, sync::Arc};
-
-#[derive(Clone)]
-pub(crate) struct DrainerMetrics {
-    pub(crate) depth: Gauge,
-    pub(crate) uploads: status::Counter,
-    pub(crate) in_flight: Gauge,
-}
-
-impl DrainerMetrics {
-    pub(crate) fn new<E: Metrics>(context: &E) -> Self {
-        let metrics = Self {
-            depth: Gauge::default(),
-            uploads: status::Counter::default(),
-            in_flight: Gauge::default(),
-        };
-
-        context.register(
-            "depth",
-            "Current number of pending finalized block uploads in the durable queue",
-            metrics.depth.clone(),
-        );
-        context.register(
-            "uploads",
-            "Total number of finalized block upload attempt outcomes by status",
-            metrics.uploads.clone(),
-        );
-        context.register(
-            "in_flight",
-            "Current number of occupied upload slots in the durable drainer",
-            metrics.in_flight.clone(),
-        );
-
-        metrics
-    }
-}
 
 /// What the durable drainer should do next for a digest.
 pub(crate) enum RawUploadDecision {
@@ -282,19 +247,19 @@ pub(crate) type SharedUploadState = Arc<Mutex<UploadState>>;
 pub(crate) struct Recorder<E: Clock + Storage + Metrics> {
     uploads: SharedUploadState,
     writer: queue::Writer<E, FinalizedEntry>,
-    metrics: DrainerMetrics,
+    queue_depth: Gauge,
 }
 
 impl<E: Clock + Storage + Metrics> Recorder<E> {
     pub(crate) fn new(
         uploads: SharedUploadState,
         writer: queue::Writer<E, FinalizedEntry>,
-        metrics: DrainerMetrics,
+        queue_depth: Gauge,
     ) -> Self {
         Self {
             uploads,
             writer,
-            metrics,
+            queue_depth,
         }
     }
 
@@ -311,7 +276,7 @@ impl<E: Clock + Storage + Metrics> Recorder<E> {
             .enqueue(entry)
             .await
             .expect("failed to enqueue finalized digest");
-        self.metrics.depth.inc();
+        self.queue_depth.inc();
         let _ = self.uploads.lock().register_finalized(position, entry);
         self.writer
             .sync()

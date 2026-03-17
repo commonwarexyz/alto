@@ -1,4 +1,4 @@
-use super::{DrainerMetrics, FinalizedEntry, RawUploadDecision, SharedUploadState};
+use super::{FinalizedEntry, RawUploadDecision, SharedUploadState};
 use crate::indexer::Indexer;
 use alto_types::{Block, Scheme};
 use commonware_consensus::marshal::{
@@ -7,11 +7,13 @@ use commonware_consensus::marshal::{
 use commonware_cryptography::sha256::Digest;
 use commonware_macros::select_loop;
 use commonware_runtime::{
+    spawn_cell,
     telemetry::metrics::status::{self, CounterExt},
-    Clock, Handle, Metrics, Spawner, Storage,
+    Clock, ContextCell, Handle, Metrics, Spawner, Storage,
 };
 use commonware_storage::queue;
 use commonware_utils::futures::{OptionFuture, Pool};
+use prometheus_client::metrics::gauge::Gauge;
 use std::time::Duration;
 use tracing::{debug, warn};
 
@@ -32,62 +34,13 @@ enum DrainCompletion {
     Retired { position: u64 },
 }
 
-#[derive(Clone)]
 pub(crate) struct Drainer<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
-    context: E,
+    context: ContextCell<E>,
     indexer: I,
     marshal: MarshalMailbox<Scheme, Standard<Block>>,
-    metrics: DrainerMetrics,
-    uploads: SharedUploadState,
-    writer: queue::Writer<E, FinalizedEntry>,
-}
-
-impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
-    pub(crate) fn new(
-        context: E,
-        indexer: I,
-        marshal: MarshalMailbox<Scheme, Standard<Block>>,
-        metrics: DrainerMetrics,
-        uploads: SharedUploadState,
-        writer: queue::Writer<E, FinalizedEntry>,
-    ) -> Self {
-        Self {
-            context,
-            indexer,
-            marshal,
-            metrics,
-            uploads,
-            writer,
-        }
-    }
-
-    /// Start the drainer loop that reads from the queue and uploads blocks.
-    pub(crate) fn start(self, reader: queue::Reader<E, FinalizedEntry>) -> Handle<()> {
-        let Self {
-            context,
-            indexer,
-            marshal,
-            metrics,
-            uploads,
-            writer,
-        } = self;
-        context
-            .with_label("drainer")
-            .spawn(move |context| async move {
-                DrainerRunner::new(context, indexer, marshal, metrics, uploads, writer, reader)
-                    .run()
-                    .await;
-            })
-    }
-}
-
-/// Owns the mutable state of the drainer event loop so the queue-processing
-/// steps can be expressed as instance methods rather than long helper calls.
-struct DrainerRunner<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
-    context: E,
-    indexer: I,
-    marshal: MarshalMailbox<Scheme, Standard<Block>>,
-    metrics: DrainerMetrics,
+    queue_depth: Gauge,
+    upload_results: status::Counter,
+    in_flight_uploads: Gauge,
     uploads: SharedUploadState,
     writer: queue::Writer<E, FinalizedEntry>,
     reader: queue::Reader<E, FinalizedEntry>,
@@ -95,27 +48,47 @@ struct DrainerRunner<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
     queue_closed: bool,
 }
 
-impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
-    fn new(
+impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
+    pub(crate) fn new(
         context: E,
         indexer: I,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
-        metrics: DrainerMetrics,
+        queue_depth: Gauge,
         uploads: SharedUploadState,
         writer: queue::Writer<E, FinalizedEntry>,
         reader: queue::Reader<E, FinalizedEntry>,
     ) -> Self {
+        let queue_metrics = context.with_label("queue");
+        let upload_results = status::Counter::default();
+        queue_metrics.register(
+            "uploads",
+            "Total number of finalized block upload attempt outcomes by status",
+            upload_results.clone(),
+        );
+        let in_flight_uploads = Gauge::default();
+        queue_metrics.register(
+            "in_flight",
+            "Current number of occupied upload slots in the durable drainer",
+            in_flight_uploads.clone(),
+        );
         Self {
-            context,
+            context: ContextCell::new(context.with_label("drainer")),
             indexer,
             marshal,
-            metrics,
+            queue_depth,
+            upload_results,
+            in_flight_uploads,
             uploads,
             writer,
             reader,
             in_flight: Pool::default(),
             queue_closed: false,
         }
+    }
+
+    /// Start the drainer loop that reads from the queue and uploads blocks.
+    pub(crate) fn start(mut self) -> Handle<()> {
+        spawn_cell!(self.context, self.run().await)
     }
 
     async fn run(mut self) {
@@ -197,26 +170,30 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
             // rows rebuild the same pending state the original process had.
             if uploads.register_finalized(position, entry) {
                 Some("drainer skipping duplicate queued block")
-            } else if matches!(uploads.raw_upload_decision(&digest), RawUploadDecision::Retire) {
+            } else if matches!(
+                uploads.raw_upload_decision(&digest),
+                RawUploadDecision::Retire
+            ) {
                 Some("drainer skipping already-uploaded block")
             } else {
                 None
             }
         };
         if let Some(reason) = skip {
-            self.complete_drained(DrainCompletion::Retired { position }).await;
+            self.complete_drained(DrainCompletion::Retired { position })
+                .await;
             debug!(?digest, reason);
             return;
         }
 
         // Hand the upload/retry loop off to the in-flight pool so the drainer
         // can continue dequeuing and retiring other durable rows concurrently.
-        self.metrics.in_flight.inc();
+        self.in_flight_uploads.inc();
         self.in_flight.push({
             let indexer = self.indexer.clone();
             let marshal = self.marshal.clone();
             let context = self.context.with_label("upload");
-            let metrics = self.metrics.clone();
+            let upload_results = self.upload_results.clone();
             let uploads = self.uploads.clone();
             async move {
                 let Some(block) =
@@ -247,7 +224,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
 
                     match indexer.block_upload(block.clone()).await {
                         Ok(()) => {
-                            metrics.uploads.inc(status::Status::Success);
+                            upload_results.inc(status::Status::Success);
                             debug!(?digest, "drainer uploaded block");
                             return DrainCompletion::Uploaded {
                                 position,
@@ -259,7 +236,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
                             // Keep retrying from the original durable row. We do
                             // not ack the row until success or until the live
                             // certificate path proves the block was uploaded.
-                            metrics.uploads.inc(status::Status::Failure);
+                            upload_results.inc(status::Status::Failure);
                             warn!(?e, ?digest, "drainer failed to upload block, retrying");
                             context.sleep(DRAINER_RETRY_DELAY).await;
                         }
@@ -270,7 +247,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
     }
 
     async fn wait_for_uploadable_block(
-        context: &E,
+        context: &ContextCell<E>,
         marshal: &MarshalMailbox<Scheme, Standard<Block>>,
         uploads: &SharedUploadState,
         digest: Digest,
@@ -321,7 +298,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
     }
 
     async fn complete_drained(&mut self, completion: DrainCompletion) {
-        self.metrics.in_flight.dec();
+        self.in_flight_uploads.dec();
         let position = match completion {
             // Record the success before acking so the in-memory dedupe tracker
             // stays aligned with the durable queue state.
@@ -339,12 +316,9 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
         // Persist retirement of the durable row before dropping the corresponding
         // pending state from memory so replay after a crash sees a consistent
         // queue/UploadState pairing.
-        self.reader
-            .ack(position)
-            .await
-            .expect("failed to ack");
+        self.reader.ack(position).await.expect("failed to ack");
         self.writer.sync().await.expect("failed to sync after ack");
-        self.metrics.depth.dec();
+        self.queue_depth.dec();
         self.uploads.lock().finish_finalized(position);
     }
 }
