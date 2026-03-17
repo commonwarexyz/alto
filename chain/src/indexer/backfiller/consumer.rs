@@ -44,7 +44,6 @@ pub struct Consumer<E: Spawner + Clock + Storage + Metrics, C: Client> {
     writer: queue::Writer<E, Entry>,
     reader: queue::Reader<E, Entry>,
     in_flight: Pool<Completion>,
-    queue_closed: bool,
 }
 
 impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
@@ -79,7 +78,6 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
             writer,
             reader,
             in_flight: Pool::default(),
-            queue_closed: false,
         }
     }
 
@@ -96,11 +94,6 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                 // blocking so restarts resume with full parallelism immediately.
                 self.fill_slots().await;
 
-                if self.queue_closed && self.in_flight.is_empty() {
-                    warn!("consumer queue closed");
-                    break;
-                }
-
                 if self.in_flight.is_empty() {
                     // If there is no work in flight, block for the next queue
                     // row instead of polling an optional future in a tight loop.
@@ -110,8 +103,8 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                         .await
                         .expect("failed to recv from finalized queue");
                     let Some((position, entry)) = item else {
-                        self.queue_closed = true;
-                        continue;
+                        warn!("consumer queue closed");
+                        break;
                     };
                     self.start_upload(position, entry).await;
                     continue;
@@ -120,8 +113,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                 // Once the consumer is busy, race newly dequeued rows against
                 // completions from already-running uploads.
                 let item = OptionFuture::from(
-                    (!self.queue_closed && self.in_flight.len() < CONSUMER_MAX_IN_FLIGHT)
-                        .then(|| self.reader.recv()),
+                    (self.in_flight.len() < CONSUMER_MAX_IN_FLIGHT).then(|| self.reader.recv()),
                 );
             },
             on_stopped => {},
@@ -134,7 +126,8 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                         self.start_upload(position, entry).await;
                     }
                     None => {
-                        self.queue_closed = true;
+                        warn!("consumer queue closed");
+                        break;
                     }
                 }
             },
