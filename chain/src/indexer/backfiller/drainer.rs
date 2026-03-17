@@ -1,5 +1,5 @@
 use super::{FinalizedEntry, SharedUploadState, UploadDecision};
-use crate::indexer::Indexer;
+use crate::indexer::Client;
 use alto_types::{Block, Scheme};
 use commonware_consensus::marshal::{
     core::Mailbox as MarshalMailbox, standard::Standard, Identifier,
@@ -20,23 +20,23 @@ use tracing::{debug, warn};
 const DRAINER_MAX_IN_FLIGHT: usize = 16;
 const DRAINER_RETRY_DELAY: Duration = Duration::from_secs(1);
 
-/// Final outcome for one durable queue row.
+/// Final outcome for one backfill queue row.
 enum DrainCompletion {
     /// The drainer uploaded the block itself and must mark the digest
-    /// uploaded before retiring the durable row.
+    /// uploaded before retiring the queue row.
     Uploaded {
         position: u64,
         height: u64,
         digest: Digest,
     },
-    /// The durable row became redundant because it was duplicate work or
+    /// The queue row became redundant because it was duplicate work or
     /// because the live certificate path uploaded the block first.
     Retired { position: u64 },
 }
 
-pub struct Drainer<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
+pub struct Drainer<E: Spawner + Clock + Storage + Metrics, C: Client> {
     context: ContextCell<E>,
-    indexer: I,
+    client: C,
     marshal: MarshalMailbox<Scheme, Standard<Block>>,
     upload_results: status::Counter,
     in_flight_uploads: Gauge,
@@ -47,10 +47,10 @@ pub struct Drainer<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
     queue_closed: bool,
 }
 
-impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
+impl<E: Spawner + Clock + Storage + Metrics, C: Client> Drainer<E, C> {
     pub fn new(
         context: E,
-        indexer: I,
+        client: C,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
         uploads: SharedUploadState,
         writer: queue::Writer<E, FinalizedEntry>,
@@ -66,12 +66,12 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
         let in_flight_uploads = Gauge::default();
         queue_metrics.register(
             "in_flight",
-            "Current number of occupied upload slots in the durable drainer",
+            "Current number of occupied upload slots in the backfiller",
             in_flight_uploads.clone(),
         );
         Self {
             context: ContextCell::new(context.with_label("drainer")),
-            indexer,
+            client,
             marshal,
             upload_results,
             in_flight_uploads,
@@ -92,7 +92,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
         select_loop! {
             self.context,
             on_start => {
-                // Drain any backlog already sitting in the durable queue before
+                // Drain any backlog already sitting in the backfill queue before
                 // blocking so restarts resume with full parallelism immediately.
                 self.fill_drainer_slots().await;
 
@@ -181,10 +181,10 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
         }
 
         // Hand the upload/retry loop off to the in-flight pool so the drainer
-        // can continue dequeuing and retiring other durable rows concurrently.
+        // can continue dequeuing and retiring other queue rows concurrently.
         self.in_flight_uploads.inc();
         self.in_flight.push({
-            let indexer = self.indexer.clone();
+            let client = self.client.clone();
             let marshal = self.marshal.clone();
             let context = self.context.with_label("upload");
             let upload_results = self.upload_results.clone();
@@ -216,7 +216,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
                         UploadDecision::Proceed => {}
                     }
 
-                    match indexer.block_upload(block.clone()).await {
+                    match client.block_upload(block.clone()).await {
                         Ok(()) => {
                             upload_results.inc(status::Status::Success);
                             debug!(?digest, "drainer uploaded block");
@@ -227,7 +227,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
                             };
                         }
                         Err(e) => {
-                            // Keep retrying from the original durable row. We do
+                            // Keep retrying from the original queue row. We do
                             // not ack the row until success or until the live
                             // certificate path proves the block was uploaded.
                             upload_results.inc(status::Status::Failure);
@@ -295,7 +295,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
         self.in_flight_uploads.dec();
         let position = match completion {
             // Record the success before acking so the in-memory dedupe tracker
-            // stays aligned with the durable queue state.
+            // stays aligned with the queue state.
             DrainCompletion::Uploaded {
                 position,
                 height,
@@ -307,7 +307,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
             DrainCompletion::Retired { position } => position,
         };
 
-        // Persist retirement of the durable row before dropping the corresponding
+        // Persist retirement of the queue row before dropping the corresponding
         // pending state from memory so replay after a crash sees a consistent
         // queue/UploadState pairing.
         self.reader.ack(position).await.expect("failed to ack");

@@ -1,6 +1,6 @@
 use crate::{
     application::Application,
-    indexer::{self, Indexer},
+    indexer::{self, Client},
 };
 use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
 use commonware_broadcast::buffered;
@@ -43,8 +43,8 @@ use std::{
 use tracing::{error, info, warn};
 
 /// Reporter type for [simplex::Engine].
-type Reporter<E, I> =
-    Reporters<Activity, MarshalMailbox<Scheme, Standard<Block>>, Option<indexer::Pusher<E, I>>>;
+type Reporter<E, C> =
+    Reporters<Activity, MarshalMailbox<Scheme, Standard<Block>>, Option<indexer::Pusher<E, C>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -66,7 +66,7 @@ const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(16);
 pub struct Config<
     B: Blocker<PublicKey = PublicKey>,
     P: Provider<PublicKey = PublicKey>,
-    I: Indexer,
+    C: Client,
     S: Strategy,
 > {
     pub blocker: B,
@@ -94,20 +94,20 @@ pub struct Config<
 
     pub strategy: S,
 
-    pub indexer: Option<I>,
+    pub indexer: Option<C>,
 }
 
 type Marshaled<E> = Deferred<E, Scheme, Application<E>, Block, FixedEpocher>;
 
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
-pub struct Engine<E, B, P, S, I>
+pub struct Engine<E, B, P, S, C>
 where
     E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     P: Provider<PublicKey = PublicKey>,
     S: Strategy,
-    I: Indexer,
+    C: Client,
 {
     context: ContextCell<E>,
 
@@ -125,21 +125,21 @@ where
     marshaled: Marshaled<E>,
 
     consensus:
-        Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, I>, S>,
+        Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, C>, S>,
 
-    drainer: Option<indexer::Drainer<E, I>>,
+    backfiller: Option<indexer::Drainer<E, C>>,
 }
 
-impl<E, B, P, S, I> Engine<E, B, P, S, I>
+impl<E, B, P, S, C> Engine<E, B, P, S, C>
 where
     E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + ThreadPooler + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     P: Provider<PublicKey = PublicKey>,
     S: Strategy,
-    I: Indexer,
+    C: Client,
 {
     /// Create a new [Engine].
-    pub async fn new(context: E, cfg: Config<B, P, I, S>) -> Self {
+    pub async fn new(context: E, cfg: Config<B, P, C, S>) -> Self {
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
@@ -268,11 +268,11 @@ where
         )
         .await;
 
-        // Create the reporter and, when an indexer is configured, a durable
+        // Create the reporter and, when an indexer is configured, a backfill
         // queue of finalized digests so block uploads can resume after
         // restarts.
-        let (app, pusher, drainer) = if let Some(indexer) = cfg.indexer {
-            let durable_queue = queue::shared::init(
+        let (app, pusher, backfiller) = if let Some(indexer) = cfg.indexer {
+            let backfill_queue = queue::shared::init(
                 context.with_label("finalized_queue"),
                 queue::Config {
                     partition: format!("{}-finalized-queue", cfg.partition_prefix),
@@ -285,17 +285,16 @@ where
             )
             .await
             .expect("failed to initialize finalized queue");
-            let indexer_runtime = indexer::IndexerRuntime::new(
+            let indexer_runtime = indexer::Indexer::new(
                 context.with_label("indexer"),
                 indexer,
                 marshal_mailbox.clone(),
-                durable_queue,
+                backfill_queue,
             )
             .await;
-            let app = Application::new().with_recorder(indexer_runtime.recorder());
-            let pusher = indexer_runtime.live_pusher();
-            let drainer = indexer_runtime.into_durable_drainer();
-            (app, Some(pusher), Some(drainer))
+            let (recorder, pusher, backfiller) = indexer_runtime.split();
+            let app = Application::new().with_recorder(recorder);
+            (app, Some(pusher), Some(backfiller))
         } else {
             (Application::new(), None, None)
         };
@@ -348,7 +347,7 @@ where
             marshaled,
             consensus,
 
-            drainer,
+            backfiller,
         }
     }
 
@@ -418,7 +417,7 @@ where
 
         // Start draining queued block uploads before consensus so recovered work
         // resumes immediately on startup.
-        let drainer_handle = self.drainer.map(indexer::Drainer::start);
+        let backfiller_handle = self.backfiller.map(indexer::Drainer::start);
 
         // Start consensus
         //
@@ -428,7 +427,7 @@ where
 
         // Wait for any actor to finish
         let mut handles: Vec<Handle<()>> = vec![buffer_handle, marshal_handle, consensus_handle];
-        if let Some(h) = drainer_handle {
+        if let Some(h) = backfiller_handle {
             handles.push(h);
         }
         if let Err(e) = try_join_all(handles).await {

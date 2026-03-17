@@ -1,4 +1,4 @@
-use super::{Indexer, SharedUploadState};
+use super::{Client, SharedUploadState};
 use alto_types::{Activity, Block, Scheme, Seed, Seedable};
 use commonware_consensus::{
     marshal::{core::Mailbox as MarshalMailbox, standard::Standard},
@@ -15,27 +15,27 @@ use tracing::{debug, warn};
 /// This is the live upload path. It reacts directly to consensus activity,
 /// waits for marshal to make the corresponding block available, caches that
 /// block in shared state, and uploads the certificate-bearing object. The
-/// shared state lets the durable block drainer reuse blocks and back off
+/// shared state lets the backfiller reuse blocks and back off
 /// when the live path is already handling a digest.
 #[derive(Clone)]
-pub(crate) struct Pusher<E: Spawner + Metrics, I: Indexer> {
+pub(crate) struct Pusher<E: Spawner + Metrics, C: Client> {
     context: E,
-    indexer: I,
+    client: C,
     marshal: MarshalMailbox<Scheme, Standard<Block>>,
     uploads: SharedUploadState,
 }
 
-impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
+impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
     /// Create a new [Pusher].
     pub(crate) fn new(
         context: E,
-        indexer: I,
+        client: C,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
         uploads: SharedUploadState,
     ) -> Self {
         Self {
             context,
-            indexer,
+            client,
             marshal,
             uploads,
         }
@@ -45,7 +45,7 @@ impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
 /// Tracks one in-flight live certificate upload for a digest.
 ///
 /// While the guard is alive, the digest is marked as having a certificate
-/// upload in flight so the durable drainer waits instead of racing it. On
+/// upload in flight so the backfiller waits instead of racing it. On
 /// successful upload, the guard records the uploaded height and marks the
 /// digest uploaded on drop; on failure, it only clears the in-flight marker.
 struct CertificateUploadGuard {
@@ -80,12 +80,12 @@ impl Drop for CertificateUploadGuard {
     }
 }
 
-impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
+impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
     fn spawn_seed_upload(&self, label: &str, seed: Seed, view: View) {
         self.context.with_label(label).spawn({
-            let indexer = self.indexer.clone();
+            let client = self.client.clone();
             move |_| async move {
-                if let Err(e) = indexer.seed_upload(seed).await {
+                if let Err(e) = client.seed_upload(seed).await {
                     warn!(?e, "failed to upload seed");
                     return;
                 }
@@ -95,7 +95,7 @@ impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
     }
 }
 
-impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
+impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
     fn spawn_certificate_upload<F, Fut>(
         &self,
         label: &'static str,
@@ -104,11 +104,11 @@ impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
         digest: Digest,
         upload_fn: F,
     ) where
-        F: FnOnce(I, Block) -> Fut + Send + 'static,
-        Fut: Future<Output = Result<(), I::Error>> + Send,
+        F: FnOnce(C, Block) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(), C::Error>> + Send,
     {
         self.context.with_label(label).spawn({
-            let indexer = self.indexer.clone();
+            let client = self.client.clone();
             let marshal = self.marshal.clone();
             let uploads = self.uploads.clone();
             move |_| async move {
@@ -122,7 +122,7 @@ impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
 
                 let height = block.height.get();
                 guard.cache_block(block.clone());
-                if let Err(e) = upload_fn(indexer, block).await {
+                if let Err(e) = upload_fn(client, block).await {
                     warn!(?e, %view, label, "failed to upload certificate");
                     return;
                 }
@@ -134,7 +134,7 @@ impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
     }
 }
 
-impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
+impl<E: Spawner + Metrics, C: Client> Reporter for Pusher<E, C> {
     type Activity = Activity;
 
     async fn report(&mut self, activity: Self::Activity) {

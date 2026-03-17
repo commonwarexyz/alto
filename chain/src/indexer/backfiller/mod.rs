@@ -1,6 +1,6 @@
-//! Durable block upload path for the indexer integration.
+//! Backfiller path for the indexer integration.
 //!
-//! The durable path is split into:
+//! The backfiller path is split into:
 //! - [`state`], which owns the shared upload state and the application-side
 //!   [`Recorder`] that persists finalized block digests; and
 //! - [`drainer`], which owns the background retry loop that drains those queue

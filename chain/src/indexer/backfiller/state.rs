@@ -7,18 +7,18 @@ use commonware_storage::queue;
 use commonware_utils::{sync::Mutex, PrioritySet};
 use std::{collections::BTreeMap, sync::Arc};
 
-/// What the durable drainer should do next for a digest.
+/// What the backfiller should do next for a digest.
 pub enum UploadDecision {
-    /// The block is already uploaded, so the durable row can be retired.
+    /// The block is already uploaded, so the queue row can be retired.
     Retire,
-    /// The live certificate path is still handling this digest, so the drainer
+    /// The live certificate path is still handling this digest, so the backfiller
     /// should wait instead of racing it.
     Wait,
-    /// The drainer should proceed with a block upload attempt.
+    /// The backfiller should proceed with a block upload attempt.
     Proceed,
 }
 
-/// Entry stored in the durable finalization queue.
+/// Entry stored in the backfill queue.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct FinalizedEntry {
     pub height: u64,
@@ -49,8 +49,8 @@ impl Read for FinalizedEntry {
 /// Tracks block uploads and the oldest finalized height that still needs them.
 ///
 /// A digest can be in one of three states:
-/// - not seen yet: a finalized block should enqueue a new durable row;
-/// - pending: a durable row already exists (and may currently be draining), so
+/// - not seen yet: a finalized block should enqueue a new queue row;
+/// - pending: a queue row already exists (and may currently be draining), so
 ///   duplicate finalize notifications must not enqueue another row;
 /// - uploaded: the block was already uploaded successfully, so further finalize
 ///   notifications can be ignored.
@@ -58,17 +58,17 @@ pub struct UploadState {
     // Successfully uploaded digests stay in the dedupe set until the oldest
     // pending finalized height advances past them.
     uploaded: PrioritySet<Digest, u64>,
-    // Pending durable queue rows keyed by queue position so replay and acking
+    // Pending backfill queue rows keyed by queue position so replay and acking
     // follow the queue's actual cursor model.
     pending_finalized: BTreeMap<u64, FinalizedEntry>,
     // Counts pending queue rows per digest to suppress duplicate enqueues while
-    // the durable row is still the retry source of truth.
+    // the backfill row is still the retry source of truth.
     pending_digests: BTreeMap<Digest, usize>,
     // Highest finalized height observed from the live application stream.
     latest_finalized: Option<u64>,
-    // Blocks cached for the live certificate upload path and the drainer.
+    // Blocks cached for the live certificate upload path and the backfiller.
     cached_blocks: BTreeMap<Digest, Block>,
-    // Number of in-flight certificate uploads per digest so the drainer can
+    // Number of in-flight certificate uploads per digest so the backfiller can
     // wait for the live path instead of racing it.
     certificate_uploads: BTreeMap<Digest, usize>,
 }
@@ -181,7 +181,7 @@ impl UploadState {
 
     fn needs_enqueue(&mut self, digest: &Digest, height: u64) -> bool {
         self.observe_finalization(height);
-        // A pending digest already has a durable queue row backing retries and
+        // A pending digest already has a backfill queue row backing retries and
         // crash recovery, so a duplicate finalize notification must not enqueue
         // another row.
         !(self.contains(digest) || self.pending_digests.contains_key(digest))
@@ -241,10 +241,10 @@ impl UploadState {
     }
 }
 
-/// State shared by the live certificate path and the durable block path.
+/// State shared by the live certificate path and the backfiller path.
 pub type SharedUploadState = Arc<Mutex<UploadState>>;
 
-/// Records finalized block digests in the durable queue from the application's
+/// Records finalized block digests in the backfill queue from the application's
 /// block stream.
 #[derive(Clone)]
 pub struct Recorder<E: Clock + Storage + Metrics> {
@@ -263,7 +263,7 @@ impl<E: Clock + Storage + Metrics> Recorder<E> {
         };
 
         // Persist exactly one queue row per digest while it is pending. The
-        // drainer retries from this row until it either uploads successfully or
+        // backfiller retries from this row until it either uploads successfully or
         // observes that the live certificate path already uploaded the block.
         let position = self
             .writer
@@ -403,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn test_upload_state_keeps_cached_block_while_durable_row_is_pending() {
+    fn test_upload_state_keeps_cached_block_while_backfill_row_is_pending() {
         let mut uploads = UploadState::new();
         let block = test_block(7, 7, b"view-7");
         let entry = FinalizedEntry {

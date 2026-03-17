@@ -1,4 +1,4 @@
-use super::Indexer;
+use super::Client;
 use alto_types::{Block, Finalized, Identity, Notarized, Seed};
 use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_utils::{channel::oneshot, sync::Mutex};
@@ -86,7 +86,7 @@ impl Mock {
     }
 }
 
-impl Indexer for Mock {
+impl Client for Mock {
     type Error = std::io::Error;
 
     async fn seed_upload(&self, _: Seed) -> Result<(), Self::Error> {
