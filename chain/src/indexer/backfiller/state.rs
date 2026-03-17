@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 /// What the backfiller should do next for a digest.
 pub enum Decision {
-    /// The block is already uploaded, so the queue row can be retired.
+    /// The block is already uploaded, so the queue entry can be retired.
     Retire,
     /// The live certificate path is still handling this digest, so the backfiller
     /// should wait instead of racing it.
@@ -47,8 +47,8 @@ impl Read for Entry {
 /// Tracks block uploads and the oldest finalized height that still needs them.
 ///
 /// A digest can be in one of three states:
-/// - not seen yet: a finalized block should enqueue a new queue row;
-/// - pending: a queue row already exists (and may currently be draining), so
+/// - not seen yet: a finalized block should enqueue a new queue entry;
+/// - pending: a queue entry already exists (and may currently be draining), so
 ///   duplicate finalize notifications must not enqueue another row;
 /// - uploaded: the block was already uploaded successfully, so further finalize
 ///   notifications can be ignored.
@@ -56,10 +56,10 @@ pub struct State {
     // Successfully uploaded digests stay in the dedupe set until the oldest
     // pending finalized height advances past them.
     uploaded: PrioritySet<Digest, u64>,
-    // Pending backfill queue rows keyed by queue position so replay and acking
+    // Pending backfiller entries keyed by queue position so replay and acking
     // follow the queue's actual cursor model.
     pending_finalized: BTreeMap<u64, Entry>,
-    // Counts pending queue rows per digest to suppress duplicate enqueues while
+    // Counts pending queue entries per digest to suppress duplicate enqueues while
     // the backfill row is still the retry source of truth.
     pending_digests: BTreeMap<Digest, usize>,
     // Highest finalized height observed from the live application stream.
@@ -179,7 +179,7 @@ impl State {
 
     fn needs_enqueue(&mut self, digest: &Digest, height: u64) -> bool {
         self.observe_finalization(height);
-        // A pending digest already has a backfill queue row backing retries and
+        // A pending digest already has a backfill queue entry backing retries and
         // crash recovery, so a duplicate finalize notification must not enqueue
         // another row.
         !(self.is_uploaded(digest) || self.pending_digests.contains_key(digest))

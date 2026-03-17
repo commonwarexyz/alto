@@ -16,16 +16,16 @@ use commonware_utils::futures::{OptionFuture, Pool};
 use std::{num::NonZeroUsize, time::Duration};
 use tracing::{debug, warn};
 
-/// Final outcome for one backfill queue row.
+/// Final outcome for one backfill queue entry.
 enum Completion {
     /// The consumer uploaded the block itself and must mark the digest
-    /// uploaded before retiring the queue row.
+    /// uploaded before retiring the queue entry.
     Uploaded {
         position: u64,
         height: u64,
         digest: Digest,
     },
-    /// The queue row became redundant because it was duplicate work or
+    /// The queue entry became redundant because it was duplicate work or
     /// because the live certificate path uploaded the block first.
     Retired { position: u64 },
 }
@@ -129,7 +129,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
     }
 
     async fn fill_slots(&mut self) {
-        // Consume all queue rows that are already available without waiting so
+        // Consume all queue entries that are already available without waiting so
         // the consumer keeps as many upload slots busy as it can.
         while self.in_flight.len() < self.max_in_flight.get() {
             let item = self
@@ -167,7 +167,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
         }
 
         // Hand the upload/retry loop off to the in-flight pool so the consumer
-        // can continue dequeuing and retiring other queue rows concurrently.
+        // can continue dequeuing and retiring other queue entries concurrently.
         self.in_flight.push({
             let client = self.client.clone();
             let marshal = self.marshal.clone();
@@ -214,8 +214,8 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                             };
                         }
                         Err(e) => {
-                            // Keep retrying from the original queue row. We do
-                            // not ack the row until success or until the live
+                            // Keep retrying from the original queue entry. We do
+                            // not ack the entry until success or until the live
                             // certificate path proves the block was uploaded.
                             upload_results.inc(status::Status::Failure);
                             warn!(?e, ?digest, "consumer failed to upload block, retrying");
@@ -297,7 +297,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
             Completion::Retired { position } => position,
         };
 
-        // Persist retirement of the queue row before dropping the corresponding
+        // Persist retirement of the queue entry before dropping the corresponding
         // pending state from memory so replay after a crash sees a consistent
         // queue/State pairing.
         self.reader.ack(position).await.expect("failed to ack");

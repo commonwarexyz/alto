@@ -21,7 +21,7 @@ impl<E: Clock + Storage + Metrics> Producer<E> {
             return;
         };
 
-        // Persist exactly one queue row per digest while it is pending. The
+        // Persist exactly one queue entry per digest while it is pending. The
         // backfiller retries from this row until it either uploads successfully or
         // observes that the live certificate path already uploaded the block.
         let position = self
