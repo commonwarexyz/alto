@@ -174,7 +174,14 @@ mod tests {
         }
     }
 
-    fn sum_validator_metric_u64(metrics: &str, suffix: &str, label_filter: Option<&str>) -> u64 {
+    fn sum_validator_metric<T: std::str::FromStr + std::iter::Sum>(
+        metrics: &str,
+        suffix: &str,
+        label_filter: Option<&str>,
+    ) -> T
+    where
+        T::Err: std::fmt::Debug,
+    {
         metrics
             .lines()
             .filter_map(|line| {
@@ -201,26 +208,7 @@ mod tests {
                         return None;
                     }
                 }
-                Some(value.parse::<u64>().unwrap())
-            })
-            .sum()
-    }
-
-    fn sum_validator_metric_i64(metrics: &str, suffix: &str) -> i64 {
-        metrics
-            .lines()
-            .filter_map(|line| {
-                if !line.starts_with("validator_") {
-                    return None;
-                }
-                let mut parts = line.split_whitespace();
-                let metric = parts.next()?;
-                let value = parts.next()?;
-                let name = metric.split('{').next().unwrap();
-                if !name.ends_with(suffix) {
-                    return None;
-                }
-                Some(value.parse::<i64>().unwrap())
+                Some(value.parse::<T>().unwrap())
             })
             .sum()
     }
@@ -1282,8 +1270,8 @@ mod tests {
             for _ in 0..10 {
                 metrics = context.encode();
                 if indexer.current_cert_upload_inflight() > 0
-                    && sum_validator_metric_i64(&metrics, "_queue_depth") > 0
-                    && sum_validator_metric_u64(&metrics, "_marshal_processed_height", None)
+                    && sum_validator_metric::<i64>(&metrics, "_queue_depth", None) > 0
+                    && sum_validator_metric::<u64>(&metrics, "_marshal_processed_height", None)
                         >= required_container
                 {
                     break;
@@ -1296,7 +1284,7 @@ mod tests {
                 "expected at least one certificate upload to remain blocked",
             );
             assert!(
-                sum_validator_metric_i64(&metrics, "_queue_depth") > 0,
+                sum_validator_metric::<i64>(&metrics, "_queue_depth", None) > 0,
                 "expected finalized queue work while certificate uploads were blocked",
             );
             assert_eq!(
@@ -1464,13 +1452,13 @@ mod tests {
             let mut metrics = String::new();
             for _ in 0..10 {
                 metrics = context.encode();
-                if sum_validator_metric_i64(&metrics, "_queue_in_flight") >= 2 {
+                if sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None) >= 2 {
                     break;
                 }
                 context.sleep(Duration::from_secs(1)).await;
             }
 
-            let queue_in_flight = sum_validator_metric_i64(&metrics, "_queue_in_flight");
+            let queue_in_flight = sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None);
             assert!(
                 queue_in_flight >= 2,
                 "queue in_flight metric never reflected parallel drainer uploads",
@@ -1479,7 +1467,7 @@ mod tests {
                 queue_in_flight as usize >= indexer.current_block_upload_inflight(),
                 "queue in_flight metric should be >= mock inflight (may include un-reaped completions)",
             );
-            let queue_depth = sum_validator_metric_i64(&metrics, "_queue_depth");
+            let queue_depth = sum_validator_metric::<i64>(&metrics, "_queue_depth", None);
             assert!(
                 queue_depth >= queue_in_flight,
                 "queue depth should include uploads currently in flight",
@@ -1510,7 +1498,7 @@ mod tests {
             );
 
             let metrics = context.encode();
-            let queue_upload_success = sum_validator_metric_u64(
+            let queue_upload_success = sum_validator_metric::<u64>(
                 &metrics,
                 "_queue_uploads_total",
                 Some("status=\"success\""),
@@ -1522,7 +1510,7 @@ mod tests {
                     .load(std::sync::atomic::Ordering::SeqCst) as u64,
                 "queue success counter did not match completed drainer uploads",
             );
-            let queue_upload_failure = sum_validator_metric_u64(
+            let queue_upload_failure = sum_validator_metric::<u64>(
                 &metrics,
                 "_queue_uploads_total",
                 Some("status=\"failure\""),
@@ -1671,13 +1659,13 @@ mod tests {
                 let mut metrics = String::new();
                 for _ in 0..10 {
                     metrics = context.encode();
-                    if sum_validator_metric_i64(&metrics, "_queue_in_flight") >= 2 {
+                    if sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None) >= 2 {
                         break;
                     }
                     context.sleep(Duration::from_secs(1)).await;
                 }
 
-                let queue_in_flight = sum_validator_metric_i64(&metrics, "_queue_in_flight");
+                let queue_in_flight = sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None);
                 assert!(
                     queue_in_flight >= 2,
                     "queue in_flight metric never reflected the blocked uploads before restart",
@@ -1688,7 +1676,7 @@ mod tests {
                     "queue in_flight metric diverged from the blocked uploads before restart",
                 );
                 assert!(
-                    sum_validator_metric_i64(&metrics, "_queue_depth") >= queue_in_flight,
+                    sum_validator_metric::<i64>(&metrics, "_queue_depth", None) >= queue_in_flight,
                     "queue depth should include blocked uploads before restart",
                 );
 
@@ -1829,8 +1817,8 @@ mod tests {
             let mut metrics = String::new();
             for _ in 0..10 {
                 metrics = context.encode();
-                if sum_validator_metric_i64(&metrics, "_queue_depth") == 0
-                    && sum_validator_metric_i64(&metrics, "_queue_in_flight") == 0
+                if sum_validator_metric::<i64>(&metrics, "_queue_depth", None) == 0
+                    && sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None) == 0
                 {
                     break;
                 }
@@ -1838,16 +1826,16 @@ mod tests {
             }
 
             assert_eq!(
-                sum_validator_metric_i64(&metrics, "_queue_depth"),
+                sum_validator_metric::<i64>(&metrics, "_queue_depth", None),
                 0,
                 "queue depth metric should return to zero after replay drains the durable queue",
             );
             assert_eq!(
-                sum_validator_metric_i64(&metrics, "_queue_in_flight"),
+                sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None),
                 0,
                 "queue in_flight metric should return to zero after replay completes",
             );
-            let queue_upload_success = sum_validator_metric_u64(
+            let queue_upload_success = sum_validator_metric::<u64>(
                 &metrics,
                 "_queue_uploads_total",
                 Some("status=\"success\""),
@@ -1859,7 +1847,7 @@ mod tests {
                     .load(std::sync::atomic::Ordering::SeqCst) as u64,
                 "queue success counter did not match replayed drainer uploads",
             );
-            let queue_upload_failure = sum_validator_metric_u64(
+            let queue_upload_failure = sum_validator_metric::<u64>(
                 &metrics,
                 "_queue_uploads_total",
                 Some("status=\"failure\""),

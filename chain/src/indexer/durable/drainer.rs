@@ -161,10 +161,17 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
 
     async fn start_drained_upload(&mut self, position: u64, entry: FinalizedEntry) {
         let FinalizedEntry { height, digest } = entry;
-        if self.uploads.lock().register_finalized(position, entry) {
-            // Another durable row for this digest is already pending. Keep that
-            // original row as the single retry/recovery source of truth and
-            // retire this duplicate entry.
+        let skip = {
+            let mut uploads = self.uploads.lock();
+            if uploads.register_finalized(position, entry) {
+                Some("drainer skipping duplicate queued block")
+            } else if uploads.contains(&digest) {
+                Some("drainer skipping already-uploaded block")
+            } else {
+                None
+            }
+        };
+        if let Some(reason) = skip {
             self.complete_drained(DrainCompletion {
                 position,
                 height,
@@ -172,21 +179,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
                 counted_in_flight: false,
             })
             .await;
-            debug!(?digest, "drainer skipping duplicate queued block");
-            return;
-        }
-
-        // Skip queue entries that already succeeded through a live
-        // notarization/finalization upload path.
-        if self.uploads.lock().contains(&digest) {
-            self.complete_drained(DrainCompletion {
-                position,
-                height,
-                digest: None,
-                counted_in_flight: false,
-            })
-            .await;
-            debug!(?digest, "drainer skipping already-uploaded block");
+            debug!(?digest, reason);
             return;
         }
 
@@ -229,16 +222,6 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
                     if wait_for_certificate {
                         context.sleep(DRAINER_RETRY_DELAY).await;
                         continue;
-                    }
-
-                    if uploads.lock().contains(&digest) {
-                        debug!(?digest, "drainer observed live upload before raw upload");
-                        return DrainCompletion {
-                            position,
-                            height,
-                            digest: None,
-                            counted_in_flight: true,
-                        };
                     }
 
                     match indexer.block_upload(block.clone()).await {

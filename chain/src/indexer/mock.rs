@@ -3,9 +3,17 @@ use alto_types::{Block, Finalized, Identity, Notarized, Seed};
 use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_utils::{channel::oneshot, sync::Mutex};
 use std::sync::{
-    atomic::{AtomicBool, AtomicUsize},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
 };
+
+struct InflightGuard(Arc<AtomicUsize>);
+
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 /// A mock indexer implementation for testing.
 #[derive(Clone)]
@@ -61,25 +69,17 @@ impl Mock {
 
     pub fn current_cert_upload_inflight(&self) -> usize {
         self.cert_upload_inflight
-            .load(std::sync::atomic::Ordering::SeqCst)
+            .load(Ordering::SeqCst)
     }
 
     pub fn current_block_upload_inflight(&self) -> usize {
         self.block_upload_inflight
-            .load(std::sync::atomic::Ordering::SeqCst)
+            .load(Ordering::SeqCst)
     }
 
     async fn wait_for_cert_upload(&self) {
-        struct InflightGuard(Arc<AtomicUsize>);
-
-        impl Drop for InflightGuard {
-            fn drop(&mut self) {
-                self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-            }
-        }
-
         self.cert_upload_inflight
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            .fetch_add(1, Ordering::SeqCst);
         let _guard = InflightGuard(self.cert_upload_inflight.clone());
 
         let waiter = self.cert_upload_waiters.lock().pop();
@@ -94,7 +94,7 @@ impl Indexer for Mock {
 
     async fn seed_upload(&self, _: Seed) -> Result<(), Self::Error> {
         self.seed_seen
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+            .store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -104,7 +104,7 @@ impl Indexer for Mock {
         }
         self.wait_for_cert_upload().await;
         self.notarization_seen
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+            .store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -114,29 +114,21 @@ impl Indexer for Mock {
         }
         self.wait_for_cert_upload().await;
         self.finalization_seen
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+            .store(true, Ordering::Relaxed);
         Ok(())
     }
 
     async fn block_upload(&self, block: Block) -> Result<(), Self::Error> {
-        struct InflightGuard(Arc<AtomicUsize>);
-
-        impl Drop for InflightGuard {
-            fn drop(&mut self) {
-                self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-            }
-        }
-
         let digest = block.digest();
         self.block_upload_started
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            .fetch_add(1, Ordering::SeqCst);
         self.block_upload_started_digests.lock().push(digest);
         let inflight = self
             .block_upload_inflight
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            .fetch_add(1, Ordering::SeqCst)
             + 1;
         self.block_upload_max_inflight
-            .fetch_max(inflight, std::sync::atomic::Ordering::SeqCst);
+            .fetch_max(inflight, Ordering::SeqCst);
         let _guard = InflightGuard(self.block_upload_inflight.clone());
 
         let waiter = self.block_upload_waiters.lock().pop();
@@ -145,7 +137,7 @@ impl Indexer for Mock {
         }
 
         self.block_upload_completed
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            .fetch_add(1, Ordering::SeqCst);
         self.block_upload_completed_digests.lock().push(digest);
         Ok(())
     }
