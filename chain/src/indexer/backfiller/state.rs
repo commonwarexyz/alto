@@ -46,22 +46,18 @@ impl Read for Entry {
 
 /// Tracks block uploads and the oldest finalized height that still needs them.
 ///
-/// A digest can be in one of three states:
-/// - not seen yet: a finalized block should enqueue a new queue entry;
-/// - pending: a queue entry already exists (and may currently be draining), so
-///   duplicate finalize notifications must not enqueue another row;
-/// - uploaded: the block was already uploaded successfully, so further finalize
-///   notifications can be ignored.
+/// Duplicate finalize notifications may enqueue multiple queue entries for the
+/// same digest until one upload succeeds. The queue itself remains the durable
+/// source of truth for pending work; this state only keeps recent upload and
+/// cache metadata around it.
 pub struct State {
-    // Successfully uploaded digests stay in the dedupe set until the oldest
-    // pending finalized height advances past them.
+    // Successfully uploaded digests stay in the dedupe set until contiguous
+    // queue retirement has advanced far enough that older heights are no longer
+    // needed for dedupe.
     uploaded: PrioritySet<Digest, u64>,
-    // Pending backfiller entries keyed by queue position so replay and acking
-    // follow the queue's actual cursor model.
-    pending_finalized: BTreeMap<u64, Entry>,
-    // Counts pending queue entries per digest to suppress duplicate enqueues while
-    // the backfill row is still the retry source of truth.
-    pending_digests: BTreeMap<Digest, usize>,
+    // Conservative height watermark derived from contiguous queue-floor
+    // progress. Heights below this can be forgotten from the uploaded set.
+    acked_through: Option<u64>,
     // Highest finalized height observed from the live application stream.
     latest_finalized: Option<u64>,
     // Blocks cached for the live certificate upload path and the backfiller.
@@ -75,8 +71,7 @@ impl State {
     pub fn new() -> Self {
         Self {
             uploaded: PrioritySet::new(),
-            pending_finalized: BTreeMap::new(),
-            pending_digests: BTreeMap::new(),
+            acked_through: None,
             latest_finalized: None,
             cached_blocks: BTreeMap::new(),
             certificate_uploads: BTreeMap::new(),
@@ -92,44 +87,19 @@ impl State {
             height: block.height.get(),
             digest: block.digest(),
         };
-        let needs_enqueue = self.needs_enqueue(&entry.digest, entry.height);
-        if needs_enqueue || self.pending_digests.contains_key(&entry.digest) {
-            self.cache_block(block.clone());
+        self.observe_finalization(entry.height);
+        if self.is_uploaded(&entry.digest) {
+            return None;
         }
-        needs_enqueue.then_some(entry)
+        self.cache_block(block.clone());
+        Some(entry)
     }
 
-    pub fn register_finalized(&mut self, position: u64, entry: Entry) -> bool {
-        if let Some(previous) = self.pending_finalized.get(&position) {
-            assert_eq!(
-                previous.height, entry.height,
-                "pending finalized height changed"
-            );
-            assert_eq!(
-                previous.digest, entry.digest,
-                "pending finalized digest changed"
-            );
-            return false;
-        }
-        let duplicate_digest = self.pending_digests.contains_key(&entry.digest);
-        self.pending_finalized.insert(position, entry);
-        *self.pending_digests.entry(entry.digest).or_default() += 1;
-        duplicate_digest
-    }
-
-    pub fn finish_finalized(&mut self, position: u64) {
-        let pending = self
-            .pending_finalized
-            .remove(&position)
-            .expect("missing pending finalized height");
-        let count = self
-            .pending_digests
-            .get_mut(&pending.digest)
-            .expect("missing pending finalized digest");
-        *count -= 1;
-        if *count == 0 {
-            self.pending_digests.remove(&pending.digest);
-        }
+    pub fn advance_queue_floor(&mut self, height: u64) {
+        self.acked_through = Some(
+            self.acked_through
+                .map_or(height, |current| current.max(height)),
+        );
         self.prune();
     }
 
@@ -177,14 +147,6 @@ impl State {
         self.prune();
     }
 
-    fn needs_enqueue(&mut self, digest: &Digest, height: u64) -> bool {
-        self.observe_finalization(height);
-        // A pending digest already has a backfill queue entry backing retries and
-        // crash recovery, so a duplicate finalize notification must not enqueue
-        // another row.
-        !(self.is_uploaded(digest) || self.pending_digests.contains_key(digest))
-    }
-
     fn observe_finalization(&mut self, height: u64) {
         self.latest_finalized = Some(
             self.latest_finalized
@@ -194,19 +156,7 @@ impl State {
     }
 
     fn prune(&mut self) {
-        let uploaded_prune_before = match (
-            self.pending_finalized
-                .first_key_value()
-                .map(|(_, pending)| pending.height),
-            self.latest_finalized,
-        ) {
-            (Some(pending), Some(latest)) => Some(pending.min(latest)),
-            (Some(pending), None) => Some(pending),
-            (None, Some(latest)) => Some(latest),
-            (None, None) => None,
-        };
-
-        if let Some(prune_before) = uploaded_prune_before {
+        if let Some(prune_before) = self.acked_through {
             while let Some((_, &height)) = self.uploaded.peek() {
                 if height >= prune_before {
                     break;
@@ -215,11 +165,7 @@ impl State {
             }
         }
 
-        let mut cached_prune_before = self
-            .pending_finalized
-            .values()
-            .map(|pending| pending.height)
-            .min();
+        let mut cached_prune_before: Option<u64> = None;
         for digest in self.certificate_uploads.keys() {
             let Some(block) = self.cached_blocks.get(digest) else {
                 continue;
@@ -266,52 +212,27 @@ mod tests {
     }
 
     #[test]
-    fn test_upload_state_prunes_only_after_oldest_pending_completion() {
+    fn test_upload_state_prunes_only_after_queue_floor_progress() {
         let mut uploads = State::new();
 
         let digest_10 = Sha256::hash(b"view-10");
         let digest_11 = Sha256::hash(b"view-11");
         let digest_12 = Sha256::hash(b"view-12");
 
-        for (position, entry) in [
-            (
-                3,
-                Entry {
-                    height: 10,
-                    digest: digest_10,
-                },
-            ),
-            (
-                4,
-                Entry {
-                    height: 11,
-                    digest: digest_11,
-                },
-            ),
-            (
-                5,
-                Entry {
-                    height: 12,
-                    digest: digest_12,
-                },
-            ),
-        ] {
-            uploads.observe_finalization(entry.height);
-            uploads.register_finalized(position, entry);
-        }
-
-        // Later views may complete first, but they must remain in the dedupe set
-        // until the oldest queued view has been retired.
         uploads.mark_uploaded(digest_11, 11);
-        uploads.finish_finalized(4);
         uploads.mark_uploaded(digest_12, 12);
-        uploads.finish_finalized(5);
 
         assert!(uploads.is_uploaded(&digest_11));
         assert!(uploads.is_uploaded(&digest_12));
 
         uploads.mark_uploaded(digest_10, 10);
-        uploads.finish_finalized(3);
+        uploads.advance_queue_floor(10);
+
+        assert!(uploads.is_uploaded(&digest_10));
+        assert!(uploads.is_uploaded(&digest_11));
+        assert!(uploads.is_uploaded(&digest_12));
+
+        uploads.advance_queue_floor(12);
 
         assert!(!uploads.is_uploaded(&digest_10));
         assert!(!uploads.is_uploaded(&digest_11));
@@ -319,22 +240,18 @@ mod tests {
     }
 
     #[test]
-    fn test_upload_state_dedupes_pending_digests() {
+    fn test_upload_state_allows_duplicate_pending_entries() {
         let mut uploads = State::new();
-        let digest = Sha256::hash(b"view-10");
-        let entry = Entry { height: 10, digest };
+        let block = test_block(10, 10, b"view-10");
+        let entry = Entry {
+            height: block.height.get(),
+            digest: block.digest(),
+        };
 
-        assert!(uploads.needs_enqueue(&digest, 10));
-        assert!(!uploads.register_finalized(3, entry));
-        assert!(!uploads.needs_enqueue(&digest, 10));
-        assert!(!uploads.register_finalized(3, entry));
-        assert!(uploads.register_finalized(4, entry));
-
-        uploads.finish_finalized(3);
-        assert!(!uploads.needs_enqueue(&digest, 10));
-
-        uploads.finish_finalized(4);
-        assert!(uploads.needs_enqueue(&digest, 10));
+        assert!(uploads.prepare_enqueue(&block).is_some());
+        assert!(uploads.prepare_enqueue(&block).is_some());
+        uploads.mark_uploaded(entry.digest, entry.height);
+        assert!(uploads.prepare_enqueue(&block).is_none());
     }
 
     #[test]
@@ -367,25 +284,15 @@ mod tests {
     }
 
     #[test]
-    fn test_upload_state_keeps_cached_block_while_backfill_row_is_pending() {
+    fn test_upload_state_prunes_cached_block_after_newer_finalization() {
         let mut uploads = State::new();
         let block = test_block(7, 7, b"view-7");
-        let entry = Entry {
-            height: block.height.get(),
-            digest: block.digest(),
-        };
+        let digest = block.digest();
 
-        uploads.start_certificate_upload(entry.digest);
         uploads.cache_block(block);
-        uploads.register_finalized(3, entry);
-        uploads.finish_certificate_upload(&entry.digest, None);
+        assert!(uploads.cached_block(&digest).is_some());
 
-        assert!(uploads.cached_block(&entry.digest).is_some());
-
-        uploads.finish_finalized(3);
-        assert!(uploads.cached_block(&entry.digest).is_some());
-
-        uploads.observe_finalization(entry.height + 1);
-        assert!(uploads.cached_block(&entry.digest).is_none());
+        uploads.observe_finalization(8);
+        assert!(uploads.cached_block(&digest).is_none());
     }
 }

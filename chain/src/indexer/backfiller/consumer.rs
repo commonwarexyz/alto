@@ -25,9 +25,9 @@ enum Completion {
         height: u64,
         digest: Digest,
     },
-    /// The queue entry became redundant because it was duplicate work or
-    /// because the live certificate path uploaded the block first.
-    Retired { position: u64 },
+    /// The queue entry became redundant because the live certificate path
+    /// uploaded the block first.
+    Retired { position: u64, height: u64 },
 }
 
 pub struct Consumer<E: Spawner + Clock + Storage + Metrics, C: Client> {
@@ -146,22 +146,13 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
 
     async fn start_upload(&mut self, position: u64, entry: Entry) {
         let Entry { height, digest } = entry;
-        let skip = {
-            let mut uploads = self.uploads.lock();
-            // Re-register every dequeued row in shared state before deciding
-            // what to do with it. That keeps crash recovery idempotent: replayed
-            // rows rebuild the same pending state the original process had.
-            if uploads.register_finalized(position, entry) {
-                Some("consumer skipping duplicate queued block")
-            } else if matches!(uploads.upload_decision(&digest), Decision::Retire) {
-                Some("consumer skipping already-uploaded block")
-            } else {
-                None
-            }
-        };
-        if let Some(reason) = skip {
-            self.complete(Completion::Retired { position }).await;
-            debug!(?digest, reason);
+        if matches!(
+            self.uploads.lock().upload_decision(&digest),
+            Decision::Retire
+        ) {
+            self.complete(Completion::Retired { position, height })
+                .await;
+            debug!(?digest, "consumer skipping already-uploaded block");
             return;
         }
 
@@ -180,7 +171,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                         .await
                 else {
                     debug!(?digest, "consumer observed live upload before block upload");
-                    return Completion::Retired { position };
+                    return Completion::Retired { position, height };
                 };
 
                 loop {
@@ -193,7 +184,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                     match decision {
                         Decision::Retire => {
                             debug!(?digest, "consumer observed live upload before block upload");
-                            return Completion::Retired { position };
+                            return Completion::Retired { position, height };
                         }
                         Decision::Wait => {
                             context.sleep(retry).await;
@@ -282,7 +273,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
     }
 
     async fn complete(&mut self, completion: Completion) {
-        let position = match completion {
+        let (position, height) = match completion {
             // Record the success before acking so the in-memory dedupe tracker
             // stays aligned with the queue state.
             Completion::Uploaded {
@@ -291,16 +282,17 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                 digest,
             } => {
                 self.uploads.lock().mark_uploaded(digest, height);
-                position
+                (position, height)
             }
-            Completion::Retired { position } => position,
+            Completion::Retired { position, height } => (position, height),
         };
 
-        // Persist retirement of the queue entry before dropping the corresponding
-        // pending state from memory so replay after a crash sees a consistent
-        // queue/State pairing.
+        let floor = self.reader.ack_floor().await;
         self.reader.ack(position).await.expect("failed to ack");
+        let floor_advanced = self.reader.ack_floor().await > floor;
         self.writer.sync().await.expect("failed to sync after ack");
-        self.uploads.lock().finish_finalized(position);
+        if floor_advanced {
+            self.uploads.lock().advance_queue_floor(height);
+        }
     }
 }

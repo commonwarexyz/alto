@@ -21,15 +21,14 @@ impl<E: Clock + Storage + Metrics> Producer<E> {
             return;
         };
 
-        // Persist exactly one queue entry per digest while it is pending. The
-        // backfiller retries from this row until it either uploads successfully or
-        // observes that the live certificate path already uploaded the block.
-        let position = self
-            .writer
+        // Persist a queue entry for each finalized block that is not already
+        // known uploaded. The backfiller retries from durable queue state until
+        // it either uploads successfully or observes that the live certificate
+        // path already uploaded the block.
+        self.writer
             .enqueue(entry)
             .await
             .expect("failed to enqueue finalized digest");
-        let _ = self.uploads.lock().register_finalized(position, entry);
         self.writer
             .sync()
             .await
