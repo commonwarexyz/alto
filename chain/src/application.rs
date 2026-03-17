@@ -129,7 +129,7 @@ impl<E: Clock + Storage + Metrics> Reporter for Application<E> {
                 // Cache the finalized block in memory and enqueue its digest
                 // before acking so the consumer can recover it across restarts.
                 // Duplicate finalize notifications still collapse to a single
-                // queue row while an upload is pending.
+                // queue entry while an upload is pending.
                 backfiller.record(&block).await;
             }
             info!(height = %block.height(), "finalized block");
