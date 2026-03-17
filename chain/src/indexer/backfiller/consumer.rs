@@ -53,16 +53,15 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
         max_in_flight: NonZeroUsize,
         retry: Duration,
     ) -> Self {
-        let queue_metrics = context.with_label("queue");
         let upload_results = status::Counter::default();
-        queue_metrics.register(
+        context.register(
             "uploads",
             "Total number of finalized block upload attempt outcomes by status",
             upload_results.clone(),
         );
         let (writer, reader) = backfiller;
         Self {
-            context: ContextCell::new(context.with_label("consumer")),
+            context: ContextCell::new(context),
             client,
             marshal,
             upload_results,

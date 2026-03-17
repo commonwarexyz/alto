@@ -1097,7 +1097,7 @@ mod tests {
             let metrics = context.encode();
             let queue_upload_success = sum_validator_metric::<u64>(
                 &metrics,
-                "_queue_uploads_total",
+                "_indexer_uploads_total",
                 Some("status=\"success\""),
             );
             assert_eq!(
@@ -1109,7 +1109,7 @@ mod tests {
             );
             let queue_upload_failure = sum_validator_metric::<u64>(
                 &metrics,
-                "_queue_uploads_total",
+                "_indexer_uploads_total",
                 Some("status=\"failure\""),
             );
             assert_eq!(
@@ -1350,7 +1350,7 @@ mod tests {
             );
             let queue_upload_success = sum_validator_metric::<u64>(
                 &metrics,
-                "_queue_uploads_total",
+                "_indexer_uploads_total",
                 Some("status=\"success\""),
             );
             assert_eq!(
@@ -1362,7 +1362,7 @@ mod tests {
             );
             let queue_upload_failure = sum_validator_metric::<u64>(
                 &metrics,
-                "_queue_uploads_total",
+                "_indexer_uploads_total",
                 Some("status=\"failure\""),
             );
             assert_eq!(
