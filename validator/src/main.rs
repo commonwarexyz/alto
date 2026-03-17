@@ -269,6 +269,8 @@ fn main() {
             max_fetch_size: MAX_FETCH_SIZE,
             fetch_concurrent: FETCH_CONCURRENT,
             fetch_rate_per_peer: resolver_limit,
+            backfiller_max_in_flight: config.backfiller_max_in_flight,
+            backfiller_retry: Duration::from_millis(config.backfiller_retry_ms),
             indexer,
             polynomial,
             share,

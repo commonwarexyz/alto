@@ -1,10 +1,22 @@
+use commonware_utils::NZUsize;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, net::SocketAddr};
+use std::{collections::HashMap, net::SocketAddr, num::NonZeroUsize};
 
 pub mod application;
 pub mod engine;
 pub mod indexer;
 pub mod utils;
+
+pub const DEFAULT_BACKFILLER_MAX_IN_FLIGHT: NonZeroUsize = NZUsize!(16);
+pub const DEFAULT_BACKFILLER_RETRY_MS: u64 = 1_000;
+
+fn default_backfiller_max_in_flight() -> NonZeroUsize {
+    DEFAULT_BACKFILLER_MAX_IN_FLIGHT
+}
+
+fn default_backfiller_retry_ms() -> u64 {
+    DEFAULT_BACKFILLER_RETRY_MS
+}
 
 /// Configuration for the [engine::Engine].
 #[derive(Deserialize, Serialize)]
@@ -28,6 +40,11 @@ pub struct Config {
     pub deque_size: usize,
 
     pub signature_threads: usize,
+
+    #[serde(default = "default_backfiller_max_in_flight")]
+    pub backfiller_max_in_flight: NonZeroUsize,
+    #[serde(default = "default_backfiller_retry_ms")]
+    pub backfiller_retry_ms: u64,
 
     /// Optional base HTTP(S) URL for the indexer API.
     pub indexer: Option<String>,
@@ -212,6 +229,8 @@ mod tests {
     struct ValidatorConfig {
         leader_timeout: Duration,
         certification_timeout: Duration,
+        backfiller_max_in_flight: NonZeroUsize,
+        backfiller_retry: Duration,
         indexer: Option<Mock>,
     }
 
@@ -220,6 +239,8 @@ mod tests {
             Self {
                 leader_timeout: Duration::from_secs(1),
                 certification_timeout: Duration::from_secs(2),
+                backfiller_max_in_flight: DEFAULT_BACKFILLER_MAX_IN_FLIGHT,
+                backfiller_retry: Duration::from_millis(DEFAULT_BACKFILLER_RETRY_MS),
                 indexer: None,
             }
         }
@@ -282,6 +303,8 @@ mod tests {
             max_fetch_size: 1024 * 512,
             fetch_concurrent: 10,
             fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
+            backfiller_max_in_flight: cfg.backfiller_max_in_flight,
+            backfiller_retry: cfg.backfiller_retry,
             indexer: cfg.indexer,
             strategy: Sequential,
         };
@@ -554,7 +577,7 @@ mod tests {
                 let cfg = ValidatorConfig {
                     leader_timeout: Duration::from_millis(250),
                     certification_timeout: Duration::from_millis(500),
-                    indexer: None,
+                    ..Default::default()
                 };
                 for (signer, scheme) in private_keys.iter().zip(schemes.iter()) {
                     let registration = registrations.remove(&signer.public_key()).unwrap();

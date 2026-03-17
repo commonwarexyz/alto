@@ -37,7 +37,7 @@ use governor::clock::Clock as GClock;
 use governor::Quota;
 use rand::{CryptoRng, Rng};
 use std::{
-    num::NonZero,
+    num::{NonZero, NonZeroUsize},
     time::{Duration, Instant},
 };
 use tracing::{error, info, warn};
@@ -91,6 +91,8 @@ pub struct Config<
     pub max_fetch_size: usize,
     pub fetch_concurrent: usize,
     pub fetch_rate_per_peer: Quota,
+    pub backfiller_max_in_flight: NonZeroUsize,
+    pub backfiller_retry: Duration,
 
     pub strategy: S,
 
@@ -290,6 +292,8 @@ where
                 indexer,
                 marshal_mailbox.clone(),
                 backfill_queue,
+                cfg.backfiller_max_in_flight,
+                cfg.backfiller_retry,
             )
             .await;
             let (producer, pusher, consumer) = indexer_runtime.split();

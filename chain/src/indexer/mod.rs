@@ -20,7 +20,7 @@ use commonware_parallel::Strategy;
 use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use commonware_storage::queue;
 use commonware_utils::sync::Mutex;
-use std::{future::Future, sync::Arc};
+use std::{future::Future, num::NonZeroUsize, sync::Arc, time::Duration};
 
 mod backfiller;
 #[cfg(test)]
@@ -102,6 +102,8 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Indexer<E, C> {
         client: C,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
         backfill_queue: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
+        backfiller_max_in_flight: NonZeroUsize,
+        backfiller_retry: Duration,
     ) -> Self {
         let uploads: SharedState = Arc::new(Mutex::new(State::new()));
         let pusher = Pusher::new(
@@ -112,7 +114,16 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Indexer<E, C> {
         );
         let (writer, reader) = backfill_queue;
         let producer = Producer::new(uploads.clone(), writer.clone());
-        let consumer = Consumer::new(context, client, marshal, uploads, writer, reader);
+        let consumer = Consumer::new(
+            context,
+            client,
+            marshal,
+            uploads,
+            writer,
+            reader,
+            backfiller_max_in_flight,
+            backfiller_retry,
+        );
 
         Self {
             producer,

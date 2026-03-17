@@ -14,11 +14,8 @@ use commonware_runtime::{
 use commonware_storage::queue;
 use commonware_utils::futures::{OptionFuture, Pool};
 use prometheus_client::metrics::gauge::Gauge;
-use std::time::Duration;
+use std::{num::NonZeroUsize, time::Duration};
 use tracing::{debug, warn};
-
-const CONSUMER_MAX_IN_FLIGHT: usize = 16;
-const CONSUMER_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Final outcome for one backfill queue row.
 enum Completion {
@@ -44,6 +41,8 @@ pub struct Consumer<E: Spawner + Clock + Storage + Metrics, C: Client> {
     writer: queue::Writer<E, Entry>,
     reader: queue::Reader<E, Entry>,
     in_flight: Pool<Completion>,
+    max_in_flight: NonZeroUsize,
+    retry: Duration,
 }
 
 impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
@@ -54,6 +53,8 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
         uploads: SharedState,
         writer: queue::Writer<E, Entry>,
         reader: queue::Reader<E, Entry>,
+        max_in_flight: NonZeroUsize,
+        retry: Duration,
     ) -> Self {
         let queue_metrics = context.with_label("queue");
         let upload_results = status::Counter::default();
@@ -78,6 +79,8 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
             writer,
             reader,
             in_flight: Pool::default(),
+            max_in_flight,
+            retry,
         }
     }
 
@@ -113,7 +116,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                 // Once the consumer is busy, race newly dequeued rows against
                 // completions from already-running uploads.
                 let item = OptionFuture::from(
-                    (self.in_flight.len() < CONSUMER_MAX_IN_FLIGHT).then(|| self.reader.recv()),
+                    (self.in_flight.len() < self.max_in_flight.get()).then(|| self.reader.recv()),
                 );
             },
             on_stopped => {},
@@ -137,7 +140,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
     async fn fill_slots(&mut self) {
         // Consume all queue rows that are already available without waiting so
         // the consumer keeps as many upload slots busy as it can.
-        while self.in_flight.len() < CONSUMER_MAX_IN_FLIGHT {
+        while self.in_flight.len() < self.max_in_flight.get() {
             let item = self
                 .reader
                 .try_recv()
@@ -181,9 +184,11 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
             let context = self.context.with_label("upload");
             let upload_results = self.upload_results.clone();
             let uploads = self.uploads.clone();
+            let retry = self.retry;
             async move {
                 let Some(block) =
-                    Self::wait_for_uploadable_block(&context, &marshal, &uploads, digest).await
+                    Self::wait_for_uploadable_block(&context, &marshal, &uploads, digest, retry)
+                        .await
                 else {
                     debug!(?digest, "consumer observed live upload before block upload");
                     return Completion::Retired { position };
@@ -202,7 +207,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                             return Completion::Retired { position };
                         }
                         Decision::Wait => {
-                            context.sleep(CONSUMER_RETRY_DELAY).await;
+                            context.sleep(retry).await;
                             continue;
                         }
                         Decision::Proceed => {}
@@ -224,7 +229,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                             // certificate path proves the block was uploaded.
                             upload_results.inc(status::Status::Failure);
                             warn!(?e, ?digest, "consumer failed to upload block, retrying");
-                            context.sleep(CONSUMER_RETRY_DELAY).await;
+                            context.sleep(retry).await;
                         }
                     }
                 }
@@ -237,6 +242,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
         marshal: &MarshalMailbox<Scheme, Standard<Block>>,
         uploads: &SharedState,
         digest: Digest,
+        retry: Duration,
     ) -> Option<Block> {
         // Prefer the in-process block cache populated by the application and
         // certificate uploaders. On restart that cache is empty, so we fall
@@ -268,7 +274,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
             match next {
                 NextBlock::AlreadyUploaded => return None,
                 NextBlock::WaitForCertificate => {
-                    context.sleep(CONSUMER_RETRY_DELAY).await;
+                    context.sleep(retry).await;
                 }
                 NextBlock::Ready(block) => return Some(*block),
                 NextBlock::FetchFromMarshal => {
@@ -280,7 +286,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                         ?digest,
                         "consumer could not find block in marshal, retrying"
                     );
-                    context.sleep(CONSUMER_RETRY_DELAY).await;
+                    context.sleep(retry).await;
                 }
             }
         }
