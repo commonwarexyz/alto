@@ -86,6 +86,12 @@ impl Mock {
     }
 }
 
+impl Default for Mock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Client for Mock {
     type Error = std::io::Error;
 

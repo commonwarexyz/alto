@@ -49,8 +49,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
         client: C,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
         uploads: SharedState,
-        writer: queue::Writer<E, Entry>,
-        reader: queue::Reader<E, Entry>,
+        backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
         max_in_flight: NonZeroUsize,
         retry: Duration,
     ) -> Self {
@@ -61,6 +60,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
             "Total number of finalized block upload attempt outcomes by status",
             upload_results.clone(),
         );
+        let (writer, reader) = backfiller;
         Self {
             context: ContextCell::new(context.with_label("consumer")),
             client,

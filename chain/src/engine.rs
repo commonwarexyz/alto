@@ -274,7 +274,7 @@ where
         // queue of finalized digests so block uploads can resume after
         // restarts.
         let (app, pusher, consumer) = if let Some(indexer) = cfg.indexer {
-            let backfill_queue = queue::shared::init(
+            let backfiller = queue::shared::init(
                 context.with_label("finalized_queue"),
                 queue::Config {
                     partition: format!("{}-finalized-queue", cfg.partition_prefix),
@@ -291,7 +291,7 @@ where
                 context.with_label("indexer"),
                 indexer,
                 marshal_mailbox.clone(),
-                backfill_queue,
+                backfiller,
                 cfg.backfiller_max_in_flight,
                 cfg.backfiller_retry,
             )

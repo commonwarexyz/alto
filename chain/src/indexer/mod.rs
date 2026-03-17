@@ -101,7 +101,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Indexer<E, C> {
         context: E,
         client: C,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
-        backfill_queue: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
+        backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
         backfiller_max_in_flight: NonZeroUsize,
         backfiller_retry: Duration,
     ) -> Self {
@@ -112,15 +112,14 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Indexer<E, C> {
             marshal.clone(),
             uploads.clone(),
         );
-        let (writer, reader) = backfill_queue;
+        let (writer, reader) = backfiller;
         let producer = Producer::new(uploads.clone(), writer.clone());
         let consumer = Consumer::new(
             context,
             client,
             marshal,
             uploads,
-            writer,
-            reader,
+            (writer, reader),
             backfiller_max_in_flight,
             backfiller_retry,
         );
