@@ -1665,7 +1665,8 @@ mod tests {
                     context.sleep(Duration::from_secs(1)).await;
                 }
 
-                let queue_in_flight = sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None);
+                let queue_in_flight =
+                    sum_validator_metric::<i64>(&metrics, "_queue_in_flight", None);
                 assert!(
                     queue_in_flight >= 2,
                     "queue in_flight metric never reflected the blocked uploads before restart",

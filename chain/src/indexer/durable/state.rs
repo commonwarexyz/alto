@@ -241,10 +241,9 @@ impl UploadState {
             let Some(block) = self.cached_blocks.get(digest) else {
                 continue;
             };
-            cached_prune_before = Some(
-                cached_prune_before
-                    .map_or(block.height.get(), |current| current.min(block.height.get())),
-            );
+            cached_prune_before = Some(cached_prune_before.map_or(block.height.get(), |current| {
+                current.min(block.height.get())
+            }));
         }
         if cached_prune_before.is_none() {
             cached_prune_before = self.latest_finalized;

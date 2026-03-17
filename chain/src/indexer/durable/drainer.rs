@@ -18,6 +18,11 @@ use tracing::{debug, warn};
 const DRAINER_MAX_IN_FLIGHT: usize = 16;
 const DRAINER_RETRY_DELAY: Duration = Duration::from_secs(1);
 
+/// Final outcome for one durable queue row.
+///
+/// `digest` is `Some` only when this row's raw block upload actually succeeded.
+/// When it is `None`, the row is being retired because it was duplicate work or
+/// because the live certificate path already uploaded the block first.
 struct DrainCompletion {
     position: u64,
     height: u64,
@@ -84,6 +89,8 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
     }
 }
 
+/// Owns the mutable state of the drainer event loop so the queue-processing
+/// steps can be expressed as instance methods rather than long helper calls.
 struct DrainerRunner<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
     context: E,
     indexer: I,
@@ -101,6 +108,8 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
         select_loop! {
             self.context,
             on_start => {
+                // Drain any backlog already sitting in the durable queue before
+                // blocking so restarts resume with full parallelism immediately.
                 self.fill_drainer_slots().await;
 
                 if self.queue_closed && self.in_flight.is_empty() {
@@ -109,6 +118,8 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
                 }
 
                 if self.in_flight.is_empty() {
+                    // If there is no work in flight, block for the next queue
+                    // row instead of polling an optional future in a tight loop.
                     let item = self
                         .reader
                         .recv()
@@ -122,6 +133,8 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
                     continue;
                 }
 
+                // Once the drainer is busy, race newly dequeued rows against
+                // completions from already-running uploads.
                 let item = OptionFuture::from(
                     (!self.queue_closed && self.in_flight.len() < DRAINER_MAX_IN_FLIGHT)
                         .then(|| self.reader.recv()),
@@ -145,6 +158,8 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
     }
 
     async fn fill_drainer_slots(&mut self) {
+        // Consume all queue rows that are already available without waiting so
+        // the drainer keeps as many upload slots busy as it can.
         while self.in_flight.len() < DRAINER_MAX_IN_FLIGHT {
             let item = self
                 .reader
@@ -163,6 +178,9 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
         let FinalizedEntry { height, digest } = entry;
         let skip = {
             let mut uploads = self.uploads.lock();
+            // Re-register every dequeued row in shared state before deciding
+            // what to do with it. That keeps crash recovery idempotent: replayed
+            // rows rebuild the same pending state the original process had.
             if uploads.register_finalized(position, entry) {
                 Some("drainer skipping duplicate queued block")
             } else if uploads.contains(&digest) {
@@ -183,6 +201,8 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
             return;
         }
 
+        // Hand the upload/retry loop off to the in-flight pool so the drainer
+        // can continue dequeuing and retiring other durable rows concurrently.
         self.in_flight.push({
             let indexer = self.indexer.clone();
             let marshal = self.marshal.clone();
@@ -201,6 +221,8 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
                         counted_in_flight: false,
                     };
                 };
+                // Count only active raw block upload attempts. Waiting for a
+                // block to appear in cache/marshal is not yet an in-flight upload.
                 metrics.in_flight.inc();
 
                 loop {
@@ -308,6 +330,9 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
             self.uploads.lock().mark_uploaded(digest, completion.height);
         }
 
+        // Persist retirement of the durable row before dropping the corresponding
+        // pending state from memory so replay after a crash sees a consistent
+        // queue/UploadState pairing.
         self.reader
             .ack(completion.position)
             .await
