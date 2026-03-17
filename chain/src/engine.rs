@@ -50,6 +50,7 @@ type Reporter<E, C> =
 /// the consensus activity timeout by this factor.
 const SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER: u64 = 10;
 const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
+const QUEUE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(128);
 const IMMUTABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
 const FREEZER_TABLE_RESIZE_FREQUENCY: u8 = 4;
 const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // 3MB
@@ -274,11 +275,11 @@ where
         // queue of finalized digests so block uploads can resume after
         // restarts.
         let (app, pusher, consumer) = if let Some(indexer) = cfg.indexer {
-            let backfiller = queue::shared::init(
-                context.with_label("finalized_queue"),
+            let queue = queue::shared::init(
+                context.with_label("queue"),
                 queue::Config {
                     partition: format!("{}-finalized-queue", cfg.partition_prefix),
-                    items_per_section: PRUNABLE_ITEMS_PER_SECTION,
+                    items_per_section: QUEUE_ITEMS_PER_SECTION,
                     compression: None,
                     codec_config: (),
                     page_cache: page_cache.clone(),
@@ -287,16 +288,16 @@ where
             )
             .await
             .expect("failed to initialize finalized queue");
-            let indexer_runtime = indexer::Indexer::new(
+            let indexer = indexer::Indexer::new(
                 context.with_label("indexer"),
                 indexer,
                 marshal_mailbox.clone(),
-                backfiller,
+                queue,
                 cfg.backfiller_max_in_flight,
                 cfg.backfiller_retry,
             )
             .await;
-            let (producer, pusher, consumer) = indexer_runtime.split();
+            let (producer, pusher, consumer) = indexer.split();
             let app = Application::new().with_backfiller(producer);
             (app, Some(pusher), Some(consumer))
         } else {
