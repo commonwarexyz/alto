@@ -22,9 +22,8 @@ use tracing::{debug, warn};
 
 mod durable;
 
-pub(crate) use durable::{
-    Drainer, DrainerMetrics, Enqueuer, FinalizedEntry, SharedUploadState, UploadState,
-};
+pub(crate) use durable::{Drainer, Enqueuer, FinalizedEntry};
+use durable::{DrainerMetrics, SharedUploadState, UploadState};
 
 /// Trait for interacting with an indexer.
 pub trait Indexer: Clone + Send + Sync + 'static {
@@ -56,8 +55,6 @@ pub struct Mock {
     pub seed_seen: Arc<AtomicBool>,
     pub notarization_seen: Arc<AtomicBool>,
     pub finalization_seen: Arc<AtomicBool>,
-    pub cert_upload_started: Arc<AtomicUsize>,
-    pub block_upload_seen: Arc<AtomicBool>,
     pub block_upload_started: Arc<AtomicUsize>,
     pub block_upload_completed: Arc<AtomicUsize>,
     pub block_upload_max_inflight: Arc<AtomicUsize>,
@@ -77,8 +74,6 @@ impl Mock {
             seed_seen: Arc::new(AtomicBool::new(false)),
             notarization_seen: Arc::new(AtomicBool::new(false)),
             finalization_seen: Arc::new(AtomicBool::new(false)),
-            cert_upload_started: Arc::new(AtomicUsize::new(0)),
-            block_upload_seen: Arc::new(AtomicBool::new(false)),
             block_upload_started: Arc::new(AtomicUsize::new(0)),
             block_upload_completed: Arc::new(AtomicUsize::new(0)),
             block_upload_max_inflight: Arc::new(AtomicUsize::new(0)),
@@ -126,8 +121,6 @@ impl Mock {
             }
         }
 
-        self.cert_upload_started
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.cert_upload_inflight
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let _guard = InflightGuard(self.cert_upload_inflight.clone());
@@ -195,8 +188,6 @@ impl Indexer for Mock {
             let _ = waiter.await;
         }
 
-        self.block_upload_seen
-            .store(true, std::sync::atomic::Ordering::Relaxed);
         self.block_upload_completed
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.block_upload_completed_digests.lock().push(digest);

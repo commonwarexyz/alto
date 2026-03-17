@@ -18,10 +18,6 @@ Generated validator configs use:
 indexer: http://localhost:8080
 ```
 
-When `indexer` is set, the validator enables durable raw block uploads automatically.
-Raw `/block` uploads are open, while certificate-bearing uploads are still verified
-by signature.
-
 ```bash
 cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --message-backlog 16384 --mailbox-size 16384 --deque-size 10 --signature-threads 2 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
 ```
@@ -101,10 +97,6 @@ Each selected validator config will contain:
 ```yaml
 indexer: https://your-indexer.example.com
 ```
-
-When `indexer` is set, the validator enables durable raw block uploads automatically.
-Raw `/block` uploads are open, while certificate-bearing uploads are still verified
-by signature.
 
 ##### Global
 

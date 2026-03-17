@@ -4,7 +4,6 @@ use alto_types::{Identity, Scheme, NAMESPACE};
 use commonware_cryptography::sha256::Digest;
 use commonware_parallel::Strategy;
 use commonware_utils::hex;
-use reqwest::{Method, RequestBuilder};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -182,9 +181,5 @@ impl<S: Strategy> Client<S> {
     /// use [`ClientBuilder`] instead.
     pub fn new(uri: &str, identity: Identity, strategy: S) -> Self {
         ClientBuilder::new(uri, identity, strategy).build()
-    }
-
-    pub(crate) fn request(&self, method: Method, url: String) -> RequestBuilder {
-        self.http_client.request(method, url)
     }
 }

@@ -63,7 +63,8 @@ pub enum Message {
 impl<S: Strategy> Client<S> {
     pub async fn seed_upload(&self, seed: Seed) -> Result<(), Error> {
         let result = self
-            .request(reqwest::Method::POST, seed_upload_path(self.uri.clone()))
+            .http_client
+            .post(seed_upload_path(self.uri.clone()))
             .body(seed.encode().to_vec())
             .send()
             .await
@@ -77,10 +78,8 @@ impl<S: Strategy> Client<S> {
     pub async fn seed_get(&self, query: IndexQuery) -> Result<Seed, Error> {
         // Get the seed
         let result = self
-            .request(
-                reqwest::Method::GET,
-                seed_get_path(self.uri.clone(), &query),
-            )
+            .http_client
+            .get(seed_get_path(self.uri.clone(), &query))
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -107,10 +106,8 @@ impl<S: Strategy> Client<S> {
 
     pub async fn notarized_upload(&self, notarized: Notarized) -> Result<(), Error> {
         let result = self
-            .request(
-                reqwest::Method::POST,
-                notarization_upload_path(self.uri.clone()),
-            )
+            .http_client
+            .post(notarization_upload_path(self.uri.clone()))
             .body(notarized.encode().to_vec())
             .send()
             .await
@@ -124,10 +121,8 @@ impl<S: Strategy> Client<S> {
     pub async fn notarized_get(&self, query: IndexQuery) -> Result<Notarized, Error> {
         // Get the notarization
         let result = self
-            .request(
-                reqwest::Method::GET,
-                notarization_get_path(self.uri.clone(), &query),
-            )
+            .http_client
+            .get(notarization_get_path(self.uri.clone(), &query))
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -154,10 +149,8 @@ impl<S: Strategy> Client<S> {
 
     pub async fn finalized_upload(&self, finalized: Finalized) -> Result<(), Error> {
         let result = self
-            .request(
-                reqwest::Method::POST,
-                finalization_upload_path(self.uri.clone()),
-            )
+            .http_client
+            .post(finalization_upload_path(self.uri.clone()))
             .body(finalized.encode().to_vec())
             .send()
             .await
@@ -171,10 +164,8 @@ impl<S: Strategy> Client<S> {
     pub async fn finalized_get(&self, query: IndexQuery) -> Result<Finalized, Error> {
         // Get the finalization
         let result = self
-            .request(
-                reqwest::Method::GET,
-                finalization_get_path(self.uri.clone(), &query),
-            )
+            .http_client
+            .get(finalization_get_path(self.uri.clone(), &query))
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -202,7 +193,8 @@ impl<S: Strategy> Client<S> {
     pub async fn block_upload(&self, block: Block) -> Result<(), Error> {
         // Upload the raw block body without a notarization/finalization wrapper.
         let result = self
-            .request(reqwest::Method::POST, block_upload_path(self.uri.clone()))
+            .http_client
+            .post(block_upload_path(self.uri.clone()))
             .body(block.encode().to_vec())
             .send()
             .await
@@ -216,10 +208,8 @@ impl<S: Strategy> Client<S> {
     pub async fn block_get(&self, query: Query) -> Result<Payload, Error> {
         // Get the block
         let result = self
-            .request(
-                reqwest::Method::GET,
-                block_get_path(self.uri.clone(), &query),
-            )
+            .http_client
+            .get(block_get_path(self.uri.clone(), &query))
             .send()
             .await
             .map_err(Error::Reqwest)?;

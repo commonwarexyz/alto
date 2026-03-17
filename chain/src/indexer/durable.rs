@@ -270,7 +270,7 @@ pub(crate) type SharedUploadState = Arc<Mutex<UploadState>>;
 /// Durably enqueues finalized block digests from the application's block stream.
 #[derive(Clone)]
 pub(crate) struct Enqueuer<E: Clock + Storage + Metrics> {
-    pub(crate) uploads: SharedUploadState,
+    uploads: SharedUploadState,
     writer: queue::Writer<E, FinalizedEntry>,
     metrics: DrainerMetrics,
 }

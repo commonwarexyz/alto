@@ -8,7 +8,8 @@ fn healthy_path(base: String) -> String {
 impl<S: Strategy> Client<S> {
     pub async fn health(&self) -> Result<(), Error> {
         let result = self
-            .request(reqwest::Method::GET, healthy_path(self.uri.clone()))
+            .http_client
+            .get(healthy_path(self.uri.clone()))
             .send()
             .await
             .map_err(Error::from)?;

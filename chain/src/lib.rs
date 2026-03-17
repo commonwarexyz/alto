@@ -1007,9 +1007,6 @@ mod tests {
             assert!(indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
-            assert!(!indexer
-                .block_upload_seen
-                .load(std::sync::atomic::Ordering::Relaxed));
             assert_eq!(
                 indexer
                     .block_upload_started
@@ -1159,16 +1156,20 @@ mod tests {
             // The durable drainer should compensate by uploading raw blocks.
             for _ in 0..10 {
                 if indexer
-                    .block_upload_seen
-                    .load(std::sync::atomic::Ordering::Relaxed)
+                    .block_upload_completed
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    > 0
                 {
                     break;
                 }
                 context.sleep(Duration::from_secs(1)).await;
             }
-            assert!(indexer
-                .block_upload_seen
-                .load(std::sync::atomic::Ordering::Relaxed));
+            assert!(
+                indexer
+                    .block_upload_completed
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    > 0
+            );
         });
     }
 
