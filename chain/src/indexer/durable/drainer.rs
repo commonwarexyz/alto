@@ -145,10 +145,6 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
     }
 
     async fn fill_drainer_slots(&mut self) {
-        if self.in_flight.len() >= DRAINER_MAX_IN_FLIGHT {
-            return;
-        }
-
         while self.in_flight.len() < DRAINER_MAX_IN_FLIGHT {
             let item = self
                 .reader
