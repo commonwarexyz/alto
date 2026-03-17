@@ -171,6 +171,8 @@ impl<S: Strategy> Indexer<S> {
         }
     }
 
+    /// Resolve canonical chain queries by finalized height/latest, or raw block
+    /// fallback queries by digest.
     pub fn get_block(&self, query: &str) -> Option<BlockResult> {
         let state = self.state.read().unwrap();
 
@@ -191,6 +193,8 @@ impl<S: Strategy> Indexer<S> {
                         .map(|f| BlockResult::Finalized(f.clone()))
                 })
             } else if raw.len() == Digest::SIZE {
+                // Raw block uploads are keyed by digest and are not restricted
+                // to the canonical finalized chain.
                 let digest = Digest::decode(raw.as_slice()).ok()?;
                 state
                     .blocks_by_digest

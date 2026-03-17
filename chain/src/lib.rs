@@ -1036,6 +1036,8 @@ mod tests {
             );
             network.start();
 
+            // Stand up a normal validator set; only the mock indexer behavior
+            // differs from the happy-path tests below.
             let Fixture {
                 schemes,
                 private_keys,
@@ -1057,6 +1059,8 @@ mod tests {
             let identity = *schemes[0].polynomial().public();
             let indexer = Mock::new("", identity).with_fail_certs();
 
+            // Every validator points at the same mock indexer so we can assert
+            // that the fallback drainer compensates cluster-wide.
             let mut public_keys = HashSet::new();
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
                 let public_key = signer.public_key();
@@ -1153,9 +1157,179 @@ mod tests {
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
             // The durable drainer should compensate by uploading raw blocks.
+            for _ in 0..10 {
+                if indexer
+                    .block_upload_seen
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    break;
+                }
+                context.sleep(Duration::from_secs(1)).await;
+            }
             assert!(indexer
                 .block_upload_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
+        });
+    }
+
+    #[test_traced]
+    fn test_drainer_waits_for_certificate_uploads() {
+        let n = 5;
+        let required_container = 10;
+        let executor = Runner::timed(Duration::from_secs(30));
+        executor.start(|mut context| async move {
+            let (network, mut oracle) = Network::new(
+                context.with_label("network"),
+                simulated::Config {
+                    max_size: 1024 * 1024,
+                    disconnect_on_block: true,
+                    tracked_peer_sets: Some(1),
+                },
+            );
+            network.start();
+
+            let Fixture {
+                schemes,
+                private_keys,
+                participants,
+                ..
+            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            let mut registrations = register_validators(&mut oracle, &participants).await;
+            let participants_set = Set::from_iter_dedup(participants.clone());
+
+            let link = Link {
+                latency: Duration::from_millis(10),
+                jitter: Duration::from_millis(1),
+                success_rate: 1.0,
+            };
+            link_validators(&mut oracle, &participants, link, None).await;
+
+            // Hold the first few certificate uploads open so finalized queue
+            // rows exist while a certificate path for the same digest is still
+            // in flight. The raw drainer should wait instead of racing them.
+            let mut cert_upload_senders = Vec::new();
+            let mut cert_upload_waiters = Vec::new();
+            for _ in 0..8 {
+                let (sender, receiver) = oneshot::channel();
+                cert_upload_senders.push(sender);
+                cert_upload_waiters.push(receiver);
+            }
+            let identity = *schemes[0].polynomial().public();
+            let indexer = Mock::new("", identity).with_cert_upload_waiters(cert_upload_waiters);
+
+            let mut public_keys = HashSet::new();
+            for (signer, scheme) in private_keys.into_iter().zip(schemes) {
+                let public_key = signer.public_key();
+                public_keys.insert(public_key.clone());
+
+                let uid = format!("validator_{public_key}");
+                let config: Config<_, _, Mock, _> = engine::Config {
+                    blocker: oracle.control(public_key.clone()),
+                    provider: oracle.manager(),
+                    partition_prefix: uid.clone(),
+                    blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                    finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
+                    me: signer.public_key(),
+                    polynomial: scheme.polynomial().clone(),
+                    share: scheme.share().cloned().unwrap(),
+                    participants: participants_set.clone(),
+                    mailbox_size: 1024,
+                    deque_size: 10,
+                    leader_timeout: Duration::from_secs(1),
+                    certification_timeout: Duration::from_secs(2),
+                    nullify_retry: Duration::from_secs(10),
+                    fetch_timeout: Duration::from_secs(1),
+                    activity_timeout: ViewDelta::new(10),
+                    skip_timeout: ViewDelta::new(5),
+                    max_fetch_count: 10,
+                    max_fetch_size: 1024 * 512,
+                    fetch_concurrent: 10,
+                    fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                    indexer: Some(indexer.clone()),
+                    strategy: Sequential,
+                };
+                let validator_context = context.with_label(&uid);
+
+                let (pending, recovered, resolver, broadcast, backfill) =
+                    registrations.remove(&public_key).unwrap();
+
+                let marshal_resolver_cfg = marshal::resolver::p2p::Config {
+                    public_key: public_key.clone(),
+                    peer_provider: oracle.manager(),
+                    blocker: oracle.control(public_key.clone()),
+                    mailbox_size: 1024,
+                    initial: Duration::from_secs(1),
+                    timeout: Duration::from_secs(2),
+                    fetch_retry_timeout: Duration::from_millis(100),
+                    priority_requests: false,
+                    priority_responses: false,
+                };
+                let marshal_resolver = marshal::resolver::p2p::init(
+                    &validator_context.with_label("backfill"),
+                    marshal_resolver_cfg,
+                    backfill,
+                );
+
+                let engine = Engine::new(validator_context.with_label("engine"), config).await;
+                engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
+            }
+
+            // Wait until consensus has finalized enough blocks for the queue to
+            // have pending work, while the shared mock still has certificate
+            // uploads blocked in flight.
+            let mut metrics = String::new();
+            for _ in 0..10 {
+                metrics = context.encode();
+                if indexer.current_cert_upload_inflight() > 0
+                    && sum_validator_metric_i64(&metrics, "_queue_depth") > 0
+                    && sum_validator_metric_u64(&metrics, "_marshal_processed_height", None)
+                        >= required_container
+                {
+                    break;
+                }
+                context.sleep(Duration::from_secs(1)).await;
+            }
+
+            assert!(
+                indexer.current_cert_upload_inflight() > 0,
+                "expected at least one certificate upload to remain blocked",
+            );
+            assert!(
+                sum_validator_metric_i64(&metrics, "_queue_depth") > 0,
+                "expected finalized queue work while certificate uploads were blocked",
+            );
+            assert_eq!(
+                indexer
+                    .block_upload_started
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                0,
+                "raw block uploads should wait while certificate uploads are still in flight",
+            );
+
+            // Release the blocked certificate uploads and confirm the
+            // certificate-bearing paths finish without the raw drainer ever
+            // needing to step in.
+            drop(cert_upload_senders);
+            for _ in 0..10 {
+                if indexer
+                    .finalization_seen
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    break;
+                }
+                context.sleep(Duration::from_secs(1)).await;
+            }
+
+            assert!(indexer
+                .finalization_seen
+                .load(std::sync::atomic::Ordering::Relaxed));
+            assert_eq!(
+                indexer
+                    .block_upload_started
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                0,
+                "raw block uploads should remain idle when certificate uploads eventually succeed",
+            );
         });
     }
 
@@ -1174,6 +1348,8 @@ mod tests {
             );
             network.start();
 
+            // Use the normal validator topology so the only source of
+            // concurrency is the drainer itself.
             let Fixture {
                 schemes,
                 private_keys,
@@ -1411,6 +1587,8 @@ mod tests {
                 );
                 network.start();
 
+                // Rebuild the original validator set so the durable queue state
+                // we recover later comes from a realistic multi-validator run.
                 let mut registrations = register_validators(&mut oracle, &participants).await;
                 let participants_set = Set::from_iter_dedup(participants.clone());
 

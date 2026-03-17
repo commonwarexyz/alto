@@ -295,7 +295,7 @@ where
                 durable_queue,
             )
             .await;
-            let app = Application::new().with_enqueuer(uploads.enqueuer());
+            let app = Application::new().with_durable_uploads(uploads.enqueuer());
             let pusher = uploads.pusher();
             let drainer = uploads.into_drainer();
             (app, Some(pusher), Some(drainer))

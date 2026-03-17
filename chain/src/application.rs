@@ -8,7 +8,7 @@ use commonware_consensus::{
     types::{Height, Round, View},
     Heightable, Reporter,
 };
-use commonware_cryptography::{ed25519, sha256, Digest, Digestible, Hasher, Sha256, Signer};
+use commonware_cryptography::{ed25519, sha256, Digest as _, Digestible, Hasher, Sha256, Signer};
 use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
@@ -25,7 +25,7 @@ const SYNCHRONY_BOUND: u64 = 500;
 #[derive(Clone)]
 pub struct Application<E: Clock + Storage + Metrics> {
     genesis: Arc<Block>,
-    enqueuer: Option<indexer::Enqueuer<E>>,
+    durable_uploads: Option<indexer::Enqueuer<E>>,
 }
 
 impl<E: Clock + Storage + Metrics> Application<E> {
@@ -38,12 +38,12 @@ impl<E: Clock + Storage + Metrics> Application<E> {
         let genesis = Block::new(genesis_context, Sha256::hash(GENESIS), Height::zero(), 0);
         Self {
             genesis: Arc::new(genesis),
-            enqueuer: None,
+            durable_uploads: None,
         }
     }
 
-    pub(crate) fn with_enqueuer(mut self, enqueuer: indexer::Enqueuer<E>) -> Self {
-        self.enqueuer = Some(enqueuer);
+    pub(crate) fn with_durable_uploads(mut self, durable_uploads: indexer::Enqueuer<E>) -> Self {
+        self.durable_uploads = Some(durable_uploads);
         self
     }
 }
@@ -125,13 +125,12 @@ impl<E: Clock + Storage + Metrics> Reporter for Application<E> {
 
     async fn report(&mut self, activity: Self::Activity) {
         if let Update::Block(block, ack_rx) = activity {
-            if let Some(enqueuer) = &self.enqueuer {
-                // Enqueue before acking so the drainer can recover this finalized
-                // block after a restart. Duplicate finalize notifications do not
-                // enqueue duplicate rows while an upload is already pending.
-                enqueuer
-                    .enqueue_if_needed(block.digest(), block.height.get())
-                    .await;
+            if let Some(durable_uploads) = &self.durable_uploads {
+                // Cache the finalized block in memory and enqueue its digest
+                // before acking so the drainer can recover it across restarts.
+                // Duplicate finalize notifications still collapse to a single
+                // durable row while an upload is pending.
+                durable_uploads.enqueue_if_needed(&block).await;
             }
             info!(height = %block.height(), "finalized block");
             ack_rx.acknowledge();

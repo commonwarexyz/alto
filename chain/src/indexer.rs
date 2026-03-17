@@ -5,7 +5,6 @@ use commonware_consensus::{
     marshal::{core::Mailbox as MarshalMailbox, standard::Standard},
     Reporter, Viewable,
 };
-#[cfg(test)]
 use commonware_cryptography::sha256::Digest;
 #[cfg(test)]
 use commonware_cryptography::Digestible;
@@ -24,7 +23,7 @@ use tracing::{debug, warn};
 mod durable;
 
 pub(crate) use durable::{
-    Drainer, DrainerMetrics, Enqueuer, FinalizedEntry, SharedUploadTracker, UploadTracker,
+    Drainer, DrainerMetrics, Enqueuer, FinalizedEntry, SharedUploadState, UploadState,
 };
 
 /// Trait for interacting with an indexer.
@@ -57,12 +56,15 @@ pub struct Mock {
     pub seed_seen: Arc<AtomicBool>,
     pub notarization_seen: Arc<AtomicBool>,
     pub finalization_seen: Arc<AtomicBool>,
+    pub cert_upload_started: Arc<AtomicUsize>,
     pub block_upload_seen: Arc<AtomicBool>,
     pub block_upload_started: Arc<AtomicUsize>,
     pub block_upload_completed: Arc<AtomicUsize>,
     pub block_upload_max_inflight: Arc<AtomicUsize>,
     pub block_upload_started_digests: Arc<Mutex<Vec<Digest>>>,
     pub block_upload_completed_digests: Arc<Mutex<Vec<Digest>>>,
+    cert_upload_inflight: Arc<AtomicUsize>,
+    cert_upload_waiters: Arc<Mutex<Vec<oneshot::Receiver<()>>>>,
     block_upload_inflight: Arc<AtomicUsize>,
     block_upload_waiters: Arc<Mutex<Vec<oneshot::Receiver<()>>>>,
     pub fail_certs: bool,
@@ -75,12 +77,15 @@ impl Mock {
             seed_seen: Arc::new(AtomicBool::new(false)),
             notarization_seen: Arc::new(AtomicBool::new(false)),
             finalization_seen: Arc::new(AtomicBool::new(false)),
+            cert_upload_started: Arc::new(AtomicUsize::new(0)),
             block_upload_seen: Arc::new(AtomicBool::new(false)),
             block_upload_started: Arc::new(AtomicUsize::new(0)),
             block_upload_completed: Arc::new(AtomicUsize::new(0)),
             block_upload_max_inflight: Arc::new(AtomicUsize::new(0)),
             block_upload_started_digests: Arc::new(Mutex::new(Vec::new())),
             block_upload_completed_digests: Arc::new(Mutex::new(Vec::new())),
+            cert_upload_inflight: Arc::new(AtomicUsize::new(0)),
+            cert_upload_waiters: Arc::new(Mutex::new(Vec::new())),
             block_upload_inflight: Arc::new(AtomicUsize::new(0)),
             block_upload_waiters: Arc::new(Mutex::new(Vec::new())),
             fail_certs: false,
@@ -97,9 +102,40 @@ impl Mock {
         self
     }
 
+    pub fn with_cert_upload_waiters(self, waiters: Vec<oneshot::Receiver<()>>) -> Self {
+        *self.cert_upload_waiters.lock() = waiters.into_iter().rev().collect();
+        self
+    }
+
+    pub fn current_cert_upload_inflight(&self) -> usize {
+        self.cert_upload_inflight
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     pub fn current_block_upload_inflight(&self) -> usize {
         self.block_upload_inflight
             .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    async fn wait_for_cert_upload(&self) {
+        struct InflightGuard(Arc<AtomicUsize>);
+
+        impl Drop for InflightGuard {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+
+        self.cert_upload_started
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.cert_upload_inflight
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let _guard = InflightGuard(self.cert_upload_inflight.clone());
+
+        let waiter = self.cert_upload_waiters.lock().pop();
+        if let Some(waiter) = waiter {
+            let _ = waiter.await;
+        }
     }
 }
 
@@ -117,6 +153,7 @@ impl Indexer for Mock {
         if self.fail_certs {
             return Err(std::io::Error::other("cert upload disabled"));
         }
+        self.wait_for_cert_upload().await;
         self.notarization_seen
             .store(true, std::sync::atomic::Ordering::Relaxed);
         Ok(())
@@ -126,6 +163,7 @@ impl Indexer for Mock {
         if self.fail_certs {
             return Err(std::io::Error::other("cert upload disabled"));
         }
+        self.wait_for_cert_upload().await;
         self.finalization_seen
             .store(true, std::sync::atomic::Ordering::Relaxed);
         Ok(())
@@ -209,12 +247,12 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Uploads<E, I> {
             queue::Reader<E, FinalizedEntry>,
         ),
     ) -> Self {
-        let uploaded: SharedUploadTracker = Arc::new(Mutex::new(UploadTracker::new()));
+        let uploads: SharedUploadState = Arc::new(Mutex::new(UploadState::new()));
         let pusher = Pusher::new(
             context.clone(),
             indexer.clone(),
             marshal.clone(),
-            uploaded.clone(),
+            uploads.clone(),
         );
         let (writer, reader) = durable_queue;
         let queue_size = writer.size().await;
@@ -224,9 +262,9 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Uploads<E, I> {
         metrics.depth.set(pending as i64);
         metrics.ack_floor.set(ack_floor as i64);
 
-        let enqueuer = Enqueuer::new(uploaded.clone(), writer.clone(), metrics.clone());
+        let enqueuer = Enqueuer::new(uploads.clone(), writer.clone(), metrics.clone());
         let drainer = (
-            Drainer::new(context, indexer, marshal, metrics, uploaded, writer),
+            Drainer::new(context, indexer, marshal, metrics, uploads, writer),
             reader,
         );
 
@@ -256,7 +294,7 @@ pub(crate) struct Pusher<E: Spawner + Metrics, I: Indexer> {
     context: E,
     indexer: I,
     marshal: MarshalMailbox<Scheme, Standard<Block>>,
-    uploaded: SharedUploadTracker,
+    uploads: SharedUploadState,
 }
 
 impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
@@ -265,14 +303,49 @@ impl<E: Spawner + Metrics, I: Indexer> Pusher<E, I> {
         context: E,
         indexer: I,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
-        uploaded: SharedUploadTracker,
+        uploads: SharedUploadState,
     ) -> Self {
         Self {
             context,
             indexer,
             marshal,
-            uploaded,
+            uploads,
         }
+    }
+}
+
+struct CertificateUploadGuard {
+    uploads: SharedUploadState,
+    digest: Digest,
+    uploaded_height: Option<u64>,
+}
+
+impl CertificateUploadGuard {
+    fn new(uploads: SharedUploadState, digest: Digest) -> Self {
+        uploads.lock().start_certificate_upload(digest);
+        Self {
+            uploads,
+            digest,
+            uploaded_height: None,
+        }
+    }
+
+    fn cache_block(&self, block: Block) {
+        self.uploads.lock().cache_block(block);
+    }
+
+    fn mark_uploaded(&mut self, height: u64) {
+        self.uploaded_height = Some(height);
+    }
+}
+
+impl Drop for CertificateUploadGuard {
+    fn drop(&mut self) {
+        let mut uploads = self.uploads.lock();
+        if let Some(height) = self.uploaded_height {
+            uploads.mark_uploaded(self.digest, height);
+        }
+        uploads.finish_certificate_upload(&self.digest);
     }
 }
 
@@ -302,8 +375,10 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                 self.context.with_label("notarized_block").spawn({
                     let indexer = self.indexer.clone();
                     let marshal = self.marshal.clone();
-                    let uploaded = self.uploaded.clone();
+                    let uploads = self.uploads.clone();
                     move |_| async move {
+                        let mut guard = CertificateUploadGuard::new(uploads, digest);
+
                         // Wait for block.
                         let block = marshal
                             .subscribe_by_digest(
@@ -318,6 +393,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                         };
 
                         let height = block.height.get();
+                        guard.cache_block(block.clone());
                         // Upload to indexer once we have it.
                         let notarized = Notarized::new(notarization, block);
                         let result = indexer.notarized_upload(notarized).await;
@@ -326,7 +402,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                             return;
                         }
 
-                        uploaded.lock().mark_uploaded(digest, height);
+                        guard.mark_uploaded(height);
                         debug!(%view, "notarization uploaded to indexer");
                     }
                 });
@@ -353,8 +429,10 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                 self.context.with_label("finalized_block").spawn({
                     let indexer = self.indexer.clone();
                     let marshal = self.marshal.clone();
-                    let uploaded = self.uploaded.clone();
+                    let uploads = self.uploads.clone();
                     move |_| async move {
+                        let mut guard = CertificateUploadGuard::new(uploads, digest);
+
                         // Wait for block.
                         let block = marshal
                             .subscribe_by_digest(
@@ -369,6 +447,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                         };
 
                         let height = block.height.get();
+                        guard.cache_block(block.clone());
                         // Upload to indexer once we have it.
                         let finalization = Finalized::new(finalization, block);
                         let result = indexer.finalized_upload(finalization).await;
@@ -377,7 +456,7 @@ impl<E: Spawner + Metrics, I: Indexer> Reporter for Pusher<E, I> {
                             return;
                         }
 
-                        uploaded.lock().mark_uploaded(digest, height);
+                        guard.mark_uploaded(height);
                         debug!(%view, "finalization uploaded to indexer");
                     }
                 });

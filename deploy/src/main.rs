@@ -401,6 +401,8 @@ fn generate_local(
         total_indexer_count <= configurations.len(),
         "indexer count exceeds number of peers"
     );
+    // Assign each configured indexer URL to the requested number of validators
+    // in order. Validators without an assignment simply run without an indexer.
     let indexer_assignments = configured_indexers
         .iter()
         .flat_map(|indexer| std::iter::repeat_n(indexer.url.clone(), indexer.count));
