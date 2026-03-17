@@ -34,7 +34,7 @@ enum DrainCompletion {
     Retired { position: u64 },
 }
 
-pub(crate) struct Drainer<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
+pub struct Drainer<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
     context: ContextCell<E>,
     indexer: I,
     marshal: MarshalMailbox<Scheme, Standard<Block>>,
@@ -48,7 +48,7 @@ pub(crate) struct Drainer<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
 }
 
 impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
-    pub(crate) fn new(
+    pub fn new(
         context: E,
         indexer: I,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
@@ -84,7 +84,7 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
     }
 
     /// Start the drainer loop that reads from the queue and uploads blocks.
-    pub(crate) fn start(mut self) -> Handle<()> {
+    pub fn start(mut self) -> Handle<()> {
         spawn_cell!(self.context, self.run().await)
     }
 

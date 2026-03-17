@@ -8,7 +8,7 @@ use commonware_utils::{sync::Mutex, PrioritySet};
 use std::{collections::BTreeMap, sync::Arc};
 
 /// What the durable drainer should do next for a digest.
-pub(crate) enum UploadDecision {
+pub enum UploadDecision {
     /// The block is already uploaded, so the durable row can be retired.
     Retire,
     /// The live certificate path is still handling this digest, so the drainer
@@ -54,7 +54,7 @@ impl Read for FinalizedEntry {
 ///   duplicate finalize notifications must not enqueue another row;
 /// - uploaded: the block was already uploaded successfully, so further finalize
 ///   notifications can be ignored.
-pub(crate) struct UploadState {
+pub struct UploadState {
     // Successfully uploaded digests stay in the dedupe set until the oldest
     // pending finalized height advances past them.
     uploaded: PrioritySet<Digest, u64>,
@@ -74,7 +74,7 @@ pub(crate) struct UploadState {
 }
 
 impl UploadState {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             uploaded: PrioritySet::new(),
             pending_finalized: BTreeMap::new(),
@@ -89,7 +89,7 @@ impl UploadState {
         self.uploaded.contains(digest)
     }
 
-    pub(crate) fn prepare_enqueue(&mut self, block: &Block) -> Option<FinalizedEntry> {
+    pub fn prepare_enqueue(&mut self, block: &Block) -> Option<FinalizedEntry> {
         let entry = FinalizedEntry {
             height: block.height.get(),
             digest: block.digest(),
@@ -101,7 +101,7 @@ impl UploadState {
         needs_enqueue.then_some(entry)
     }
 
-    pub(crate) fn register_finalized(&mut self, position: u64, entry: FinalizedEntry) -> bool {
+    pub fn register_finalized(&mut self, position: u64, entry: FinalizedEntry) -> bool {
         if let Some(previous) = self.pending_finalized.get(&position) {
             assert_eq!(
                 previous.height, entry.height,
@@ -119,7 +119,7 @@ impl UploadState {
         duplicate_digest
     }
 
-    pub(crate) fn finish_finalized(&mut self, position: u64) {
+    pub fn finish_finalized(&mut self, position: u64) {
         let pending = self
             .pending_finalized
             .remove(&position)
@@ -135,21 +135,21 @@ impl UploadState {
         self.prune();
     }
 
-    pub(crate) fn mark_uploaded(&mut self, digest: Digest, height: u64) {
+    pub fn mark_uploaded(&mut self, digest: Digest, height: u64) {
         self.cached_blocks.remove(&digest);
         self.uploaded.put(digest, height);
         self.prune();
     }
 
-    pub(crate) fn cache_block(&mut self, block: Block) {
+    pub fn cache_block(&mut self, block: Block) {
         self.cached_blocks.entry(block.digest()).or_insert(block);
     }
 
-    pub(crate) fn cached_block(&self, digest: &Digest) -> Option<Block> {
+    pub fn cached_block(&self, digest: &Digest) -> Option<Block> {
         self.cached_blocks.get(digest).cloned()
     }
 
-    pub(crate) fn upload_decision(&self, digest: &Digest) -> UploadDecision {
+    pub fn upload_decision(&self, digest: &Digest) -> UploadDecision {
         if self.contains(digest) {
             UploadDecision::Retire
         } else if self.certificate_uploads.contains_key(digest) {
@@ -159,15 +159,11 @@ impl UploadState {
         }
     }
 
-    pub(crate) fn start_certificate_upload(&mut self, digest: Digest) {
+    pub fn start_certificate_upload(&mut self, digest: Digest) {
         *self.certificate_uploads.entry(digest).or_default() += 1;
     }
 
-    pub(crate) fn finish_certificate_upload(
-        &mut self,
-        digest: &Digest,
-        uploaded_height: Option<u64>,
-    ) {
+    pub fn finish_certificate_upload(&mut self, digest: &Digest, uploaded_height: Option<u64>) {
         let count = self
             .certificate_uploads
             .get_mut(digest)
@@ -246,25 +242,22 @@ impl UploadState {
 }
 
 /// State shared by the live certificate path and the durable block path.
-pub(crate) type SharedUploadState = Arc<Mutex<UploadState>>;
+pub type SharedUploadState = Arc<Mutex<UploadState>>;
 
 /// Records finalized block digests in the durable queue from the application's
 /// block stream.
 #[derive(Clone)]
-pub(crate) struct Recorder<E: Clock + Storage + Metrics> {
+pub struct Recorder<E: Clock + Storage + Metrics> {
     uploads: SharedUploadState,
     writer: queue::Writer<E, FinalizedEntry>,
 }
 
 impl<E: Clock + Storage + Metrics> Recorder<E> {
-    pub(crate) fn new(
-        uploads: SharedUploadState,
-        writer: queue::Writer<E, FinalizedEntry>,
-    ) -> Self {
+    pub fn new(uploads: SharedUploadState, writer: queue::Writer<E, FinalizedEntry>) -> Self {
         Self { uploads, writer }
     }
 
-    pub(crate) async fn record(&self, block: &Block) {
+    pub async fn record(&self, block: &Block) {
         let Some(entry) = self.uploads.lock().prepare_enqueue(block) else {
             return;
         };

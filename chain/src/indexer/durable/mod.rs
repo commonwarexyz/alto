@@ -12,5 +12,5 @@
 mod drainer;
 mod state;
 
-pub(crate) use drainer::Drainer;
-pub(crate) use state::{FinalizedEntry, Recorder, SharedUploadState, UploadDecision, UploadState};
+pub use drainer::Drainer;
+pub use state::{FinalizedEntry, Recorder, SharedUploadState, UploadDecision, UploadState};
