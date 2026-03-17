@@ -72,19 +72,9 @@ impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> Drainer<E, I> {
         context
             .with_label("drainer")
             .spawn(move |context| async move {
-                DrainerRunner {
-                    context,
-                    indexer,
-                    marshal,
-                    metrics,
-                    uploads,
-                    writer,
-                    reader,
-                    in_flight: Pool::default(),
-                    queue_closed: false,
-                }
-                .run()
-                .await;
+                DrainerRunner::new(context, indexer, marshal, metrics, uploads, writer, reader)
+                    .run()
+                    .await;
             })
     }
 }
@@ -104,6 +94,28 @@ struct DrainerRunner<E: Spawner + Clock + Storage + Metrics, I: Indexer> {
 }
 
 impl<E: Spawner + Clock + Storage + Metrics, I: Indexer> DrainerRunner<E, I> {
+    fn new(
+        context: E,
+        indexer: I,
+        marshal: MarshalMailbox<Scheme, Standard<Block>>,
+        metrics: DrainerMetrics,
+        uploads: SharedUploadState,
+        writer: queue::Writer<E, FinalizedEntry>,
+        reader: queue::Reader<E, FinalizedEntry>,
+    ) -> Self {
+        Self {
+            context,
+            indexer,
+            marshal,
+            metrics,
+            uploads,
+            writer,
+            reader,
+            in_flight: Pool::default(),
+            queue_closed: false,
+        }
+    }
+
     async fn run(mut self) {
         select_loop! {
             self.context,
