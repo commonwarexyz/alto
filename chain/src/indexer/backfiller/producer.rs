@@ -29,9 +29,5 @@ impl<E: Clock + Storage + Metrics> Producer<E> {
             .enqueue(entry)
             .await
             .expect("failed to enqueue finalized digest");
-        self.writer
-            .sync()
-            .await
-            .expect("failed to sync after enqueue");
     }
 }
