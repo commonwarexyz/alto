@@ -110,6 +110,9 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
             let marshal = self.marshal.clone();
             let uploads = self.uploads.clone();
             move |_| async move {
+                // Mark the digest as being handled by the live certificate path
+                // before waiting on marshal so the backfiller does not race it
+                // while the block is still being fetched.
                 let mut guard = CertificateUploadGuard::new(uploads, digest);
 
                 let block = marshal.subscribe_by_digest(Some(round), digest).await.await;
