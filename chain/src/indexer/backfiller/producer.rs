@@ -1,4 +1,4 @@
-use super::{FinalizedEntry, SharedUploadState};
+use super::{Entry, SharedState};
 use alto_types::Block;
 use commonware_runtime::{Clock, Metrics, Storage};
 use commonware_storage::queue;
@@ -7,12 +7,12 @@ use commonware_storage::queue;
 /// block stream.
 #[derive(Clone)]
 pub struct Producer<E: Clock + Storage + Metrics> {
-    uploads: SharedUploadState,
-    writer: queue::Writer<E, FinalizedEntry>,
+    uploads: SharedState,
+    writer: queue::Writer<E, Entry>,
 }
 
 impl<E: Clock + Storage + Metrics> Producer<E> {
-    pub fn new(uploads: SharedUploadState, writer: queue::Writer<E, FinalizedEntry>) -> Self {
+    pub fn new(uploads: SharedState, writer: queue::Writer<E, Entry>) -> Self {
         Self { uploads, writer }
     }
 

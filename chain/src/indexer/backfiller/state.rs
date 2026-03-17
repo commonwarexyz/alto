@@ -6,7 +6,7 @@ use commonware_utils::{sync::Mutex, PrioritySet};
 use std::{collections::BTreeMap, sync::Arc};
 
 /// What the backfiller should do next for a digest.
-pub enum UploadDecision {
+pub enum Decision {
     /// The block is already uploaded, so the queue row can be retired.
     Retire,
     /// The live certificate path is still handling this digest, so the backfiller
@@ -18,23 +18,23 @@ pub enum UploadDecision {
 
 /// Entry stored in the backfill queue.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct FinalizedEntry {
+pub struct Entry {
     pub height: u64,
     pub digest: Digest,
 }
 
-impl FixedSize for FinalizedEntry {
+impl FixedSize for Entry {
     const SIZE: usize = u64::SIZE + Digest::SIZE;
 }
 
-impl Write for FinalizedEntry {
+impl Write for Entry {
     fn write(&self, buf: &mut impl BufMut) {
         self.height.write(buf);
         self.digest.write(buf);
     }
 }
 
-impl Read for FinalizedEntry {
+impl Read for Entry {
     type Cfg = ();
 
     fn read_cfg(buf: &mut impl Buf, _: &()) -> Result<Self, commonware_codec::Error> {
@@ -52,13 +52,13 @@ impl Read for FinalizedEntry {
 ///   duplicate finalize notifications must not enqueue another row;
 /// - uploaded: the block was already uploaded successfully, so further finalize
 ///   notifications can be ignored.
-pub struct UploadState {
+pub struct State {
     // Successfully uploaded digests stay in the dedupe set until the oldest
     // pending finalized height advances past them.
     uploaded: PrioritySet<Digest, u64>,
     // Pending backfill queue rows keyed by queue position so replay and acking
     // follow the queue's actual cursor model.
-    pending_finalized: BTreeMap<u64, FinalizedEntry>,
+    pending_finalized: BTreeMap<u64, Entry>,
     // Counts pending queue rows per digest to suppress duplicate enqueues while
     // the backfill row is still the retry source of truth.
     pending_digests: BTreeMap<Digest, usize>,
@@ -71,7 +71,7 @@ pub struct UploadState {
     certificate_uploads: BTreeMap<Digest, usize>,
 }
 
-impl UploadState {
+impl State {
     pub fn new() -> Self {
         Self {
             uploaded: PrioritySet::new(),
@@ -87,8 +87,8 @@ impl UploadState {
         self.uploaded.contains(digest)
     }
 
-    pub fn prepare_enqueue(&mut self, block: &Block) -> Option<FinalizedEntry> {
-        let entry = FinalizedEntry {
+    pub fn prepare_enqueue(&mut self, block: &Block) -> Option<Entry> {
+        let entry = Entry {
             height: block.height.get(),
             digest: block.digest(),
         };
@@ -99,7 +99,7 @@ impl UploadState {
         needs_enqueue.then_some(entry)
     }
 
-    pub fn register_finalized(&mut self, position: u64, entry: FinalizedEntry) -> bool {
+    pub fn register_finalized(&mut self, position: u64, entry: Entry) -> bool {
         if let Some(previous) = self.pending_finalized.get(&position) {
             assert_eq!(
                 previous.height, entry.height,
@@ -147,13 +147,13 @@ impl UploadState {
         self.cached_blocks.get(digest).cloned()
     }
 
-    pub fn upload_decision(&self, digest: &Digest) -> UploadDecision {
+    pub fn upload_decision(&self, digest: &Digest) -> Decision {
         if self.contains(digest) {
-            UploadDecision::Retire
+            Decision::Retire
         } else if self.certificate_uploads.contains_key(digest) {
-            UploadDecision::Wait
+            Decision::Wait
         } else {
-            UploadDecision::Proceed
+            Decision::Proceed
         }
     }
 
@@ -240,7 +240,7 @@ impl UploadState {
 }
 
 /// State shared by the live certificate path and the backfiller path.
-pub type SharedUploadState = Arc<Mutex<UploadState>>;
+pub type SharedState = Arc<Mutex<State>>;
 
 #[cfg(test)]
 mod tests {
@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn test_upload_state_prunes_only_after_oldest_pending_completion() {
-        let mut uploads = UploadState::new();
+        let mut uploads = State::new();
 
         let digest_10 = Sha256::hash(b"view-10");
         let digest_11 = Sha256::hash(b"view-11");
@@ -276,21 +276,21 @@ mod tests {
         for (position, entry) in [
             (
                 3,
-                FinalizedEntry {
+                Entry {
                     height: 10,
                     digest: digest_10,
                 },
             ),
             (
                 4,
-                FinalizedEntry {
+                Entry {
                     height: 11,
                     digest: digest_11,
                 },
             ),
             (
                 5,
-                FinalizedEntry {
+                Entry {
                     height: 12,
                     digest: digest_12,
                 },
@@ -320,9 +320,9 @@ mod tests {
 
     #[test]
     fn test_upload_state_dedupes_pending_digests() {
-        let mut uploads = UploadState::new();
+        let mut uploads = State::new();
         let digest = Sha256::hash(b"view-10");
-        let entry = FinalizedEntry { height: 10, digest };
+        let entry = Entry { height: 10, digest };
 
         assert!(uploads.needs_enqueue(&digest, 10));
         assert!(!uploads.register_finalized(3, entry));
@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn test_upload_state_does_not_recache_already_uploaded_blocks() {
-        let mut uploads = UploadState::new();
+        let mut uploads = State::new();
         let block = test_block(7, 7, b"view-7");
         let digest = block.digest();
 
@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_upload_state_eventually_drops_cached_block_after_failed_certificate_upload() {
-        let mut uploads = UploadState::new();
+        let mut uploads = State::new();
         let block = test_block(7, 7, b"view-7");
         let digest = block.digest();
 
@@ -368,9 +368,9 @@ mod tests {
 
     #[test]
     fn test_upload_state_keeps_cached_block_while_backfill_row_is_pending() {
-        let mut uploads = UploadState::new();
+        let mut uploads = State::new();
         let block = test_block(7, 7, b"view-7");
-        let entry = FinalizedEntry {
+        let entry = Entry {
             height: block.height.get(),
             digest: block.digest(),
         };

@@ -1364,19 +1364,16 @@ mod tests {
     fn test_finalized_entry_codec() {
         use commonware_codec::{DecodeExt, Encode};
         use commonware_cryptography::{Hasher, Sha256};
-        use indexer::FinalizedEntry;
+        use indexer::Entry;
 
         let digest = Sha256::hash(b"test block");
-        let entry = FinalizedEntry { height: 42, digest };
+        let entry = Entry { height: 42, digest };
 
         let encoded = entry.encode();
-        let decoded = FinalizedEntry::decode(encoded.as_ref()).unwrap();
+        let decoded = Entry::decode(encoded.as_ref()).unwrap();
         assert_eq!(decoded.height, 42);
         assert_eq!(decoded.digest, digest);
 
-        assert_eq!(
-            encoded.len(),
-            <FinalizedEntry as commonware_codec::FixedSize>::SIZE
-        );
+        assert_eq!(encoded.len(), <Entry as commonware_codec::FixedSize>::SIZE);
     }
 }

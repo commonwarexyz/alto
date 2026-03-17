@@ -1,4 +1,4 @@
-use super::{FinalizedEntry, SharedUploadState, UploadDecision};
+use super::{Decision, Entry, SharedState};
 use crate::indexer::Client;
 use alto_types::{Block, Scheme};
 use commonware_consensus::marshal::{
@@ -40,9 +40,9 @@ pub struct Consumer<E: Spawner + Clock + Storage + Metrics, C: Client> {
     marshal: MarshalMailbox<Scheme, Standard<Block>>,
     upload_results: status::Counter,
     in_flight_uploads: Gauge,
-    uploads: SharedUploadState,
-    writer: queue::Writer<E, FinalizedEntry>,
-    reader: queue::Reader<E, FinalizedEntry>,
+    uploads: SharedState,
+    writer: queue::Writer<E, Entry>,
+    reader: queue::Reader<E, Entry>,
     in_flight: Pool<Completion>,
     queue_closed: bool,
 }
@@ -52,9 +52,9 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
         context: E,
         client: C,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
-        uploads: SharedUploadState,
-        writer: queue::Writer<E, FinalizedEntry>,
-        reader: queue::Reader<E, FinalizedEntry>,
+        uploads: SharedState,
+        writer: queue::Writer<E, Entry>,
+        reader: queue::Reader<E, Entry>,
     ) -> Self {
         let queue_metrics = context.with_label("queue");
         let upload_results = status::Counter::default();
@@ -158,8 +158,8 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
         }
     }
 
-    async fn start_upload(&mut self, position: u64, entry: FinalizedEntry) {
-        let FinalizedEntry { height, digest } = entry;
+    async fn start_upload(&mut self, position: u64, entry: Entry) {
+        let Entry { height, digest } = entry;
         let skip = {
             let mut uploads = self.uploads.lock();
             // Re-register every dequeued row in shared state before deciding
@@ -167,7 +167,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
             // rows rebuild the same pending state the original process had.
             if uploads.register_finalized(position, entry) {
                 Some("consumer skipping duplicate queued block")
-            } else if matches!(uploads.upload_decision(&digest), UploadDecision::Retire) {
+            } else if matches!(uploads.upload_decision(&digest), Decision::Retire) {
                 Some("consumer skipping already-uploaded block")
             } else {
                 None
@@ -204,15 +204,15 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                         uploads.upload_decision(&digest)
                     };
                     match decision {
-                        UploadDecision::Retire => {
+                        Decision::Retire => {
                             debug!(?digest, "consumer observed live upload before block upload");
                             return Completion::Retired { position };
                         }
-                        UploadDecision::Wait => {
+                        Decision::Wait => {
                             context.sleep(CONSUMER_RETRY_DELAY).await;
                             continue;
                         }
-                        UploadDecision::Proceed => {}
+                        Decision::Proceed => {}
                     }
 
                     match client.block_upload(block.clone()).await {
@@ -242,7 +242,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
     async fn wait_for_uploadable_block(
         context: &ContextCell<E>,
         marshal: &MarshalMailbox<Scheme, Standard<Block>>,
-        uploads: &SharedUploadState,
+        uploads: &SharedState,
         digest: Digest,
     ) -> Option<Block> {
         // Prefer the in-process block cache populated by the application and
@@ -260,9 +260,9 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
             let next = {
                 let uploads = uploads.lock();
                 match uploads.upload_decision(&digest) {
-                    UploadDecision::Retire => NextBlock::AlreadyUploaded,
-                    UploadDecision::Wait => NextBlock::WaitForCertificate,
-                    UploadDecision::Proceed => {
+                    Decision::Retire => NextBlock::AlreadyUploaded,
+                    Decision::Wait => NextBlock::WaitForCertificate,
+                    Decision::Proceed => {
                         if let Some(block) = uploads.cached_block(&digest) {
                             NextBlock::Ready(Box::new(block))
                         } else {
@@ -311,7 +311,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
 
         // Persist retirement of the queue row before dropping the corresponding
         // pending state from memory so replay after a crash sees a consistent
-        // queue/UploadState pairing.
+        // queue/State pairing.
         self.reader.ack(position).await.expect("failed to ack");
         self.writer.sync().await.expect("failed to sync after ack");
         self.uploads.lock().finish_finalized(position);

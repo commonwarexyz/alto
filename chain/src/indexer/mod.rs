@@ -8,7 +8,7 @@
 //!   restarts.
 //!
 //! [`Indexer`] is the top-level abstraction over those pieces. It owns
-//! the shared [`UploadState`] used to deduplicate uploads, cache blocks, and
+//! the shared [`State`] used to deduplicate uploads, cache blocks, and
 //! coordinate the live and backfiller paths. The actors are still exposed
 //! separately because they plug into three different integration points:
 //! the application's finalized block stream, the consensus reporter, and a
@@ -27,8 +27,8 @@ mod backfiller;
 mod mock;
 mod pusher;
 
-pub(crate) use backfiller::{Consumer, FinalizedEntry, Producer};
-use backfiller::{SharedUploadState, UploadState};
+pub(crate) use backfiller::{Consumer, Entry, Producer};
+use backfiller::{SharedState, State};
 #[cfg(test)]
 pub use mock::Mock;
 pub(crate) use pusher::Pusher;
@@ -101,12 +101,9 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Indexer<E, C> {
         context: E,
         client: C,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
-        backfill_queue: (
-            queue::Writer<E, FinalizedEntry>,
-            queue::Reader<E, FinalizedEntry>,
-        ),
+        backfill_queue: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
     ) -> Self {
-        let uploads: SharedUploadState = Arc::new(Mutex::new(UploadState::new()));
+        let uploads: SharedState = Arc::new(Mutex::new(State::new()));
         let pusher = Pusher::new(
             context.clone(),
             client.clone(),

@@ -1,4 +1,4 @@
-use super::{Client, SharedUploadState};
+use super::{Client, SharedState};
 use alto_types::{Activity, Block, Scheme, Seed, Seedable};
 use commonware_consensus::{
     marshal::{core::Mailbox as MarshalMailbox, standard::Standard},
@@ -22,7 +22,7 @@ pub(crate) struct Pusher<E: Spawner + Metrics, C: Client> {
     context: E,
     client: C,
     marshal: MarshalMailbox<Scheme, Standard<Block>>,
-    uploads: SharedUploadState,
+    uploads: SharedState,
 }
 
 impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
@@ -31,7 +31,7 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
         context: E,
         client: C,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
-        uploads: SharedUploadState,
+        uploads: SharedState,
     ) -> Self {
         Self {
             context,
@@ -49,13 +49,13 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
 /// successful upload, the guard records the uploaded height and marks the
 /// digest uploaded on drop; on failure, it only clears the in-flight marker.
 struct CertificateUploadGuard {
-    uploads: SharedUploadState,
+    uploads: SharedState,
     digest: Digest,
     uploaded_height: Option<u64>,
 }
 
 impl CertificateUploadGuard {
-    fn new(uploads: SharedUploadState, digest: Digest) -> Self {
+    fn new(uploads: SharedState, digest: Digest) -> Self {
         uploads.lock().start_certificate_upload(digest);
         Self {
             uploads,
