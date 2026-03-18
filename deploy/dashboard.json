@@ -2146,7 +2146,7 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
+                "w": 6,
                 "x": 0,
                 "y": 46
             },
@@ -2247,11 +2247,11 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
-                "x": 8,
+                "w": 6,
+                "x": 6,
                 "y": 46
             },
-            "id": 11,
+            "id": 42,
             "options": {
                 "legend": {
                     "calcs": [],
@@ -2274,7 +2274,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "network_spawner_connections{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
+                    "expr": "count by(deployer_name, deployer_ip) (network_tracker_directory_connected{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"})",
                     "fullMetaSearch": false,
                     "includeNullMetadata": true,
                     "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
@@ -2283,8 +2283,81 @@
                     "useBackend": false
                 }
             ],
-            "title": "Connections",
+            "title": "Connected Peers",
             "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "mappings": [],
+                    "min": 0,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    },
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 9,
+                "w": 6,
+                "x": 12,
+                "y": 46
+            },
+            "id": 11,
+            "options": {
+                "displayMode": "basic",
+                "namePlacement": "left",
+                "orientation": "horizontal",
+                "reduceOptions": {
+                    "calcs": [
+                        "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                },
+                "showUnfilled": false,
+                "sizing": "auto",
+                "text": {}
+            },
+            "pluginVersion": "11.5.2",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "disableTextWrap": false,
+                    "editorMode": "code",
+                    "expr": "sort_desc(avg by(peer) (clamp_min((time() * 1000 - network_tracker_directory_connected{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}) / 1000, 0)))",
+                    "fullMetaSearch": false,
+                    "includeNullMetadata": true,
+                    "instant": true,
+                    "legendFormat": "{{peer}}",
+                    "range": false,
+                    "refId": "A",
+                    "useBackend": false
+                }
+            ],
+            "title": "Peer Average Connection Age",
+            "type": "bargauge"
         },
         {
             "datasource": {
@@ -2348,8 +2421,8 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
-                "x": 16,
+                "w": 6,
+                "x": 18,
                 "y": 46
             },
             "id": 12,
@@ -2443,6 +2516,107 @@
                                 "value": 80
                             }
                         ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 9,
+                "w": 6,
+                "x": 0,
+                "y": 55
+            },
+            "id": 43,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": false
+                },
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "11.5.2",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "disableTextWrap": false,
+                    "editorMode": "builder",
+                    "expr": "sum by(deployer_name, deployer_ip) (engine_queue_tip{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}) - sum by(deployer_name, deployer_ip) (engine_queue_floor{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"})",
+                    "fullMetaSearch": false,
+                    "includeNullMetadata": true,
+                    "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
+                    "range": true,
+                    "refId": "A",
+                    "useBackend": false
+                }
+            ],
+            "title": "Queue Depth (Tip - Floor)",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 0,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
                     },
                     "unit": "bytes"
                 },
@@ -2450,8 +2624,8 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
-                "x": 0,
+                "w": 6,
+                "x": 6,
                 "y": 55
             },
             "id": 13,
@@ -2552,8 +2726,8 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
-                "x": 8,
+                "w": 6,
+                "x": 12,
                 "y": 55
             },
             "id": 14,
@@ -2653,8 +2827,8 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
-                "x": 16,
+                "w": 6,
+                "x": 18,
                 "y": 55
             },
             "id": 8,
