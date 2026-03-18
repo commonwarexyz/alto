@@ -112,9 +112,12 @@ pub struct Actor<E: Spawner, C: Source> {
 }
 
 enum State {
-    // A fetch is currently running. The id lets us ignore stale
-    // completions from an earlier attempt for the same key, and dropping the
-    // aborter cancels the current attempt.
+    // A fetch is currently running.
+    //
+    // The id lets us ignore stale completions from an earlier attempt for
+    // the same key, and dropping the aborter cancels the current attempt.
+    // This ensures we only have 1 fetch in flight for a given key (regardless
+    // of the order of fetch, cancel, clear, retain messages).
     Active { id: u64, aborter: Aborter },
     // A retry is queued for the recorded deadline.
     Scheduled(SystemTime),
