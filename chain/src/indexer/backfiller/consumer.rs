@@ -167,7 +167,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                     Self::wait_for_uploadable_block(&context, &marshal, &uploads, digest, retry)
                         .await
                 else {
-                    debug!(?digest, "consumer observed live upload before block upload");
+                    debug!(?digest, "skipping previously uploaded block");
                     return Completion::Skipped { position, height };
                 };
 
@@ -180,7 +180,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                     };
                     match decision {
                         Decision::Skip => {
-                            debug!(?digest, "consumer observed live upload before block upload");
+                            debug!(?digest, "skipping previously uploaded block");
                             return Completion::Skipped { position, height };
                         }
                         Decision::Wait => {
@@ -193,7 +193,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                     match client.block_upload(block.clone()).await {
                         Ok(()) => {
                             upload_results.inc(status::Status::Success);
-                            debug!(?digest, "consumer uploaded block");
+                            debug!(?digest, "uploaded block by digest");
                             return Completion::Uploaded {
                                 position,
                                 height,
@@ -205,7 +205,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                             // not ack the entry until success or until the live
                             // certificate path proves the block was uploaded.
                             upload_results.inc(status::Status::Failure);
-                            warn!(?e, ?digest, "consumer failed to upload block, retrying");
+                            warn!(?e, ?digest, "retrying block upload by digest");
                             context.sleep(retry).await;
                         }
                     }
@@ -267,9 +267,9 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
     }
 
     async fn complete(&mut self, completion: Completion) {
+        // Record the success before acking so the in-memory dedupe tracker
+        // stays aligned with the queue state.
         let (position, height) = match completion {
-            // Record the success before acking so the in-memory dedupe tracker
-            // stays aligned with the queue state.
             Completion::Uploaded {
                 position,
                 height,
@@ -281,6 +281,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
             Completion::Skipped { position, height } => (position, height),
         };
 
+        // Acknowledge the queue entry and advance the queue floor if needed.
         let floor = self.reader.ack_floor().await;
         self.reader.ack(position).await.expect("failed to ack");
         let floor_advanced = self.reader.ack_floor().await > floor;
