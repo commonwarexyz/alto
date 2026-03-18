@@ -104,7 +104,7 @@ pub struct Actor<E: Spawner, C: Source> {
     client: C,
     mailbox_rx: mpsc::Receiver<Message>,
     handler: handler::Handler<Digest>,
-    in_flight: AbortablePool<Result>,
+    active: AbortablePool<Result>,
     requests: HashMap<handler::Request<Digest>, State>,
     retry_schedule: BTreeSet<(SystemTime, handler::Request<Digest>)>,
     fetch_retry_timeout: Duration,
@@ -145,7 +145,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
             client,
             mailbox_rx,
             handler: handler::Handler::new(ingress_tx),
-            in_flight: AbortablePool::default(),
+            active: AbortablePool::default(),
             requests: HashMap::new(),
             retry_schedule: BTreeSet::new(),
             fetch_retry_timeout,
@@ -167,14 +167,14 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
         select_loop! {
             self.context,
             on_stopped => {},
-            Ok(result) = self.in_flight.next_completed() else continue => {
+            Ok(result) = self.active.next_completed() else continue => {
                 self.handle_completed(result);
             },
             _ = match self.retry_schedule.first() {
                 Some((deadline, _)) => futures::future::Either::Left(self.context.sleep_until(*deadline)),
                 None => futures::future::Either::Right(futures::future::pending()),
             } => {
-                self.retry_due();
+                self.process_retries();
             },
             Some(msg) = self.mailbox_rx.recv() else break => {
                 match msg {
@@ -239,17 +239,20 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
         }
     }
 
+    /// Start a fetch for the given key.
     fn start_fetch(&mut self, key: handler::Request<Digest>) {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
         let future =
             Self::process_fetch(key.clone(), id, self.client.clone(), self.handler.clone());
-        let aborter = self.in_flight.push(future);
+        let aborter = self.active.push(future);
         let previous = self.requests.insert(key, State::Active { id, aborter });
         assert!(previous.is_none(), "request state already existed");
     }
 
+    /// Handle a completed fetch.
     fn handle_completed(&mut self, result: Result) {
+        // If the request has been removed or updated, ignore the completion.
         let Some(state) = self.requests.get(&result.key) else {
             trace!(
                 ?result.key,
@@ -258,7 +261,6 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
             );
             return;
         };
-
         match state {
             State::Active { id, .. } if *id == result.id => {}
             State::Active { id, .. } => {
@@ -281,6 +283,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
             }
         }
 
+        // Remove the request and (optionally) schedule a retry.
         let removed = self.requests.remove(&result.key);
         assert!(
             matches!(
@@ -294,6 +297,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
         }
     }
 
+    /// Schedule a retry for the given key.
     fn schedule_retry(&mut self, key: handler::Request<Digest>) {
         let deadline = self
             .context
@@ -310,7 +314,8 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
         debug!(?key, ?deadline, "scheduled fetch retry");
     }
 
-    fn retry_due(&mut self) {
+    /// Process any due retries.
+    fn process_retries(&mut self) {
         let now = self.context.current();
         while let Some((deadline, key)) = self.retry_schedule.pop_first() {
             if deadline > now {
@@ -344,6 +349,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
         }
     }
 
+    /// Process a fetch request.
     async fn process_fetch(
         key: handler::Request<Digest>,
         id: u64,
@@ -364,6 +370,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
         Result { key, id, retry }
     }
 
+    /// Fetch a block by digest.
     async fn fetch_block_by_digest(
         digest: Digest,
         client: C,
@@ -393,6 +400,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
         }
     }
 
+    /// Fetch a finalized block by height.
     async fn fetch_finalized_by_height(
         height: Height,
         client: C,
@@ -427,6 +435,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
         }
     }
 
+    /// Fetch a notarized block by round.
     async fn fetch_notarized_by_round(
         round: commonware_consensus::types::Round,
         client: C,
@@ -489,7 +498,6 @@ mod tests {
                 16,
                 DEFAULT_FETCH_RETRY_TIMEOUT,
             );
-
             let _actor_handle = actor.start();
 
             let key = handler::Request::<Digest>::Finalized {
@@ -529,12 +537,10 @@ mod tests {
                 16,
                 DEFAULT_FETCH_RETRY_TIMEOUT,
             );
-
             let _actor_handle = actor.start();
 
-            resolver.fetch(handler::Request::Block(digest)).await;
-
             // Verify the actor delivered the block with the correct key
+            resolver.fetch(handler::Request::Block(digest)).await;
             let msg = ingress_rx.recv().await.unwrap();
             match msg {
                 handler::Message::Deliver { key, .. } => {
@@ -570,11 +576,9 @@ mod tests {
                 16,
                 DEFAULT_FETCH_RETRY_TIMEOUT,
             );
-
             let _actor_handle = actor.start();
 
             resolver.fetch(handler::Request::Finalized { height }).await;
-
             let msg = ingress_rx.recv().await.unwrap();
             match msg {
                 handler::Message::Deliver { key, .. } => {
@@ -626,12 +630,10 @@ mod tests {
                 16,
                 DEFAULT_FETCH_RETRY_TIMEOUT,
             );
-
             let _actor_handle = actor.start();
 
-            resolver.fetch(handler::Request::Finalized { height }).await;
-
             // Allow the fetch to run to completion.
+            resolver.fetch(handler::Request::Finalized { height }).await;
             context.sleep(Duration::from_millis(100)).await;
 
             assert_eq!(
@@ -678,11 +680,9 @@ mod tests {
                 16,
                 DEFAULT_FETCH_RETRY_TIMEOUT,
             );
-
             let _actor_handle = actor.start();
 
             resolver.fetch(handler::Request::Notarized { round }).await;
-
             let msg = ingress_rx.recv().await.unwrap();
             match msg {
                 handler::Message::Deliver { key, .. } => {
@@ -721,10 +721,9 @@ mod tests {
                 16,
                 DEFAULT_FETCH_RETRY_TIMEOUT,
             );
-
             let _actor_handle = actor.start();
-            resolver.fetch(handler::Request::Finalized { height }).await;
 
+            resolver.fetch(handler::Request::Finalized { height }).await;
             let msg = ingress_rx.recv().await.unwrap();
             match msg {
                 handler::Message::Deliver { response, .. } => {
@@ -780,10 +779,9 @@ mod tests {
                 16,
                 DEFAULT_FETCH_RETRY_TIMEOUT,
             );
-
             let _actor_handle = actor.start();
-            resolver.fetch(handler::Request::Notarized { round }).await;
 
+            resolver.fetch(handler::Request::Notarized { round }).await;
             let msg = ingress_rx.recv().await.unwrap();
             match msg {
                 handler::Message::Deliver { response, .. } => {
@@ -838,7 +836,6 @@ mod tests {
                 16,
                 DEFAULT_FETCH_RETRY_TIMEOUT,
             );
-
             let _actor_handle = actor.start();
 
             // Send the same request twice
@@ -886,11 +883,9 @@ mod tests {
                 16,
                 DEFAULT_FETCH_RETRY_TIMEOUT,
             );
-
             let _actor_handle = actor.start();
 
             resolver.fetch(handler::Request::Block(digest)).await;
-
             let max_retry_wait = DEFAULT_FETCH_RETRY_TIMEOUT * 2 + Duration::from_millis(10);
             for _ in 0..3 {
                 if *call_count.lock().unwrap() >= 3 {
@@ -935,7 +930,6 @@ mod tests {
             );
 
             let key = handler::Request::<Digest>::Block(digest);
-
             actor.start_fetch(key.clone());
             let Some(State::Active { id: first_id, .. }) = actor.requests.remove(&key) else {
                 panic!("expected first fetch attempt to be active");
