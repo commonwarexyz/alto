@@ -207,6 +207,7 @@ mod tests {
     use commonware_runtime::{deterministic::Runner, Metrics, Runner as _};
     use commonware_utils::channel::{mpsc, oneshot};
     use commonware_utils::NZUsize;
+    use std::time::Duration;
 
     /// Verifies that marshal's Deliver handler rejects a finalization whose
     /// threshold signature does not match the configured scheme. This is
@@ -237,6 +238,7 @@ mod tests {
                 source,
                 ingress_tx.clone(),
                 16,
+                Duration::from_secs(1),
             );
             let _engine_handle = engine.start((ingress_rx, resolver));
 
@@ -291,6 +293,7 @@ mod tests {
                 source,
                 ingress_tx.clone(),
                 16,
+                Duration::from_secs(1),
             );
             let _engine_handle = engine.start((ingress_rx, resolver));
 

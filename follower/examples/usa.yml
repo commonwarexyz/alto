@@ -33,6 +33,9 @@ mailbox_size: 4096
 # Maximum number of blocks to fetch concurrently during backfill
 max_repair: 512
 
+# Milliseconds between retries for failed backfill requests
+fetch_retry_timeout_ms: 5000
+
 # Start from the tip of the finalized chain on first run
 # Set to false to start from genesis (requires backfilling all historical blocks)
 tip: true

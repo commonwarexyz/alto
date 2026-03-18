@@ -46,6 +46,7 @@ pub struct Config {
     pub metrics_port: u16,
     pub mailbox_size: NonZero<usize>,
     pub max_repair: NonZero<usize>,
+    pub fetch_retry_timeout_ms: u64,
     pub tip: bool,
     pub pruning_depth: Option<u64>,
 }
@@ -220,6 +221,7 @@ fn main() {
         );
         info!(
             source = %config.source,
+            fetch_retry_timeout_ms = config.fetch_retry_timeout_ms,
             pruning_depth = config.pruning_depth,
             "starting follower node"
         );
@@ -290,6 +292,7 @@ fn main() {
             client.clone(),
             ingress_tx,
             config.mailbox_size.get(),
+            Duration::from_millis(config.fetch_retry_timeout_ms),
         );
         let resolver_handle = resolver_actor.start();
 

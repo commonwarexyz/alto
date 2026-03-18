@@ -4,11 +4,11 @@
 # and stores finalized blocks locally.
 
 # URL of the exoware relay or indexer endpoint
-source: "https://global.alto.exoware.xyz"
+source: "https://backfill.alto.exoware.xyz"
 
 # Hex-encoded BLS12-381 public key of the network identity
 # This is the threshold public key used to verify finalization signatures
-identity: "a5e8eb414379bf165cc6f717719c31cd87e062c4e3bd3647ad320dbb0b063b04f288202d7cfb7bbf6ca7ba053c48d36a16015b2977a031ef8294fd8fd943d213c53177c6521ad9fd3fd24cf362879a827a716bac2ca4b29f3c90a87fc2d543c4"
+identity: "87ceaecbfd832414c33f777af848425b055f36759fb54552ccf5abaa373f053a79a8f72bf7f5463aafe785f63628dd3b017fc16845bd543be379ee181a791e3ae380572a05bf232893ecdc6d560807af5c22638a2d4d5387a882fe1a91c6ffa9"
 
 # Directory for storing finalized blocks and state
 directory: "/tmp/alto-follower-global"
@@ -30,6 +30,9 @@ mailbox_size: 4096
 
 # Maximum number of blocks to fetch concurrently during backfill
 max_repair: 512
+
+# Milliseconds between retries for failed backfill requests
+fetch_retry_timeout_ms: 5000
 
 # Start from the tip of the finalized chain on first run
 # Set to false to start from genesis (requires backfilling all historical blocks)

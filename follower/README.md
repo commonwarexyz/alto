@@ -44,6 +44,7 @@ _To deploy your own instance of `alto`, read the guide in [deploy](../deploy/REA
 | `metrics_port` | Port for the Prometheus metrics endpoint |
 | `mailbox_size` | Capacity of internal actor mailboxes |
 | `max_repair` | Maximum concurrent block fetches during backfill |
+| `fetch_retry_timeout_ms` | Milliseconds between follower resolver retries for failed backfill requests |
 | `tip` | Start from the tip of the finalized chain instead of backfilling from genesis |
 | `pruning_depth` | Number of finalized blocks to retain before pruning (null to keep all) |
 

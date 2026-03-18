@@ -7,13 +7,17 @@ use commonware_consensus::{marshal::resolver::handler, types::Height};
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
 use commonware_macros::select_loop;
 use commonware_resolver::Consumer;
-use commonware_runtime::{spawn_cell, ContextCell, Handle, Spawner};
+use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Spawner};
 use commonware_utils::channel::mpsc;
 use commonware_utils::{
     futures::{AbortablePool, Aborter},
     vec::NonEmptyVec,
+    PrioritySet,
 };
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{Duration, SystemTime},
+};
 use tracing::{debug, trace, warn};
 
 /// Messages sent from the [Resolver] handle to the [Actor].
@@ -89,7 +93,7 @@ impl commonware_resolver::Resolver for Resolver {
 ///
 /// This replaces the p2p-based resolver used by validators. When marshal needs
 /// a block or certificate it does not have locally, it asks this actor to fetch
-/// it from the HTTP source. In-flight requests are deduplicated.
+/// it from the HTTP source. In-flight and scheduled retry requests are deduplicated.
 ///
 /// The [Source] (client) is constructed without verification because marshal's
 /// Deliver handler verifies all signatures before accepting resolved data.
@@ -99,17 +103,25 @@ pub struct Actor<E: Spawner, C: Source> {
     client: C,
     mailbox_rx: mpsc::Receiver<Message>,
     handler: handler::Handler<Digest>,
-    in_flight: AbortablePool<handler::Request<Digest>>,
+    in_flight: AbortablePool<FetchResult>,
     in_flight_keys: HashMap<handler::Request<Digest>, Aborter>,
+    retry_pending: PrioritySet<handler::Request<Digest>, SystemTime>,
+    fetch_retry_timeout: Duration,
 }
 
-impl<E: Spawner, C: Source> Actor<E, C> {
+struct FetchResult {
+    key: handler::Request<Digest>,
+    retry: bool,
+}
+
+impl<E: Spawner + Clock, C: Source> Actor<E, C> {
     /// Create a new [Actor] and its corresponding [Resolver] handle.
     pub fn new(
         context: E,
         client: C,
         ingress_tx: mpsc::Sender<handler::Message<Digest>>,
         mailbox_size: usize,
+        fetch_retry_timeout: Duration,
     ) -> (Self, Resolver) {
         let (mailbox_tx, mailbox_rx) = mpsc::channel(mailbox_size);
 
@@ -120,6 +132,8 @@ impl<E: Spawner, C: Source> Actor<E, C> {
             handler: handler::Handler::new(ingress_tx),
             in_flight: AbortablePool::default(),
             in_flight_keys: HashMap::new(),
+            retry_pending: PrioritySet::new(),
+            fetch_retry_timeout,
         };
 
         let handle = Resolver { mailbox_tx };
@@ -137,42 +151,101 @@ impl<E: Spawner, C: Source> Actor<E, C> {
         select_loop! {
             self.context,
             on_stopped => {},
-            Ok(key) = self.in_flight.next_completed() else continue => {
-                self.in_flight_keys.remove(&key);
+            Ok(result) = self.in_flight.next_completed() else continue => {
+                self.in_flight_keys.remove(&result.key);
+                if result.retry {
+                    self.schedule_retry(result.key);
+                }
+            },
+            _ = match self.retry_pending.peek() {
+                Some((_, &deadline)) => futures::future::Either::Left(self.context.sleep_until(deadline)),
+                None => futures::future::Either::Right(futures::future::pending()),
+            } => {
+                self.retry_due();
             },
             Some(msg) = self.mailbox_rx.recv() else break => {
                 match msg {
                     Message::Fetch(key) => {
                         if self.in_flight_keys.contains_key(&key) {
-                            trace!(?key, "skipping duplicate fetch request");
+                            trace!(?key, "skipping duplicate in-flight fetch request");
                             continue;
                         }
-                        let future = Self::process_fetch(
-                            key.clone(),
-                            self.client.clone(),
-                            self.handler.clone(),
-                        );
-                        let aborter = self.in_flight.push(future);
-                        self.in_flight_keys.insert(key, aborter);
+                        if self.retry_pending.contains(&key) {
+                            trace!(?key, "skipping fetch request with pending retry");
+                            continue;
+                        }
+                        self.start_fetch(key);
                     }
                     Message::Cancel(key) => {
-                        if self.in_flight_keys.remove(&key).is_some() {
-                            debug!(?key, "cancelled in-flight request");
+                        let cancelled_in_flight = self.in_flight_keys.remove(&key).is_some();
+                        let cancelled_retry = self.retry_pending.remove(&key);
+                        if cancelled_in_flight || cancelled_retry {
+                            debug!(
+                                ?key,
+                                cancelled_in_flight,
+                                cancelled_retry,
+                                "cancelled pending request"
+                            );
                         }
                     }
                     Message::Clear => {
-                        let count = self.in_flight_keys.len();
+                        let in_flight = self.in_flight_keys.len();
+                        let scheduled = self.retry_pending.len();
                         self.in_flight_keys.clear();
-                        debug!(count, "cleared all in-flight requests");
+                        self.retry_pending.clear();
+                        debug!(in_flight, scheduled, "cleared all pending requests");
                     }
                     Message::Retain(f) => {
-                        let before = self.in_flight_keys.len();
+                        let in_flight_before = self.in_flight_keys.len();
                         self.in_flight_keys.retain(|key, _| f(key));
-                        let removed = before - self.in_flight_keys.len();
-                        debug!(removed, remaining = self.in_flight_keys.len(), "retained in-flight requests");
+                        let scheduled_before = self.retry_pending.len();
+                        self.retry_pending.retain(|key| f(key));
+                        let removed_in_flight = in_flight_before - self.in_flight_keys.len();
+                        let removed_scheduled = scheduled_before - self.retry_pending.len();
+                        debug!(
+                            removed_in_flight,
+                            removed_scheduled,
+                            in_flight_remaining = self.in_flight_keys.len(),
+                            scheduled_remaining = self.retry_pending.len(),
+                            "retained pending requests"
+                        );
                     }
                 }
             },
+        }
+    }
+
+    fn start_fetch(&mut self, key: handler::Request<Digest>) {
+        let future = Self::process_fetch(key.clone(), self.client.clone(), self.handler.clone());
+        let aborter = self.in_flight.push(future);
+        self.in_flight_keys.insert(key, aborter);
+    }
+
+    fn schedule_retry(&mut self, key: handler::Request<Digest>) {
+        let deadline = self.context.current() + self.fetch_retry_timeout;
+        self.retry_pending.put(key.clone(), deadline);
+        debug!(?key, ?deadline, "scheduled fetch retry");
+    }
+
+    fn retry_due(&mut self) {
+        let now = self.context.current();
+        while let Some((_, &deadline)) = self.retry_pending.peek() {
+            if deadline > now {
+                break;
+            }
+            let (key, _) = self
+                .retry_pending
+                .pop()
+                .expect("retry pending entry disappeared");
+            if self.in_flight_keys.contains_key(&key) {
+                trace!(
+                    ?key,
+                    "skipping due retry because request is already in flight"
+                );
+                continue;
+            }
+            debug!(?key, "retrying fetch request");
+            self.start_fetch(key);
         }
     }
 
@@ -180,26 +253,26 @@ impl<E: Spawner, C: Source> Actor<E, C> {
         key: handler::Request<Digest>,
         client: C,
         handler: handler::Handler<Digest>,
-    ) -> handler::Request<Digest> {
-        match &key {
+    ) -> FetchResult {
+        let retry = match &key {
             handler::Request::Block(digest) => {
-                Self::fetch_block_by_digest(*digest, client, handler).await;
+                Self::fetch_block_by_digest(*digest, client, handler).await
             }
             handler::Request::Finalized { height } => {
-                Self::fetch_finalized_by_height(*height, client, handler).await;
+                Self::fetch_finalized_by_height(*height, client, handler).await
             }
             handler::Request::Notarized { round } => {
-                Self::fetch_notarized_by_round(*round, client, handler).await;
+                Self::fetch_notarized_by_round(*round, client, handler).await
             }
-        }
-        key
+        };
+        FetchResult { key, retry }
     }
 
     async fn fetch_block_by_digest(
         digest: Digest,
         client: C,
         mut handler: handler::Handler<Digest>,
-    ) {
+    ) -> bool {
         debug!(?digest, "fetching block by digest");
 
         match client.block(alto_client::Query::Digest(digest)).await {
@@ -208,14 +281,18 @@ impl<E: Spawner, C: Source> Actor<E, C> {
                 let value = Bytes::from(block.encode().to_vec());
                 if !handler.deliver(key, value).await {
                     warn!(?digest, "failed to deliver block to marshal");
+                    return true;
                 }
                 debug!(?digest, "fetched block by digest");
+                false
             }
             Ok(_) => {
                 warn!(?digest, "wrong payload returned for block by digest");
+                true
             }
             Err(e) => {
                 warn!(?digest, error=?e, "failed to fetch block by digest");
+                true
             }
         }
     }
@@ -224,7 +301,7 @@ impl<E: Spawner, C: Source> Actor<E, C> {
         height: Height,
         client: C,
         mut handler: handler::Handler<Digest>,
-    ) {
+    ) -> bool {
         debug!(height = height.get(), "fetching finalized block by height");
 
         match client.block(Query::Index(height.get())).await {
@@ -235,18 +312,21 @@ impl<E: Spawner, C: Source> Actor<E, C> {
                 let value = Bytes::from((finalization, block).encode().to_vec());
                 if !handler.deliver(key, value).await {
                     warn!(height = height.get(), "marshal rejected finalized block");
-                    return;
+                    return true;
                 }
                 debug!(height = height.get(), "fetched finalized block by height");
+                false
             }
             Ok(_) => {
                 warn!(
                     height = height.get(),
                     "wrong payload returned for finalized block by height"
                 );
+                true
             }
             Err(e) => {
                 warn!(height = height.get(), error=?e, "failed to fetch finalized block by height");
+                true
             }
         }
     }
@@ -255,7 +335,7 @@ impl<E: Spawner, C: Source> Actor<E, C> {
         round: commonware_consensus::types::Round,
         client: C,
         mut handler: handler::Handler<Digest>,
-    ) {
+    ) -> bool {
         let view = round.view().get();
         debug!(view, "fetching notarized block by round");
 
@@ -267,12 +347,14 @@ impl<E: Spawner, C: Source> Actor<E, C> {
                 let value = Bytes::from((notarization, block).encode().to_vec());
                 if !handler.deliver(key, value).await {
                     warn!(view, "marshal rejected notarized block");
-                    return;
+                    return true;
                 }
                 debug!(view, "fetched notarized block by round");
+                false
             }
             Err(e) => {
                 warn!(view, error=?e, "failed to fetch notarized block by round");
+                true
             }
         }
     }
@@ -295,6 +377,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
+    const DEFAULT_FETCH_RETRY_TIMEOUT: Duration = Duration::from_secs(1);
+
     /// Exercises the full Resolver trait surface (fetch, cancel, clear,
     /// retain) to ensure messages reach the actor without error.
     #[test_traced]
@@ -302,8 +386,13 @@ mod tests {
         Runner::default().start(|context| async move {
             let source = MockSource::new();
             let (ingress_tx, _ingress_rx) = mpsc::channel(16);
-            let (actor, mut resolver) =
-                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+            let (actor, mut resolver) = Actor::new(
+                context.with_label("resolver"),
+                source,
+                ingress_tx,
+                16,
+                DEFAULT_FETCH_RETRY_TIMEOUT,
+            );
 
             let _actor_handle = actor.start();
 
@@ -337,8 +426,13 @@ mod tests {
 
         Runner::default().start(|context| async move {
             let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
-            let (actor, mut resolver) =
-                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+            let (actor, mut resolver) = Actor::new(
+                context.with_label("resolver"),
+                source,
+                ingress_tx,
+                16,
+                DEFAULT_FETCH_RETRY_TIMEOUT,
+            );
 
             let _actor_handle = actor.start();
 
@@ -373,8 +467,13 @@ mod tests {
 
         Runner::default().start(|context| async move {
             let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
-            let (actor, mut resolver) =
-                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+            let (actor, mut resolver) = Actor::new(
+                context.with_label("resolver"),
+                source,
+                ingress_tx,
+                16,
+                DEFAULT_FETCH_RETRY_TIMEOUT,
+            );
 
             let _actor_handle = actor.start();
 
@@ -424,8 +523,13 @@ mod tests {
 
         Runner::default().start(|context| async move {
             let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
-            let (actor, mut resolver) =
-                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+            let (actor, mut resolver) = Actor::new(
+                context.with_label("resolver"),
+                source,
+                ingress_tx,
+                16,
+                DEFAULT_FETCH_RETRY_TIMEOUT,
+            );
 
             let _actor_handle = actor.start();
 
@@ -471,8 +575,13 @@ mod tests {
 
         Runner::default().start(|context| async move {
             let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
-            let (actor, mut resolver) =
-                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+            let (actor, mut resolver) = Actor::new(
+                context.with_label("resolver"),
+                source,
+                ingress_tx,
+                16,
+                DEFAULT_FETCH_RETRY_TIMEOUT,
+            );
 
             let _actor_handle = actor.start();
 
@@ -506,8 +615,13 @@ mod tests {
 
         Runner::default().start(|context| async move {
             let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
-            let (actor, mut resolver) =
-                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+            let (actor, mut resolver) = Actor::new(
+                context.with_label("resolver"),
+                source,
+                ingress_tx,
+                16,
+                DEFAULT_FETCH_RETRY_TIMEOUT,
+            );
 
             let _actor_handle = actor.start();
             resolver.fetch(handler::Request::Finalized { height }).await;
@@ -538,8 +652,13 @@ mod tests {
 
         Runner::default().start(|context| async move {
             let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
-            let (actor, mut resolver) =
-                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+            let (actor, mut resolver) = Actor::new(
+                context.with_label("resolver"),
+                source,
+                ingress_tx,
+                16,
+                DEFAULT_FETCH_RETRY_TIMEOUT,
+            );
 
             let _actor_handle = actor.start();
             resolver.fetch(handler::Request::Notarized { round }).await;
@@ -575,8 +694,13 @@ mod tests {
 
         Runner::default().start(|context| async move {
             let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
-            let (actor, mut resolver) =
-                Actor::new(context.with_label("resolver"), source, ingress_tx, 16);
+            let (actor, mut resolver) = Actor::new(
+                context.with_label("resolver"),
+                source,
+                ingress_tx,
+                16,
+                DEFAULT_FETCH_RETRY_TIMEOUT,
+            );
 
             let _actor_handle = actor.start();
 
@@ -591,6 +715,69 @@ mod tests {
 
             // Source should have been called exactly once
             assert_eq!(*call_count.lock().unwrap(), 1);
+        });
+    }
+
+    /// Verifies that repeated fetch failures continue retrying until a later
+    /// attempt succeeds and delivers the requested payload.
+    #[test_traced]
+    fn failed_fetch_eventually_resolves_after_multiple_retries() {
+        let fixture = TestFixture::new();
+        let block = fixture.create_block(1, 1);
+        let digest = block.digest();
+
+        let call_count = Arc::new(Mutex::new(0u32));
+        let call_count_inner = call_count.clone();
+
+        let source = MockSource::new();
+        *source.block_handler.lock().unwrap() = Some(Box::new(move |_| {
+            let mut calls = call_count_inner.lock().unwrap();
+            *calls += 1;
+            if *calls >= 3 {
+                Some(Payload::Block(Box::new(block.clone())))
+            } else {
+                None
+            }
+        }));
+
+        Runner::default().start(|context| async move {
+            let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
+            let (actor, mut resolver) = Actor::new(
+                context.with_label("resolver"),
+                source,
+                ingress_tx,
+                16,
+                DEFAULT_FETCH_RETRY_TIMEOUT,
+            );
+
+            let _actor_handle = actor.start();
+
+            resolver.fetch(handler::Request::Block(digest)).await;
+
+            let retry_wait = DEFAULT_FETCH_RETRY_TIMEOUT + Duration::from_millis(10);
+
+            context.sleep(retry_wait).await;
+            assert_eq!(
+                *call_count.lock().unwrap(),
+                2,
+                "expected one initial fetch and one retry after the first timeout"
+            );
+
+            context.sleep(retry_wait).await;
+
+            let msg = ingress_rx.recv().await.unwrap();
+            match msg {
+                handler::Message::Deliver { key, .. } => {
+                    assert!(matches!(key, handler::Request::Block(d) if d == digest));
+                }
+                _ => panic!("expected Deliver message"),
+            }
+
+            assert_eq!(
+                *call_count.lock().unwrap(),
+                3,
+                "expected fetch to succeed on the third attempt"
+            );
         });
     }
 }
