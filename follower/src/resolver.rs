@@ -12,7 +12,9 @@ use commonware_utils::channel::mpsc;
 use commonware_utils::{
     futures::{AbortablePool, Aborter},
     vec::NonEmptyVec,
+    SystemTimeExt,
 };
+use rand::{CryptoRng, RngCore};
 use std::{
     collections::{BTreeSet, HashMap},
     time::{Duration, SystemTime},
@@ -120,7 +122,7 @@ struct FetchResult {
     retry: bool,
 }
 
-impl<E: Spawner + Clock, C: Source> Actor<E, C> {
+impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
     /// Create a new [Actor] and its corresponding [Resolver] handle.
     pub fn new(
         context: E,
@@ -242,8 +244,13 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
     }
 
     fn schedule_retry(&mut self, key: handler::Request<Digest>) {
-        let deadline = self.context.current() + self.fetch_retry_timeout;
-        let previous = self.requests.insert(key.clone(), State::Scheduled(deadline));
+        let deadline = self
+            .context
+            .current()
+            .add_jittered(&mut self.context, self.fetch_retry_timeout);
+        let previous = self
+            .requests
+            .insert(key.clone(), State::Scheduled(deadline));
         assert!(
             matches!(previous, None | Some(State::Active(_))),
             "request was already scheduled"
@@ -791,16 +798,13 @@ mod tests {
 
             resolver.fetch(handler::Request::Block(digest)).await;
 
-            let retry_wait = DEFAULT_FETCH_RETRY_TIMEOUT + Duration::from_millis(10);
-
-            context.sleep(retry_wait).await;
-            assert_eq!(
-                *call_count.lock().unwrap(),
-                2,
-                "expected one initial fetch and one retry after the first timeout"
-            );
-
-            context.sleep(retry_wait).await;
+            let max_retry_wait = DEFAULT_FETCH_RETRY_TIMEOUT * 2 + Duration::from_millis(10);
+            for _ in 0..3 {
+                if *call_count.lock().unwrap() >= 3 {
+                    break;
+                }
+                context.sleep(max_retry_wait).await;
+            }
 
             let msg = ingress_rx.recv().await.unwrap();
             match msg {
