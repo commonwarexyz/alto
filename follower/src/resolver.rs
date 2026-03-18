@@ -104,7 +104,7 @@ pub struct Actor<E: Spawner, C: Source> {
     client: C,
     mailbox_rx: mpsc::Receiver<Message>,
     handler: handler::Handler<Digest>,
-    in_flight: AbortablePool<FetchResult>,
+    in_flight: AbortablePool<Result>,
     requests: HashMap<handler::Request<Digest>, State>,
     retry_schedule: BTreeSet<(SystemTime, handler::Request<Digest>)>,
     fetch_retry_timeout: Duration,
@@ -120,7 +120,7 @@ enum State {
     Scheduled(SystemTime),
 }
 
-struct FetchResult {
+struct Result {
     key: handler::Request<Digest>,
     id: u64,
     retry: bool,
@@ -246,7 +246,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
         assert!(previous.is_none(), "request state already existed");
     }
 
-    fn handle_completed(&mut self, result: FetchResult) {
+    fn handle_completed(&mut self, result: Result) {
         let Some(state) = self.requests.get(&result.key) else {
             trace!(
                 ?result.key,
@@ -346,7 +346,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
         id: u64,
         client: C,
         handler: handler::Handler<Digest>,
-    ) -> FetchResult {
+    ) -> Result {
         let retry = match &key {
             handler::Request::Block(digest) => {
                 Self::fetch_block_by_digest(*digest, client, handler).await
@@ -358,7 +358,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
                 Self::fetch_notarized_by_round(*round, client, handler).await
             }
         };
-        FetchResult { key, id, retry }
+        Result { key, id, retry }
     }
 
     async fn fetch_block_by_digest(
@@ -944,7 +944,7 @@ mod tests {
             };
             let second_id = *second_id;
 
-            actor.handle_completed(FetchResult {
+            actor.handle_completed(Result {
                 key: key.clone(),
                 id: first_id,
                 retry: true,
