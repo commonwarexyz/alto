@@ -82,7 +82,7 @@ impl State {
         self.uploaded.contains(digest)
     }
 
-    pub fn prepare_enqueue(&mut self, block: &Block) -> Option<Entry> {
+    pub fn record(&mut self, block: &Block) -> Option<Entry> {
         let entry = Entry {
             height: block.height.get(),
             digest: block.digest(),
@@ -248,10 +248,10 @@ mod tests {
             digest: block.digest(),
         };
 
-        assert!(uploads.prepare_enqueue(&block).is_some());
-        assert!(uploads.prepare_enqueue(&block).is_some());
+        assert!(uploads.record(&block).is_some());
+        assert!(uploads.record(&block).is_some());
         uploads.mark_uploaded(entry.digest, entry.height);
-        assert!(uploads.prepare_enqueue(&block).is_none());
+        assert!(uploads.record(&block).is_none());
     }
 
     #[test]
@@ -260,10 +260,10 @@ mod tests {
         let block = test_block(7, 7, b"view-7");
         let digest = block.digest();
 
-        assert!(uploads.prepare_enqueue(&block).is_some());
+        assert!(uploads.record(&block).is_some());
         uploads.mark_uploaded(digest, block.height.get());
         assert!(uploads.cached_block(&digest).is_none());
-        assert!(uploads.prepare_enqueue(&block).is_none());
+        assert!(uploads.record(&block).is_none());
         assert!(uploads.cached_block(&digest).is_none());
     }
 

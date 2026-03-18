@@ -17,7 +17,7 @@ impl<E: Clock + Storage + Metrics> Producer<E> {
     }
 
     pub async fn record(&self, block: &Block) {
-        let Some(entry) = self.uploads.lock().prepare_enqueue(block) else {
+        let Some(entry) = self.uploads.lock().record(block) else {
             return;
         };
 
