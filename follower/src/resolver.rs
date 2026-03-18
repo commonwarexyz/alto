@@ -108,21 +108,21 @@ pub struct Actor<E: Spawner, C: Source> {
     requests: HashMap<handler::Request<Digest>, State>,
     retry_schedule: BTreeSet<(SystemTime, handler::Request<Digest>)>,
     fetch_retry_timeout: Duration,
-    next_request_id: u64,
+    next_id: u64,
 }
 
 enum State {
-    // A fetch is currently running. The request id lets us ignore stale
+    // A fetch is currently running. The id lets us ignore stale
     // completions from an earlier attempt for the same key, and dropping the
     // aborter cancels the current attempt.
-    Active { request_id: u64, aborter: Aborter },
+    Active { id: u64, aborter: Aborter },
     // A retry is queued for the recorded deadline.
     Scheduled(SystemTime),
 }
 
 struct FetchResult {
     key: handler::Request<Digest>,
-    request_id: u64,
+    id: u64,
     retry: bool,
 }
 
@@ -146,7 +146,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
             requests: HashMap::new(),
             retry_schedule: BTreeSet::new(),
             fetch_retry_timeout,
-            next_request_id: 0,
+            next_id: 0,
         };
 
         let handle = Resolver { mailbox_tx };
@@ -239,25 +239,12 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
     }
 
     fn start_fetch(&mut self, key: handler::Request<Digest>) {
-        let request_id = self.next_request_id;
-        self.next_request_id = self
-            .next_request_id
-            .checked_add(1)
-            .expect("request id overflow");
-        let future = Self::process_fetch(
-            key.clone(),
-            request_id,
-            self.client.clone(),
-            self.handler.clone(),
-        );
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1);
+        let future =
+            Self::process_fetch(key.clone(), id, self.client.clone(), self.handler.clone());
         let aborter = self.in_flight.push(future);
-        let previous = self.requests.insert(
-            key,
-            State::Active {
-                request_id,
-                aborter,
-            },
-        );
+        let previous = self.requests.insert(key, State::Active { id, aborter });
         assert!(previous.is_none(), "request state already existed");
     }
 
@@ -265,19 +252,19 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
         let Some(state) = self.requests.get(&result.key) else {
             trace!(
                 ?result.key,
-                request_id = result.request_id,
+                id = result.id,
                 "ignoring stale fetch completion for removed request"
             );
             return;
         };
 
         match state {
-            State::Active { request_id, .. } if *request_id == result.request_id => {}
-            State::Active { request_id, .. } => {
+            State::Active { id, .. } if *id == result.id => {}
+            State::Active { id, .. } => {
                 trace!(
                     ?result.key,
-                    completed_request_id = result.request_id,
-                    active_request_id = *request_id,
+                    completed_id = result.id,
+                    active_id = *id,
                     "ignoring stale fetch completion for replaced request"
                 );
                 return;
@@ -285,7 +272,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
             State::Scheduled(deadline) => {
                 trace!(
                     ?result.key,
-                    request_id = result.request_id,
+                    id = result.id,
                     ?deadline,
                     "ignoring stale fetch completion for scheduled request"
                 );
@@ -297,7 +284,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
         assert!(
             matches!(
                 removed,
-                Some(State::Active { request_id, .. }) if request_id == result.request_id
+                Some(State::Active { id, .. }) if id == result.id
             ),
             "active request state missing for completed fetch"
         );
@@ -358,7 +345,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
 
     async fn process_fetch(
         key: handler::Request<Digest>,
-        request_id: u64,
+        id: u64,
         client: C,
         handler: handler::Handler<Digest>,
     ) -> FetchResult {
@@ -373,11 +360,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
                 Self::fetch_notarized_by_round(*round, client, handler).await
             }
         };
-        FetchResult {
-            key,
-            request_id,
-            retry,
-        }
+        FetchResult { key, id, retry }
     }
 
     async fn fetch_block_by_digest(
@@ -912,33 +895,25 @@ mod tests {
             let key = handler::Request::<Digest>::Block(digest);
 
             actor.start_fetch(key.clone());
-            let Some(State::Active {
-                request_id: first_request_id,
-                ..
-            }) = actor.requests.remove(&key)
-            else {
+            let Some(State::Active { id: first_id, .. }) = actor.requests.remove(&key) else {
                 panic!("expected first fetch attempt to be active");
             };
 
             actor.start_fetch(key.clone());
-            let Some(State::Active {
-                request_id: second_request_id,
-                ..
-            }) = actor.requests.get(&key)
-            else {
+            let Some(State::Active { id: second_id, .. }) = actor.requests.get(&key) else {
                 panic!("expected second fetch attempt to be active");
             };
-            let second_request_id = *second_request_id;
+            let second_id = *second_id;
 
             actor.handle_completed(FetchResult {
                 key: key.clone(),
-                request_id: first_request_id,
+                id: first_id,
                 retry: true,
             });
 
             assert!(matches!(
                 actor.requests.get(&key),
-                Some(State::Active { request_id, .. }) if *request_id == second_request_id
+                Some(State::Active { id, .. }) if *id == second_id
             ));
             assert!(
                 actor.retry_schedule.is_empty(),
