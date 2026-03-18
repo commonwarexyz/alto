@@ -731,7 +731,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "engine_consensus_voter_state_skips_per_leader_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
+                    "expr": "engine_consensus_voter_state_timeouts_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
                     "fullMetaSearch": false,
                     "includeNullMetadata": true,
                     "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
