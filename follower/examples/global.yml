@@ -4,11 +4,11 @@
 # and stores finalized blocks locally.
 
 # URL of the exoware relay or indexer endpoint
-source: "https://backfill.alto.exoware.xyz"
+source: "https://global.alto.exoware.xyz"
 
 # Hex-encoded BLS12-381 public key of the network identity
 # This is the threshold public key used to verify finalization signatures
-identity: "87ceaecbfd832414c33f777af848425b055f36759fb54552ccf5abaa373f053a79a8f72bf7f5463aafe785f63628dd3b017fc16845bd543be379ee181a791e3ae380572a05bf232893ecdc6d560807af5c22638a2d4d5387a882fe1a91c6ffa9"
+identity: "afd36cf46e8d180a3880d04efde7c176a4cf2f74b296eef21cc3e156255b17e176d1f0691511ed8d12208a3ba3d8a1d608952412e01ee2c85b1d7e0aa496f50460cd3dfbdfeeaff845fe814c60e572a1e31982f206ab3b47f3182054673573e2"
 
 # Directory for storing finalized blocks and state
 directory: "/tmp/alto-follower-global"
