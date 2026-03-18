@@ -327,9 +327,6 @@ async fn block_upload<S: Strategy>(
 ) -> impl IntoResponse {
     match Block::decode(&mut body.as_ref()) {
         Ok(block) => {
-            // Accept uncertified block bodies for fallback recovery from any
-            // uploader. Certificate verification remains on the
-            // seed/notarization/finalization paths.
             indexer.submit_block(block);
             StatusCode::OK
         }
