@@ -171,8 +171,6 @@ impl<S: Strategy> Indexer<S> {
         }
     }
 
-    /// Resolve canonical chain queries by finalized height/latest, or block
-    /// fallback queries by digest.
     pub fn get_block(&self, query: &str) -> Option<BlockResult> {
         let state = self.state.read().unwrap();
 
@@ -193,8 +191,7 @@ impl<S: Strategy> Indexer<S> {
                         .map(|f| BlockResult::Finalized(f.clone()))
                 })
             } else if raw.len() == Digest::SIZE {
-                // Block uploads are keyed by digest and are not restricted
-                // to the canonical finalized chain.
+                // Try to parse as digest
                 let digest = Digest::decode(raw.as_slice()).ok()?;
                 state
                     .blocks_by_digest
@@ -208,11 +205,9 @@ impl<S: Strategy> Indexer<S> {
         }
     }
 
-    /// Store a block body for digest lookups used by the backfiller.
     pub fn submit_block(&self, block: Block) {
+        // Store block by digest (no guarantee this is part of the canonical chain)
         let mut state = self.state.write().unwrap();
-        // These uploads are not certificate-bearing; verified certificate data
-        // still enters through the seed/notarization/finalization endpoints.
         state.blocks_by_digest.insert(block.digest(), block);
     }
 
