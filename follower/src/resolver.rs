@@ -212,18 +212,13 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
                         debug!(active, scheduled, "cleared all pending requests");
                     }
                     Message::Retain(f) => {
-                        let active_before = self
-                            .requests
-                            .values()
-                            .filter(|state| matches!(state, State::Active(_)))
-                            .count();
-                        let scheduled_before = self.requests.len() - active_before;
                         let to_remove = self
                             .requests
                             .keys()
                             .filter(|key| !f(key))
                             .cloned()
                             .collect::<Vec<_>>();
+                        let removed = to_remove.len();
                         for key in to_remove {
                             if let Some(state) = self.requests.remove(&key) {
                                 if let State::Scheduled(deadline) = state {
@@ -232,19 +227,7 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
                                 }
                             }
                         }
-                        let active_after = self
-                            .requests
-                            .values()
-                            .filter(|state| matches!(state, State::Active(_)))
-                            .count();
-                        let scheduled_after = self.requests.len() - active_after;
-                        debug!(
-                            removed_in_flight = active_before - active_after,
-                            removed_scheduled = scheduled_before - scheduled_after,
-                            in_flight_remaining = active_after,
-                            scheduled_remaining = scheduled_after,
-                            "retained pending requests"
-                        );
+                        debug!(removed, remaining = self.requests.len(), "retained pending requests");
                     }
                 }
             },
