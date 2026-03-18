@@ -38,8 +38,8 @@ pub struct Consumer<E: Spawner + Clock + Storage + Metrics, C: Client> {
     uploads: SharedState,
     writer: queue::Writer<E, Entry>,
     reader: queue::Reader<E, Entry>,
-    in_flight: Pool<Completion>,
-    max_in_flight: NonZeroUsize,
+    active: Pool<Completion>,
+    max_active: NonZeroUsize,
     retry: Duration,
 }
 
@@ -50,7 +50,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
         uploads: SharedState,
         backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
-        max_in_flight: NonZeroUsize,
+        max_active: NonZeroUsize,
         retry: Duration,
     ) -> Self {
         let upload_results = status::Counter::default();
@@ -68,8 +68,8 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
             uploads,
             writer,
             reader,
-            in_flight: Pool::default(),
-            max_in_flight,
+            active: Pool::default(),
+            max_active,
             retry,
         }
     }
@@ -87,9 +87,9 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                 // blocking so restarts resume with full parallelism immediately.
                 self.fill_slots().await;
 
-                if self.in_flight.is_empty() {
-                    // If there is no work in flight, block for the next queue
-                    // row instead of polling an optional future in a tight loop.
+                // If there is no work in flight, block for the next queue
+                // row instead of polling an optional future in a tight loop.
+                if self.active.is_empty() {
                     let item = self
                         .reader
                         .recv()
@@ -106,11 +106,11 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                 // Once the consumer is busy, race newly dequeued rows against
                 // completions from already-running uploads.
                 let item = OptionFuture::from(
-                    (self.in_flight.len() < self.max_in_flight.get()).then(|| self.reader.recv()),
+                    (self.active.len() < self.max_active.get()).then(|| self.reader.recv()),
                 );
             },
             on_stopped => {},
-            completion = self.in_flight.next_completed() => {
+            completion = self.active.next_completed() => {
                 self.complete(completion).await;
             },
             item = item => {
@@ -130,7 +130,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
     async fn fill_slots(&mut self) {
         // Consume all queue entries that are already available without waiting so
         // the consumer keeps as many upload slots busy as it can.
-        while self.in_flight.len() < self.max_in_flight.get() {
+        while self.active.len() < self.max_active.get() {
             let item = self
                 .reader
                 .try_recv()
@@ -158,7 +158,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
 
         // Hand the upload/retry loop off to the in-flight pool so the consumer
         // can continue dequeuing and retiring other queue entries concurrently.
-        self.in_flight.push({
+        self.active.push({
             let client = self.client.clone();
             let marshal = self.marshal.clone();
             let context = self.context.with_label("upload");

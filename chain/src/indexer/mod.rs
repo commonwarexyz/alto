@@ -100,7 +100,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Indexer<E, C> {
         client: C,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
         backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
-        backfiller_max_in_flight: NonZeroUsize,
+        backfiller_max_active: NonZeroUsize,
         backfiller_retry: Duration,
     ) -> Self {
         let uploads: SharedState = Arc::new(Mutex::new(State::new()));
@@ -118,7 +118,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Indexer<E, C> {
             marshal,
             uploads,
             (writer, reader),
-            backfiller_max_in_flight,
+            backfiller_max_active,
             backfiller_retry,
         );
 

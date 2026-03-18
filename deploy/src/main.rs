@@ -1,4 +1,4 @@
-use alto_chain::{Config, Peers, DEFAULT_BACKFILLER_MAX_IN_FLIGHT, DEFAULT_BACKFILLER_RETRY_MS};
+use alto_chain::{Config, Peers, DEFAULT_BACKFILLER_MAX_ACTIVE, DEFAULT_BACKFILLER_RETRY_MS};
 use alto_types::NAMESPACE;
 use clap::{value_parser, Arg, ArgMatches, Command};
 use commonware_codec::{Decode, DecodeExt, Encode};
@@ -386,7 +386,7 @@ fn generate_local(
             deque_size,
 
             signature_threads,
-            backfiller_max_in_flight: DEFAULT_BACKFILLER_MAX_IN_FLIGHT,
+            backfiller_max_active: DEFAULT_BACKFILLER_MAX_ACTIVE,
             backfiller_retry_ms: DEFAULT_BACKFILLER_RETRY_MS,
 
             indexer: None,
@@ -579,7 +579,7 @@ fn generate_remote(
             deque_size,
 
             signature_threads,
-            backfiller_max_in_flight: DEFAULT_BACKFILLER_MAX_IN_FLIGHT,
+            backfiller_max_active: DEFAULT_BACKFILLER_MAX_ACTIVE,
             backfiller_retry_ms: DEFAULT_BACKFILLER_RETRY_MS,
 
             indexer: None,
