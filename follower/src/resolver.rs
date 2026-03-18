@@ -12,10 +12,9 @@ use commonware_utils::channel::mpsc;
 use commonware_utils::{
     futures::{AbortablePool, Aborter},
     vec::NonEmptyVec,
-    PrioritySet,
 };
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     time::{Duration, SystemTime},
 };
 use tracing::{debug, trace, warn};
@@ -104,9 +103,16 @@ pub struct Actor<E: Spawner, C: Source> {
     mailbox_rx: mpsc::Receiver<Message>,
     handler: handler::Handler<Digest>,
     in_flight: AbortablePool<FetchResult>,
-    in_flight_keys: HashMap<handler::Request<Digest>, Aborter>,
-    retry_pending: PrioritySet<handler::Request<Digest>, SystemTime>,
+    states: HashMap<handler::Request<Digest>, State>,
+    retry_schedule: BTreeSet<(SystemTime, handler::Request<Digest>)>,
     fetch_retry_timeout: Duration,
+}
+
+enum State {
+    // A fetch is currently running. Dropping the aborter cancels it.
+    Active(Aborter),
+    // A retry is queued for the recorded deadline.
+    Scheduled(SystemTime),
 }
 
 struct FetchResult {
@@ -131,8 +137,8 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
             mailbox_rx,
             handler: handler::Handler::new(ingress_tx),
             in_flight: AbortablePool::default(),
-            in_flight_keys: HashMap::new(),
-            retry_pending: PrioritySet::new(),
+            states: HashMap::new(),
+            retry_schedule: BTreeSet::new(),
             fetch_retry_timeout,
         };
 
@@ -152,13 +158,13 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
             self.context,
             on_stopped => {},
             Ok(result) = self.in_flight.next_completed() else continue => {
-                self.in_flight_keys.remove(&result.key);
+                self.states.remove(&result.key);
                 if result.retry {
                     self.schedule_retry(result.key);
                 }
             },
-            _ = match self.retry_pending.peek() {
-                Some((_, &deadline)) => futures::future::Either::Left(self.context.sleep_until(deadline)),
+            _ = match self.retry_schedule.first() {
+                Some((deadline, _)) => futures::future::Either::Left(self.context.sleep_until(*deadline)),
                 None => futures::future::Either::Right(futures::future::pending()),
             } => {
                 self.retry_due();
@@ -166,47 +172,77 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
             Some(msg) = self.mailbox_rx.recv() else break => {
                 match msg {
                     Message::Fetch(key) => {
-                        if self.in_flight_keys.contains_key(&key) {
-                            trace!(?key, "skipping duplicate in-flight fetch request");
-                            continue;
-                        }
-                        if self.retry_pending.contains(&key) {
-                            trace!(?key, "skipping fetch request with pending retry");
+                        if let Some(state) = self.states.get(&key) {
+                            match state {
+                                State::Active(_) => {
+                                    trace!(?key, "skipping duplicate in-flight fetch request");
+                                }
+                                State::Scheduled(_) => {
+                                    trace!(?key, "skipping fetch request with pending retry");
+                                }
+                            }
                             continue;
                         }
                         self.start_fetch(key);
                     }
                     Message::Cancel(key) => {
-                        let cancelled_in_flight = self.in_flight_keys.remove(&key).is_some();
-                        let cancelled_retry = self.retry_pending.remove(&key);
-                        if cancelled_in_flight || cancelled_retry {
-                            debug!(
-                                ?key,
-                                cancelled_in_flight,
-                                cancelled_retry,
-                                "cancelled pending request"
-                            );
+                        if let Some(state) = self.states.remove(&key) {
+                            match state {
+                                State::Active(aborter) => {
+                                    drop(aborter);
+                                    debug!(?key, "cancelled active request");
+                                }
+                                State::Scheduled(deadline) => {
+                                    let removed = self.retry_schedule.remove(&(deadline, key.clone()));
+                                    assert!(removed, "scheduled retry entry missing");
+                                    debug!(?key, ?deadline, "cancelled scheduled request");
+                                }
+                            }
                         }
                     }
                     Message::Clear => {
-                        let in_flight = self.in_flight_keys.len();
-                        let scheduled = self.retry_pending.len();
-                        self.in_flight_keys.clear();
-                        self.retry_pending.clear();
-                        debug!(in_flight, scheduled, "cleared all pending requests");
+                        let active = self
+                            .states
+                            .values()
+                            .filter(|state| matches!(state, State::Active(_)))
+                            .count();
+                        let scheduled = self.states.len() - active;
+                        self.states.clear();
+                        self.retry_schedule.clear();
+                        debug!(active, scheduled, "cleared all pending requests");
                     }
                     Message::Retain(f) => {
-                        let in_flight_before = self.in_flight_keys.len();
-                        self.in_flight_keys.retain(|key, _| f(key));
-                        let scheduled_before = self.retry_pending.len();
-                        self.retry_pending.retain(|key| f(key));
-                        let removed_in_flight = in_flight_before - self.in_flight_keys.len();
-                        let removed_scheduled = scheduled_before - self.retry_pending.len();
+                        let active_before = self
+                            .states
+                            .values()
+                            .filter(|state| matches!(state, State::Active(_)))
+                            .count();
+                        let scheduled_before = self.states.len() - active_before;
+                        let to_remove = self
+                            .states
+                            .keys()
+                            .filter(|key| !f(key))
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        for key in to_remove {
+                            if let Some(state) = self.states.remove(&key) {
+                                if let State::Scheduled(deadline) = state {
+                                    let removed = self.retry_schedule.remove(&(deadline, key.clone()));
+                                    assert!(removed, "scheduled retry entry missing");
+                                }
+                            }
+                        }
+                        let active_after = self
+                            .states
+                            .values()
+                            .filter(|state| matches!(state, State::Active(_)))
+                            .count();
+                        let scheduled_after = self.states.len() - active_after;
                         debug!(
-                            removed_in_flight,
-                            removed_scheduled,
-                            in_flight_remaining = self.in_flight_keys.len(),
-                            scheduled_remaining = self.retry_pending.len(),
+                            removed_in_flight = active_before - active_after,
+                            removed_scheduled = scheduled_before - scheduled_after,
+                            in_flight_remaining = active_after,
+                            scheduled_remaining = scheduled_after,
                             "retained pending requests"
                         );
                     }
@@ -218,34 +254,52 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
     fn start_fetch(&mut self, key: handler::Request<Digest>) {
         let future = Self::process_fetch(key.clone(), self.client.clone(), self.handler.clone());
         let aborter = self.in_flight.push(future);
-        self.in_flight_keys.insert(key, aborter);
+        let previous = self.states.insert(key, State::Active(aborter));
+        assert!(previous.is_none(), "request state already existed");
     }
 
     fn schedule_retry(&mut self, key: handler::Request<Digest>) {
         let deadline = self.context.current() + self.fetch_retry_timeout;
-        self.retry_pending.put(key.clone(), deadline);
+        let previous = self.states.insert(key.clone(), State::Scheduled(deadline));
+        assert!(
+            matches!(previous, None | Some(State::Active(_))),
+            "request was already scheduled"
+        );
+        self.retry_schedule.insert((deadline, key.clone()));
         debug!(?key, ?deadline, "scheduled fetch retry");
     }
 
     fn retry_due(&mut self) {
         let now = self.context.current();
-        while let Some((_, &deadline)) = self.retry_pending.peek() {
+        while let Some((deadline, key)) = self.retry_schedule.pop_first() {
             if deadline > now {
+                self.retry_schedule.insert((deadline, key));
                 break;
             }
-            let (key, _) = self
-                .retry_pending
-                .pop()
-                .expect("retry pending entry disappeared");
-            if self.in_flight_keys.contains_key(&key) {
-                trace!(
-                    ?key,
-                    "skipping due retry because request is already in flight"
-                );
-                continue;
+            match self.states.get(&key) {
+                Some(State::Scheduled(state_deadline)) if *state_deadline == deadline => {
+                    self.states.remove(&key);
+                    debug!(?key, "retrying fetch request");
+                    self.start_fetch(key);
+                }
+                Some(State::Active(_)) => {
+                    trace!(
+                        ?key,
+                        "skipping stale retry because request is already in flight"
+                    );
+                }
+                Some(State::Scheduled(state_deadline)) => {
+                    trace!(
+                        ?key,
+                        ?deadline,
+                        ?state_deadline,
+                        "skipping stale retry with outdated deadline"
+                    );
+                }
+                None => {
+                    trace!(?key, ?deadline, "skipping stale retry for removed request");
+                }
             }
-            debug!(?key, "retrying fetch request");
-            self.start_fetch(key);
         }
     }
 
