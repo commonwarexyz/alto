@@ -57,9 +57,9 @@ pub struct State {
     uploaded: PrioritySet<Digest, u64>,
     // Conservative height watermark derived from contiguous queue-floor
     // progress. Heights below this can be forgotten from the uploaded set.
-    acked_through: Option<u64>,
+    acked_through: u64,
     // Highest finalized height observed from the live application stream.
-    latest_finalized: Option<u64>,
+    latest_finalized: u64,
     // Blocks cached for the live certificate upload path and the backfiller.
     cached_blocks: BTreeMap<Digest, Block>,
     // Number of in-flight certificate uploads per digest so the backfiller can
@@ -71,8 +71,8 @@ impl State {
     pub fn new() -> Self {
         Self {
             uploaded: PrioritySet::new(),
-            acked_through: None,
-            latest_finalized: None,
+            acked_through: 0,
+            latest_finalized: 0,
             cached_blocks: BTreeMap::new(),
             certificate_uploads: BTreeMap::new(),
         }
@@ -96,10 +96,7 @@ impl State {
     }
 
     pub fn advance_queue_floor(&mut self, height: u64) {
-        self.acked_through = Some(
-            self.acked_through
-                .map_or(height, |current| current.max(height)),
-        );
+        self.acked_through = self.acked_through.max(height);
         self.prune();
     }
 
@@ -148,40 +145,27 @@ impl State {
     }
 
     fn observe_finalization(&mut self, height: u64) {
-        self.latest_finalized = Some(
-            self.latest_finalized
-                .map_or(height, |latest| latest.max(height)),
-        );
+        self.latest_finalized = self.latest_finalized.max(height);
         self.prune();
     }
 
     fn prune(&mut self) {
-        if let Some(prune_before) = self.acked_through {
-            while let Some((_, &height)) = self.uploaded.peek() {
-                if height >= prune_before {
-                    break;
-                }
-                self.uploaded.pop();
+        while let Some((_, &height)) = self.uploaded.peek() {
+            if height >= self.acked_through {
+                break;
             }
+            self.uploaded.pop();
         }
 
-        let mut cached_prune_before: Option<u64> = None;
+        let mut cached_prune_before = self.latest_finalized;
         for digest in self.certificate_uploads.keys() {
             let Some(block) = self.cached_blocks.get(digest) else {
                 continue;
             };
-            cached_prune_before = Some(cached_prune_before.map_or(block.height.get(), |current| {
-                current.min(block.height.get())
-            }));
+            cached_prune_before = cached_prune_before.min(block.height.get());
         }
-        if cached_prune_before.is_none() {
-            cached_prune_before = self.latest_finalized;
-        }
-
-        if let Some(prune_before) = cached_prune_before {
-            self.cached_blocks
-                .retain(|_, block| block.height.get() >= prune_before);
-        }
+        self.cached_blocks
+            .retain(|_, block| block.height.get() >= cached_prune_before);
     }
 }
 
