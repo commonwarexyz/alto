@@ -224,11 +224,9 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
                             .collect::<Vec<_>>();
                         let removed = to_remove.len();
                         for key in to_remove {
-                            if let Some(state) = self.requests.remove(&key) {
-                                if let State::Scheduled(deadline) = state {
-                                    let removed = self.retry_schedule.remove(&(deadline, key.clone()));
-                                    assert!(removed, "scheduled retry entry missing");
-                                }
+                            if let Some(State::Scheduled(deadline)) = self.requests.remove(&key) {
+                                let removed = self.retry_schedule.remove(&(deadline, key.clone()));
+                                assert!(removed, "scheduled retry entry missing");
                             }
                         }
                         debug!(removed, remaining = self.requests.len(), "retained pending requests");
