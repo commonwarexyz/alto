@@ -126,12 +126,13 @@ After redeploying a cluster, update the identity (BLS12-381 threshold public key
 
 ```bash
 # Global cluster:
-OLD_KEY=$(grep '^identity:' follower/examples/global.yml | sed 's/identity: "//;s/"//')
+OLD_KEY=$(sed -nE 's/^identity: "(.*)"$/\1/p' follower/examples/global.yml)
 NEW_KEY="<new-key-hex>"
-sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/global.yml inspector/src/main.rs
+sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/global.yml
+sed -i '' -E "s|^const DEFAULT_IDENTITY: &str = \".*\";|const DEFAULT_IDENTITY: &str = \"$NEW_KEY\";|" inspector/src/main.rs
 
 # USA cluster:
-OLD_KEY=$(grep '^identity:' follower/examples/usa.yml | sed 's/identity: "//;s/"//')
+OLD_KEY=$(sed -nE 's/^identity: "(.*)"$/\1/p' follower/examples/usa.yml)
 NEW_KEY="<new-key-hex>"
 sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/usa.yml
 ```
