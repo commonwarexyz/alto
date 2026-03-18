@@ -238,13 +238,10 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                 match uploads.should_upload(&digest) {
                     Decision::Skip => NextBlock::AlreadyUploaded,
                     Decision::Wait => NextBlock::WaitForCertificate,
-                    Decision::Proceed => {
-                        if let Some(block) = uploads.cached_block(&digest) {
-                            NextBlock::Ready(Box::new(block))
-                        } else {
-                            NextBlock::FetchFromMarshal
-                        }
-                    }
+                    Decision::Proceed => uploads
+                        .cached_block(&digest)
+                        .map(|block| NextBlock::Ready(Box::new(block)))
+                        .unwrap_or(NextBlock::FetchFromMarshal),
                 }
             };
 
