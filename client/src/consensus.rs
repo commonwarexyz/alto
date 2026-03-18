@@ -31,13 +31,13 @@ fn finalization_get_path(base: String, query: &IndexQuery) -> String {
     format!("{base}/finalization/{}", query.serialize())
 }
 
-/// Raw block backfill endpoint used by the chain backfiller.
+/// Block backfill endpoint used by the chain backfiller.
 fn block_upload_path(base: String) -> String {
     format!("{base}/block")
 }
 
 /// Block reads still go through this path. `Latest` and `Index` return certified
-/// data; digest lookups may return a raw block body recovered by the backfiller.
+/// data; digest lookups may return a block body recovered by the backfiller.
 fn block_get_path(base: String, query: &Query) -> String {
     format!("{base}/block/{}", query.serialize())
 }
@@ -188,7 +188,7 @@ impl<S: Strategy> Client<S> {
     }
 
     pub async fn block_upload(&self, block: Block) -> Result<(), Error> {
-        // Upload the raw block body without a notarization/finalization wrapper.
+        // Upload the block body without a notarization/finalization wrapper.
         let result = self
             .http_client
             .post(block_upload_path(self.uri.clone()))

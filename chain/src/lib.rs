@@ -756,7 +756,7 @@ mod tests {
                     .block_upload_started
                     .load(std::sync::atomic::Ordering::SeqCst),
                 0,
-                "raw block uploads should stay idle when certified uploads succeed",
+                "block uploads should stay idle when certified uploads succeed",
             );
         });
     }
@@ -796,7 +796,7 @@ mod tests {
             link_validators(&mut oracle, &participants, link, None).await;
 
             // Reject certificate uploads so the only way blocks can reach the
-            // indexer is through the durable raw block consumer.
+            // indexer is through the durable block consumer.
 
             let indexer = mocks::Client::new().with_fail_certs();
 
@@ -824,7 +824,7 @@ mod tests {
             assert!(!indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
-            // The durable consumer should compensate by uploading raw blocks.
+            // The durable consumer should compensate by uploading blocks.
             for _ in 0..10 {
                 if indexer
                     .block_upload_completed
@@ -878,7 +878,7 @@ mod tests {
 
             // Hold the first few certificate uploads open so finalized queue
             // rows exist while a certificate path for the same digest is still
-            // in flight. The raw consumer should wait instead of racing them.
+            // in flight. The block consumer should wait instead of racing them.
             let mut cert_upload_senders = Vec::new();
             let mut cert_upload_waiters = Vec::new();
             for _ in 0..8 {
@@ -932,11 +932,11 @@ mod tests {
                     .block_upload_started
                     .load(std::sync::atomic::Ordering::SeqCst),
                 0,
-                "raw block uploads should wait while certificate uploads are still in flight",
+                "block uploads should wait while certificate uploads are still in flight",
             );
 
             // Release the blocked certificate uploads and confirm the
-            // certificate-bearing paths finish without the raw consumer ever
+            // certificate-bearing paths finish without the block consumer ever
             // needing to step in.
             drop(cert_upload_senders);
             for _ in 0..10 {
@@ -957,7 +957,7 @@ mod tests {
                     .block_upload_started
                     .load(std::sync::atomic::Ordering::SeqCst),
                 0,
-                "raw block uploads should remain idle when certificate uploads eventually succeed",
+                "block uploads should remain idle when certificate uploads eventually succeed",
             );
         });
     }
@@ -995,7 +995,7 @@ mod tests {
             };
             link_validators(&mut oracle, &participants, link, None).await;
 
-            // Hold the first two raw block uploads open so we can observe the
+            // Hold the first two block uploads open so we can observe the
             // consumer's parallelism before any upload completes.
             let (release_first, wait_first) = oneshot::channel();
             let (release_second, wait_second) = oneshot::channel();
@@ -1135,8 +1135,8 @@ mod tests {
             blocked_waiters.push(receiver);
         }
 
-        // Use one mock that keeps raw uploads blocked during the first run, and
-        // a second mock that still rejects cert uploads but lets replayed raw
+        // Use one mock that keeps block uploads blocked during the first run, and
+        // a second mock that still rejects cert uploads but lets replayed block
         // uploads complete during recovery.
         let blocked_indexer = mocks::Client::new()
             .with_fail_certs()
@@ -1290,7 +1290,7 @@ mod tests {
             let mut registrations = register_validators(&mut oracle, &participants).await;
             let participants_set = Set::from_iter_dedup(participants.clone());
 
-            // Do not relink validators on restart. Any successful raw block
+            // Do not relink validators on restart. Any successful block
             // uploads in this run must therefore come from replaying the
             // durable queue and restored marshal state.
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
