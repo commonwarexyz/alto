@@ -125,11 +125,13 @@ impl<E: Clock + Storage + Metrics> Reporter for Application<E> {
 
     async fn report(&mut self, activity: Self::Activity) {
         if let Update::Block(block, ack_rx) = activity {
+            // Cache the finalized block in memory and enqueue its digest
+            // before acking so the consumer can recover it across restarts.
             if let Some(backfiller) = &self.backfiller {
-                // Cache the finalized block in memory and enqueue its digest
-                // before acking so the consumer can recover it across restarts.
                 backfiller.record(&block).await;
             }
+
+            // Acknowledge the block.
             info!(height = %block.height(), "finalized block");
             ack_rx.acknowledge();
         }
