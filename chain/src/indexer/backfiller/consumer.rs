@@ -156,9 +156,14 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
         // Hand the upload/retry loop off to the in-flight pool so the consumer
         // can continue dequeuing and retiring other queue entries concurrently.
         self.active.push({
+            let context = self
+                .context
+                .with_label("upload")
+                .with_attribute("digest", digest)
+                .with_attribute("height", height)
+                .into_present();
             let client = self.client.clone();
             let marshal = self.marshal.clone();
-            let context = self.context.with_label("upload");
             let upload_results = self.upload_results.clone();
             let uploads = self.uploads.clone();
             let retry = self.retry;
@@ -215,7 +220,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
     }
 
     async fn wait_for_uploadable_block(
-        context: &ContextCell<E>,
+        context: &E,
         marshal: &MarshalMailbox<Scheme, Standard<Block>>,
         uploads: &SharedState,
         digest: Digest,
