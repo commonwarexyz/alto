@@ -103,7 +103,7 @@ pub struct Actor<E: Spawner, C: Source> {
     mailbox_rx: mpsc::Receiver<Message>,
     handler: handler::Handler<Digest>,
     in_flight: AbortablePool<FetchResult>,
-    states: HashMap<handler::Request<Digest>, State>,
+    requests: HashMap<handler::Request<Digest>, State>,
     retry_schedule: BTreeSet<(SystemTime, handler::Request<Digest>)>,
     fetch_retry_timeout: Duration,
 }
@@ -137,7 +137,7 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
             mailbox_rx,
             handler: handler::Handler::new(ingress_tx),
             in_flight: AbortablePool::default(),
-            states: HashMap::new(),
+            requests: HashMap::new(),
             retry_schedule: BTreeSet::new(),
             fetch_retry_timeout,
         };
@@ -158,7 +158,7 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
             self.context,
             on_stopped => {},
             Ok(result) = self.in_flight.next_completed() else continue => {
-                self.states.remove(&result.key);
+                self.requests.remove(&result.key);
                 if result.retry {
                     self.schedule_retry(result.key);
                 }
@@ -172,13 +172,13 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
             Some(msg) = self.mailbox_rx.recv() else break => {
                 match msg {
                     Message::Fetch(key) => {
-                        if let Some(state) = self.states.get(&key) {
+                        if let Some(state) = self.requests.get(&key) {
                             match state {
                                 State::Active(_) => {
-                                    trace!(?key, "skipping duplicate in-flight fetch request");
+                                    trace!(?key, "ignoring fetch request for active key");
                                 }
                                 State::Scheduled(_) => {
-                                    trace!(?key, "skipping fetch request with pending retry");
+                                    trace!(?key, "ignoring fetch request for scheduled key");
                                 }
                             }
                             continue;
@@ -186,7 +186,7 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
                         self.start_fetch(key);
                     }
                     Message::Cancel(key) => {
-                        if let Some(state) = self.states.remove(&key) {
+                        if let Some(state) = self.requests.remove(&key) {
                             match state {
                                 State::Active(aborter) => {
                                     drop(aborter);
@@ -202,30 +202,30 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
                     }
                     Message::Clear => {
                         let active = self
-                            .states
+                            .requests
                             .values()
                             .filter(|state| matches!(state, State::Active(_)))
                             .count();
-                        let scheduled = self.states.len() - active;
-                        self.states.clear();
+                        let scheduled = self.requests.len() - active;
+                        self.requests.clear();
                         self.retry_schedule.clear();
                         debug!(active, scheduled, "cleared all pending requests");
                     }
                     Message::Retain(f) => {
                         let active_before = self
-                            .states
+                            .requests
                             .values()
                             .filter(|state| matches!(state, State::Active(_)))
                             .count();
-                        let scheduled_before = self.states.len() - active_before;
+                        let scheduled_before = self.requests.len() - active_before;
                         let to_remove = self
-                            .states
+                            .requests
                             .keys()
                             .filter(|key| !f(key))
                             .cloned()
                             .collect::<Vec<_>>();
                         for key in to_remove {
-                            if let Some(state) = self.states.remove(&key) {
+                            if let Some(state) = self.requests.remove(&key) {
                                 if let State::Scheduled(deadline) = state {
                                     let removed = self.retry_schedule.remove(&(deadline, key.clone()));
                                     assert!(removed, "scheduled retry entry missing");
@@ -233,11 +233,11 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
                             }
                         }
                         let active_after = self
-                            .states
+                            .requests
                             .values()
                             .filter(|state| matches!(state, State::Active(_)))
                             .count();
-                        let scheduled_after = self.states.len() - active_after;
+                        let scheduled_after = self.requests.len() - active_after;
                         debug!(
                             removed_in_flight = active_before - active_after,
                             removed_scheduled = scheduled_before - scheduled_after,
@@ -254,13 +254,13 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
     fn start_fetch(&mut self, key: handler::Request<Digest>) {
         let future = Self::process_fetch(key.clone(), self.client.clone(), self.handler.clone());
         let aborter = self.in_flight.push(future);
-        let previous = self.states.insert(key, State::Active(aborter));
+        let previous = self.requests.insert(key, State::Active(aborter));
         assert!(previous.is_none(), "request state already existed");
     }
 
     fn schedule_retry(&mut self, key: handler::Request<Digest>) {
         let deadline = self.context.current() + self.fetch_retry_timeout;
-        let previous = self.states.insert(key.clone(), State::Scheduled(deadline));
+        let previous = self.requests.insert(key.clone(), State::Scheduled(deadline));
         assert!(
             matches!(previous, None | Some(State::Active(_))),
             "request was already scheduled"
@@ -276,9 +276,9 @@ impl<E: Spawner + Clock, C: Source> Actor<E, C> {
                 self.retry_schedule.insert((deadline, key));
                 break;
             }
-            match self.states.get(&key) {
+            match self.requests.get(&key) {
                 Some(State::Scheduled(state_deadline)) if *state_deadline == deadline => {
-                    self.states.remove(&key);
+                    self.requests.remove(&key);
                     debug!(?key, "retrying fetch request");
                     self.start_fetch(key);
                 }
