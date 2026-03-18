@@ -94,11 +94,11 @@ impl commonware_resolver::Resolver for Resolver {
 ///
 /// This replaces the p2p-based resolver used by validators. When marshal needs
 /// a block or certificate it does not have locally, it asks this actor to fetch
-/// it from the HTTP source. In-flight and scheduled retry requests are deduplicated.
+/// it from the HTTP source.
 ///
-/// The [Source] (client) is constructed without verification because marshal's
+/// The [Source] (client) should be constructed without verification because marshal's
 /// Deliver handler verifies all signatures before accepting resolved data.
-/// Rejections are logged as warnings and the fetch is abandoned.
+/// Rejections are logged as warnings and retried.
 pub struct Actor<E: Spawner, C: Source> {
     context: ContextCell<E>,
     client: C,
@@ -690,17 +690,20 @@ mod tests {
         });
     }
 
-    /// Verifies that marshal rejecting a finalized delivery logs a warning
-    /// instead of crashing.
+    /// Verifies that marshal rejecting a finalized delivery causes the
+    /// resolver to retry and redeliver it.
     #[test_traced]
-    fn warns_when_marshal_rejects_finalized_delivery() {
+    fn retries_when_marshal_rejects_finalized_delivery() {
         let fixture = TestFixture::new();
         let finalized = fixture.create_finalized(1, 1);
         let height = Height::new(1);
+        let call_count = Arc::new(Mutex::new(0u32));
+        let call_count_inner = call_count.clone();
 
         let source = MockSource::new();
         *source.block_handler.lock().unwrap() = Some(Box::new(move |query| match query {
             Query::Index(index) if index == height.get() => {
+                *call_count_inner.lock().unwrap() += 1;
                 Some(Payload::Finalized(Box::new(finalized.clone())))
             }
             _ => None,
@@ -727,21 +730,43 @@ mod tests {
                 _ => panic!("expected Deliver message"),
             }
 
-            context.sleep(Duration::from_millis(50)).await;
+            let max_retry_wait = DEFAULT_FETCH_RETRY_TIMEOUT * 2 + Duration::from_millis(10);
+            context.sleep(max_retry_wait).await;
+
+            let retry = ingress_rx.recv().await.unwrap();
+            match retry {
+                handler::Message::Deliver { key, response, .. } => {
+                    assert!(
+                        matches!(key, handler::Request::Finalized { height: h } if h == height)
+                    );
+                    response.send(true).expect("deliver response dropped");
+                }
+                _ => panic!("expected Deliver message"),
+            }
+
+            assert_eq!(
+                *call_count.lock().unwrap(),
+                2,
+                "expected marshal rejection to trigger one retry"
+            );
         });
     }
 
-    /// Verifies that marshal rejecting a notarized delivery logs a warning
-    /// instead of crashing.
+    /// Verifies that marshal rejecting a notarized delivery causes the
+    /// resolver to retry and redeliver it.
     #[test_traced]
-    fn warns_when_marshal_rejects_notarized_delivery() {
+    fn retries_when_marshal_rejects_notarized_delivery() {
         let fixture = TestFixture::new();
         let notarized = fixture.create_notarized(3, 3);
         let round = Round::new(alto_types::EPOCH, View::new(3));
+        let call_count = Arc::new(Mutex::new(0u32));
+        let call_count_inner = call_count.clone();
 
         let source = MockSource::new();
-        *source.notarized_handler.lock().unwrap() =
-            Some(Box::new(move |_| Some(notarized.clone())));
+        *source.notarized_handler.lock().unwrap() = Some(Box::new(move |_| {
+            *call_count_inner.lock().unwrap() += 1;
+            Some(notarized.clone())
+        }));
 
         Runner::default().start(|context| async move {
             let (ingress_tx, mut ingress_rx) = mpsc::channel(16);
@@ -764,7 +789,23 @@ mod tests {
                 _ => panic!("expected Deliver message"),
             }
 
-            context.sleep(Duration::from_millis(50)).await;
+            let max_retry_wait = DEFAULT_FETCH_RETRY_TIMEOUT * 2 + Duration::from_millis(10);
+            context.sleep(max_retry_wait).await;
+
+            let retry = ingress_rx.recv().await.unwrap();
+            match retry {
+                handler::Message::Deliver { key, response, .. } => {
+                    assert!(matches!(key, handler::Request::Notarized { round: r } if r == round));
+                    response.send(true).expect("deliver response dropped");
+                }
+                _ => panic!("expected Deliver message"),
+            }
+
+            assert_eq!(
+                *call_count.lock().unwrap(),
+                2,
+                "expected marshal rejection to trigger one retry"
+            );
         });
     }
 
