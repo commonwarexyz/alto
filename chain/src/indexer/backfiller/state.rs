@@ -7,8 +7,8 @@ use std::{collections::BTreeMap, sync::Arc};
 
 /// What the backfiller should do next for a digest.
 pub enum Decision {
-    /// The block is already uploaded, so the queue entry can be retired.
-    Retire,
+    /// The block is already uploaded, so the queue entry can be skipped.
+    Skip,
     /// The live certificate path is still handling this digest, so the backfiller
     /// should wait instead of racing it.
     Wait,
@@ -117,9 +117,9 @@ impl State {
         self.cached_blocks.get(digest).cloned()
     }
 
-    pub fn upload_decision(&self, digest: &Digest) -> Decision {
+    pub fn should_upload(&self, digest: &Digest) -> Decision {
         if self.is_uploaded(digest) {
-            Decision::Retire
+            Decision::Skip
         } else if self.certificate_uploads.contains_key(digest) {
             Decision::Wait
         } else {

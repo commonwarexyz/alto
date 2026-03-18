@@ -25,9 +25,9 @@ enum Completion {
         height: u64,
         digest: Digest,
     },
-    /// The queue entry became redundant because the live certificate path
+    /// The queue entry was skipped because the live certificate path
     /// uploaded the block first.
-    Retired { position: u64, height: u64 },
+    Skipped { position: u64, height: u64 },
 }
 
 pub struct Consumer<E: Spawner + Clock + Storage + Metrics, C: Client> {
@@ -146,11 +146,8 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
 
     async fn start_upload(&mut self, position: u64, entry: Entry) {
         let Entry { height, digest } = entry;
-        if matches!(
-            self.uploads.lock().upload_decision(&digest),
-            Decision::Retire
-        ) {
-            self.complete(Completion::Retired { position, height })
+        if matches!(self.uploads.lock().should_upload(&digest), Decision::Skip) {
+            self.complete(Completion::Skipped { position, height })
                 .await;
             debug!(?digest, "consumer skipping already-uploaded block");
             return;
@@ -171,7 +168,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                         .await
                 else {
                     debug!(?digest, "consumer observed live upload before block upload");
-                    return Completion::Retired { position, height };
+                    return Completion::Skipped { position, height };
                 };
 
                 loop {
@@ -179,12 +176,12 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                     // queue item is waiting for its block or retrying after failures.
                     let decision = {
                         let uploads = uploads.lock();
-                        uploads.upload_decision(&digest)
+                        uploads.should_upload(&digest)
                     };
                     match decision {
-                        Decision::Retire => {
+                        Decision::Skip => {
                             debug!(?digest, "consumer observed live upload before block upload");
-                            return Completion::Retired { position, height };
+                            return Completion::Skipped { position, height };
                         }
                         Decision::Wait => {
                             context.sleep(retry).await;
@@ -238,8 +235,8 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
         loop {
             let next = {
                 let uploads = uploads.lock();
-                match uploads.upload_decision(&digest) {
-                    Decision::Retire => NextBlock::AlreadyUploaded,
+                match uploads.should_upload(&digest) {
+                    Decision::Skip => NextBlock::AlreadyUploaded,
                     Decision::Wait => NextBlock::WaitForCertificate,
                     Decision::Proceed => {
                         if let Some(block) = uploads.cached_block(&digest) {
@@ -284,7 +281,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
                 self.uploads.lock().mark_uploaded(digest, height);
                 (position, height)
             }
-            Completion::Retired { position, height } => (position, height),
+            Completion::Skipped { position, height } => (position, height),
         };
 
         let floor = self.reader.ack_floor().await;
