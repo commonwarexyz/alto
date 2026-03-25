@@ -246,6 +246,33 @@ mod tests {
         async fn retain(&mut self, _: impl Fn(&Self::Key) -> bool + Send + 'static) {}
     }
 
+    fn test_archive_config<C>(
+        prefix: &str,
+        label: &str,
+        page_cache: CacheRef,
+        codec_config: C,
+    ) -> immutable::Config<C> {
+        immutable::Config {
+            metadata_partition: format!("{prefix}-{label}-metadata"),
+            freezer_table_partition: format!("{prefix}-{label}-freezer-table"),
+            freezer_table_initial_size: 64,
+            freezer_table_resize_frequency: 10,
+            freezer_table_resize_chunk_size: 10,
+            freezer_key_partition: format!("{prefix}-{label}-key"),
+            freezer_key_page_cache: page_cache,
+            freezer_value_partition: format!("{prefix}-{label}-value"),
+            freezer_value_target_size: 1024,
+            freezer_value_compression: None,
+            ordinal_partition: format!("{prefix}-{label}-ordinal"),
+            items_per_section: NZU64!(10),
+            codec_config,
+            replay_buffer: NZUsize!(1024),
+            freezer_key_write_buffer: NZUsize!(1024),
+            freezer_value_write_buffer: NZUsize!(1024),
+            ordinal_write_buffer: NZUsize!(1024),
+        }
+    }
+
     async fn init_mailbox(
         context: deterministic::Context,
         scheme: Scheme,
@@ -262,55 +289,18 @@ mod tests {
 
         let finalizations_by_height = immutable::Archive::init(
             context.with_label("finalizations_by_height"),
-            immutable::Config {
-                metadata_partition: format!("{partition_prefix}-finalizations-by-height-metadata"),
-                freezer_table_partition: format!(
-                    "{partition_prefix}-finalizations-by-height-freezer-table"
-                ),
-                freezer_table_initial_size: 64,
-                freezer_table_resize_frequency: 10,
-                freezer_table_resize_chunk_size: 10,
-                freezer_key_partition: format!("{partition_prefix}-finalizations-by-height-key"),
-                freezer_key_page_cache: page_cache.clone(),
-                freezer_value_partition: format!(
-                    "{partition_prefix}-finalizations-by-height-value"
-                ),
-                freezer_value_target_size: 1024,
-                freezer_value_compression: None,
-                ordinal_partition: format!("{partition_prefix}-finalizations-by-height-ordinal"),
-                items_per_section: NZU64!(10),
-                codec_config: Scheme::certificate_codec_config_unbounded(),
-                replay_buffer: NZUsize!(1024),
-                freezer_key_write_buffer: NZUsize!(1024),
-                freezer_value_write_buffer: NZUsize!(1024),
-                ordinal_write_buffer: NZUsize!(1024),
-            },
+            test_archive_config(
+                partition_prefix,
+                "finalizations-by-height",
+                page_cache.clone(),
+                Scheme::certificate_codec_config_unbounded(),
+            ),
         )
         .await
         .expect("failed to initialize finalizations archive");
         let finalized_blocks = immutable::Archive::init(
             context.with_label("finalized_blocks"),
-            immutable::Config {
-                metadata_partition: format!("{partition_prefix}-finalized-blocks-metadata"),
-                freezer_table_partition: format!(
-                    "{partition_prefix}-finalized-blocks-freezer-table"
-                ),
-                freezer_table_initial_size: 64,
-                freezer_table_resize_frequency: 10,
-                freezer_table_resize_chunk_size: 10,
-                freezer_key_partition: format!("{partition_prefix}-finalized-blocks-key"),
-                freezer_key_page_cache: page_cache.clone(),
-                freezer_value_partition: format!("{partition_prefix}-finalized-blocks-value"),
-                freezer_value_target_size: 1024,
-                freezer_value_compression: None,
-                ordinal_partition: format!("{partition_prefix}-finalized-blocks-ordinal"),
-                items_per_section: NZU64!(10),
-                codec_config: (),
-                replay_buffer: NZUsize!(1024),
-                freezer_key_write_buffer: NZUsize!(1024),
-                freezer_value_write_buffer: NZUsize!(1024),
-                ordinal_write_buffer: NZUsize!(1024),
-            },
+            test_archive_config(partition_prefix, "finalized-blocks", page_cache.clone(), ()),
         )
         .await
         .expect("failed to initialize finalized blocks archive");
