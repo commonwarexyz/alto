@@ -165,7 +165,7 @@ mod tests {
     };
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig,
-        certificate::{mocks::Fixture, ConstantProvider, Scheme as _},
+        certificate::{mocks::Fixture, ConstantProvider},
     };
     use commonware_parallel::Sequential;
     use commonware_resolver::Resolver;
@@ -246,12 +246,11 @@ mod tests {
         async fn retain(&mut self, _: impl Fn(&Self::Key) -> bool + Send + 'static) {}
     }
 
-    fn test_archive_config<C>(
+    fn test_archive_config(
         prefix: &str,
         label: &str,
         page_cache: CacheRef,
-        codec_config: C,
-    ) -> immutable::Config<C> {
+    ) -> immutable::Config<()> {
         immutable::Config {
             metadata_partition: format!("{prefix}-{label}-metadata"),
             freezer_table_partition: format!("{prefix}-{label}-freezer-table"),
@@ -265,7 +264,7 @@ mod tests {
             freezer_value_compression: None,
             ordinal_partition: format!("{prefix}-{label}-ordinal"),
             items_per_section: NZU64!(10),
-            codec_config,
+            codec_config: (),
             replay_buffer: NZUsize!(1024),
             freezer_key_write_buffer: NZUsize!(1024),
             freezer_value_write_buffer: NZUsize!(1024),
@@ -289,18 +288,13 @@ mod tests {
 
         let finalizations_by_height = immutable::Archive::init(
             context.with_label("finalizations_by_height"),
-            test_archive_config(
-                partition_prefix,
-                "finalizations-by-height",
-                page_cache.clone(),
-                Scheme::certificate_codec_config_unbounded(),
-            ),
+            test_archive_config(partition_prefix, "finalizations-by-height", page_cache.clone()),
         )
         .await
         .expect("failed to initialize finalizations archive");
         let finalized_blocks = immutable::Archive::init(
             context.with_label("finalized_blocks"),
-            test_archive_config(partition_prefix, "finalized-blocks", page_cache.clone(), ()),
+            test_archive_config(partition_prefix, "finalized-blocks", page_cache.clone()),
         )
         .await
         .expect("failed to initialize finalized blocks archive");
