@@ -288,7 +288,11 @@ mod tests {
 
         let finalizations_by_height = immutable::Archive::init(
             context.with_label("finalizations_by_height"),
-            test_archive_config(partition_prefix, "finalizations-by-height", page_cache.clone()),
+            test_archive_config(
+                partition_prefix,
+                "finalizations-by-height",
+                page_cache.clone(),
+            ),
         )
         .await
         .expect("failed to initialize finalizations archive");
