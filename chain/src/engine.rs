@@ -1,5 +1,5 @@
 use crate::{
-    application::Application,
+    application::{Application, Qmdb, SingleDatabaseSet},
     indexer::{self, Client},
 };
 use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
@@ -11,7 +11,7 @@ use commonware_consensus::{
         resolver::handler,
         standard::{Deferred, Standard},
     },
-    simplex::{self, elector::Random, Engine as Consensus},
+    simplex::{self, elector::Random, Engine as Consensus, ForwardingPolicy},
     types::{Epoch, FixedEpocher, ViewDelta},
     Reporters,
 };
@@ -21,6 +21,11 @@ use commonware_cryptography::{
     ed25519::PublicKey,
     sha256::Digest,
 };
+use commonware_glue::stateful::{
+    db::{p2p as qmdb_resolver, SyncEngineConfig},
+    Config as StatefulConfig, Mailbox as StatefulMailbox, StartupMode,
+    Stateful as StatefulActor,
+};
 use commonware_p2p::{Blocker, Provider, Receiver, Sender};
 use commonware_parallel::Strategy;
 use commonware_resolver::Resolver;
@@ -28,7 +33,14 @@ use commonware_runtime::{
     buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
     Spawner, Storage, ThreadPooler,
 };
-use commonware_storage::{archive::immutable, queue};
+use commonware_storage::{
+    archive::immutable,
+    journal::contiguous::fixed::Config as FixedLogConfig,
+    mmr::journaled::Config as MmrJournalConfig,
+    qmdb::any::FixedConfig,
+    queue,
+    translator::FourCap,
+};
 use commonware_utils::channel::mpsc;
 use commonware_utils::{ordered::Set, NZU16};
 use commonware_utils::{NZUsize, NZU64};
@@ -42,9 +54,25 @@ use std::{
 };
 use tracing::{error, info, warn};
 
+/// Type alias for the stateful mailbox.
+type StatefulMbx<E> = StatefulMailbox<E, Application<E>>;
+
+/// Type alias for the deferred consensus adapter wrapping the stateful mailbox.
+type Marshaled<E> = Deferred<E, Scheme, StatefulMbx<E>, Block, FixedEpocher>;
+
 /// Reporter type for [simplex::Engine].
 type Reporter<E, C> =
     Reporters<Activity, MarshalMailbox<Scheme, Standard<Block>>, Option<indexer::Pusher<E, C>>>;
+
+/// Type alias for the QMDB sync resolver mailbox.
+///
+/// Resolves the associated types from `SyncResolver` for our concrete
+/// QMDB database type.
+type QmdbSyncResolver<E> = qmdb_resolver::Mailbox<
+    Qmdb<E>,
+    <SingleDatabaseSet<E> as commonware_storage::qmdb::sync::resolver::Resolver>::Op,
+    <SingleDatabaseSet<E> as commonware_storage::qmdb::sync::resolver::Resolver>::Digest,
+>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -59,7 +87,7 @@ const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
 const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
-const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
+const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(131_072); // 512MB
 const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(16);
 
@@ -100,10 +128,8 @@ pub struct Config<
     pub indexer: Option<C>,
 }
 
-type Marshaled<E> = Deferred<E, Scheme, Application<E>, Block, FixedEpocher>;
-
 /// The engine that drives the [Application].
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, dead_code)]
 pub struct Engine<E, B, P, S, C>
 where
     E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
@@ -127,6 +153,16 @@ where
     >,
     marshaled: Marshaled<E>,
 
+    stateful: StatefulActor<
+        E,
+        Application<E>,
+        MarshalMailbox<Scheme, Standard<Block>>,
+        QmdbSyncResolver<E>,
+    >,
+    stateful_mailbox: StatefulMbx<E>,
+
+    qmdb_resolver: qmdb_resolver::Actor<E, PublicKey, P, B, Qmdb<E>>,
+
     consensus:
         Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, C>, S>,
 
@@ -144,15 +180,16 @@ where
     /// Create a new [Engine].
     pub async fn new(context: E, cfg: Config<B, P, C, S>) -> Self {
         // Create the buffer
+        let me = cfg.me;
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.with_label("buffer"),
             buffered::Config {
-                public_key: cfg.me,
+                public_key: me.clone(),
                 mailbox_size: cfg.mailbox_size,
                 deque_size: cfg.deque_size,
                 priority: true,
                 codec_config: (),
-                peer_provider: cfg.provider,
+                peer_provider: cfg.provider.clone(),
             },
         );
 
@@ -271,9 +308,7 @@ where
         )
         .await;
 
-        // Create the reporter and, when an indexer is configured, a backfill
-        // queue of finalized digests so block uploads can resume after
-        // restarts.
+        // Create the indexer backfill pipeline when configured.
         let (app, pusher, consumer) = if let Some(indexer) = cfg.indexer {
             let queue = queue::shared::init(
                 context.with_label("queue"),
@@ -304,10 +339,73 @@ where
             (Application::new(), None, None)
         };
 
-        // Create the application
+        // QMDB database config
+        // Target ~1GB per blob file. Each operation (U32 key + U64 value +
+        // overhead) is ~20 bytes, so 50M items ≈ 1GB.
+        const QMDB_ITEMS_PER_BLOB: NonZero<u64> = NZU64!(50_000_000);
+
+        let db_config = FixedConfig {
+            mmr_config: MmrJournalConfig {
+                journal_partition: format!("{}-qmdb-mmr-journal", cfg.partition_prefix),
+                metadata_partition: format!("{}-qmdb-mmr-metadata", cfg.partition_prefix),
+                items_per_blob: QMDB_ITEMS_PER_BLOB,
+                write_buffer: WRITE_BUFFER,
+                thread_pool: None,
+                page_cache: page_cache.clone(),
+            },
+            journal_config: FixedLogConfig {
+                partition: format!("{}-qmdb-log-journal", cfg.partition_prefix),
+                items_per_blob: QMDB_ITEMS_PER_BLOB,
+                page_cache: page_cache.clone(),
+                write_buffer: WRITE_BUFFER,
+            },
+            translator: FourCap,
+        };
+
+        // QMDB state-sync resolver
+        let (qmdb_resolver, qmdb_sync_resolver) =
+            qmdb_resolver::Actor::<_, PublicKey, _, _, Qmdb<_>>::new(
+                context.with_label("qmdb_resolver"),
+                qmdb_resolver::Config {
+                    peer_provider: cfg.provider,
+                    blocker: cfg.blocker.clone(),
+                    database: None,
+                    mailbox_size: cfg.mailbox_size,
+                    me: Some(me),
+                    initial: Duration::from_secs(1),
+                    timeout: Duration::from_secs(2),
+                    fetch_retry_timeout: Duration::from_millis(100),
+                    priority_requests: false,
+                    priority_responses: false,
+                },
+            );
+
+        // Create the stateful actor
+        let (stateful, stateful_mailbox) = StatefulActor::init(
+            context.with_label("stateful"),
+            StatefulConfig {
+                app,
+                db_config,
+                input_provider: (),
+                marshal: marshal_mailbox.clone(),
+                mailbox_size: cfg.mailbox_size,
+                partition_prefix: cfg.partition_prefix.clone(),
+                startup: StartupMode::MarshalSync,
+                resolvers: qmdb_sync_resolver,
+                sync_config: SyncEngineConfig {
+                    fetch_batch_size: NZU64!(256),
+                    apply_batch_size: 1024,
+                    max_outstanding_requests: 8,
+                    update_channel_size: NZUsize!(256),
+                    max_retained_roots: 16,
+                },
+            },
+        );
+
+        // Create the deferred consensus adapter wrapping the stateful mailbox.
         let marshaled = Marshaled::new(
             context.with_label("marshaled"),
-            app,
+            stateful_mailbox.clone(),
             marshal_mailbox.clone(),
             epocher,
         );
@@ -339,6 +437,7 @@ where
                 page_cache,
                 elector: Random,
                 strategy: cfg.strategy,
+                forwarding: ForwardingPolicy::Disabled,
             },
         );
 
@@ -350,6 +449,9 @@ where
             buffer_mailbox,
             marshal,
             marshaled,
+            stateful,
+            stateful_mailbox,
+            qmdb_resolver,
             consensus,
 
             consumer,
@@ -380,11 +482,22 @@ where
             mpsc::Receiver<handler::Message<Digest>>,
             impl Resolver<Key = handler::Request<Digest>, PublicKey = PublicKey>,
         ),
+        qmdb_resolver_network: (
+            impl Sender<PublicKey = PublicKey>,
+            impl Receiver<PublicKey = PublicKey>,
+        ),
     ) -> Handle<()> {
         spawn_cell!(
             self.context,
-            self.run(pending, recovered, resolver, broadcast, marshal)
-                .await
+            self.run(
+                pending,
+                recovered,
+                resolver,
+                broadcast,
+                marshal,
+                qmdb_resolver_network
+            )
+            .await
         )
     }
 
@@ -411,14 +524,25 @@ where
             mpsc::Receiver<handler::Message<Digest>>,
             impl Resolver<Key = handler::Request<Digest>, PublicKey = PublicKey>,
         ),
+        qmdb_resolver_network: (
+            impl Sender<PublicKey = PublicKey>,
+            impl Receiver<PublicKey = PublicKey>,
+        ),
     ) {
         // Start the buffer
         let buffer_handle = self.buffer.start(broadcast);
 
-        // Start marshal
+        // Start QMDB resolver
+        let qmdb_resolver_handle = self.qmdb_resolver.start(qmdb_resolver_network);
+
+        // Start marshal with deferred as reporter (Deferred forwards to the
+        // stateful mailbox internally and also cleans up its verification state).
         let marshal_handle = self
             .marshal
             .start(self.marshaled, self.buffer_mailbox, marshal);
+
+        // Start the stateful actor
+        let stateful_handle = self.stateful.start();
 
         // Start draining queued block uploads before consensus so recovered work
         // resumes immediately on startup.
@@ -431,7 +555,13 @@ where
         let consensus_handle = self.consensus.start(pending, recovered, resolver);
 
         // Wait for any actor to finish
-        let mut handles: Vec<Handle<()>> = vec![buffer_handle, marshal_handle, consensus_handle];
+        let mut handles: Vec<Handle<()>> = vec![
+            buffer_handle,
+            qmdb_resolver_handle,
+            marshal_handle,
+            stateful_handle,
+            consensus_handle,
+        ];
         if let Some(h) = consumer_handle {
             handles.push(h);
         }

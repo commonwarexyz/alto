@@ -177,7 +177,9 @@ mod tests {
     use super::*;
     use alto_types::{Context, EPOCH};
     use commonware_consensus::types::{Height, Round, View};
-    use commonware_cryptography::{ed25519, Digestible, Hasher, Sha256, Signer};
+    use commonware_cryptography::{ed25519, sha256, Digest as _, Digestible, Hasher, Sha256, Signer};
+    use commonware_storage::mmr::Location;
+    use commonware_utils::non_empty_range;
 
     fn test_block(view: u64, height: u64, label: &[u8]) -> Block {
         Block::new(
@@ -192,6 +194,9 @@ mod tests {
             Sha256::hash(label),
             Height::new(height),
             height,
+            sha256::Digest::EMPTY,
+            non_empty_range!(Location::new(0), Location::new(1)),
+            vec![],
         )
     }
 

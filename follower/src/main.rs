@@ -275,7 +275,7 @@ fn main() {
                     );
                     let height = finalized.block.height;
                     info!(height = height.get(), "setting checkpoint floor from latest finalized block");
-                    mailbox.set_floor(height).await;
+                    mailbox.set_floor(height, true).await;
                 }
                 Err(e) => {
                     warn!(error = ?e, "failed to fetch latest finalized block for checkpoint, will backfill from genesis");

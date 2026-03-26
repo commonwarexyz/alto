@@ -4,6 +4,8 @@ use commonware_codec::{varint::UInt, Encode, EncodeSize, Error, Read, ReadExt, W
 use commonware_consensus::{types::Height, CertifiableBlock, Heightable};
 use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256};
 use commonware_parallel::Strategy;
+use commonware_storage::mmr::Location;
+use commonware_utils::range::NonEmptyRange;
 use rand::rngs::OsRng;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,6 +22,15 @@ pub struct Block {
     /// The timestamp of the block (in milliseconds since the Unix epoch).
     pub timestamp: u64,
 
+    /// The state root from merkleizing the database after executing this block.
+    pub state_root: Digest,
+
+    /// The database range (inactivity floor .. size) for QMDB sync targeting.
+    pub range: NonEmptyRange<Location>,
+
+    /// Key indices in `[0, 2^16)` that this block writes to.
+    pub slots: Vec<u16>,
+
     /// Pre-computed digest of the block.
     digest: Digest,
 }
@@ -30,22 +41,50 @@ impl Block {
         parent: &Digest,
         height: Height,
         timestamp: u64,
+        state_root: &Digest,
+        range: &NonEmptyRange<Location>,
+        slots: &[u16],
     ) -> Digest {
         let mut hasher = Sha256::new();
         hasher.update(&context.encode());
         hasher.update(parent);
         hasher.update(&height.get().to_be_bytes());
         hasher.update(&timestamp.to_be_bytes());
+        hasher.update(state_root);
+        hasher.update(&range.start().as_u64().to_be_bytes());
+        hasher.update(&range.end().as_u64().to_be_bytes());
+        for &s in slots {
+            hasher.update(&s.to_be_bytes());
+        }
         hasher.finalize()
     }
 
-    pub fn new(context: Context, parent: Digest, height: Height, timestamp: u64) -> Self {
-        let digest = Self::compute_digest(&context, &parent, height, timestamp);
+    pub fn new(
+        context: Context,
+        parent: Digest,
+        height: Height,
+        timestamp: u64,
+        state_root: Digest,
+        range: NonEmptyRange<Location>,
+        slots: Vec<u16>,
+    ) -> Self {
+        let digest = Self::compute_digest(
+            &context,
+            &parent,
+            height,
+            timestamp,
+            &state_root,
+            &range,
+            &slots,
+        );
         Self {
             context,
             parent,
             height,
             timestamp,
+            state_root,
+            range,
+            slots,
             digest,
         }
     }
@@ -57,6 +96,9 @@ impl Write for Block {
         self.parent.write(writer);
         self.height.write(writer);
         UInt(self.timestamp).write(writer);
+        self.state_root.write(writer);
+        self.range.write(writer);
+        self.slots.write(writer);
     }
 }
 
@@ -68,13 +110,27 @@ impl Read for Block {
         let parent = Digest::read(reader)?;
         let height = Height::read(reader)?;
         let timestamp = UInt::read(reader)?.0;
+        let state_root = Digest::read(reader)?;
+        let range = NonEmptyRange::<Location>::read(reader)?;
+        let slots = Vec::<u16>::read_cfg(reader, &((0..=(1 << 14)).into(), ()))?;
 
-        let digest = Self::compute_digest(&context, &parent, height, timestamp);
+        let digest = Self::compute_digest(
+            &context,
+            &parent,
+            height,
+            timestamp,
+            &state_root,
+            &range,
+            &slots,
+        );
         Ok(Self {
             context,
             parent,
             height,
             timestamp,
+            state_root,
+            range,
+            slots,
             digest,
         })
     }
@@ -86,6 +142,9 @@ impl EncodeSize for Block {
             + self.parent.encode_size()
             + self.height.encode_size()
             + UInt(self.timestamp).encode_size()
+            + self.state_root.encode_size()
+            + self.range.encode_size()
+            + self.slots.encode_size()
     }
 }
 

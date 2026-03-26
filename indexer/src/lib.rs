@@ -392,6 +392,8 @@ mod tests {
         Digest, Digestible, Hasher, Sha256, Signer,
     };
     use commonware_parallel::Sequential;
+    use commonware_storage::mmr::Location;
+    use commonware_utils::non_empty_range;
     use futures::StreamExt;
     use rand::{rngs::StdRng, SeedableRng};
     use rcgen::{generate_simple_self_signed, CertifiedKey, KeyPair};
@@ -429,7 +431,7 @@ mod tests {
                 leader: ed25519::PrivateKey::from_seed(0).public_key(),
                 parent: (View::new(0), sha256::Digest::EMPTY),
             };
-            Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000)
+            Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000, sha256::Digest::EMPTY, non_empty_range!(Location::new(0), Location::new(1)), vec![])
         }
 
         /// Create a proposal for the given block at view 1.
@@ -673,7 +675,7 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
-        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000);
+        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000, sha256::Digest::EMPTY, non_empty_range!(Location::new(0), Location::new(1)), vec![]);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),
@@ -795,7 +797,7 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
-        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000);
+        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000, sha256::Digest::EMPTY, non_empty_range!(Location::new(0), Location::new(1)), vec![]);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),
@@ -832,7 +834,7 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
-        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000);
+        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000, sha256::Digest::EMPTY, non_empty_range!(Location::new(0), Location::new(1)), vec![]);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),

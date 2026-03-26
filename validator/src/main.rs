@@ -34,9 +34,10 @@ const RECOVERED_CHANNEL: u64 = 1;
 const RESOLVER_CHANNEL: u64 = 2;
 const BROADCASTER_CHANNEL: u64 = 3;
 const MARSHAL_CHANNEL: u64 = 4;
+const QMDB_RESOLVER_CHANNEL: u64 = 5;
 
-const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
-const CERTIFICATION_TIMEOUT: Duration = Duration::from_secs(2);
+const LEADER_TIMEOUT: Duration = Duration::from_secs(4);
+const CERTIFICATION_TIMEOUT: Duration = Duration::from_secs(8);
 const NULLIFY_RETRY: Duration = Duration::from_secs(10);
 const ACTIVITY_TIMEOUT: ViewDelta = ViewDelta::new(256);
 const SKIP_TIMEOUT: ViewDelta = ViewDelta::new(32);
@@ -235,6 +236,14 @@ fn main() {
         let marshal_quota = Quota::per_second(NonZeroU32::new(8).unwrap());
         let marshal = network.register(MARSHAL_CHANNEL, marshal_quota, config.message_backlog);
 
+        // Register QMDB sync resolver channel
+        let qmdb_resolver_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
+        let qmdb_resolver_network = network.register(
+            QMDB_RESOLVER_CHANNEL,
+            qmdb_resolver_limit,
+            config.message_backlog,
+        );
+
         // Create network
         let p2p = network.start();
 
@@ -293,7 +302,14 @@ fn main() {
             marshal::resolver::p2p::init(&context, marshal_resolver_cfg, marshal);
 
         // Start engine
-        let engine = engine.start(pending, recovered, resolver, broadcaster, marshal_resolver);
+        let engine = engine.start(
+            pending,
+            recovered,
+            resolver,
+            broadcaster,
+            marshal_resolver,
+            qmdb_resolver_network,
+        );
 
         // Wait for any task to error
         if let Err(e) = try_join_all(vec![p2p, engine]).await {

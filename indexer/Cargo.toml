@@ -43,6 +43,7 @@ path = "src/lib.rs"
 [dev-dependencies]
 commonware-cryptography = { workspace = true, features = ["mocks"] }
 commonware-consensus = { workspace = true, features = ["mocks"] }
+commonware-storage = { workspace = true }
 rcgen = { version = "0.14.6", features = ["crypto", "pem"] }
 rustls = { version = "0.23.23", features = ["aws_lc_rs"] }
 tokio-rustls = "0.26.2"

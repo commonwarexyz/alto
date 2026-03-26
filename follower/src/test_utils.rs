@@ -16,6 +16,8 @@ use commonware_cryptography::{
     Digestible, Hasher, Sha256, Signer,
 };
 use commonware_parallel::Sequential;
+use commonware_storage::mmr::Location;
+use commonware_utils::non_empty_range;
 use rand::{rngs::StdRng, SeedableRng};
 use std::{
     future::Future,
@@ -121,7 +123,7 @@ impl TestFixture {
             parent: (View::new(view.saturating_sub(1)), sha256::Digest::EMPTY),
         };
         let parent_digest = Sha256::hash(format!("parent-{height}").as_bytes());
-        Block::new(context, parent_digest, Height::new(height), height * 100)
+        Block::new(context, parent_digest, Height::new(height), height * 100, sha256::Digest::EMPTY, non_empty_range!(Location::new(0), Location::new(1)), vec![])
     }
 
     pub fn create_finalized(&self, height: u64, view: u64) -> Finalized {

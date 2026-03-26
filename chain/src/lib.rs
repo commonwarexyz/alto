@@ -115,6 +115,8 @@ mod tests {
                 oracle.register(3, TEST_QUOTA).await.unwrap();
             let (backfill_sender, backfill_receiver) =
                 oracle.register(4, TEST_QUOTA).await.unwrap();
+            let (qmdb_resolver_sender, qmdb_resolver_receiver) =
+                oracle.register(5, TEST_QUOTA).await.unwrap();
             registrations.insert(
                 validator.clone(),
                 (
@@ -123,6 +125,7 @@ mod tests {
                     (resolver_sender, resolver_receiver),
                     (broadcast_sender, broadcast_receiver),
                     (backfill_sender, backfill_receiver),
+                    (qmdb_resolver_sender, qmdb_resolver_receiver),
                 ),
             );
         }
@@ -233,6 +236,10 @@ mod tests {
             Sender<PublicKey, deterministic::Context>,
             Receiver<PublicKey>,
         ),
+        (
+            Sender<PublicKey, deterministic::Context>,
+            Receiver<PublicKey>,
+        ),
     );
 
     #[derive(Clone)]
@@ -319,7 +326,8 @@ mod tests {
             strategy: Sequential,
         };
         let validator_context = context.with_label(&uid);
-        let (pending, recovered, resolver, broadcast, backfill) = registration;
+        let (pending, recovered, resolver, broadcast, backfill, qmdb_resolver_network) =
+            registration;
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),
             peer_provider: oracle.manager(),
@@ -337,7 +345,14 @@ mod tests {
             backfill,
         );
         let engine = Engine::new(validator_context.with_label("engine"), config).await;
-        engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
+        engine.start(
+            pending,
+            recovered,
+            resolver,
+            broadcast,
+            marshal_resolver,
+            qmdb_resolver_network,
+        );
     }
 
     async fn poll_until_height(context: &deterministic::Context, required: u64) {

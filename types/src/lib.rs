@@ -75,6 +75,8 @@ mod tests {
         Digest, Digestible, Hasher, Sha256, Signer,
     };
     use commonware_parallel::Sequential;
+    use commonware_storage::mmr::Location;
+    use commonware_utils::non_empty_range;
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
@@ -92,7 +94,7 @@ mod tests {
             parent: (View::new(8), sha256::Digest::EMPTY),
         };
         let digest = Sha256::hash(b"hello world");
-        let block = Block::new(context, digest, Height::new(10), 100);
+        let block = Block::new(context, digest, Height::new(10), 100, sha256::Digest::EMPTY, non_empty_range!(Location::new(0), Location::new(1)), vec![]);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
@@ -132,7 +134,7 @@ mod tests {
             parent: (View::new(8), sha256::Digest::EMPTY),
         };
         let digest = Sha256::hash(b"hello world");
-        let block = Block::new(context, digest, Height::new(10), 100);
+        let block = Block::new(context, digest, Height::new(10), 100, sha256::Digest::EMPTY, non_empty_range!(Location::new(0), Location::new(1)), vec![]);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
