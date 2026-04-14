@@ -11,7 +11,7 @@ use commonware_consensus::{
         resolver::handler,
         standard::{Deferred, Standard},
     },
-    simplex::{self, elector::Random, Engine as Consensus},
+    simplex::{self, config::ForwardingPolicy, elector::Random, Engine as Consensus},
     types::{Epoch, FixedEpocher, ViewDelta},
     Reporters,
 };
@@ -339,6 +339,7 @@ where
                 page_cache,
                 elector: Random,
                 strategy: cfg.strategy,
+                forwarding: ForwardingPolicy::Disabled,
             },
         );
 

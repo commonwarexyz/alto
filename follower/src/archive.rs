@@ -237,6 +237,19 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates f
             Self::Prunable(a) => Archive::last_index(a).map(Height::new),
         }
     }
+
+    fn ranges_from(&self, from: Height) -> impl Iterator<Item = (Height, Height)> {
+        match self {
+            Self::Immutable(a) => Archive::ranges_from(a, from.get())
+                .map(|(s, e)| (Height::new(s), Height::new(e)))
+                .collect::<Vec<_>>()
+                .into_iter(),
+            Self::Prunable(a) => Archive::ranges_from(a, from.get())
+                .map(|(s, e)| (Height::new(s), Height::new(e)))
+                .collect::<Vec<_>>()
+                .into_iter(),
+        }
+    }
 }
 
 /// Wrapper over [immutable::Archive] and [prunable::Archive] for finalized
@@ -300,5 +313,12 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Blocks for Blo
             Self::Prunable(a) => Archive::next_gap(a, value.get()),
         };
         (a.map(Height::new), b.map(Height::new))
+    }
+
+    fn last_index(&self) -> Option<Height> {
+        match self {
+            Self::Immutable(a) => Archive::last_index(a).map(Height::new),
+            Self::Prunable(a) => Archive::last_index(a).map(Height::new),
+        }
     }
 }
