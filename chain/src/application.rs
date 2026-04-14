@@ -193,6 +193,7 @@ mod tests {
     struct NoopBuffer;
 
     impl Buffer<Standard<Block>> for NoopBuffer {
+        type PublicKey = alto_types::PublicKey;
         type CachedBlock = Block;
 
         async fn find_by_digest(&self, _: sha256::Digest) -> Option<Self::CachedBlock> {
@@ -221,7 +222,13 @@ mod tests {
 
         async fn finalized(&self, _: sha256::Digest) {}
 
-        async fn proposed(&self, _: Round, _: Block) {}
+        async fn send(
+            &self,
+            _: Round,
+            _: Block,
+            _: commonware_p2p::Recipients<Self::PublicKey>,
+        ) {
+        }
     }
 
     #[derive(Clone)]
