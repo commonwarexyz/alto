@@ -222,13 +222,7 @@ mod tests {
 
         async fn finalized(&self, _: sha256::Digest) {}
 
-        async fn send(
-            &self,
-            _: Round,
-            _: Block,
-            _: commonware_p2p::Recipients<Self::PublicKey>,
-        ) {
-        }
+        async fn send(&self, _: Round, _: Block, _: commonware_p2p::Recipients<Self::PublicKey>) {}
     }
 
     #[derive(Clone)]
