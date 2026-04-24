@@ -8,7 +8,7 @@ use commonware_cryptography::sha256::Digest;
 use commonware_macros::select_loop;
 use commonware_runtime::{
     spawn_cell,
-    telemetry::metrics::status::{self, CounterExt},
+    telemetry::metrics::{status, MetricsExt as _},
     Clock, ContextCell, Handle, Metrics, Spawner, Storage,
 };
 use commonware_storage::queue;
@@ -53,11 +53,9 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
         max_active: NonZeroUsize,
         retry: Duration,
     ) -> Self {
-        let upload_results = status::Counter::default();
-        context.register(
+        let upload_results = context.family(
             "uploads",
             "Total number of finalized block upload attempt outcomes by status",
-            upload_results.clone(),
         );
         let (writer, reader) = backfiller;
         Self {
@@ -76,7 +74,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
 
     /// Start the consumer loop that reads from the queue and uploads blocks.
     pub fn start(mut self) -> Handle<()> {
-        spawn_cell!(self.context, self.run().await)
+        spawn_cell!(self.context, self.run())
     }
 
     async fn run(mut self) {

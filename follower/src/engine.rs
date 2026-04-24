@@ -163,7 +163,7 @@ where
         mut self,
         marshal: (mpsc::Receiver<handler::Message<Digest>>, Resolver),
     ) -> Handle<()> {
-        spawn_cell!(self.context, self.run(marshal).await)
+        spawn_cell!(self.context, self.run(marshal))
     }
 
     async fn run(mut self, marshal: (mpsc::Receiver<handler::Message<Digest>>, Resolver)) {

@@ -385,7 +385,6 @@ where
         spawn_cell!(
             self.context,
             self.run(pending, recovered, resolver, broadcast, marshal)
-                .await
         )
     }
 

@@ -159,7 +159,7 @@ impl<E: Spawner + Clock + CryptoRng + RngCore, C: Source> Actor<E, C> {
 
     /// Start the [Actor] in a background task.
     pub fn start(mut self) -> Handle<()> {
-        spawn_cell!(self.context, self.run().await)
+        spawn_cell!(self.context, self.run())
     }
 
     /// Run the actor loop, processing fetch/cancel/clear/retain messages.

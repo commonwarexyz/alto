@@ -57,7 +57,7 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
 
     /// Start the [Feeder] in a background task.
     pub fn start(mut self) -> Handle<()> {
-        spawn_cell!(self.context, self.run().await)
+        spawn_cell!(self.context, self.run())
     }
 
     /// Run the feeder loop, reconnecting on stream disconnection.
@@ -126,9 +126,12 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
                 // just prune it later.
                 //
                 // TODO (https://github.com/commonwarexyz/monorepo/pull/2208): create a dedicated cache for storing unverified (but notarized) blocks
-                self.marshal_mailbox
-                    .verified(round, notarized.block.clone())
-                    .await;
+                assert!(
+                    self.marshal_mailbox
+                        .verified(round, notarized.block.clone())
+                        .await,
+                    "failed to cache notarized block before reporting proof",
+                );
                 self.marshal_mailbox
                     .report(Activity::Notarization(notarized.proof.clone()))
                     .await;
@@ -151,9 +154,12 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
 
                 // Cache the block and report the finalization proof to marshal
                 let round = finalized.proof.round();
-                self.marshal_mailbox
-                    .verified(round, finalized.block.clone())
-                    .await;
+                assert!(
+                    self.marshal_mailbox
+                        .verified(round, finalized.block.clone())
+                        .await,
+                    "failed to cache finalized block before reporting proof",
+                );
                 self.marshal_mailbox
                     .report(Activity::Finalization(finalized.proof.clone()))
                     .await;

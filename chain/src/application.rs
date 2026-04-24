@@ -358,7 +358,7 @@ mod tests {
         mailbox: &Mailbox<Scheme, Standard<Block>>,
         block: &Block,
     ) {
-        mailbox.verified(block.context.round, block.clone()).await;
+        assert!(mailbox.verified(block.context.round, block.clone()).await);
         loop {
             if mailbox.get_block(&block.digest()).await.is_some() {
                 break;
