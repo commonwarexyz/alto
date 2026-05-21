@@ -61,7 +61,7 @@ fn genesis() -> Block {
 ///
 /// Unlike the validator's engine, this does not run consensus. Instead, it
 /// relies on a [Feeder](crate::feeder::Feeder) to feed certificates from a
-/// trusted source and an [Actor](crate::resolver::Actor) to backfill missing
+/// trusted source and a [Resolver] to backfill missing
 /// blocks.
 #[allow(clippy::type_complexity)]
 pub struct Engine<E, T>

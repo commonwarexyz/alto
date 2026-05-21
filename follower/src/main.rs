@@ -48,7 +48,7 @@ pub struct Config {
 }
 
 /// Abstraction over the certificate source (HTTP client) used by the
-/// [feeder::Feeder] and [resolver::Actor].
+/// [feeder::Feeder] and [resolver::Resolver].
 #[allow(dead_code)]
 pub(crate) trait Source: Clone + Send + Sync + 'static {
     type Error: std::error::Error + Send + Sync + 'static;
