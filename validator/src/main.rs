@@ -16,7 +16,7 @@ use commonware_cryptography::{
 use commonware_deployer::aws::Hosts;
 use commonware_formatting::from_hex;
 use commonware_p2p::{authenticated::discovery as authenticated, Ingress, Manager};
-use commonware_runtime::{tokio, Runner, Supervisor as _, ThreadPooler};
+use commonware_runtime::{tokio, BufferPoolConfig, Runner, Supervisor as _, ThreadPooler};
 use commonware_utils::{ordered::Set, union_unique, NZUsize, NZU32};
 use futures::future::try_join_all;
 use governor::Quota;
@@ -75,10 +75,39 @@ fn main() {
     let public_key = signer.public_key();
 
     // Initialize runtime
+    let network_buffer_pool_parallelism = config
+        .worker_threads
+        .checked_add(config.signature_threads)
+        .expect("network buffer pool parallelism overflowed");
+    // Storage I/O runs on Tokio's blocking pool. Include those threads in the
+    // pool parallelism calculation so buffers cannot be stranded in too few
+    // thread-local caches and surface as exhaustion under restart pressure.
+    let storage_buffer_pool_parallelism = network_buffer_pool_parallelism
+        .checked_add(config.blocking_threads)
+        .expect("storage buffer pool parallelism overflowed");
+    let mut storage_buffer_pool_cfg = BufferPoolConfig::for_storage().with_parallelism(
+        config
+            .storage_buffer_pool_parallelism
+            .unwrap_or(NZUsize!(storage_buffer_pool_parallelism)),
+    );
+    if let Some(max_per_class) = config.storage_buffer_pool_max_per_class {
+        storage_buffer_pool_cfg = storage_buffer_pool_cfg.with_max_per_class(max_per_class);
+    }
+    let mut network_buffer_pool_cfg = BufferPoolConfig::for_network().with_parallelism(
+        config
+            .network_buffer_pool_parallelism
+            .unwrap_or(NZUsize!(network_buffer_pool_parallelism)),
+    );
+    if let Some(max_per_class) = config.network_buffer_pool_max_per_class {
+        network_buffer_pool_cfg = network_buffer_pool_cfg.with_max_per_class(max_per_class);
+    }
     let cfg = tokio::Config::default()
         .with_tcp_nodelay(Some(true))
         .with_worker_threads(config.worker_threads)
+        .with_max_blocking_threads(config.blocking_threads)
         .with_storage_directory(PathBuf::from(config.directory))
+        .with_storage_buffer_pool_config(storage_buffer_pool_cfg)
+        .with_network_buffer_pool_config(network_buffer_pool_cfg)
         .with_catch_panics(false);
     let executor = tokio::Runner::new(cfg);
 

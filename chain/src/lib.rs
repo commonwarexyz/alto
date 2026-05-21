@@ -1,6 +1,10 @@
 use commonware_utils::NZUsize;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, net::SocketAddr, num::NonZeroUsize};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    num::{NonZeroU32, NonZeroUsize},
+};
 
 pub mod application;
 pub mod engine;
@@ -10,12 +14,23 @@ pub mod utils;
 pub const DEFAULT_BACKFILLER_MAX_ACTIVE: NonZeroUsize = NZUsize!(16);
 pub const DEFAULT_BACKFILLER_RETRY_MS: u64 = 1_000;
 
+/// Default Tokio blocking thread cap used by the validator.
+///
+/// This must stay aligned with the storage buffer-pool parallelism calculation:
+/// storage I/O can run on blocking threads, so undercounting them allows
+/// thread-local caches to strand buffers and can look like pool exhaustion.
+pub const DEFAULT_BLOCKING_THREADS: usize = 512;
+
 fn default_backfiller_max_active() -> NonZeroUsize {
     DEFAULT_BACKFILLER_MAX_ACTIVE
 }
 
 fn default_backfiller_retry_ms() -> u64 {
     DEFAULT_BACKFILLER_RETRY_MS
+}
+
+fn default_blocking_threads() -> usize {
+    DEFAULT_BLOCKING_THREADS
 }
 
 /// Configuration for the [engine::Engine].
@@ -29,6 +44,18 @@ pub struct Config {
     pub metrics_port: u16,
     pub directory: String,
     pub worker_threads: usize,
+    /// Maximum Tokio blocking threads. Storage buffer-pool parallelism includes
+    /// this count because blocking storage tasks can hold pool buffers.
+    #[serde(default = "default_blocking_threads")]
+    pub blocking_threads: usize,
+    #[serde(default)]
+    pub storage_buffer_pool_max_per_class: Option<NonZeroU32>,
+    #[serde(default)]
+    pub network_buffer_pool_max_per_class: Option<NonZeroU32>,
+    #[serde(default)]
+    pub storage_buffer_pool_parallelism: Option<NonZeroUsize>,
+    #[serde(default)]
+    pub network_buffer_pool_parallelism: Option<NonZeroUsize>,
     pub log_level: String,
 
     pub local: bool,

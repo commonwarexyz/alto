@@ -1,4 +1,7 @@
-use alto_chain::{Config, Peers, DEFAULT_BACKFILLER_MAX_ACTIVE, DEFAULT_BACKFILLER_RETRY_MS};
+use alto_chain::{
+    Config, Peers, DEFAULT_BACKFILLER_MAX_ACTIVE, DEFAULT_BACKFILLER_RETRY_MS,
+    DEFAULT_BLOCKING_THREADS,
+};
 use alto_types::NAMESPACE;
 use clap::{value_parser, Arg, ArgMatches, Command};
 use commonware_codec::{Decode, DecodeExt, Encode};
@@ -21,6 +24,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    num::{NonZeroU32, NonZeroUsize},
 };
 use tracing::{error, info};
 use uuid::Uuid;
@@ -111,6 +115,36 @@ fn main() {
                         .long("worker-threads")
                         .required(true)
                         .value_parser(value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("blocking_threads")
+                        .long("blocking-threads")
+                        .required(false)
+                        .value_parser(value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("storage_buffer_pool_max_per_class")
+                        .long("storage-buffer-pool-max-per-class")
+                        .required(false)
+                        .value_parser(value_parser!(NonZeroU32)),
+                )
+                .arg(
+                    Arg::new("network_buffer_pool_max_per_class")
+                        .long("network-buffer-pool-max-per-class")
+                        .required(false)
+                        .value_parser(value_parser!(NonZeroU32)),
+                )
+                .arg(
+                    Arg::new("storage_buffer_pool_parallelism")
+                        .long("storage-buffer-pool-parallelism")
+                        .required(false)
+                        .value_parser(value_parser!(NonZeroUsize)),
+                )
+                .arg(
+                    Arg::new("network_buffer_pool_parallelism")
+                        .long("network-buffer-pool-parallelism")
+                        .required(false)
+                        .value_parser(value_parser!(NonZeroUsize)),
                 )
                 .arg(
                     Arg::new("log_level")
@@ -238,6 +272,22 @@ fn main() {
             let peers = *sub_matches.get_one::<usize>("peers").unwrap();
             let bootstrappers = *sub_matches.get_one::<usize>("bootstrappers").unwrap();
             let worker_threads = *sub_matches.get_one::<usize>("worker_threads").unwrap();
+            let blocking_threads = sub_matches
+                .get_one::<usize>("blocking_threads")
+                .copied()
+                .unwrap_or(DEFAULT_BLOCKING_THREADS);
+            let storage_buffer_pool_max_per_class = sub_matches
+                .get_one::<NonZeroU32>("storage_buffer_pool_max_per_class")
+                .copied();
+            let network_buffer_pool_max_per_class = sub_matches
+                .get_one::<NonZeroU32>("network_buffer_pool_max_per_class")
+                .copied();
+            let storage_buffer_pool_parallelism = sub_matches
+                .get_one::<NonZeroUsize>("storage_buffer_pool_parallelism")
+                .copied();
+            let network_buffer_pool_parallelism = sub_matches
+                .get_one::<NonZeroUsize>("network_buffer_pool_parallelism")
+                .copied();
             let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
             let message_backlog = *sub_matches.get_one::<usize>("message_backlog").unwrap();
             let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
@@ -250,6 +300,11 @@ fn main() {
                     peers,
                     bootstrappers,
                     worker_threads,
+                    blocking_threads,
+                    storage_buffer_pool_max_per_class,
+                    network_buffer_pool_max_per_class,
+                    storage_buffer_pool_parallelism,
+                    network_buffer_pool_parallelism,
                     log_level,
                     message_backlog,
                     mailbox_size,
@@ -262,6 +317,11 @@ fn main() {
                     peers,
                     bootstrappers,
                     worker_threads,
+                    blocking_threads,
+                    storage_buffer_pool_max_per_class,
+                    network_buffer_pool_max_per_class,
+                    storage_buffer_pool_parallelism,
+                    network_buffer_pool_parallelism,
                     log_level,
                     message_backlog,
                     mailbox_size,
@@ -303,6 +363,11 @@ fn generate_local(
     peers: usize,
     bootstrappers: usize,
     worker_threads: usize,
+    blocking_threads: usize,
+    storage_buffer_pool_max_per_class: Option<NonZeroU32>,
+    network_buffer_pool_max_per_class: Option<NonZeroU32>,
+    storage_buffer_pool_parallelism: Option<NonZeroUsize>,
+    network_buffer_pool_parallelism: Option<NonZeroUsize>,
     log_level: String,
     message_backlog: usize,
     mailbox_size: usize,
@@ -376,6 +441,11 @@ fn generate_local(
             metrics_port: port + 1,
             directory,
             worker_threads,
+            blocking_threads,
+            storage_buffer_pool_max_per_class,
+            network_buffer_pool_max_per_class,
+            storage_buffer_pool_parallelism,
+            network_buffer_pool_parallelism,
             log_level: log_level.clone(),
 
             local: true,
@@ -478,6 +548,11 @@ fn generate_remote(
     peers: usize,
     bootstrappers: usize,
     worker_threads: usize,
+    blocking_threads: usize,
+    storage_buffer_pool_max_per_class: Option<NonZeroU32>,
+    network_buffer_pool_max_per_class: Option<NonZeroU32>,
+    storage_buffer_pool_parallelism: Option<NonZeroUsize>,
+    network_buffer_pool_parallelism: Option<NonZeroUsize>,
     log_level: String,
     message_backlog: usize,
     mailbox_size: usize,
@@ -569,6 +644,11 @@ fn generate_remote(
             metrics_port: METRICS_PORT,
             directory: "/home/ubuntu/data".to_string(),
             worker_threads,
+            blocking_threads,
+            storage_buffer_pool_max_per_class,
+            network_buffer_pool_max_per_class,
+            storage_buffer_pool_parallelism,
+            network_buffer_pool_parallelism,
             log_level: log_level.clone(),
 
             local: false,
