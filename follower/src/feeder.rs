@@ -57,7 +57,7 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
 
     /// Start the [Feeder] in a background task.
     pub fn start(mut self) -> Handle<()> {
-        spawn_cell!(self.context, self.run().await)
+        spawn_cell!(self.context, self.run())
     }
 
     /// Run the feeder loop, reconnecting on stream disconnection.
@@ -126,12 +126,19 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
                 // just prune it later.
                 //
                 // TODO (https://github.com/commonwarexyz/monorepo/pull/2208): create a dedicated cache for storing unverified (but notarized) blocks
-                self.marshal_mailbox
+                if !self
+                    .marshal_mailbox
                     .verified(round, notarized.block.clone())
-                    .await;
+                    .await
+                {
+                    warn!(
+                        height = notarized.block.height.get(),
+                        view = round.view().get(),
+                        "failed to cache notarized block"
+                    );
+                }
                 self.marshal_mailbox
-                    .report(Activity::Notarization(notarized.proof.clone()))
-                    .await;
+                    .report(Activity::Notarization(notarized.proof.clone()));
                 debug!(
                     height = notarized.block.height.get(),
                     view = round.view().get(),
@@ -151,12 +158,19 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
 
                 // Cache the block and report the finalization proof to marshal
                 let round = finalized.proof.round();
-                self.marshal_mailbox
+                if !self
+                    .marshal_mailbox
                     .verified(round, finalized.block.clone())
-                    .await;
+                    .await
+                {
+                    warn!(
+                        height = height.get(),
+                        view = view.get(),
+                        "failed to cache finalized block"
+                    );
+                }
                 self.marshal_mailbox
-                    .report(Activity::Finalization(finalized.proof.clone()))
-                    .await;
+                    .report(Activity::Finalization(finalized.proof.clone()));
                 debug!(
                     height = height.get(),
                     view = view.get(),
@@ -174,8 +188,9 @@ mod tests {
     use crate::test_utils::{MockSource, TestFixture};
     use alto_client::consensus::Message;
     use commonware_macros::test_traced;
-    use commonware_runtime::{deterministic::Runner, Metrics, Runner as _};
+    use commonware_runtime::{deterministic::Runner, Runner as _, Supervisor as _};
     use commonware_utils::NZUsize;
+    use std::time::Duration;
 
     /// Verifies that a finalization with a valid threshold signature is
     /// accepted by handle_message without error.
@@ -188,9 +203,9 @@ mod tests {
         Runner::default().start(|context| async move {
             // Engine is needed to provide the marshal mailbox
             let (_engine, mailbox, _) = crate::engine::Engine::new(
-                context.with_label("engine"),
+                context.child("engine"),
                 verifier.clone(),
-                16,
+                NZUsize!(16),
                 NZUsize!(256),
                 Sequential,
                 None,
@@ -198,7 +213,14 @@ mod tests {
             .await;
 
             let source = MockSource::new();
-            let mut feeder = Feeder::new(context.with_label("feeder"), source, verifier, mailbox);
+            let resolver = crate::resolver::init(
+                context.child("resolver"),
+                source.clone(),
+                NZUsize!(16),
+                Duration::from_millis(10),
+            );
+            let _engine_handle = _engine.start(resolver);
+            let mut feeder = Feeder::new(context.child("feeder"), source, verifier, mailbox);
 
             let result = feeder
                 .handle_message(Message::Finalization(finalized))
@@ -220,9 +242,9 @@ mod tests {
 
         Runner::default().start(|context| async move {
             let (_engine, mailbox, _) = crate::engine::Engine::new(
-                context.with_label("engine"),
+                context.child("engine"),
                 wrong_verifier.clone(),
-                16,
+                NZUsize!(16),
                 NZUsize!(256),
                 Sequential,
                 None,
@@ -230,12 +252,7 @@ mod tests {
             .await;
 
             let source = MockSource::new();
-            let mut feeder = Feeder::new(
-                context.with_label("feeder"),
-                source,
-                wrong_verifier,
-                mailbox,
-            );
+            let mut feeder = Feeder::new(context.child("feeder"), source, wrong_verifier, mailbox);
 
             // Should panic on the assert! inside handle_message
             feeder
@@ -255,9 +272,9 @@ mod tests {
 
         Runner::default().start(|context| async move {
             let (_engine, mailbox, _) = crate::engine::Engine::new(
-                context.with_label("engine"),
+                context.child("engine"),
                 verifier.clone(),
-                16,
+                NZUsize!(16),
                 NZUsize!(256),
                 Sequential,
                 None,
@@ -265,7 +282,14 @@ mod tests {
             .await;
 
             let source = MockSource::new();
-            let mut feeder = Feeder::new(context.with_label("feeder"), source, verifier, mailbox);
+            let resolver = crate::resolver::init(
+                context.child("resolver"),
+                source.clone(),
+                NZUsize!(16),
+                Duration::from_millis(10),
+            );
+            let _engine_handle = _engine.start(resolver);
+            let mut feeder = Feeder::new(context.child("feeder"), source, verifier, mailbox);
 
             let result = feeder
                 .handle_message(Message::Notarization(notarized))
@@ -285,9 +309,9 @@ mod tests {
 
         Runner::default().start(|context| async move {
             let (_engine, mailbox, _) = crate::engine::Engine::new(
-                context.with_label("engine"),
+                context.child("engine"),
                 wrong_verifier.clone(),
-                16,
+                NZUsize!(16),
                 NZUsize!(256),
                 Sequential,
                 None,
@@ -295,12 +319,7 @@ mod tests {
             .await;
 
             let source = MockSource::new();
-            let mut feeder = Feeder::new(
-                context.with_label("feeder"),
-                source,
-                wrong_verifier,
-                mailbox,
-            );
+            let mut feeder = Feeder::new(context.child("feeder"), source, wrong_verifier, mailbox);
 
             feeder
                 .handle_message(Message::Notarization(notarized))

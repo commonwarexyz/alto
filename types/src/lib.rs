@@ -1,7 +1,8 @@
 //! Common types used throughout `alto`.
 
 use commonware_consensus::types::Epoch;
-use commonware_utils::{hex, NZU64};
+use commonware_formatting::hex;
+use commonware_utils::NZU64;
 use std::num::NonZero;
 
 mod block;

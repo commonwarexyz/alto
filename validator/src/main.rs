@@ -14,9 +14,10 @@ use commonware_cryptography::{
     Signer,
 };
 use commonware_deployer::aws::Hosts;
+use commonware_formatting::from_hex;
 use commonware_p2p::{authenticated::discovery as authenticated, Ingress, Manager};
-use commonware_runtime::{tokio, Metrics, Runner, ThreadPooler};
-use commonware_utils::{from_hex_formatted, ordered::Set, union_unique, NZUsize, NZU32};
+use commonware_runtime::{tokio, Runner, Supervisor as _, ThreadPooler};
+use commonware_utils::{ordered::Set, union_unique, NZUsize, NZU32};
 use futures::future::try_join_all;
 use governor::Quota;
 use std::{
@@ -69,7 +70,7 @@ fn main() {
     let config_file = matches.get_one::<String>("config").unwrap();
     let config_file = std::fs::read_to_string(config_file).expect("Could not read config file");
     let config: Config = serde_yaml::from_str(&config_file).expect("Could not parse config file");
-    let key = from_hex_formatted(&config.private_key).expect("Could not parse private key");
+    let key = from_hex(&config.private_key).expect("Could not parse private key");
     let signer = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
     let public_key = signer.public_key();
 
@@ -86,7 +87,7 @@ fn main() {
         // Configure telemetry
         let log_level = Level::from_str(&config.log_level).expect("Invalid log level");
         tokio::telemetry::init(
-            context.with_label("telemetry"),
+            context.child("telemetry"),
             tokio::telemetry::Logging {
                 level: log_level,
                 // If we are using `commonware-deployer`, we should use structured logging.
@@ -108,7 +109,7 @@ fn main() {
                 .hosts
                 .into_iter()
                 .map(|peer| {
-                    let key = from_hex_formatted(&peer.name).expect("Could not parse peer key");
+                    let key = from_hex(&peer.name).expect("Could not parse peer key");
                     let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
                     (key, peer.ip)
                 })
@@ -117,8 +118,7 @@ fn main() {
             let peer_keys = peers.keys().cloned().collect::<Vec<_>>();
             let mut bootstrappers = Vec::new();
             for bootstrapper in &config.bootstrappers {
-                let key =
-                    from_hex_formatted(bootstrapper).expect("Could not parse bootstrapper key");
+                let key = from_hex(bootstrapper).expect("Could not parse bootstrapper key");
                 let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
                 let ip = peers.get(&key).expect("Could not find bootstrapper in IPs");
                 let bootstrapper_socket = format!("{}:{}", ip, config.port);
@@ -136,7 +136,7 @@ fn main() {
                 .addresses
                 .into_iter()
                 .map(|peer| {
-                    let key = from_hex_formatted(&peer.0).expect("Could not parse peer key");
+                    let key = from_hex(&peer.0).expect("Could not parse peer key");
                     let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
                     (key, peer.1)
                 })
@@ -145,8 +145,7 @@ fn main() {
             let peer_keys = peers.keys().cloned().collect::<Vec<_>>();
             let mut bootstrappers = Vec::new();
             for bootstrapper in &config.bootstrappers {
-                let key =
-                    from_hex_formatted(bootstrapper).expect("Could not parse bootstrapper key");
+                let key = from_hex(bootstrapper).expect("Could not parse bootstrapper key");
                 let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
                 let socket = peers.get(&key).expect("Could not find bootstrapper in IPs");
                 bootstrappers.push((key, Ingress::Socket(*socket)));
@@ -161,10 +160,9 @@ fn main() {
         let peers_u32 = peers.len() as u32;
 
         // Parse config
-        let share = from_hex_formatted(&config.share).expect("Could not parse share");
+        let share = from_hex(&config.share).expect("Could not parse share");
         let share = group::Share::decode(share.as_ref()).expect("Share is invalid");
-        let polynomial =
-            from_hex_formatted(&config.polynomial).expect("Could not parse polynomial");
+        let polynomial = from_hex(&config.polynomial).expect("Could not parse polynomial");
         let polynomial = Sharing::<MinSig>::decode_cfg(
             polynomial.as_ref(),
             &(NZU32!(peers_u32), ModeVersion::v0()),
@@ -200,15 +198,15 @@ fn main() {
                 MAX_MESSAGE_SIZE,
             )
         };
-        p2p_cfg.mailbox_size = config.mailbox_size;
+        p2p_cfg.mailbox_size = NZUsize!(config.mailbox_size);
 
         // Start p2p
         let (mut network, mut oracle) =
-            authenticated::Network::new(context.with_label("network"), p2p_cfg);
+            authenticated::Network::new(context.child("network"), p2p_cfg);
 
         // Provide authorized peers
         let participants: Set<PublicKey> = Set::from_iter_dedup(peers.clone());
-        oracle.track(EPOCH.get(), participants.clone()).await;
+        oracle.track(EPOCH.get(), participants.clone());
 
         // Register pending channel
         let pending_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
@@ -276,21 +274,24 @@ fn main() {
             share,
             strategy,
         };
-        let engine = engine::Engine::new(context.with_label("engine"), engine_cfg).await;
+        let engine = engine::Engine::new(context.child("engine"), engine_cfg).await;
 
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),
             peer_provider: oracle.clone(),
             blocker: oracle,
-            mailbox_size: config.mailbox_size,
+            mailbox_size: NZUsize!(config.mailbox_size),
             initial: Duration::from_secs(1),
             timeout: Duration::from_secs(2),
             fetch_retry_timeout: Duration::from_millis(100),
             priority_requests: false,
             priority_responses: false,
         };
-        let marshal_resolver =
-            marshal::resolver::p2p::init(&context, marshal_resolver_cfg, marshal);
+        let marshal_resolver = marshal::resolver::p2p::init(
+            context.child("marshal_resolver"),
+            marshal_resolver_cfg,
+            marshal,
+        );
 
         // Start engine
         let engine = engine.start(pending, recovered, resolver, broadcaster, marshal_resolver);

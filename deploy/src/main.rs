@@ -13,8 +13,9 @@ use commonware_cryptography::{
     Signer,
 };
 use commonware_deployer::aws::{self, METRICS_PORT};
+use commonware_formatting::{from_hex, hex};
 use commonware_math::algebra::Random;
-use commonware_utils::{from_hex_formatted, hex, NZU32};
+use commonware_utils::NZU32;
 use rand::{rngs::OsRng, seq::IteratorRandom};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -730,7 +731,7 @@ fn explorer_local(dir: String, backend_url: String) {
     let peer_config: Config =
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
     let polynomial_hex = peer_config.polynomial;
-    let polynomial = from_hex_formatted(&polynomial_hex).expect("invalid polynomial");
+    let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
     let polynomial = Sharing::<MinSig>::decode_cfg(
         polynomial.as_ref(),
         &(NZU32!(num_peers as u32), ModeVersion::v0()),
@@ -762,7 +763,7 @@ fn explorer_remote(dir: String, backend_url: String) {
     let mut participants = BTreeMap::new();
     for instance in &config.instances {
         let region = &instance.region;
-        let public_key = from_hex_formatted(&instance.name).expect("invalid public key");
+        let public_key = from_hex(&instance.name).expect("invalid public key");
         let public_key = PublicKey::decode(public_key.as_ref()).expect("invalid public key");
         let (coords, city) = get_aws_location(region).expect("unknown region");
         participants.insert(
@@ -786,7 +787,7 @@ fn explorer_remote(dir: String, backend_url: String) {
     let peer_config: Config =
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
     let polynomial_hex = peer_config.polynomial;
-    let polynomial = from_hex_formatted(&polynomial_hex).expect("invalid polynomial");
+    let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
     let polynomial = Sharing::<MinSig>::decode_cfg(
         polynomial.as_ref(),
         &(NZU32!(locations.len() as u32), ModeVersion::v0()),

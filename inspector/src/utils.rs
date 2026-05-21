@@ -3,6 +3,7 @@ use alto_types::{Finalized, Notarized, Seed};
 use commonware_codec::DecodeExt;
 use commonware_consensus::Viewable;
 use commonware_cryptography::{sha256::Digest, Digestible};
+use commonware_formatting::from_hex;
 use commonware_utils::SystemTimeExt;
 use std::time;
 use tracing::{debug, info};
@@ -40,7 +41,7 @@ pub fn parse_query(query: &str) -> Option<QueryKind> {
     } else if let Ok(index) = query.parse::<u64>() {
         Some(QueryKind::Single(Query::Index(index)))
     } else {
-        let bytes = commonware_utils::from_hex(query)?;
+        let bytes = from_hex(query)?;
         let digest = Digest::decode(bytes.as_ref()).ok()?;
         Some(QueryKind::Single(Query::Digest(digest)))
     }

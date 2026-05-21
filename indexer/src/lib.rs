@@ -11,8 +11,8 @@ use axum::{
 use commonware_codec::{DecodeExt, Encode, EncodeSize, FixedSize, Write};
 use commonware_consensus::{types::View, Viewable};
 use commonware_cryptography::{sha256::Digest, Digestible};
+use commonware_formatting::from_hex;
 use commonware_parallel::Strategy;
-use commonware_utils::from_hex;
 use futures::{SinkExt, StreamExt};
 use std::{
     collections::BTreeMap,

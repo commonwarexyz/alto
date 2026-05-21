@@ -2,8 +2,8 @@
 
 use alto_types::{Identity, Scheme, NAMESPACE};
 use commonware_cryptography::sha256::Digest;
+use commonware_formatting::hex;
 use commonware_parallel::Strategy;
-use commonware_utils::hex;
 use std::sync::Arc;
 use thiserror::Error;
 

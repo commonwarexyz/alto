@@ -20,6 +20,7 @@ use commonware_cryptography::{
     certificate::{ConstantProvider, Scheme as _},
     ed25519::PublicKey,
     sha256::Digest,
+    Digestible,
 };
 use commonware_p2p::{Blocker, Provider, Receiver, Sender};
 use commonware_parallel::Strategy;
@@ -29,7 +30,6 @@ use commonware_runtime::{
     Spawner, Storage, ThreadPooler,
 };
 use commonware_storage::{archive::immutable, queue};
-use commonware_utils::channel::mpsc;
 use commonware_utils::{ordered::Set, NZU16};
 use commonware_utils::{NZUsize, NZU64};
 use futures::future::try_join_all;
@@ -145,10 +145,10 @@ where
     pub async fn new(context: E, cfg: Config<B, P, C, S>) -> Self {
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
-            context.with_label("buffer"),
+            context.child("buffer"),
             buffered::Config {
                 public_key: cfg.me,
-                mailbox_size: cfg.mailbox_size,
+                mailbox_size: NZUsize!(cfg.mailbox_size),
                 deque_size: cfg.deque_size,
                 priority: true,
                 codec_config: (),
@@ -162,7 +162,7 @@ where
         // Initialize finalizations by height
         let start = Instant::now();
         let finalizations_by_height = immutable::Archive::init(
-            context.with_label("finalizations_by_height"),
+            context.child("finalizations_by_height"),
             immutable::Config {
                 metadata_partition: format!(
                     "{}-finalizations-by-height-metadata",
@@ -205,7 +205,7 @@ where
         // Initialize finalized blocks
         let start = Instant::now();
         let finalized_blocks = immutable::Archive::init(
-            context.with_label("finalized_blocks"),
+            context.child("finalized_blocks"),
             immutable::Config {
                 metadata_partition: format!("{}-finalized_blocks-metadata", cfg.partition_prefix),
                 freezer_table_partition: format!(
@@ -244,20 +244,23 @@ where
             .expect("failed to create scheme");
         let provider = ConstantProvider::new(scheme.clone());
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
+        let genesis = Application::<E>::genesis();
+        let genesis_digest = genesis.digest();
         let (marshal, marshal_mailbox, _) = MarshalActor::init(
-            context.with_label("marshal"),
+            context.child("marshal"),
             finalizations_by_height,
             finalized_blocks,
             marshal::Config {
                 provider,
                 epocher: epocher.clone(),
                 partition_prefix: cfg.partition_prefix.clone(),
-                mailbox_size: cfg.mailbox_size,
+                mailbox_size: NZUsize!(cfg.mailbox_size),
                 view_retention_timeout: ViewDelta::new(
                     cfg.activity_timeout
                         .get()
                         .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
                 ),
+                start: marshal::Start::Genesis(genesis),
                 prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
                 replay_buffer: REPLAY_BUFFER,
                 key_write_buffer: WRITE_BUFFER,
@@ -276,7 +279,7 @@ where
         // restarts.
         let (app, pusher, consumer) = if let Some(indexer) = cfg.indexer {
             let queue = queue::shared::init(
-                context.with_label("queue"),
+                context.child("queue"),
                 queue::Config {
                     partition: format!("{}-finalized-queue", cfg.partition_prefix),
                     items_per_section: QUEUE_ITEMS_PER_SECTION,
@@ -289,7 +292,7 @@ where
             .await
             .expect("failed to initialize finalized queue");
             let indexer = indexer::Indexer::new(
-                context.with_label("indexer"),
+                context.child("indexer"),
                 indexer,
                 marshal_mailbox.clone(),
                 queue,
@@ -298,15 +301,15 @@ where
             )
             .await;
             let (producer, pusher, consumer) = indexer.split();
-            let app = Application::new().with_backfiller(producer);
+            let app = Application::new(context.child("application")).with_backfiller(producer);
             (app, Some(pusher), Some(consumer))
         } else {
-            (Application::new(), None, None)
+            (Application::new(context.child("application")), None, None)
         };
 
         // Create the application
         let marshaled = Marshaled::new(
-            context.with_label("marshaled"),
+            context.child("marshaled"),
             app,
             marshal_mailbox.clone(),
             epocher,
@@ -317,7 +320,7 @@ where
 
         // Create the consensus engine
         let consensus = Consensus::new(
-            context.with_label("consensus"),
+            context.child("consensus"),
             simplex::Config {
                 epoch: EPOCH,
                 scheme,
@@ -325,14 +328,16 @@ where
                 relay: marshaled.clone(),
                 reporter,
                 partition: format!("{}-consensus", cfg.partition_prefix),
-                mailbox_size: cfg.mailbox_size,
+                mailbox_size: NZUsize!(cfg.mailbox_size),
+                floor: simplex::Floor::Genesis(genesis_digest),
                 leader_timeout: cfg.leader_timeout,
                 certification_timeout: cfg.certification_timeout,
                 timeout_retry: cfg.nullify_retry,
                 fetch_timeout: cfg.fetch_timeout,
                 activity_timeout: cfg.activity_timeout,
                 skip_timeout: cfg.skip_timeout,
-                fetch_concurrent: cfg.fetch_concurrent,
+                fetch_concurrent: NZUsize!(cfg.fetch_concurrent),
+                forwarding: simplex::ForwardingPolicy::Disabled,
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
                 blocker: cfg.blocker,
@@ -377,14 +382,17 @@ where
             impl Receiver<PublicKey = PublicKey>,
         ),
         marshal: (
-            mpsc::Receiver<handler::Message<Digest>>,
-            impl Resolver<Key = handler::Request<Digest>, PublicKey = PublicKey>,
+            handler::Receiver<Digest>,
+            impl Resolver<
+                Key = handler::Key<Digest>,
+                Subscriber = handler::Annotation,
+                PublicKey = PublicKey,
+            >,
         ),
     ) -> Handle<()> {
         spawn_cell!(
             self.context,
             self.run(pending, recovered, resolver, broadcast, marshal)
-                .await
         )
     }
 
@@ -408,8 +416,12 @@ where
             impl Receiver<PublicKey = PublicKey>,
         ),
         marshal: (
-            mpsc::Receiver<handler::Message<Digest>>,
-            impl Resolver<Key = handler::Request<Digest>, PublicKey = PublicKey>,
+            handler::Receiver<Digest>,
+            impl Resolver<
+                Key = handler::Key<Digest>,
+                Subscriber = handler::Annotation,
+                PublicKey = PublicKey,
+            >,
         ),
     ) {
         // Start the buffer
@@ -418,7 +430,7 @@ where
         // Start marshal
         let marshal_handle = self
             .marshal
-            .start(self.marshaled, self.buffer_mailbox, marshal);
+            .start(self.marshaled, Some(self.buffer_mailbox), marshal);
 
         // Start draining queued block uploads before consensus so recovered work
         // resumes immediately on startup.

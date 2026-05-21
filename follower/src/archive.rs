@@ -85,7 +85,7 @@ where
 
     if pruning_depth.is_some() {
         let fbh = prunable::Archive::init(
-            context.with_label("finalizations_by_height"),
+            context.child("finalizations_by_height"),
             prunable::Config {
                 translator: FourCap,
                 key_partition: PRUNABLE_FINALIZATIONS_BY_HEIGHT_KEY_PARTITION.to_string(),
@@ -102,7 +102,7 @@ where
         .await
         .expect("failed to initialize finalizations by height archive");
         let fb = prunable::Archive::init(
-            context.with_label("finalized_blocks"),
+            context.child("finalized_blocks"),
             prunable::Config {
                 translator: FourCap,
                 key_partition: PRUNABLE_FINALIZED_BLOCKS_KEY_PARTITION.to_string(),
@@ -125,7 +125,7 @@ where
         )
     } else {
         let fbh = immutable::Archive::init(
-            context.with_label("finalizations_by_height"),
+            context.child("finalizations_by_height"),
             immutable::Config {
                 metadata_partition: IMMUTABLE_FINALIZATIONS_BY_HEIGHT_METADATA_PARTITION
                     .to_string(),
@@ -152,7 +152,7 @@ where
         .await
         .expect("failed to initialize finalizations by height archive");
         let fb = immutable::Archive::init(
-            context.with_label("finalized_blocks"),
+            context.child("finalized_blocks"),
             immutable::Config {
                 metadata_partition: IMMUTABLE_FINALIZED_BLOCKS_METADATA_PARTITION.to_string(),
                 freezer_table_partition: IMMUTABLE_FINALIZED_BLOCKS_FREEZER_TABLE_PARTITION
@@ -237,6 +237,18 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates f
             Self::Prunable(a) => Archive::last_index(a).map(Height::new),
         }
     }
+
+    fn ranges_from(&self, from: Height) -> impl Iterator<Item = (Height, Height)> {
+        match self {
+            Self::Immutable(a) => Archive::ranges_from(a, from.get())
+                .map(|(start, end)| (Height::new(start), Height::new(end)))
+                .collect::<Vec<_>>(),
+            Self::Prunable(a) => Archive::ranges_from(a, from.get())
+                .map(|(start, end)| (Height::new(start), Height::new(end)))
+                .collect::<Vec<_>>(),
+        }
+        .into_iter()
+    }
 }
 
 /// Wrapper over [immutable::Archive] and [prunable::Archive] for finalized
@@ -300,5 +312,12 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Blocks for Blo
             Self::Prunable(a) => Archive::next_gap(a, value.get()),
         };
         (a.map(Height::new), b.map(Height::new))
+    }
+
+    fn last_index(&self) -> Option<Height> {
+        match self {
+            Self::Immutable(a) => Archive::last_index(a).map(Height::new),
+            Self::Prunable(a) => Archive::last_index(a).map(Height::new),
+        }
     }
 }

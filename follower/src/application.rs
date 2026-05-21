@@ -1,13 +1,17 @@
 use crate::throughput::Throughput;
 use alto_types::{Block, Scheme};
+use commonware_actor::{
+    mailbox::{self, Policy},
+    Feedback,
+};
 use commonware_consensus::{
     marshal::{core::Mailbox as MarshalMailbox, standard::Standard, Update},
     types::Height,
     Reporter,
 };
-use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Spawner};
+use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner};
 use commonware_utils::Acknowledgement;
-use futures::{channel::mpsc, SinkExt, StreamExt};
+use std::{collections::VecDeque, num::NonZeroUsize};
 use tracing::info;
 
 const THROUGHPUT_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
@@ -44,52 +48,63 @@ fn format_eta_maybe(remaining: Option<u64>, rate: f64) -> String {
 /// A forwarder of [Update] messages to the [Application].
 #[derive(Clone)]
 pub(crate) struct Mailbox {
-    tx: mpsc::Sender<Update<Block>>,
+    sender: mailbox::Sender<Message>,
+}
+
+struct Message(Update<Block>);
+
+impl Policy for Message {
+    type Overflow = VecDeque<Self>;
+
+    fn handle(overflow: &mut Self::Overflow, message: Self) -> bool {
+        overflow.push_back(message);
+        true
+    }
 }
 
 impl Reporter for Mailbox {
     type Activity = Update<Block>;
 
-    async fn report(&mut self, activity: Self::Activity) {
-        let _ = self.tx.send(activity).await;
+    fn report(&mut self, activity: Self::Activity) -> Feedback {
+        self.sender.enqueue(Message(activity))
     }
 }
 
 /// A simple application that tracks just tracks the rate of block processing.
-pub(crate) struct Application<E: Clock + Spawner> {
+pub(crate) struct Application<E: Clock + Spawner + Metrics> {
     context: ContextCell<E>,
-    rx: mpsc::Receiver<Update<Block>>,
+    receiver: mailbox::Receiver<Message>,
     throughput: Throughput,
     tip: Option<Height>,
     mailbox: MarshalMailbox<Scheme, Standard<Block>>,
     pruning_depth: Option<u64>,
 }
 
-impl<E: Clock + Spawner> Application<E> {
+impl<E: Clock + Spawner + Metrics> Application<E> {
     pub(crate) fn new(
         context: E,
         mailbox: MarshalMailbox<Scheme, Standard<Block>>,
-        mailbox_size: usize,
+        mailbox_size: NonZeroUsize,
         pruning_depth: Option<u64>,
     ) -> (Self, Mailbox) {
-        let (tx, rx) = mpsc::channel(mailbox_size);
+        let (sender, receiver) = mailbox::new(context.child("mailbox"), mailbox_size);
         let app = Self {
-            context: ContextCell::new(context.clone()),
-            rx,
+            context: ContextCell::new(context),
+            receiver,
             throughput: Throughput::new(THROUGHPUT_WINDOW),
             tip: None,
             mailbox,
             pruning_depth,
         };
-        (app, Mailbox { tx })
+        (app, Mailbox { sender })
     }
 
     pub(crate) fn start(mut self) -> Handle<()> {
-        spawn_cell!(self.context, self.run().await)
+        spawn_cell!(self.context, self.run())
     }
 
     async fn run(mut self) {
-        while let Some(msg) = self.rx.next().await {
+        while let Some(Message(msg)) = self.receiver.recv().await {
             match msg {
                 Update::Tip(_, height, _) => {
                     self.tip = Some(height);
@@ -115,7 +130,7 @@ impl<E: Clock + Spawner> Application<E> {
                     {
                         let prune_to = height.saturating_sub(depth);
                         if prune_to > 0 {
-                            self.mailbox.prune(Height::new(prune_to)).await;
+                            self.mailbox.prune(Height::new(prune_to));
                         }
                     }
                 }

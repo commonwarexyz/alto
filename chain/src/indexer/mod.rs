@@ -105,7 +105,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Indexer<E, C> {
     ) -> Self {
         let uploads: SharedState = Arc::new(Mutex::new(State::new()));
         let pusher = Pusher::new(
-            context.with_label("pusher"),
+            context.child("pusher"),
             client.clone(),
             marshal.clone(),
             uploads.clone(),
@@ -113,7 +113,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Indexer<E, C> {
         let (writer, reader) = backfiller;
         let producer = Producer::new(uploads.clone(), writer.clone());
         let consumer = Consumer::new(
-            context.with_label("consumer"),
+            context.child("consumer"),
             client,
             marshal,
             uploads,

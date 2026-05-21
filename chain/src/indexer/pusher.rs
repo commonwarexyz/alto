@@ -1,13 +1,14 @@
 use super::{Client, SharedState};
 use alto_types::{Activity, Block, Scheme, Seed, Seedable};
+use commonware_actor::Feedback;
 use commonware_consensus::{
-    marshal::{core::Mailbox as MarshalMailbox, standard::Standard},
+    marshal::{core::DigestFallback, core::Mailbox as MarshalMailbox, standard::Standard},
     types::{Round, View},
     Reporter, Viewable,
 };
 use commonware_cryptography::sha256::Digest;
 use commonware_runtime::{Metrics, Spawner};
-use std::future::Future;
+use std::{future::Future, sync::Arc};
 use tracing::{debug, warn};
 
 /// Uploads live seeds and certificate-bearing objects to the indexer.
@@ -17,12 +18,22 @@ use tracing::{debug, warn};
 /// block in shared state, and uploads the certificate-bearing object. The
 /// shared state lets the backfiller reuse blocks and back off
 /// when the live path is already handling a digest.
-#[derive(Clone)]
 pub(crate) struct Pusher<E: Spawner + Metrics, C: Client> {
-    context: E,
+    context: Arc<E>,
     client: C,
     marshal: MarshalMailbox<Scheme, Standard<Block>>,
     uploads: SharedState,
+}
+
+impl<E: Spawner + Metrics, C: Client> Clone for Pusher<E, C> {
+    fn clone(&self) -> Self {
+        Self {
+            context: self.context.clone(),
+            client: self.client.clone(),
+            marshal: self.marshal.clone(),
+            uploads: self.uploads.clone(),
+        }
+    }
 }
 
 impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
@@ -34,7 +45,7 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
         uploads: SharedState,
     ) -> Self {
         Self {
-            context,
+            context: Arc::new(context),
             client,
             marshal,
             uploads,
@@ -81,8 +92,8 @@ impl Drop for CertificateUploadGuard {
 }
 
 impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
-    fn spawn_seed_upload(&self, label: &str, seed: Seed, view: View) {
-        self.context.with_label(label).spawn({
+    fn spawn_seed_upload(&self, label: &'static str, seed: Seed, view: View) {
+        self.context.child(label).spawn({
             let client = self.client.clone();
             move |_| async move {
                 if let Err(e) = client.seed_upload(seed).await {
@@ -105,7 +116,7 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
         F: FnOnce(C, Block) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), C::Error>> + Send,
     {
-        self.context.with_label(label).spawn({
+        self.context.child(label).spawn({
             let client = self.client.clone();
             let marshal = self.marshal.clone();
             let uploads = self.uploads.clone();
@@ -115,7 +126,9 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
                 // while the block is still being fetched.
                 let mut guard = CertificateUploadGuard::new(uploads, digest);
 
-                let block = marshal.subscribe_by_digest(Some(round), digest).await.await;
+                let block = marshal
+                    .subscribe_by_digest(digest, DigestFallback::FetchByRound { round })
+                    .await;
                 let Ok(block) = block else {
                     warn!(%view, "subscription for block cancelled");
                     return;
@@ -138,7 +151,7 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
 impl<E: Spawner + Metrics, C: Client> Reporter for Pusher<E, C> {
     type Activity = Activity;
 
-    async fn report(&mut self, activity: Self::Activity) {
+    fn report(&mut self, activity: Self::Activity) -> Feedback {
         match activity {
             Activity::Notarization(notarization) => {
                 let view = notarization.view();
@@ -172,5 +185,6 @@ impl<E: Spawner + Metrics, C: Client> Reporter for Pusher<E, C> {
             }
             _ => {}
         }
+        Feedback::Ok
     }
 }
