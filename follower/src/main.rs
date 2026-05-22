@@ -209,7 +209,7 @@ fn main() {
         // On the first run (no previously synced data), optionally skip to the
         // latest finalized height so the follower starts near tip instead of
         // backfilling from genesis.
-        if config.tip && last_processed_height == Height::zero() {
+        if config.tip && last_processed_height.is_none_or(|height| height == Height::zero()) {
             match client.finalized_get(IndexQuery::Latest).await {
                 Ok(finalized) => {
                     assert!(

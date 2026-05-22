@@ -6,7 +6,6 @@ use crate::{
     resolver::Resolver,
 };
 use alto_types::{Block, Context, Scheme, EPOCH, EPOCH_LENGTH};
-use commonware_broadcast::buffered;
 use commonware_consensus::{
     marshal::{
         self,
@@ -18,7 +17,7 @@ use commonware_consensus::{
 };
 use commonware_cryptography::{
     certificate::ConstantProvider,
-    ed25519::{PrivateKey, PublicKey},
+    ed25519::PrivateKey,
     sha256::{self, Digest, Sha256},
     Digest as _, Hasher, Signer,
 };
@@ -111,7 +110,11 @@ where
         max_repair: NonZero<usize>,
         strategy: T,
         pruning_depth: Option<u64>,
-    ) -> (Self, MarshalMailbox<Scheme, Standard<Block>>, Height) {
+    ) -> (
+        Self,
+        MarshalMailbox<Scheme, Standard<Block>>,
+        Option<Height>,
+    ) {
         // Initialize the finalized certificate and block archives. Uses
         // prunable archives when pruning is enabled, immutable otherwise.
         let (finalizations_by_height, finalized_blocks, page_cache) =
@@ -171,11 +174,7 @@ where
         let app_handle = app.start();
 
         // Start marshal
-        let marshal_handle = self.marshal.start(
-            mailbox,
-            None::<buffered::Mailbox<PublicKey, Block>>,
-            marshal,
-        );
+        let marshal_handle = self.marshal.start_unbuffered(mailbox, marshal);
 
         // Wait for any actor to finish
         if let Err(e) = try_join_all(vec![marshal_handle, app_handle]).await {

@@ -430,7 +430,7 @@ where
         // Start marshal
         let marshal_handle = self
             .marshal
-            .start(self.marshaled, Some(self.buffer_mailbox), marshal);
+            .start(self.marshaled, self.buffer_mailbox, marshal);
 
         // Start draining queued block uploads before consensus so recovered work
         // resumes immediately on startup.

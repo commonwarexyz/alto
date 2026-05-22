@@ -8,7 +8,6 @@ description = "Run a follower node for alto."
 [dependencies]
 alto-client = { workspace = true }
 alto-types = { workspace = true }
-commonware-broadcast = { workspace = true }
 commonware-actor = { workspace = true }
 commonware-codec = { workspace = true }
 commonware-consensus = { workspace = true }
@@ -16,7 +15,6 @@ commonware-cryptography = { workspace = true }
 commonware-formatting = { workspace = true }
 commonware-macros = { workspace = true }
 commonware-math = { workspace = true }
-commonware-p2p = { workspace = true }
 commonware-resolver = { workspace = true }
 commonware-runtime = { workspace = true }
 commonware-storage = { workspace = true }
