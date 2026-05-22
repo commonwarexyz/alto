@@ -13,13 +13,14 @@ use commonware_resolver::{Consumer as _, Delivery, Fetch};
 use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner};
 use commonware_utils::{
     futures::{AbortablePool, Aborter},
+    sync::Mutex,
     vec::NonEmptyVec,
 };
 use futures::future::{self, Either};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     num::NonZeroUsize,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 use tracing::{debug, trace, warn};
@@ -218,10 +219,7 @@ where
     fn add_fetch(&mut self, fetch: FetchRequest) {
         let Fetch { key, subscriber } = fetch;
         if let Some(state) = self.requests.get_mut(&key) {
-            let mut subscribers = state
-                .subscribers
-                .lock()
-                .expect("subscribers mutex poisoned");
+            let mut subscribers = state.subscribers.lock();
             if !subscribers.contains(&subscriber) {
                 subscribers.push(subscriber);
             }
@@ -242,10 +240,7 @@ where
     fn retain(&mut self, predicate: Box<dyn Fn(&Key, &Subscriber) -> bool + Send>) {
         let mut retained = Vec::new();
         for (key, state) in &mut self.requests {
-            let mut subscribers = state
-                .subscribers
-                .lock()
-                .expect("subscribers mutex poisoned");
+            let mut subscribers = state.subscribers.lock();
             subscribers.retain(|subscriber| predicate(key, subscriber));
             if !subscribers.is_empty() {
                 retained.push(*key);
@@ -468,10 +463,7 @@ where
         mut handler: handler::Handler<Digest>,
         subscribers: Subscribers,
     ) -> bool {
-        let subscribers = subscribers
-            .lock()
-            .expect("subscribers mutex poisoned")
-            .clone();
+        let subscribers = subscribers.lock().clone();
         let Ok(subscribers) = NonEmptyVec::try_from(subscribers) else {
             return false;
         };

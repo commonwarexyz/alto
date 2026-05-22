@@ -16,11 +16,9 @@ use commonware_cryptography::{
     Digestible, Hasher, Sha256, Signer,
 };
 use commonware_parallel::Sequential;
+use commonware_utils::sync::Mutex;
 use rand::{rngs::StdRng, SeedableRng};
-use std::{
-    future::Future,
-    sync::{Arc, Mutex},
-};
+use std::{future::Future, sync::Arc};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -62,7 +60,7 @@ impl Source for MockSource {
 
     async fn block(&self, query: Query) -> Result<Payload, Self::Error> {
         let handler = self.block_handler.clone();
-        let guard = handler.lock().unwrap();
+        let guard = handler.lock();
         match guard.as_ref().and_then(|f| f(query)) {
             Some(payload) => Ok(payload),
             None => Err(MockError("block not found".to_string())),
@@ -71,7 +69,7 @@ impl Source for MockSource {
 
     async fn notarized(&self, query: IndexQuery) -> Result<Notarized, Self::Error> {
         let handler = self.notarized_handler.clone();
-        let guard = handler.lock().unwrap();
+        let guard = handler.lock();
         match guard.as_ref().and_then(|f| f(query)) {
             Some(notarized) => Ok(notarized),
             None => Err(MockError("notarized not found".to_string())),
@@ -80,7 +78,7 @@ impl Source for MockSource {
 
     async fn finalized(&self, query: IndexQuery) -> Result<Finalized, Self::Error> {
         let handler = self.finalized_handler.clone();
-        let guard = handler.lock().unwrap();
+        let guard = handler.lock();
         match guard.as_ref().and_then(|f| f(query)) {
             Some(finalized) => Ok(finalized),
             None => Err(MockError("finalized not found".to_string())),
@@ -97,7 +95,7 @@ impl Source for MockSource {
     > + Send {
         let messages = self.messages.clone();
         async move {
-            let msgs = messages.lock().unwrap().drain(..).collect::<Vec<_>>();
+            let msgs = messages.lock().drain(..).collect::<Vec<_>>();
             Ok(futures::stream::iter(msgs.into_iter().map(Ok)))
         }
     }
