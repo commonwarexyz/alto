@@ -56,9 +56,8 @@ struct Message(Update<Block>);
 impl Policy for Message {
     type Overflow = VecDeque<Self>;
 
-    fn handle(overflow: &mut Self::Overflow, message: Self) -> bool {
+    fn handle(overflow: &mut Self::Overflow, message: Self) {
         overflow.push_back(message);
-        true
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::Source;
 use alto_client::{consensus::Payload, IndexQuery, Query};
 use bytes::{Buf, Bytes};
-use commonware_actor::Feedback;
+use commonware_actor::{Feedback, Unreliable};
 use commonware_codec::{Encode, ReadExt, Write};
 use commonware_consensus::marshal::resolver::{
     handler,
@@ -120,14 +120,14 @@ impl CheckedSender for SourceCheckedSender {
         vec![self.peer.clone()]
     }
 
-    fn send(self, message: impl Into<IoBufs> + Send, _priority: bool) -> Feedback {
+    fn send(self, message: impl Into<IoBufs> + Send, _priority: bool) -> Unreliable<Feedback> {
         let Some(request) = decode_request(message) else {
-            return Feedback::Rejected;
+            return Unreliable::Rejected;
         };
         if self.requests.try_send_lossy(request) {
-            Feedback::Ok
+            Unreliable::new(Feedback::Ok)
         } else {
-            Feedback::Rejected
+            Unreliable::Rejected
         }
     }
 }

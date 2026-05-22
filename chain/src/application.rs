@@ -156,7 +156,41 @@ impl<E: Clock + Storage + Metrics + Spawner> Reporter for Application<E> {
 mod tests {
     use super::*;
     use commonware_runtime::{deterministic, Runner as _, Supervisor as _};
-    use futures::stream;
+    use futures::Stream;
+    use std::{
+        collections::VecDeque,
+        pin::Pin,
+        task::{Context as TaskContext, Poll},
+    };
+
+    struct TestAncestry {
+        blocks: VecDeque<Block>,
+    }
+
+    impl TestAncestry {
+        fn new(blocks: impl IntoIterator<Item = Block>) -> Self {
+            Self {
+                blocks: blocks.into_iter().collect(),
+            }
+        }
+    }
+
+    impl Stream for TestAncestry {
+        type Item = Block;
+
+        fn poll_next(
+            mut self: Pin<&mut Self>,
+            _: &mut TaskContext<'_>,
+        ) -> Poll<Option<Self::Item>> {
+            Poll::Ready(self.blocks.pop_front())
+        }
+    }
+
+    impl Ancestry<Block> for TestAncestry {
+        fn peek(&self) -> Option<&Block> {
+            self.blocks.front()
+        }
+    }
 
     fn test_context(view: u64, parent: (View, sha256::Digest)) -> Context {
         Context {
@@ -178,7 +212,7 @@ mod tests {
         block: &Block,
         parent: &Block,
     ) -> bool {
-        let ancestry = stream::iter([block.clone(), parent.clone()]);
+        let ancestry = TestAncestry::new([block.clone(), parent.clone()]);
         commonware_consensus::Application::verify(
             application,
             (context, block.context.clone()),
@@ -193,7 +227,7 @@ mod tests {
         child_context: Context,
         parent: &Block,
     ) -> Block {
-        let ancestry = stream::iter([parent.clone()]);
+        let ancestry = TestAncestry::new([parent.clone()]);
         commonware_consensus::Application::propose(application, (context, child_context), ancestry)
             .await
             .expect("expected proposal")
