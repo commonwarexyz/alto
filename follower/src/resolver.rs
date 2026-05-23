@@ -28,6 +28,7 @@ use tracing::{debug, trace, warn};
 type Key = handler::Key<Digest>;
 type Subscriber = handler::Annotation;
 type FetchRequest = Fetch<Key, Subscriber>;
+type RetainPredicate = Box<dyn Fn(&Key, &Subscriber) -> bool + Send>;
 type Subscribers = Arc<Mutex<Vec<Subscriber>>>;
 
 /// Handle to the source-backed resolver actor used by marshal.
@@ -89,7 +90,7 @@ impl Resolver {
 enum Message {
     Fetch(FetchRequest),
     FetchAll(Vec<FetchRequest>),
-    Retain(Box<dyn Fn(&Key, &Subscriber) -> bool + Send>),
+    Retain(RetainPredicate),
 }
 
 impl mailbox::Policy for Message {
@@ -237,7 +238,7 @@ where
         self.start_fetch(key);
     }
 
-    fn retain(&mut self, predicate: Box<dyn Fn(&Key, &Subscriber) -> bool + Send>) {
+    fn retain(&mut self, predicate: RetainPredicate) {
         let mut retained = Vec::new();
         for (key, state) in &mut self.requests {
             let mut subscribers = state.subscribers.lock();
