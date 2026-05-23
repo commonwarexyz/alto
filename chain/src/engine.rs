@@ -296,6 +296,7 @@ where
                 indexer,
                 marshal_mailbox.clone(),
                 queue,
+                NZUsize!(cfg.mailbox_size),
                 cfg.backfiller_max_active,
                 cfg.backfiller_retry,
             )

@@ -9,7 +9,7 @@ use commonware_consensus::{
 };
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
 use commonware_macros::select_loop;
-use commonware_resolver::{Consumer as _, Delivery, Fetch};
+use commonware_resolver::{Consumer, Delivery, Fetch};
 use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner};
 use commonware_utils::{
     futures::{AbortablePool, Aborter},
@@ -101,11 +101,20 @@ impl mailbox::Policy for Message {
     }
 }
 
-struct Actor<E: Clock + Spawner, C: Source> {
+/// Actor that fetches blocks and certificates from a [Source] on behalf of marshal.
+///
+/// The [Source] should be constructed without verification because marshal
+/// validates all signatures before accepting resolved data. Rejections are
+/// logged and retried.
+struct Actor<
+    E: Clock + Spawner,
+    C: Source,
+    H: Consumer<Key = Key, Value = Bytes, Subscriber = Subscriber>,
+> {
     context: ContextCell<E>,
     client: C,
     mailbox: mailbox::Receiver<Message>,
-    handler: handler::Handler<Digest>,
+    handler: H,
     active: AbortablePool<Result>,
     requests: BTreeMap<Key, RequestState>,
     retry_schedule: BTreeSet<(SystemTime, Key)>,
@@ -114,12 +123,18 @@ struct Actor<E: Clock + Spawner, C: Source> {
 }
 
 struct RequestState {
+    // Subscribers not yet included in a delivery attempt.
     subscribers: Subscribers,
     attempt: Attempt,
 }
 
 enum Attempt {
+    // A source fetch or marshal delivery is currently running.
+    //
+    // The id lets us ignore stale completions from an earlier attempt for the
+    // same key, and dropping the aborter cancels the current attempt.
     Active { id: u64, _aborter: Aborter },
+    // A retry is queued for the recorded deadline.
     Scheduled(SystemTime),
 }
 
@@ -157,16 +172,17 @@ where
     )
 }
 
-impl<E, C> Actor<E, C>
+impl<E, C, H> Actor<E, C, H>
 where
     E: Clock + Spawner,
     C: Source,
+    H: Consumer<Key = Key, Value = Bytes, Subscriber = Subscriber>,
 {
     fn new(
         context: E,
         client: C,
         mailbox: mailbox::Receiver<Message>,
-        handler: handler::Handler<Digest>,
+        handler: H,
         fetch_retry_timeout: Duration,
     ) -> Self {
         Self {
@@ -317,6 +333,12 @@ where
 
         if result.retry {
             self.schedule_retry(result.key);
+        } else if self
+            .requests
+            .get(&result.key)
+            .is_some_and(|state| !state.subscribers.lock().is_empty())
+        {
+            self.start_fetch(result.key);
         } else {
             self.requests.remove(&result.key);
         }
@@ -357,7 +379,7 @@ where
         key: Key,
         id: u64,
         client: C,
-        handler: handler::Handler<Digest>,
+        handler: H,
         subscribers: Subscribers,
     ) -> Result {
         let retry = match key {
@@ -378,7 +400,7 @@ where
         key: Key,
         digest: Digest,
         client: C,
-        handler: handler::Handler<Digest>,
+        handler: H,
         subscribers: Subscribers,
     ) -> bool {
         debug!(?digest, "fetching block by digest");
@@ -402,7 +424,7 @@ where
         key: Key,
         height: Height,
         client: C,
-        handler: handler::Handler<Digest>,
+        handler: H,
         subscribers: Subscribers,
     ) -> bool {
         debug!(height = height.get(), "fetching finalized block by height");
@@ -437,7 +459,7 @@ where
         key: Key,
         round: Round,
         client: C,
-        handler: handler::Handler<Digest>,
+        handler: H,
         subscribers: Subscribers,
     ) -> bool {
         let view = round.view().get();
@@ -458,31 +480,552 @@ where
         }
     }
 
-    async fn deliver(
-        key: Key,
-        value: Bytes,
-        mut handler: handler::Handler<Digest>,
-        subscribers: Subscribers,
-    ) -> bool {
-        let subscribers = subscribers.lock().clone();
-        let Ok(subscribers) = NonEmptyVec::try_from(subscribers) else {
-            return false;
-        };
-        let response = handler.deliver(Delivery { key, subscribers }, value);
-        match response.await {
-            Ok(true) => false,
-            Ok(false) => {
-                warn!(?key, "marshal rejected source resolver delivery");
-                true
-            }
-            Err(error) => {
-                warn!(
-                    ?key,
-                    ?error,
-                    "marshal dropped source resolver delivery response"
-                );
-                true
+    async fn deliver(key: Key, value: Bytes, mut handler: H, subscribers: Subscribers) -> bool {
+        loop {
+            let pending = {
+                let mut subscribers = subscribers.lock();
+                std::mem::take(&mut *subscribers)
+            };
+            let Ok(delivered) = NonEmptyVec::try_from(pending) else {
+                return false;
+            };
+            let response = handler.deliver(
+                Delivery {
+                    key,
+                    subscribers: delivered.clone(),
+                },
+                value.clone(),
+            );
+            match response.await {
+                Ok(true) => {
+                    let mut pending = subscribers.lock();
+                    pending.retain(|subscriber| !delivered.contains(subscriber));
+                    if pending.is_empty() {
+                        return false;
+                    }
+                }
+                Ok(false) => {
+                    Self::restore_subscribers(&subscribers, delivered);
+                    warn!(?key, "marshal rejected source resolver delivery");
+                    return true;
+                }
+                Err(error) => {
+                    Self::restore_subscribers(&subscribers, delivered);
+                    warn!(
+                        ?key,
+                        ?error,
+                        "marshal dropped source resolver delivery response"
+                    );
+                    return true;
+                }
             }
         }
+    }
+
+    fn restore_subscribers(subscribers: &Subscribers, delivered: NonEmptyVec<Subscriber>) {
+        let mut subscribers = subscribers.lock();
+        for subscriber in delivered {
+            if !subscribers.contains(&subscriber) {
+                subscribers.push(subscriber);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{MockSource, TestFixture};
+    use alto_client::Query;
+    use commonware_cryptography::{ed25519::PrivateKey, Digestible, Signer};
+    use commonware_macros::test_traced;
+    use commonware_resolver::Resolver as _;
+    use commonware_runtime::{deterministic, Clock, Runner as _, Supervisor as _};
+    use commonware_utils::{channel::oneshot, NZUsize};
+    use std::sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    };
+
+    const DEFAULT_FETCH_RETRY_TIMEOUT: Duration = Duration::from_secs(1);
+
+    struct CapturedDelivery {
+        delivery: Delivery<Key, Subscriber>,
+        value: Bytes,
+        response: oneshot::Sender<bool>,
+    }
+
+    #[derive(Clone, Default)]
+    struct TestConsumer {
+        deliveries: Arc<Mutex<VecDeque<CapturedDelivery>>>,
+    }
+
+    impl TestConsumer {
+        fn pop(&self) -> Option<CapturedDelivery> {
+            self.deliveries.lock().pop_front()
+        }
+
+        fn len(&self) -> usize {
+            self.deliveries.lock().len()
+        }
+    }
+
+    impl Consumer for TestConsumer {
+        type Key = Key;
+        type Value = Bytes;
+        type Subscriber = Subscriber;
+
+        fn deliver(
+            &mut self,
+            delivery: Delivery<Self::Key, Self::Subscriber>,
+            value: Self::Value,
+        ) -> oneshot::Receiver<bool> {
+            let (response, receiver) = oneshot::channel();
+            self.deliveries.lock().push_back(CapturedDelivery {
+                delivery,
+                value,
+                response,
+            });
+            receiver
+        }
+    }
+
+    fn start_resolver(
+        context: deterministic::Context,
+        source: MockSource,
+        consumer: TestConsumer,
+    ) -> Resolver {
+        let (mailbox_tx, mailbox_rx) = mailbox::new(context.child("mailbox"), NZUsize!(16));
+        Actor::new(
+            context.child("actor"),
+            source,
+            mailbox_rx,
+            consumer,
+            DEFAULT_FETCH_RETRY_TIMEOUT,
+        )
+        .start();
+        Resolver {
+            mailbox: mailbox_tx,
+        }
+    }
+
+    async fn wait_for_delivery(
+        context: &deterministic::Context,
+        consumer: &TestConsumer,
+    ) -> CapturedDelivery {
+        for _ in 0..50 {
+            if let Some(delivery) = consumer.pop() {
+                return delivery;
+            }
+            context.sleep(Duration::from_millis(100)).await;
+        }
+        panic!("timed out waiting for delivery");
+    }
+
+    #[test_traced]
+    fn fetches_block_by_digest() {
+        let fixture = TestFixture::new();
+        let block = fixture.create_block(1, 1);
+        let digest = block.digest();
+
+        let source = MockSource::new();
+        *source.block_handler.lock() = Some(Box::new(move |_| {
+            Some(Payload::Block(Box::new(block.clone())))
+        }));
+
+        deterministic::Runner::default().start(|context| async move {
+            let consumer = TestConsumer::default();
+            let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
+            let height = Height::new(1);
+
+            assert!(resolver
+                .fetch(handler::Request::certified_block(digest, height))
+                .accepted());
+            let delivery = wait_for_delivery(&context, &consumer).await;
+
+            assert!(matches!(delivery.delivery.key, handler::Key::Block(d) if d == digest));
+            assert!(delivery
+                .delivery
+                .subscribers
+                .contains(&handler::Annotation::Certified { height }));
+            assert!(!delivery.value.is_empty());
+            delivery.response.send(true).expect("response dropped");
+        });
+    }
+
+    #[test_traced]
+    fn fetches_finalized_by_height_uses_height_indexed_block_query() {
+        let fixture = TestFixture::new();
+        let finalized = fixture.create_finalized(5, 8);
+        let height = Height::new(5);
+        let block_calls = Arc::new(AtomicU32::new(0));
+        let finalized_calls = Arc::new(AtomicU32::new(0));
+
+        let source = MockSource::new();
+        {
+            let block_calls = block_calls.clone();
+            *source.block_handler.lock() = Some(Box::new(move |query| {
+                block_calls.fetch_add(1, Ordering::Relaxed);
+                match query {
+                    Query::Index(index) if index == height.get() => {
+                        Some(Payload::Finalized(Box::new(finalized.clone())))
+                    }
+                    _ => None,
+                }
+            }));
+        }
+        {
+            let finalized_calls = finalized_calls.clone();
+            *source.finalized_handler.lock() = Some(Box::new(move |_| {
+                finalized_calls.fetch_add(1, Ordering::Relaxed);
+                None
+            }));
+        }
+
+        deterministic::Runner::default().start(|context| async move {
+            let consumer = TestConsumer::default();
+            let mut resolver =
+                start_resolver(context.child("resolver"), source, consumer.clone());
+
+            assert!(resolver.fetch(handler::Request::finalized(height)).accepted());
+            let delivery = wait_for_delivery(&context, &consumer).await;
+            assert!(
+                matches!(delivery.delivery.key, handler::Key::Finalized { height: h } if h == height)
+            );
+            delivery.response.send(true).expect("response dropped");
+
+            assert_eq!(block_calls.load(Ordering::Relaxed), 1);
+            assert_eq!(finalized_calls.load(Ordering::Relaxed), 0);
+        });
+    }
+
+    #[test_traced]
+    fn fetches_notarized_by_round() {
+        let fixture = TestFixture::new();
+        let notarized = fixture.create_notarized(3, 3);
+        let round = Round::new(alto_types::EPOCH, commonware_consensus::types::View::new(3));
+
+        let source = MockSource::new();
+        *source.notarized_handler.lock() = Some(Box::new(move |_| Some(notarized.clone())));
+
+        deterministic::Runner::default().start(|context| async move {
+            let consumer = TestConsumer::default();
+            let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
+
+            assert!(resolver
+                .fetch(handler::Request::notarized(round))
+                .accepted());
+            let delivery = wait_for_delivery(&context, &consumer).await;
+            assert!(
+                matches!(delivery.delivery.key, handler::Key::Notarized { round: r } if r == round)
+            );
+            delivery.response.send(true).expect("response dropped");
+        });
+    }
+
+    #[test_traced]
+    fn retries_when_marshal_rejects_finalized_delivery() {
+        let fixture = TestFixture::new();
+        let finalized = fixture.create_finalized(1, 1);
+        let height = Height::new(1);
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let source = MockSource::new();
+        {
+            let calls = calls.clone();
+            *source.block_handler.lock() = Some(Box::new(move |query| match query {
+                Query::Index(index) if index == height.get() => {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    Some(Payload::Finalized(Box::new(finalized.clone())))
+                }
+                _ => None,
+            }));
+        }
+
+        deterministic::Runner::default().start(|context| async move {
+            let consumer = TestConsumer::default();
+            let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
+
+            assert!(resolver
+                .fetch(handler::Request::finalized(height))
+                .accepted());
+            let delivery = wait_for_delivery(&context, &consumer).await;
+            delivery.response.send(false).expect("response dropped");
+
+            context
+                .sleep(DEFAULT_FETCH_RETRY_TIMEOUT + Duration::from_millis(100))
+                .await;
+            let retry = wait_for_delivery(&context, &consumer).await;
+            assert!(
+                matches!(retry.delivery.key, handler::Key::Finalized { height: h } if h == height)
+            );
+            retry.response.send(true).expect("response dropped");
+
+            assert_eq!(calls.load(Ordering::Relaxed), 2);
+        });
+    }
+
+    #[test_traced]
+    fn deduplicates_identical_subscribers() {
+        let fixture = TestFixture::new();
+        let block = fixture.create_block(1, 1);
+        let digest = block.digest();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let source = MockSource::new();
+        {
+            let calls = calls.clone();
+            *source.block_handler.lock() = Some(Box::new(move |_| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                Some(Payload::Block(Box::new(block.clone())))
+            }));
+        }
+
+        deterministic::Runner::default().start(|context| async move {
+            let consumer = TestConsumer::default();
+            let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
+            let request = handler::Request::certified_block(digest, Height::new(1));
+
+            assert!(resolver.fetch(request).accepted());
+            assert!(resolver.fetch(request).accepted());
+            let delivery = wait_for_delivery(&context, &consumer).await;
+            assert_eq!(delivery.delivery.subscribers.len().get(), 1);
+            delivery.response.send(true).expect("response dropped");
+            context.sleep(Duration::from_millis(100)).await;
+
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
+            assert_eq!(consumer.len(), 0);
+        });
+    }
+
+    #[test_traced]
+    fn failed_fetch_eventually_resolves_after_multiple_retries() {
+        let fixture = TestFixture::new();
+        let block = fixture.create_block(1, 1);
+        let digest = block.digest();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let source = MockSource::new();
+        {
+            let calls = calls.clone();
+            *source.block_handler.lock() = Some(Box::new(move |_| {
+                let attempt = calls.fetch_add(1, Ordering::Relaxed) + 1;
+                (attempt >= 3).then(|| Payload::Block(Box::new(block.clone())))
+            }));
+        }
+
+        deterministic::Runner::default().start(|context| async move {
+            let consumer = TestConsumer::default();
+            let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
+
+            assert!(resolver
+                .fetch(handler::Request::certified_block(digest, Height::new(1)))
+                .accepted());
+            let delivery = wait_for_delivery(&context, &consumer).await;
+            assert!(matches!(delivery.delivery.key, handler::Key::Block(d) if d == digest));
+            delivery.response.send(true).expect("response dropped");
+
+            assert_eq!(calls.load(Ordering::Relaxed), 3);
+        });
+    }
+
+    #[test_traced]
+    fn fetch_during_validation_reuses_response_after_success() {
+        let fixture = TestFixture::new();
+        let block = fixture.create_block(1, 1);
+        let digest = block.digest();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let source = MockSource::new();
+        {
+            let calls = calls.clone();
+            *source.block_handler.lock() = Some(Box::new(move |_| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                Some(Payload::Block(Box::new(block.clone())))
+            }));
+        }
+
+        deterministic::Runner::default().start(|context| async move {
+            let consumer = TestConsumer::default();
+            let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
+            let height = Height::new(1);
+
+            assert!(resolver
+                .fetch(handler::Request::certified_block(digest, height))
+                .accepted());
+            let first = wait_for_delivery(&context, &consumer).await;
+
+            assert!(resolver
+                .fetch(handler::Request::finalized_block_by_height(digest, height))
+                .accepted());
+            context.sleep(Duration::from_millis(100)).await;
+            first.response.send(true).expect("response dropped");
+
+            let second = wait_for_delivery(&context, &consumer).await;
+            assert!(matches!(second.delivery.key, handler::Key::Block(d) if d == digest));
+            assert!(second
+                .delivery
+                .subscribers
+                .contains(&handler::Annotation::Finalized(
+                    handler::Finalized::ByHeight { height }
+                )));
+            second.response.send(true).expect("response dropped");
+
+            context.sleep(Duration::from_millis(100)).await;
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
+        });
+    }
+
+    #[test_traced]
+    fn retain_removes_unwanted_subscribers() {
+        let fixture = TestFixture::new();
+        let digest = fixture.create_block(1, 1).digest();
+
+        deterministic::Runner::default().start(|context| async move {
+            let source = MockSource::new();
+            let consumer = TestConsumer::default();
+            let (mailbox_tx, mailbox_rx) = mailbox::new(context.child("mailbox"), NZUsize!(16));
+            let mut actor = Actor::new(
+                context.child("actor"),
+                source,
+                mailbox_rx,
+                consumer,
+                DEFAULT_FETCH_RETRY_TIMEOUT,
+            );
+            let mut resolver = Resolver {
+                mailbox: mailbox_tx,
+            };
+            let keep = handler::Annotation::Certified {
+                height: Height::new(2),
+            };
+            let discard = handler::Annotation::Certified {
+                height: Height::new(1),
+            };
+            let key = handler::Key::Block(digest);
+            actor.requests.insert(
+                key,
+                RequestState {
+                    subscribers: Arc::new(Mutex::new(vec![keep, discard])),
+                    attempt: Attempt::Scheduled(context.current()),
+                },
+            );
+
+            assert!(resolver
+                .retain(move |_, subscriber| *subscriber == keep)
+                .accepted());
+            let message = actor.mailbox.recv().await.expect("missing retain");
+            actor.handle_message(message);
+
+            let subscribers = actor
+                .requests
+                .get(&key)
+                .expect("request should be retained")
+                .subscribers
+                .lock()
+                .clone();
+            assert_eq!(subscribers, vec![keep]);
+        });
+    }
+
+    #[test_traced]
+    fn stale_completion_does_not_mutate_replaced_request() {
+        let fixture = TestFixture::new();
+        let digest = fixture.create_block(1, 1).digest();
+
+        deterministic::Runner::default().start(|context| async move {
+            let source = MockSource::new();
+            let consumer = TestConsumer::default();
+            let (_, mailbox_rx) = mailbox::new(context.child("mailbox"), NZUsize!(16));
+            let mut actor = Actor::new(
+                context.child("actor"),
+                source,
+                mailbox_rx,
+                consumer,
+                DEFAULT_FETCH_RETRY_TIMEOUT,
+            );
+
+            let key = handler::Key::Block(digest);
+            let subscriber = handler::Annotation::Certified {
+                height: Height::new(1),
+            };
+            actor.requests.insert(
+                key,
+                RequestState {
+                    subscribers: Arc::new(Mutex::new(vec![subscriber])),
+                    attempt: Attempt::Scheduled(context.current()),
+                },
+            );
+            actor.start_fetch(key);
+            let first_state = actor.requests.remove(&key).expect("missing first state");
+            let Attempt::Active { id: first_id, .. } = first_state.attempt else {
+                panic!("expected first fetch attempt to be active");
+            };
+
+            actor.requests.insert(
+                key,
+                RequestState {
+                    subscribers: Arc::new(Mutex::new(vec![subscriber])),
+                    attempt: Attempt::Scheduled(context.current()),
+                },
+            );
+            actor.start_fetch(key);
+            let Some(RequestState {
+                attempt: Attempt::Active { id: second_id, .. },
+                ..
+            }) = actor.requests.get(&key)
+            else {
+                panic!("expected second fetch attempt to be active");
+            };
+            let second_id = *second_id;
+
+            actor.handle_completed(Result {
+                key,
+                id: first_id,
+                retry: true,
+            });
+
+            assert!(matches!(
+                actor.requests.get(&key),
+                Some(RequestState {
+                    attempt: Attempt::Active { id, .. },
+                    ..
+                }) if *id == second_id
+            ));
+            assert!(actor.retry_schedule.is_empty());
+        });
+    }
+
+    #[test_traced]
+    fn targeted_fetch_variants_use_same_source_path() {
+        let fixture = TestFixture::new();
+        let block = fixture.create_block(1, 1);
+        let digest = block.digest();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let source = MockSource::new();
+        {
+            let calls = calls.clone();
+            *source.block_handler.lock() = Some(Box::new(move |_| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                Some(Payload::Block(Box::new(block.clone())))
+            }));
+        }
+
+        deterministic::Runner::default().start(|context| async move {
+            let consumer = TestConsumer::default();
+            let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
+            let target = PrivateKey::from_seed(7).public_key();
+
+            assert!(resolver
+                .fetch_targeted(
+                    handler::Request::certified_block(digest, Height::new(1)),
+                    NonEmptyVec::new(target)
+                )
+                .accepted());
+            let delivery = wait_for_delivery(&context, &consumer).await;
+            delivery.response.send(true).expect("response dropped");
+
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
+        });
     }
 }

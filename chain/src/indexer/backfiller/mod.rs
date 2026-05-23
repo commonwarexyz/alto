@@ -12,5 +12,5 @@ mod producer;
 mod state;
 
 pub use consumer::Consumer;
-pub use producer::Producer;
+pub(crate) use producer::{init as init_producer, Producer};
 pub use state::{Decision, Entry, SharedState, State};

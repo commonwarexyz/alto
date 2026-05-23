@@ -79,6 +79,7 @@ fn main() {
         .worker_threads
         .checked_add(config.signature_threads)
         .expect("network buffer pool parallelism overflowed");
+
     // Storage I/O runs on Tokio's blocking pool. Include those threads in the
     // pool parallelism calculation so buffers cannot be stranded in too few
     // thread-local caches and surface as exhaustion under restart pressure.

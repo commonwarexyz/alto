@@ -34,7 +34,6 @@ pub type NotarizedHandler =
 #[derive(Clone)]
 pub struct MockSource {
     pub block_handler: BlockHandler,
-    #[allow(dead_code)]
     pub finalized_handler: FinalizedHandler,
     pub notarized_handler: NotarizedHandler,
     pub messages: Arc<Mutex<Vec<Message>>>,

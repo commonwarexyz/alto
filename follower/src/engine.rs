@@ -184,3 +184,104 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{MockSource, TestFixture};
+    use bytes::Bytes;
+    use commonware_codec::Encode;
+    use commonware_consensus::types::{Round, View};
+    use commonware_macros::test_traced;
+    use commonware_parallel::Sequential;
+    use commonware_resolver::{Consumer, Delivery};
+    use commonware_runtime::{deterministic::Runner, Runner as _, Supervisor as _};
+    use commonware_utils::{vec::NonEmptyVec, NZUsize};
+    use std::time::Duration;
+
+    async fn start_engine_with_handler(
+        context: commonware_runtime::deterministic::Context,
+        scheme: Scheme,
+    ) -> handler::Handler<Digest> {
+        let (engine, _, _) = Engine::new(
+            context.child("engine"),
+            scheme,
+            NZUsize!(16),
+            NZUsize!(256),
+            Sequential,
+            None,
+        )
+        .await;
+        let (receiver, handler) = handler::init(context.child("handler"), NZUsize!(16));
+        let (_, resolver) = crate::resolver::init(
+            context.child("resolver"),
+            MockSource::new(),
+            NZUsize!(16),
+            Duration::from_secs(1),
+        );
+        engine.start((receiver, resolver));
+        handler
+    }
+
+    /// Verifies that marshal's Deliver handler rejects a finalization whose
+    /// threshold signature does not match the configured scheme. This is
+    /// the resolver path's signature verification, as opposed to the feeder
+    /// path tested in feeder::tests.
+    #[test_traced]
+    fn marshal_rejects_invalid_finalization_from_resolver() {
+        let fixture = TestFixture::new();
+        let finalized = fixture.create_finalized(1, 1);
+        let wrong_verifier = fixture.wrong_verifier_scheme();
+
+        Runner::default().start(|context| async move {
+            let mut handler = start_engine_with_handler(context, wrong_verifier).await;
+
+            let height = Height::new(1);
+            let value = Bytes::from((finalized.proof, finalized.block).encode().to_vec());
+            let response = handler.deliver(
+                Delivery {
+                    key: handler::Key::Finalized { height },
+                    subscribers: NonEmptyVec::new(handler::Annotation::Finalized(
+                        handler::Finalized::ByHeight { height },
+                    )),
+                },
+                value,
+            );
+
+            let accepted = response.await.expect("response dropped");
+            assert!(
+                !accepted,
+                "marshal should reject finalization with invalid signature"
+            );
+        });
+    }
+
+    /// Verifies that marshal's Deliver handler rejects a notarization whose
+    /// threshold signature does not match the configured scheme.
+    #[test_traced]
+    fn marshal_rejects_invalid_notarization_from_resolver() {
+        let fixture = TestFixture::new();
+        let notarized = fixture.create_notarized(1, 1);
+        let wrong_verifier = fixture.wrong_verifier_scheme();
+
+        Runner::default().start(|context| async move {
+            let mut handler = start_engine_with_handler(context, wrong_verifier).await;
+
+            let round = Round::new(EPOCH, View::new(1));
+            let value = Bytes::from((notarized.proof, notarized.block).encode().to_vec());
+            let response = handler.deliver(
+                Delivery {
+                    key: handler::Key::Notarized { round },
+                    subscribers: NonEmptyVec::new(handler::Annotation::Notarization { round }),
+                },
+                value,
+            );
+
+            let accepted = response.await.expect("response dropped");
+            assert!(
+                !accepted,
+                "marshal should reject notarization with invalid signature"
+            );
+        });
+    }
+}
