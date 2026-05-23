@@ -83,11 +83,6 @@ impl State {
     }
 
     pub fn record(&mut self, block: &Block) -> Option<Entry> {
-        // Genesis is local bootstrap state and has no certificate upload to backfill.
-        if block.height.get() == 0 {
-            return None;
-        }
-
         let entry = Entry {
             height: block.height.get(),
             digest: block.digest(),
@@ -201,13 +196,16 @@ mod tests {
     }
 
     #[test]
-    fn test_upload_state_ignores_genesis() {
+    fn test_upload_state_records_genesis() {
         let mut uploads = State::new();
         let genesis = test_block(0, 0, b"genesis");
         let digest = genesis.digest();
 
-        assert!(uploads.record(&genesis).is_none());
-        assert!(uploads.cached_block(&digest).is_none());
+        let entry = uploads.record(&genesis).expect("missing genesis entry");
+
+        assert_eq!(entry.height, 0);
+        assert_eq!(entry.digest, digest);
+        assert_eq!(uploads.cached_block(&digest).as_ref(), Some(&genesis));
     }
 
     #[test]

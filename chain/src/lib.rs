@@ -94,7 +94,7 @@ mod tests {
     };
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519::PublicKey,
-        Signer,
+        Digestible, Signer,
     };
     use commonware_macros::{select, test_traced};
     use commonware_p2p::{
@@ -775,12 +775,22 @@ mod tests {
             assert!(indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
+            let genesis_digest =
+                application::Application::<deterministic::Context>::genesis().digest();
+            let started_digests = indexer.block_upload_started_digests.lock().clone();
+            let expected_genesis_uploads = n as usize;
             assert_eq!(
                 indexer
                     .block_upload_started
                     .load(std::sync::atomic::Ordering::SeqCst),
-                0,
-                "block uploads should stay idle when certified uploads succeed",
+                expected_genesis_uploads,
+                "only genesis should be uploaded as a bare block when certified uploads succeed",
+            );
+            assert!(
+                started_digests
+                    .iter()
+                    .all(|digest| *digest == genesis_digest),
+                "non-genesis block uploads should stay idle when certified uploads succeed",
             );
         });
     }
