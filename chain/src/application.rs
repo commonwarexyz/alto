@@ -28,7 +28,7 @@ const MAX_BLOCK_TIMESTAMP_MS: u64 = 7_258_118_400_000;
 
 pub struct Application<E: Clock + Storage + Metrics> {
     context: Arc<E>,
-    backfiller: Option<Arc<indexer::Producer>>,
+    backfiller: Option<indexer::Producer>,
 }
 
 impl<E: Clock + Storage + Metrics> Clone for Application<E> {
@@ -58,7 +58,7 @@ impl<E: Clock + Storage + Metrics> Application<E> {
     }
 
     pub(crate) fn with_backfiller(mut self, backfiller: indexer::Producer) -> Self {
-        self.backfiller = Some(Arc::new(backfiller));
+        self.backfiller = Some(backfiller);
         self
     }
 }
@@ -131,15 +131,16 @@ impl<E: Clock + Storage + Metrics> Reporter for Application<E> {
     type Activity = Update<Block>;
 
     fn report(&mut self, activity: Self::Activity) -> Feedback {
-        if let Update::Block(block, ack_rx) = activity {
-            if let Some(backfiller) = self.backfiller.clone() {
-                let height = block.height();
-                info!(height = %height, "finalized block");
-                return backfiller.record(block, ack_rx);
-            } else {
-                info!(height = %block.height(), "finalized block");
-                ack_rx.acknowledge();
-            }
+        if let Update::Block(block, _) = &activity {
+            info!(height = %block.height(), "finalized block");
+        }
+
+        if let Some(backfiller) = &mut self.backfiller {
+            return backfiller.report(activity);
+        }
+
+        if let Update::Block(_, ack_rx) = activity {
+            ack_rx.acknowledge();
         }
         Feedback::Ok
     }

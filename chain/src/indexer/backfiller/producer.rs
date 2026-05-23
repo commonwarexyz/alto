@@ -4,6 +4,7 @@ use commonware_actor::{
     mailbox::{self, Policy},
     Feedback,
 };
+use commonware_consensus::{marshal::Update, Reporter};
 use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage};
 use commonware_storage::queue;
 use commonware_utils::{acknowledgement::Exact, Acknowledgement};
@@ -36,9 +37,14 @@ struct Actor<E: Clock + Storage + Metrics> {
     receiver: mailbox::Receiver<Message>,
 }
 
-impl Producer {
-    pub fn record(&self, block: Block, ack: Exact) -> Feedback {
-        self.sender.enqueue(Message { block, ack })
+impl Reporter for Producer {
+    type Activity = Update<Block>;
+
+    fn report(&mut self, activity: Self::Activity) -> Feedback {
+        match activity {
+            Update::Block(block, ack) => self.sender.enqueue(Message { block, ack }),
+            Update::Tip(_, _, _) => Feedback::Ok,
+        }
     }
 }
 
