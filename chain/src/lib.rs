@@ -780,9 +780,7 @@ mod tests {
             let started_digests = indexer.block_upload_started_digests.lock().clone();
             let expected_genesis_uploads = n as usize;
             assert_eq!(
-                indexer
-                    .block_upload_started
-                    .load(std::sync::atomic::Ordering::SeqCst),
+                started_digests.len(),
                 expected_genesis_uploads,
                 "only genesis should be uploaded as a bare block when certified uploads succeed",
             );
@@ -961,12 +959,18 @@ mod tests {
                 queue_outstanding(&metrics) > 0,
                 "expected finalized queue work while certificate uploads were blocked",
             );
+            let genesis_digest =
+                application::Application::<deterministic::Context>::genesis().digest();
+            let expected_genesis_uploads = n as usize;
+            let started_digests = indexer.block_upload_started_digests.lock().clone();
             assert_eq!(
-                indexer
-                    .block_upload_started
-                    .load(std::sync::atomic::Ordering::SeqCst),
-                0,
-                "block uploads should wait while certificate uploads are still in flight",
+                started_digests.len(),
+                expected_genesis_uploads,
+                "only genesis should be uploaded as a bare block while certificate uploads are in flight",
+            );
+            assert!(
+                started_digests.iter().all(|digest| *digest == genesis_digest),
+                "non-genesis block uploads should wait while certificate uploads are still in flight",
             );
 
             // Release the blocked certificate uploads and confirm the
@@ -986,12 +990,15 @@ mod tests {
             assert!(indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
+            let started_digests = indexer.block_upload_started_digests.lock().clone();
             assert_eq!(
-                indexer
-                    .block_upload_started
-                    .load(std::sync::atomic::Ordering::SeqCst),
-                0,
-                "block uploads should remain idle when certificate uploads eventually succeed",
+                started_digests.len(),
+                expected_genesis_uploads,
+                "only genesis should be uploaded as a bare block when certificate uploads eventually succeed",
+            );
+            assert!(
+                started_digests.iter().all(|digest| *digest == genesis_digest),
+                "non-genesis block uploads should remain idle when certificate uploads eventually succeed",
             );
         });
     }
