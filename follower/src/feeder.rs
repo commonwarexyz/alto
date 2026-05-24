@@ -202,7 +202,7 @@ mod tests {
 
         Runner::default().start(|context| async move {
             // Engine is needed to provide the marshal mailbox
-            let (_engine, mailbox, _) = crate::engine::Engine::new(
+            let (engine, mailbox, _) = crate::engine::Engine::new(
                 context.child("engine"),
                 verifier.clone(),
                 NZUsize!(16),
@@ -219,7 +219,7 @@ mod tests {
                 NZUsize!(16),
                 Duration::from_millis(10),
             );
-            let _engine_handle = _engine.start(resolver);
+            engine.start(resolver);
             let mut feeder = Feeder::new(context.child("feeder"), source, verifier, mailbox);
 
             let result = feeder
@@ -271,7 +271,7 @@ mod tests {
         let verifier = fixture.verifier_scheme();
 
         Runner::default().start(|context| async move {
-            let (_engine, mailbox, _) = crate::engine::Engine::new(
+            let (engine, mailbox, _) = crate::engine::Engine::new(
                 context.child("engine"),
                 verifier.clone(),
                 NZUsize!(16),
@@ -288,7 +288,7 @@ mod tests {
                 NZUsize!(16),
                 Duration::from_millis(10),
             );
-            let _engine_handle = _engine.start(resolver);
+            engine.start(resolver);
             let mut feeder = Feeder::new(context.child("feeder"), source, verifier, mailbox);
 
             let result = feeder

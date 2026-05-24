@@ -4,7 +4,7 @@ use commonware_actor::Feedback;
 use commonware_consensus::{
     marshal::{ancestry::Ancestry, Update},
     types::{Height, Round, View},
-    Heightable, Reporter,
+    Application as ConsensusApplication, Heightable, Reporter,
 };
 use commonware_cryptography::{ed25519, sha256, Digest as _, Digestible, Hasher, Sha256, Signer};
 use commonware_runtime::{Clock, Metrics, Spawner, Storage};
@@ -63,7 +63,7 @@ impl<E: Clock + Storage + Metrics> Application<E> {
     }
 }
 
-impl<E: Clock + Storage + Metrics> commonware_consensus::Application<E> for Application<E>
+impl<E: Clock + Storage + Metrics> ConsensusApplication<E> for Application<E>
 where
     E: Rng + Spawner + Metrics + Clock + Storage,
 {
@@ -132,7 +132,12 @@ impl<E: Clock + Storage + Metrics> Reporter for Application<E> {
 
     fn report(&mut self, activity: Self::Activity) -> Feedback {
         if let Update::Block(block, _) = &activity {
-            info!(height = %block.height(), "finalized block");
+            info!(
+                height = %block.height(),
+                digest = ?block.digest(),
+                timestamp = block.timestamp,
+                "finalized block"
+            );
         }
 
         if let Some(backfiller) = &mut self.backfiller {
@@ -173,12 +178,7 @@ mod tests {
         parent: &Block,
     ) -> bool {
         let ancestry = ancestry::from_iter([block.clone(), parent.clone()]);
-        commonware_consensus::Application::verify(
-            application,
-            (context, block.context.clone()),
-            ancestry,
-        )
-        .await
+        ConsensusApplication::verify(application, (context, block.context.clone()), ancestry).await
     }
 
     async fn propose_child(
@@ -188,7 +188,7 @@ mod tests {
         parent: &Block,
     ) -> Block {
         let ancestry = ancestry::from_iter([parent.clone()]);
-        commonware_consensus::Application::propose(application, (context, child_context), ancestry)
+        ConsensusApplication::propose(application, (context, child_context), ancestry)
             .await
             .expect("expected proposal")
     }

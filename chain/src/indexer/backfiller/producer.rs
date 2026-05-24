@@ -17,6 +17,8 @@ pub struct Producer {
     sender: mailbox::Sender<Message>,
 }
 
+// Carries a finalized block while holding its marshal ack until the block is
+// durably queued.
 struct Message {
     block: Block,
     ack: Exact,

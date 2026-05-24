@@ -112,7 +112,7 @@ impl<E: Spawner + Clock + Storage + Metrics, C: Client> Indexer<E, C> {
             uploads.clone(),
         );
         let (writer, reader) = backfiller;
-        let producer = backfiller::init_producer(
+        let producer = backfiller::producer::init(
             context.child("producer"),
             uploads.clone(),
             writer.clone(),

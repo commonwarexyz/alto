@@ -13,12 +13,6 @@ pub mod utils;
 
 pub const DEFAULT_BACKFILLER_MAX_ACTIVE: NonZeroUsize = NZUsize!(16);
 pub const DEFAULT_BACKFILLER_RETRY_MS: u64 = 1_000;
-
-/// Default Tokio blocking thread cap used by the validator.
-///
-/// This must stay aligned with the storage buffer-pool parallelism calculation:
-/// storage I/O can run on blocking threads, so undercounting them allows
-/// thread-local caches to strand buffers and can look like pool exhaustion.
 pub const DEFAULT_BLOCKING_THREADS: usize = 512;
 
 fn default_backfiller_max_active() -> NonZeroUsize {
@@ -44,8 +38,6 @@ pub struct Config {
     pub metrics_port: u16,
     pub directory: String,
     pub worker_threads: usize,
-    /// Maximum Tokio blocking threads. Storage buffer-pool parallelism includes
-    /// this count because blocking storage tasks can hold pool buffers.
     #[serde(default = "default_blocking_threads")]
     pub blocking_threads: usize,
     #[serde(default)]

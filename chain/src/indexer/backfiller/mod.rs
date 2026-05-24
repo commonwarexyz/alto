@@ -7,10 +7,10 @@
 //! used to deduplicate uploads, cache blocks, and coordinate with the parent
 //! module's live `Pusher`.
 
-mod consumer;
-mod producer;
-mod state;
+pub(crate) mod consumer;
+pub(crate) mod producer;
+pub(crate) mod state;
 
-pub use consumer::Consumer;
-pub(crate) use producer::{init as init_producer, Producer};
-pub use state::{Decision, Entry, SharedState, State};
+pub(crate) use consumer::Consumer;
+pub(crate) use producer::Producer;
+pub(crate) use state::{Decision, Entry, SharedState, State};

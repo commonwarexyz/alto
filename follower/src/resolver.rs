@@ -123,7 +123,7 @@ struct Actor<
 }
 
 struct RequestState {
-    // Subscribers not yet included in a delivery attempt.
+    // Subscribers that keep the request alive, including active deliveries.
     subscribers: Subscribers,
     attempt: Attempt,
 }
@@ -255,22 +255,15 @@ where
     }
 
     fn retain(&mut self, predicate: RetainPredicate) {
-        let mut retained = Vec::new();
-        for (key, state) in &mut self.requests {
+        let mut removed = Vec::new();
+        for (key, state) in self.requests.iter_mut() {
             let mut subscribers = state.subscribers.lock();
             subscribers.retain(|subscriber| predicate(key, subscriber));
-            if !subscribers.is_empty() {
-                retained.push(*key);
+            if subscribers.is_empty() {
+                removed.push(*key);
             }
         }
 
-        let retained = retained.into_iter().collect::<BTreeSet<_>>();
-        let removed = self
-            .requests
-            .keys()
-            .filter(|key| !retained.contains(key))
-            .copied()
-            .collect::<Vec<_>>();
         for key in removed {
             if let Some(state) = self.requests.remove(&key) {
                 if let Attempt::Scheduled(deadline) = state.attempt {
@@ -483,10 +476,10 @@ where
     async fn deliver(key: Key, value: Bytes, mut handler: H, subscribers: Subscribers) -> bool {
         loop {
             let pending = {
-                let mut subscribers = subscribers.lock();
-                std::mem::take(&mut *subscribers)
+                let subscribers = subscribers.lock();
+                NonEmptyVec::try_from(subscribers.clone()).ok()
             };
-            let Ok(delivered) = NonEmptyVec::try_from(pending) else {
+            let Some(delivered) = pending else {
                 return false;
             };
             let response = handler.deliver(
@@ -505,12 +498,10 @@ where
                     }
                 }
                 Ok(false) => {
-                    Self::restore_subscribers(&subscribers, delivered);
                     warn!(?key, "marshal rejected source resolver delivery");
                     return true;
                 }
                 Err(error) => {
-                    Self::restore_subscribers(&subscribers, delivered);
                     warn!(
                         ?key,
                         ?error,
@@ -518,15 +509,6 @@ where
                     );
                     return true;
                 }
-            }
-        }
-    }
-
-    fn restore_subscribers(subscribers: &Subscribers, delivered: NonEmptyVec<Subscriber>) {
-        let mut subscribers = subscribers.lock();
-        for subscriber in delivered {
-            if !subscribers.contains(&subscriber) {
-                subscribers.push(subscriber);
             }
         }
     }
@@ -766,6 +748,45 @@ mod tests {
     }
 
     #[test_traced]
+    fn retries_when_marshal_rejects_notarized_delivery() {
+        let fixture = TestFixture::new();
+        let notarized = fixture.create_notarized(3, 3);
+        let round = Round::new(alto_types::EPOCH, commonware_consensus::types::View::new(3));
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let source = MockSource::new();
+        {
+            let calls = calls.clone();
+            *source.notarized_handler.lock() = Some(Box::new(move |_| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                Some(notarized.clone())
+            }));
+        }
+
+        deterministic::Runner::default().start(|context| async move {
+            let consumer = TestConsumer::default();
+            let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
+
+            assert!(resolver
+                .fetch(handler::Request::notarized(round))
+                .accepted());
+            let delivery = wait_for_delivery(&context, &consumer).await;
+            delivery.response.send(false).expect("response dropped");
+
+            context
+                .sleep(DEFAULT_FETCH_RETRY_TIMEOUT + Duration::from_millis(100))
+                .await;
+            let retry = wait_for_delivery(&context, &consumer).await;
+            assert!(
+                matches!(retry.delivery.key, handler::Key::Notarized { round: r } if r == round)
+            );
+            retry.response.send(true).expect("response dropped");
+
+            assert_eq!(calls.load(Ordering::Relaxed), 2);
+        });
+    }
+
+    #[test_traced]
     fn deduplicates_identical_subscribers() {
         let fixture = TestFixture::new();
         let block = fixture.create_block(1, 1);
@@ -873,6 +894,76 @@ mod tests {
 
             context.sleep(Duration::from_millis(100)).await;
             assert_eq!(calls.load(Ordering::Relaxed), 1);
+        });
+    }
+
+    #[test_traced]
+    fn retain_keeps_active_delivery_for_retained_subscriber() {
+        let fixture = TestFixture::new();
+        let block = fixture.create_block(2, 2);
+        let digest = block.digest();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let source = MockSource::new();
+        {
+            let calls = calls.clone();
+            *source.block_handler.lock() = Some(Box::new(move |_| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                Some(Payload::Block(Box::new(block.clone())))
+            }));
+        }
+
+        deterministic::Runner::default().start(|context| async move {
+            let consumer = TestConsumer::default();
+            let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
+            let subscriber = handler::Annotation::Certified {
+                height: Height::new(2),
+            };
+
+            assert!(resolver
+                .fetch(handler::Request::certified_block(digest, Height::new(2)))
+                .accepted());
+            let delivery = wait_for_delivery(&context, &consumer).await;
+            assert!(delivery.delivery.subscribers.contains(&subscriber));
+
+            assert!(resolver
+                .retain(move |_, candidate| *candidate == subscriber)
+                .accepted());
+            context.sleep(Duration::from_millis(100)).await;
+
+            delivery.response.send(true).expect("response dropped");
+            context.sleep(Duration::from_millis(100)).await;
+
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
+            assert_eq!(consumer.len(), 0);
+        });
+    }
+
+    #[test_traced]
+    fn retain_cancels_active_delivery_when_no_subscribers_remain() {
+        let fixture = TestFixture::new();
+        let block = fixture.create_block(2, 2);
+        let digest = block.digest();
+
+        let source = MockSource::new();
+        *source.block_handler.lock() = Some(Box::new(move |_| {
+            Some(Payload::Block(Box::new(block.clone())))
+        }));
+
+        deterministic::Runner::default().start(|context| async move {
+            let consumer = TestConsumer::default();
+            let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
+
+            assert!(resolver
+                .fetch(handler::Request::certified_block(digest, Height::new(2)))
+                .accepted());
+            let delivery = wait_for_delivery(&context, &consumer).await;
+
+            assert!(resolver.retain(|_, _| false).accepted());
+            context.sleep(Duration::from_millis(100)).await;
+
+            assert!(delivery.response.send(true).is_err());
+            assert_eq!(consumer.len(), 0);
         });
     }
 
