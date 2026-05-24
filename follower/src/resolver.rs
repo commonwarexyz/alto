@@ -82,22 +82,33 @@ impl commonware_resolver::Resolver for Resolver {
 }
 
 impl Resolver {
+    /// Submit a resolver message to the actor mailbox and return mailbox feedback.
     fn send(&self, message: Message) -> Feedback {
         self.mailbox.enqueue(message)
     }
 }
 
 enum Message {
+    // Fetch requests can be coalesced by resolver key while preserving every
+    // distinct local subscriber that needs the resolved value.
     Fetch(Vec<FetchKey>),
+    // Retain predicates are marshal pruning updates. They remove subscribers
+    // from both queued and active requests.
     Retain(RetainPredicate),
 }
 
+// A peer-visible resolver key plus the local marshal annotations waiting on it.
+//
+// Marshal may ask for the same key for multiple reasons. Keeping subscribers
+// grouped here lets overflow and the actor deduplicate the network fetch while
+// still notifying every local path that depends on the value.
 struct FetchKey {
     key: Key,
     subscribers: NonEmptyVec<Subscriber>,
 }
 
 impl From<FetchRequest> for FetchKey {
+    /// Convert a resolver fetch into the actor's coalesced key format.
     fn from(fetch: FetchRequest) -> Self {
         Self {
             key: fetch.key,
@@ -108,7 +119,11 @@ impl From<FetchRequest> for FetchKey {
 
 #[derive(Default)]
 struct Pending {
+    // Retain predicates are drained before fetches so pruning updates can drop
+    // stale queued work before it reaches the actor.
     modifications: VecDeque<RetainPredicate>,
+    // Queued fetches are coalesced by key. Each entry owns all subscribers that
+    // still need the value for that key.
     fetches: Vec<FetchKey>,
 }
 
@@ -117,6 +132,7 @@ impl mailbox::Overflow<Message> for Pending {
         self.modifications.is_empty() && self.fetches.is_empty()
     }
 
+    /// Refill the ready queue with retained messages in actor-visible order.
     fn drain<F>(&mut self, mut push: F)
     where
         F: FnMut(Message) -> Option<Message>,
@@ -124,6 +140,8 @@ impl mailbox::Overflow<Message> for Pending {
         while let Some(predicate) = self.modifications.pop_front() {
             let message = Message::Retain(predicate);
             if let Some(message) = push(message) {
+                // Ready is full again. Put back the retain predicate that was
+                // not delivered so its relative order with later retains is kept.
                 self.push_front(message);
                 return;
             }
@@ -132,6 +150,8 @@ impl mailbox::Overflow<Message> for Pending {
         if !self.fetches.is_empty() {
             let fetches = std::mem::take(&mut self.fetches);
             if let Some(message) = push(Message::Fetch(fetches)) {
+                // Any undelivered fetch batch still represents pending demand.
+                // Restore it at the front of the retained fetch set.
                 self.push_front(message);
             }
         }
@@ -139,6 +159,7 @@ impl mailbox::Overflow<Message> for Pending {
 }
 
 impl Pending {
+    /// Restore a message that could not be pushed back into the ready queue.
     fn push_front(&mut self, message: Message) {
         match message {
             Message::Fetch(fetches) => {
@@ -151,17 +172,23 @@ impl Pending {
     }
 }
 
+/// Apply a retain predicate to a queued fetch and drop it if no subscribers remain.
 fn retain_fetch(
     mut fetch: FetchKey,
     predicate: &(dyn Fn(&Key, &Subscriber) -> bool + Send),
 ) -> Option<FetchKey> {
+    // A retain predicate can remove some local subscribers without invalidating
+    // the shared peer-visible key for the subscribers that remain.
     let mut subscribers = fetch.subscribers.into_vec();
     subscribers.retain(|subscriber| predicate(&fetch.key, subscriber));
     fetch.subscribers = NonEmptyVec::try_from(subscribers).ok()?;
     Some(fetch)
 }
 
+/// Merge a new subscriber set into an existing key without duplicate annotations.
 fn merge_subscribers(existing: &mut NonEmptyVec<Subscriber>, incoming: NonEmptyVec<Subscriber>) {
+    // Subscribers are local processing annotations. Duplicate annotations do not
+    // need duplicate delivery attempts for the same resolved value.
     for subscriber in incoming {
         if !existing.contains(&subscriber) {
             existing.push(subscriber);
@@ -172,6 +199,7 @@ fn merge_subscribers(existing: &mut NonEmptyVec<Subscriber>, incoming: NonEmptyV
 impl mailbox::Policy for Message {
     type Overflow = Pending;
 
+    /// Retain, prune, and coalesce messages that arrive while the ready queue is full.
     fn handle(overflow: &mut Pending, message: Self) {
         match message {
             Self::Fetch(fetches) => {
@@ -188,6 +216,8 @@ impl mailbox::Policy for Message {
                 }
             }
             Self::Retain(predicate) => {
+                // Apply the pruning update to fetches still trapped in overflow,
+                // then retain the predicate so active actor state observes it too.
                 overflow.fetches = std::mem::take(&mut overflow.fetches)
                     .into_iter()
                     .filter_map(|fetch| retain_fetch(fetch, predicate.as_ref()))
@@ -212,9 +242,18 @@ struct Actor<
     client: C,
     mailbox: mailbox::Receiver<Message>,
     handler: H,
+    // Runs source fetches and marshal deliveries concurrently. The per-request
+    // Attempt owns each aborter, so removing/replacing the Attempt cancels the
+    // corresponding future.
     active: AbortablePool<Completion>,
+    // Keys with a source fetch, marshal delivery, or retry currently outstanding.
     requests: BTreeMap<Key, Attempt>,
+    // Local subscribers still waiting for each key. This is separate from
+    // Attempt so retain predicates can prune subscribers without depending on
+    // whether the key is fetching, delivering, or scheduled for retry.
     subscribers: BTreeMap<Key, BTreeSet<Subscriber>>,
+    // Mirrors Attempt::Scheduled deadlines so the actor can sleep until the next
+    // retry without scanning every request.
     retry_schedule: BTreeSet<(SystemTime, Key)>,
     fetch_retry_timeout: Duration,
     next_id: u64,
@@ -244,11 +283,14 @@ enum Attempt {
 }
 
 enum Completion {
+    // Completed source lookup. A Value still needs to be delivered to marshal
+    // before this resolver can treat the request as satisfied.
     Fetched {
         key: Key,
         id: u64,
         result: FetchResult,
     },
+    // Completed marshal validation for one batch of local subscribers.
     Delivered {
         key: Key,
         id: u64,
@@ -258,7 +300,10 @@ enum Completion {
 }
 
 enum FetchResult {
+    // Encoded bytes returned by the Source. Marshal validates the bytes before
+    // they are considered accepted.
     Value(Bytes),
+    // Any source error or wrong payload type is retried while subscribers remain.
     Retry,
 }
 
@@ -317,14 +362,18 @@ where
         }
     }
 
+    /// Spawn the resolver actor on its runtime context.
     fn start(mut self) -> Handle<()> {
         spawn_cell!(self.context, self.run())
     }
 
+    /// Drive mailbox messages, source fetch completions, delivery completions, and retries.
     async fn run(mut self) {
         select_loop! {
             self.context,
             on_stopped => {},
+            // Aborted futures also complete through this pool. They are ignored
+            // by the `Ok(...)` pattern and by the id checks below if stale.
             Ok(result) = self.active.next_completed() else continue => {
                 self.handle_completed(result);
             },
@@ -340,6 +389,7 @@ where
         }
     }
 
+    /// Apply a single actor message to resolver state.
     fn handle_message(&mut self, message: Message) {
         match message {
             Message::Fetch(fetches) => {
@@ -351,6 +401,7 @@ where
         }
     }
 
+    /// Add subscribers for a key and start the first source fetch if needed.
     fn add_fetch(&mut self, fetch: FetchKey) {
         let FetchKey { key, subscribers } = fetch;
         let is_new = !self.requests.contains_key(&key);
@@ -358,12 +409,15 @@ where
         subscribers_for_key.extend(subscribers);
 
         if is_new {
+            // Insert a scheduled placeholder before starting the fetch so
+            // start_fetch can atomically replace it with an active attempt.
             self.requests
                 .insert(key, Attempt::Scheduled(self.context.current()));
             self.start_fetch(key);
         }
     }
 
+    /// Prune subscribers that no longer satisfy marshal's retain predicate.
     fn retain(&mut self, predicate: RetainPredicate) {
         let mut removed = Vec::new();
         for (key, subscribers) in self.subscribers.iter_mut() {
@@ -375,17 +429,23 @@ where
 
         for key in removed {
             self.subscribers.remove(&key);
+            // Removing an active Attempt drops its aborter, which cancels any
+            // source fetch or marshal delivery no longer needed by subscribers.
             if let Some(Attempt::Scheduled(deadline)) = self.requests.remove(&key) {
                 self.retry_schedule.remove(&(deadline, key));
             }
         }
     }
 
+    /// Start a source fetch attempt for an already-registered key.
     fn start_fetch(&mut self, key: Key) {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
         let future = Self::fetch(key, id, self.client.clone());
         let aborter = self.active.push(future);
+        // The aborter is kept for its Drop behavior. Dropping/replacing this
+        // Attempt aborts the fetch; dropping it immediately would cancel the
+        // newly pushed future.
         self.requests.insert(
             key,
             Attempt::Fetching {
@@ -395,6 +455,7 @@ where
         );
     }
 
+    /// Start delivery of fetched bytes to marshal for the current subscriber batch.
     fn start_delivery(
         &mut self,
         key: Key,
@@ -406,6 +467,9 @@ where
         self.next_id = self.next_id.wrapping_add(1);
         let future = Self::deliver_once(key, id, value.clone(), self.handler.clone(), delivered);
         let aborter = self.active.push(future);
+        // Retain the fetched bytes while marshal validates this delivery. If a
+        // new subscriber arrives before validation finishes, the accepted bytes
+        // can be redelivered locally instead of issuing another source request.
         self.requests.insert(
             key,
             Attempt::Delivering {
@@ -417,9 +481,12 @@ where
         );
     }
 
+    /// Dispatch an active future completion after rejecting stale attempt ids.
     fn handle_completed(&mut self, completion: Completion) {
         match completion {
             Completion::Fetched { key, id, result } => {
+                // A completion can race with retain cancellation or a replacement
+                // attempt. Only the id currently recorded for the key may mutate state.
                 if !self.current_fetch(key, id) {
                     return;
                 }
@@ -431,6 +498,8 @@ where
                 delivered,
                 valid,
             } => {
+                // Deliveries are also id-checked because retain or retry handling
+                // may have replaced the attempt while marshal was validating.
                 if !self.current_delivery(key, id) {
                     return;
                 }
@@ -439,6 +508,7 @@ where
         }
     }
 
+    /// Return whether a source fetch completion belongs to the current attempt.
     fn current_fetch(&self, key: Key, id: u64) -> bool {
         let Some(attempt) = self.requests.get(&key) else {
             trace!(?key, id, "ignoring stale fetch completion");
@@ -462,6 +532,7 @@ where
         }
     }
 
+    /// Return whether a marshal delivery completion belongs to the current attempt.
     fn current_delivery(&self, key: Key, id: u64) -> bool {
         let Some(attempt) = self.requests.get(&key) else {
             trace!(?key, id, "ignoring stale delivery completion");
@@ -490,11 +561,14 @@ where
         }
     }
 
+    /// Transition a completed source lookup into retry, delivery, or cleanup.
     fn handle_fetched(&mut self, key: Key, result: FetchResult) {
         match result {
             FetchResult::Retry => self.schedule_retry(key),
             FetchResult::Value(value) => {
                 if let Some(subscribers) = self.pending_subscribers(key) {
+                    // Source data is not accepted until marshal validates it, so
+                    // transition into delivery rather than completing the request.
                     self.start_delivery(key, value, subscribers, false);
                 } else {
                     self.requests.remove(&key);
@@ -504,6 +578,7 @@ where
         }
     }
 
+    /// Update subscriber state after marshal accepts or rejects a delivery batch.
     fn handle_delivered(&mut self, key: Key, delivered: NonEmptyVec<Subscriber>, valid: bool) {
         let (accepted, value) = match self.requests.get(&key).expect("request missing") {
             Attempt::Delivering {
@@ -513,6 +588,9 @@ where
         };
 
         if valid {
+            // Marshal accepted this value for the delivered subscriber set. Remove
+            // those subscribers, then redeliver the same value to any subscribers
+            // that arrived while validation was in flight.
             let remaining = self.subscribers.get_mut(&key).and_then(|subscribers| {
                 for subscriber in delivered {
                     subscribers.remove(&subscriber);
@@ -530,6 +608,9 @@ where
         }
 
         if accepted {
+            // The same bytes were already accepted for an earlier subscriber. A
+            // later local rejection should not cause an external refetch for data
+            // known to be peer-valid, so drop the remaining local demand.
             warn!(
                 ?key,
                 "previously accepted source resolver response rejected during local redelivery",
@@ -542,22 +623,26 @@ where
         self.schedule_retry(key);
     }
 
+    /// Snapshot the subscribers currently waiting on a key.
     fn pending_subscribers(&self, key: Key) -> Option<NonEmptyVec<Subscriber>> {
         self.subscribers.get(&key).and_then(|subscribers| {
             NonEmptyVec::try_from(subscribers.iter().cloned().collect::<Vec<_>>()).ok()
         })
     }
 
+    /// Queue a retry for a key that still has active local demand.
     fn schedule_retry(&mut self, key: Key) {
         let deadline = self.context.current() + self.fetch_retry_timeout;
         let Some(attempt) = self.requests.get_mut(&key) else {
             return;
         };
+        // Replacing Fetching/Delivering drops the aborter for the failed attempt.
         *attempt = Attempt::Scheduled(deadline);
         self.retry_schedule.insert((deadline, key));
         debug!(?key, ?deadline, "scheduled source resolver retry");
     }
 
+    /// Start all retry attempts whose deadlines have elapsed.
     fn process_retries(&mut self) {
         let now = self.context.current();
         while let Some((deadline, key)) = self.retry_schedule.pop_first() {
@@ -574,12 +659,17 @@ where
                     debug!(?key, "retrying source resolver fetch");
                     self.start_fetch(key);
                 }
+                // A stale schedule entry may remain after the request was
+                // rescheduled. Active attempts do not need retry work yet.
                 Attempt::Scheduled(_) | Attempt::Fetching { .. } | Attempt::Delivering { .. } => {}
             }
         }
     }
 
+    /// Fetch and encode a value from the source for a resolver key.
     async fn fetch(key: Key, id: u64, client: C) -> Completion {
+        // Source calls intentionally only fetch and encode. Signature and chain
+        // validation are left to marshal through deliver_once.
         let result = match key {
             handler::Key::Block(digest) => Self::fetch_block_by_digest(digest, client).await,
             handler::Key::Finalized { height } => {
@@ -592,6 +682,7 @@ where
         Completion::Fetched { key, id, result }
     }
 
+    /// Fetch and encode a block response by digest.
     async fn fetch_block_by_digest(digest: Digest, client: C) -> FetchResult {
         debug!(?digest, "fetching block by digest");
         match client.block(Query::Digest(digest)).await {
@@ -610,6 +701,7 @@ where
         }
     }
 
+    /// Fetch and encode a finalization plus block by finalized height.
     async fn fetch_finalized_by_height(height: Height, client: C) -> FetchResult {
         debug!(height = height.get(), "fetching finalized block by height");
         match client.block(Query::Index(height.get())).await {
@@ -639,6 +731,7 @@ where
         }
     }
 
+    /// Fetch and encode a notarization plus block by consensus round.
     async fn fetch_notarized_by_round(round: Round, client: C) -> FetchResult {
         let view = round.view().get();
         debug!(view, "fetching notarized block by round");
@@ -658,6 +751,7 @@ where
         }
     }
 
+    /// Deliver one subscriber batch to marshal and report its validation result.
     async fn deliver_once(
         key: Key,
         id: u64,
@@ -665,6 +759,8 @@ where
         mut handler: H,
         delivered: NonEmptyVec<Subscriber>,
     ) -> Completion {
+        // Handler::deliver sends the value into marshal and resolves only after
+        // marshal has accepted or rejected the delivery.
         let response = handler.deliver(
             Delivery {
                 key,
@@ -699,13 +795,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{MockSource, TestFixture};
+    use crate::test_utils::{MockError, MockSource, TestFixture};
     use alto_client::Query;
     use commonware_cryptography::{ed25519::PrivateKey, Digestible, Signer};
     use commonware_macros::test_traced;
     use commonware_resolver::Resolver as _;
     use commonware_runtime::{deterministic, Clock, Runner as _, Supervisor as _};
     use commonware_utils::{channel::oneshot, sync::Mutex, NZUsize};
+    use futures::stream;
     use std::sync::{
         atomic::{AtomicU32, Ordering},
         Arc,
@@ -754,9 +851,81 @@ mod tests {
         }
     }
 
-    fn start_resolver(
+    struct DropSignal(Arc<Mutex<Option<oneshot::Sender<()>>>>);
+
+    impl Drop for DropSignal {
+        fn drop(&mut self) {
+            if let Some(sender) = self.0.lock().take() {
+                let _ = sender.send(());
+            }
+        }
+    }
+
+    #[derive(Clone)]
+    struct BlockingSource {
+        started: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+        dropped: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    }
+
+    impl BlockingSource {
+        fn new() -> (Self, oneshot::Receiver<()>, oneshot::Receiver<()>) {
+            let (started_tx, started_rx) = oneshot::channel();
+            let (dropped_tx, dropped_rx) = oneshot::channel();
+            (
+                Self {
+                    started: Arc::new(Mutex::new(Some(started_tx))),
+                    dropped: Arc::new(Mutex::new(Some(dropped_tx))),
+                },
+                started_rx,
+                dropped_rx,
+            )
+        }
+    }
+
+    impl Source for BlockingSource {
+        type Error = MockError;
+
+        async fn health(&self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        async fn block(&self, _query: Query) -> Result<Payload, Self::Error> {
+            if let Some(sender) = self.started.lock().take() {
+                let _ = sender.send(());
+            }
+            let _drop_signal = DropSignal(self.dropped.clone());
+            std::future::pending::<Result<Payload, Self::Error>>().await
+        }
+
+        async fn notarized(
+            &self,
+            _query: IndexQuery,
+        ) -> Result<alto_types::Notarized, Self::Error> {
+            Err(MockError("notarized not supported".to_string()))
+        }
+
+        async fn finalized(
+            &self,
+            _query: IndexQuery,
+        ) -> Result<alto_types::Finalized, Self::Error> {
+            Err(MockError("finalized not supported".to_string()))
+        }
+
+        async fn listen(
+            &self,
+        ) -> Result<
+            impl futures::Stream<Item = Result<alto_client::consensus::Message, Self::Error>>
+                + Send
+                + Unpin,
+            Self::Error,
+        > {
+            Ok(stream::empty())
+        }
+    }
+
+    fn start_resolver<C: Source>(
         context: deterministic::Context,
-        source: MockSource,
+        source: C,
         consumer: TestConsumer,
     ) -> Resolver {
         let (mailbox_tx, mailbox_rx) = mailbox::new(context.child("mailbox"), NZUsize!(16));
@@ -1080,6 +1249,50 @@ mod tests {
     }
 
     #[test_traced]
+    fn accepted_redelivery_rejection_does_not_refetch() {
+        let fixture = TestFixture::new();
+        let block = fixture.create_block(1, 1);
+        let digest = block.digest();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let source = MockSource::new();
+        {
+            let calls = calls.clone();
+            *source.block_handler.lock() = Some(Box::new(move |_| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                Some(Payload::Block(Box::new(block.clone())))
+            }));
+        }
+
+        deterministic::Runner::default().start(|context| async move {
+            let consumer = TestConsumer::default();
+            let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
+            let height = Height::new(1);
+
+            assert!(resolver
+                .fetch(handler::Request::certified_block(digest, height))
+                .accepted());
+            let first = wait_for_delivery(&context, &consumer).await;
+
+            assert!(resolver
+                .fetch(handler::Request::finalized_block_by_height(digest, height))
+                .accepted());
+            context.sleep(Duration::from_millis(100)).await;
+            first.response.send(true).expect("response dropped");
+
+            let second = wait_for_delivery(&context, &consumer).await;
+            assert!(matches!(second.delivery.key, handler::Key::Block(d) if d == digest));
+            second.response.send(false).expect("response dropped");
+
+            context
+                .sleep(DEFAULT_FETCH_RETRY_TIMEOUT + Duration::from_millis(100))
+                .await;
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
+            assert_eq!(consumer.len(), 0);
+        });
+    }
+
+    #[test_traced]
     fn retain_keeps_active_delivery_for_retained_subscriber() {
         let fixture = TestFixture::new();
         let block = fixture.create_block(2, 2);
@@ -1150,6 +1363,29 @@ mod tests {
     }
 
     #[test_traced]
+    fn retain_cancels_active_fetch_when_no_subscribers_remain() {
+        let fixture = TestFixture::new();
+        let digest = fixture.create_block(2, 2).digest();
+
+        deterministic::Runner::default().start(|context| async move {
+            let (source, started, dropped) = BlockingSource::new();
+            let consumer = TestConsumer::default();
+            let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
+
+            assert!(resolver
+                .fetch(handler::Request::certified_block(digest, Height::new(2)))
+                .accepted());
+            started.await.expect("source fetch did not start");
+
+            assert!(resolver.retain(|_, _| false).accepted());
+            dropped.await.expect("source fetch was not aborted");
+
+            context.sleep(Duration::from_millis(100)).await;
+            assert_eq!(consumer.len(), 0);
+        });
+    }
+
+    #[test_traced]
     fn retain_removes_unwanted_subscribers() {
         let fixture = TestFixture::new();
         let digest = fixture.create_block(1, 1).digest();
@@ -1194,6 +1430,77 @@ mod tests {
                 .expect("request should be retained")
                 .clone();
             assert_eq!(subscribers, BTreeSet::from([keep]));
+        });
+    }
+
+    #[test_traced]
+    fn overflow_retain_prunes_queued_fetches_before_delivery() {
+        let fixture = TestFixture::new();
+        let ready_digest = fixture.create_block(1, 1).digest();
+        let queued_digest = fixture.create_block(2, 2).digest();
+
+        deterministic::Runner::default().start(|context| async move {
+            let (mailbox_tx, mut mailbox_rx) = mailbox::new(context.child("mailbox"), NZUsize!(1));
+            let mut resolver = Resolver {
+                mailbox: mailbox_tx,
+            };
+            let discard = handler::Annotation::Certified {
+                height: Height::new(2),
+            };
+            let keep = handler::Annotation::Finalized(handler::Finalized::ByHeight {
+                height: Height::new(2),
+            });
+
+            assert!(resolver
+                .fetch(handler::Request::certified_block(
+                    ready_digest,
+                    Height::new(1)
+                ))
+                .accepted());
+            assert!(resolver
+                .fetch(handler::Request::certified_block(
+                    queued_digest,
+                    Height::new(2)
+                ))
+                .accepted());
+            assert!(resolver
+                .fetch(handler::Request::finalized_block_by_height(
+                    queued_digest,
+                    Height::new(2)
+                ))
+                .accepted());
+            assert!(resolver
+                .retain(move |key, subscriber| {
+                    !matches!(key, handler::Key::Block(digest) if *digest == queued_digest)
+                        || *subscriber == keep
+                })
+                .accepted());
+
+            let ready = mailbox_rx.recv().await.expect("missing ready fetch");
+            let Message::Fetch(fetches) = ready else {
+                panic!("expected initial ready fetch");
+            };
+            assert_eq!(fetches.len(), 1);
+            assert!(
+                matches!(fetches[0].key, handler::Key::Block(digest) if digest == ready_digest)
+            );
+
+            let retained = mailbox_rx.recv().await.expect("missing retained predicate");
+            let Message::Retain(_) = retained else {
+                panic!("expected retain to drain before queued fetch");
+            };
+
+            let queued = mailbox_rx.recv().await.expect("missing queued fetch");
+            let Message::Fetch(fetches) = queued else {
+                panic!("expected retained fetch");
+            };
+            assert_eq!(fetches.len(), 1);
+            assert!(
+                matches!(fetches[0].key, handler::Key::Block(digest) if digest == queued_digest)
+            );
+            assert_eq!(fetches[0].subscribers.len().get(), 1);
+            assert!(fetches[0].subscribers.contains(&keep));
+            assert!(!fetches[0].subscribers.contains(&discard));
         });
     }
 
