@@ -831,8 +831,8 @@
                         "uid": "PBFA97CFB590B2093"
                     },
                     "disableTextWrap": false,
-                    "editorMode": "builder",
-                    "expr": "network_tracker_directory_blocked_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
+                    "editorMode": "code",
+                    "expr": "sum by(deployer_name, deployer_ip) (network_tracker_directory_blocked_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}) or on(deployer_name, deployer_ip) (0 * sum by(deployer_name, deployer_ip) (network_tracker_directory_tracked{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}))",
                     "fullMetaSearch": false,
                     "includeNullMetadata": true,
                     "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
@@ -3827,7 +3827,7 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
+                "w": 6,
                 "x": 0,
                 "y": 91
             },
@@ -3925,8 +3925,8 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
-                "x": 8,
+                "w": 6,
+                "x": 6,
                 "y": 91
             },
             "id": 47,
@@ -4023,8 +4023,8 @@
             },
             "gridPos": {
                 "h": 9,
-                "w": 8,
-                "x": 16,
+                "w": 6,
+                "x": 12,
                 "y": 91
             },
             "id": 48,
@@ -4046,7 +4046,7 @@
                 {
                     "disableTextWrap": false,
                     "editorMode": "code",
-                    "expr": "sum by(deployer_name, deployer_ip) (rate(runtime_storage_buffer_pool_buffer_pool_exhausted_total_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval]))",
+                    "expr": "sum by(deployer_name, deployer_ip) (rate(runtime_storage_buffer_pool_buffer_pool_exhausted_total_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])) or on(deployer_name, deployer_ip) (0 * sum by(deployer_name, deployer_ip) (runtime_storage_buffer_pool_buffer_pool_created{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}))",
                     "fullMetaSearch": false,
                     "includeNullMetadata": true,
                     "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
@@ -4056,6 +4056,104 @@
                 }
             ],
             "title": "Storage Buffer Pool Exhaustion",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 0,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    },
+                    "unit": "ops"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 9,
+                "w": 6,
+                "x": 18,
+                "y": 91
+            },
+            "id": 49,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": false
+                },
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "pluginVersion": "11.5.2",
+            "targets": [
+                {
+                    "disableTextWrap": false,
+                    "editorMode": "code",
+                    "expr": "sum by(deployer_name, deployer_ip) (rate(runtime_network_buffer_pool_buffer_pool_exhausted_total_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])) or on(deployer_name, deployer_ip) (0 * sum by(deployer_name, deployer_ip) (runtime_network_buffer_pool_buffer_pool_created{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}))",
+                    "fullMetaSearch": false,
+                    "includeNullMetadata": true,
+                    "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
+                    "range": true,
+                    "refId": "A",
+                    "useBackend": false
+                }
+            ],
+            "title": "Network Buffer Pool Exhaustion",
             "type": "timeseries"
         },
         {
