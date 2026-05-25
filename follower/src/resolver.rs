@@ -16,10 +16,6 @@ type Key = handler::Key<Digest>;
 type Subscriber = handler::Annotation;
 pub type Resolver = opaque::Resolver<Key, Subscriber, PublicKey>;
 
-/// Fetches and encodes marshal resolver payloads from an Alto source client.
-#[derive(Clone)]
-struct SourceFetcher<C>(C);
-
 /// Start the follower resolver and marshal handler backed by `client`.
 pub fn init<E, C>(
     context: E,
@@ -34,7 +30,7 @@ where
     let (handler_rx, handler) = handler::init(context.child("handler"), mailbox_size);
     let resolver = opaque::init::<_, _, _, PublicKey>(
         context.child("resolver"),
-        SourceFetcher(client),
+        Fetcher::new(client),
         handler,
         mailbox_size,
         fetch_retry_timeout,
@@ -42,7 +38,17 @@ where
     (handler_rx, resolver)
 }
 
-impl<C> opaque::Fetcher for SourceFetcher<C>
+/// Fetches and encodes marshal resolver payloads from an Alto source client.
+#[derive(Clone)]
+struct Fetcher<C>(C);
+
+impl<C> Fetcher<C> {
+    const fn new(client: C) -> Self {
+        Self(client)
+    }
+}
+
+impl<C> opaque::Fetcher for Fetcher<C>
 where
     C: Source,
 {
@@ -65,7 +71,7 @@ where
     }
 }
 
-impl<C> SourceFetcher<C>
+impl<C> Fetcher<C>
 where
     C: Source,
 {
@@ -271,7 +277,7 @@ mod tests {
     ) -> Resolver {
         opaque::init::<_, _, _, PublicKey>(
             context,
-            SourceFetcher(source),
+            Fetcher::new(source),
             consumer,
             NZUsize!(16),
             DEFAULT_FETCH_RETRY_TIMEOUT,
