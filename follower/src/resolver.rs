@@ -16,7 +16,7 @@ type Key = handler::Key<Digest>;
 type Subscriber = handler::Annotation;
 pub type Resolver = opaque::Resolver<Key, Subscriber, PublicKey>;
 
-/// Adapts an Alto source client to the resolver's opaque raw fetch API.
+/// Fetches and encodes marshal resolver payloads from an Alto source client.
 #[derive(Clone)]
 struct SourceFetcher<C>(C);
 
