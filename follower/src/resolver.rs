@@ -11,6 +11,8 @@ use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
 use commonware_macros::select_loop;
 use commonware_resolver::{
     delivery::{Completion as DeliveryCompletion, Tracker as DeliveryTracker},
+    ingress,
+    subscribers::Tracker as SubscriberTracker,
     Consumer, Delivery, Fetch,
 };
 use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner};
@@ -20,7 +22,7 @@ use commonware_utils::{
 };
 use futures::future::{self, Either};
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet},
     num::NonZeroUsize,
     time::{Duration, SystemTime},
 };
@@ -28,8 +30,9 @@ use tracing::{debug, trace, warn};
 
 type Key = handler::Key<Digest>;
 type Subscriber = handler::Annotation;
-type FetchRequest = Fetch<Key, Subscriber>;
-type RetainPredicate = Box<dyn Fn(&Key, &Subscriber) -> bool + Send>;
+type FetchKey = ingress::FetchKey<Key, Subscriber>;
+type Message = ingress::Message<Key, Subscriber>;
+type RetainPredicate = ingress::Predicate<Key, Subscriber>;
 
 /// Handle to the source-backed resolver actor used by marshal.
 #[derive(Clone)]
@@ -80,7 +83,9 @@ impl commonware_resolver::Resolver for Resolver {
         &mut self,
         predicate: impl Fn(&Self::Key, &Self::Subscriber) -> bool + Send + 'static,
     ) -> Feedback {
-        self.send(Message::Retain(Box::new(predicate)))
+        self.send(Message::Retain {
+            predicate: Box::new(predicate),
+        })
     }
 }
 
@@ -88,146 +93,6 @@ impl Resolver {
     /// Submit a resolver message to the actor mailbox and return mailbox feedback.
     fn send(&self, message: Message) -> Feedback {
         self.mailbox.enqueue(message)
-    }
-}
-
-enum Message {
-    // Fetch requests can be coalesced by resolver key while preserving every
-    // distinct local subscriber that needs the resolved value.
-    Fetch(Vec<FetchKey>),
-    // Retain predicates are marshal pruning updates. They remove subscribers
-    // from both queued and active requests.
-    Retain(RetainPredicate),
-}
-
-// A peer-visible resolver key plus the local marshal annotations waiting on it.
-//
-// Marshal may ask for the same key for multiple reasons. Keeping subscribers
-// grouped here lets overflow and the actor deduplicate the network fetch while
-// still notifying every local path that depends on the value.
-struct FetchKey {
-    key: Key,
-    subscribers: NonEmptyVec<Subscriber>,
-}
-
-impl From<FetchRequest> for FetchKey {
-    /// Convert a resolver fetch into the actor's coalesced key format.
-    fn from(fetch: FetchRequest) -> Self {
-        Self {
-            key: fetch.key,
-            subscribers: NonEmptyVec::new(fetch.subscriber),
-        }
-    }
-}
-
-#[derive(Default)]
-struct Pending {
-    // Retain predicates are drained before fetches so pruning updates can drop
-    // stale queued work before it reaches the actor.
-    modifications: VecDeque<RetainPredicate>,
-    // Queued fetches are coalesced by key. Each entry owns all subscribers that
-    // still need the value for that key.
-    fetches: Vec<FetchKey>,
-}
-
-impl mailbox::Overflow<Message> for Pending {
-    fn is_empty(&self) -> bool {
-        self.modifications.is_empty() && self.fetches.is_empty()
-    }
-
-    /// Refill the ready queue with retained messages in actor-visible order.
-    fn drain<F>(&mut self, mut push: F)
-    where
-        F: FnMut(Message) -> Option<Message>,
-    {
-        while let Some(predicate) = self.modifications.pop_front() {
-            let message = Message::Retain(predicate);
-            if let Some(message) = push(message) {
-                // Ready is full again. Put back the retain predicate that was
-                // not delivered so its relative order with later retains is kept.
-                self.push_front(message);
-                return;
-            }
-        }
-
-        if !self.fetches.is_empty() {
-            let fetches = std::mem::take(&mut self.fetches);
-            if let Some(message) = push(Message::Fetch(fetches)) {
-                // Any undelivered fetch batch still represents pending demand.
-                // Restore it at the front of the retained fetch set.
-                self.push_front(message);
-            }
-        }
-    }
-}
-
-impl Pending {
-    /// Restore a message that could not be pushed back into the ready queue.
-    fn push_front(&mut self, message: Message) {
-        match message {
-            Message::Fetch(fetches) => {
-                self.fetches.splice(0..0, fetches);
-            }
-            Message::Retain(predicate) => {
-                self.modifications.push_front(predicate);
-            }
-        }
-    }
-}
-
-/// Apply a retain predicate to a queued fetch and drop it if no subscribers remain.
-fn retain_fetch(
-    mut fetch: FetchKey,
-    predicate: &(dyn Fn(&Key, &Subscriber) -> bool + Send),
-) -> Option<FetchKey> {
-    // A retain predicate can remove some local subscribers without invalidating
-    // the shared peer-visible key for the subscribers that remain.
-    let mut subscribers = fetch.subscribers.into_vec();
-    subscribers.retain(|subscriber| predicate(&fetch.key, subscriber));
-    fetch.subscribers = NonEmptyVec::try_from(subscribers).ok()?;
-    Some(fetch)
-}
-
-/// Merge a new subscriber set into an existing key without duplicate annotations.
-fn merge_subscribers(existing: &mut NonEmptyVec<Subscriber>, incoming: NonEmptyVec<Subscriber>) {
-    // Subscribers are local processing annotations. Duplicate annotations do not
-    // need duplicate delivery attempts for the same resolved value.
-    for subscriber in incoming {
-        if !existing.contains(&subscriber) {
-            existing.push(subscriber);
-        }
-    }
-}
-
-impl mailbox::Policy for Message {
-    type Overflow = Pending;
-
-    /// Retain, prune, and coalesce messages that arrive while the ready queue is full.
-    fn handle(overflow: &mut Pending, message: Self) {
-        match message {
-            Self::Fetch(fetches) => {
-                for fetch in fetches {
-                    if let Some(existing) = overflow
-                        .fetches
-                        .iter_mut()
-                        .find(|existing| existing.key == fetch.key)
-                    {
-                        merge_subscribers(&mut existing.subscribers, fetch.subscribers);
-                    } else {
-                        overflow.fetches.push(fetch);
-                    }
-                }
-            }
-            Self::Retain(predicate) => {
-                // Apply the pruning update to fetches still trapped in overflow,
-                // then retain the predicate so active actor state observes it too.
-                overflow.fetches = std::mem::take(&mut overflow.fetches)
-                    .into_iter()
-                    .filter_map(|fetch| retain_fetch(fetch, predicate.as_ref()))
-                    .collect();
-                overflow.modifications.push_back(predicate);
-            }
-        }
     }
 }
 
@@ -256,7 +121,7 @@ struct Actor<
     // Local subscribers still waiting for each key. This is separate from
     // Attempt so retain predicates can prune subscribers without depending on
     // whether the key is fetching, delivering, or scheduled for retry.
-    subscribers: BTreeMap<Key, BTreeSet<Subscriber>>,
+    subscribers: SubscriberTracker<Key, Subscriber>,
     // Mirrors Attempt::Scheduled deadlines so the actor can sleep until the next
     // retry without scanning every request.
     retry_schedule: BTreeSet<(SystemTime, Key)>,
@@ -338,7 +203,7 @@ where
             deliveries: DeliveryTracker::new(handler),
             fetches: AbortablePool::default(),
             requests: BTreeMap::new(),
-            subscribers: BTreeMap::new(),
+            subscribers: SubscriberTracker::new(),
             retry_schedule: BTreeSet::new(),
             fetch_retry_timeout,
             next_id: 0,
@@ -387,16 +252,14 @@ where
                     self.add_fetch(fetch);
                 }
             }
-            Message::Retain(predicate) => self.retain(predicate),
+            Message::Retain { predicate } => self.retain(predicate),
         }
     }
 
     /// Add subscribers for a key and start the first source fetch if needed.
     fn add_fetch(&mut self, fetch: FetchKey) {
         let FetchKey { key, subscribers } = fetch;
-        let is_new = !self.requests.contains_key(&key);
-        let subscribers_for_key = self.subscribers.entry(key).or_default();
-        subscribers_for_key.extend(subscribers);
+        let is_new = self.subscribers.insert(key, subscribers);
 
         if is_new {
             assert!(self.deliveries.insert(key), "delivery entry");
@@ -410,16 +273,10 @@ where
 
     /// Prune subscribers that no longer satisfy marshal's retain predicate.
     fn retain(&mut self, predicate: RetainPredicate) {
-        let mut removed = Vec::new();
-        for (key, subscribers) in self.subscribers.iter_mut() {
-            subscribers.retain(|subscriber| predicate(key, subscriber));
-            if subscribers.is_empty() {
-                removed.push(*key);
-            }
-        }
-
-        for key in removed {
-            self.subscribers.remove(&key);
+        for key in self
+            .subscribers
+            .retain(|key, subscriber| predicate(key, subscriber))
+        {
             self.deliveries.remove(&key);
             // Removing an active Attempt drops any source fetch aborter. The
             // delivery tracker cancels marshal validation for delivering keys.
@@ -576,7 +433,7 @@ where
         match result {
             FetchResult::Retry => self.schedule_retry(key),
             FetchResult::Value(value) => {
-                if let Some(subscribers) = self.pending_subscribers(key) {
+                if let Some(subscribers) = self.subscribers.pending(&key) {
                     // Source data is not accepted until marshal validates it, so
                     // transition into delivery rather than completing the request.
                     self.start_delivery(key, value, subscribers);
@@ -597,12 +454,7 @@ where
             // Marshal accepted this value for the delivered subscriber set. Remove
             // those subscribers, then redeliver the same value to any subscribers
             // that arrived while validation was in flight.
-            let remaining = self.subscribers.get_mut(&key).and_then(|subscribers| {
-                for subscriber in delivered {
-                    subscribers.remove(&subscriber);
-                }
-                NonEmptyVec::try_from(subscribers.iter().cloned().collect::<Vec<_>>()).ok()
-            });
+            let remaining = self.subscribers.remove_delivered(&key, delivered);
 
             if let Some(subscribers) = remaining {
                 if !accepted {
@@ -634,13 +486,6 @@ where
         warn!(?key, "marshal rejected source resolver delivery");
         self.deliveries.discard_response(&key);
         self.schedule_retry(key);
-    }
-
-    /// Snapshot the subscribers currently waiting on a key.
-    fn pending_subscribers(&self, key: Key) -> Option<NonEmptyVec<Subscriber>> {
-        self.subscribers.get(&key).and_then(|subscribers| {
-            NonEmptyVec::try_from(subscribers.iter().cloned().collect::<Vec<_>>()).ok()
-        })
     }
 
     /// Queue a retry for a key that still has active local demand.
@@ -775,11 +620,14 @@ mod tests {
     use commonware_macros::test_traced;
     use commonware_resolver::Resolver as _;
     use commonware_runtime::{deterministic, Clock, Runner as _, Supervisor as _};
-    use commonware_utils::{channel::oneshot, sync::Mutex, NZUsize};
+    use commonware_utils::{channel::oneshot, non_empty_vec, sync::Mutex, NZUsize};
     use futures::stream;
-    use std::sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc,
+    use std::{
+        collections::VecDeque,
+        sync::{
+            atomic::{AtomicU32, Ordering},
+            Arc,
+        },
     };
 
     const DEFAULT_FETCH_RETRY_TIMEOUT: Duration = Duration::from_secs(1);
@@ -1388,9 +1236,7 @@ mod tests {
             actor
                 .requests
                 .insert(key, Attempt::Scheduled(context.current()));
-            actor
-                .subscribers
-                .insert(key, BTreeSet::from([keep, discard]));
+            actor.subscribers.insert(key, non_empty_vec![keep, discard]);
 
             assert!(resolver
                 .retain(move |_, subscriber| *subscriber == keep)
@@ -1400,10 +1246,10 @@ mod tests {
 
             let subscribers = actor
                 .subscribers
-                .get(&key)
+                .pending(&key)
                 .expect("request should be retained")
-                .clone();
-            assert_eq!(subscribers, BTreeSet::from([keep]));
+                .into_vec();
+            assert_eq!(subscribers, vec![keep]);
         });
     }
 
@@ -1460,7 +1306,7 @@ mod tests {
             );
 
             let retained = mailbox_rx.recv().await.expect("missing retained predicate");
-            let Message::Retain(_) = retained else {
+            let Message::Retain { .. } = retained else {
                 panic!("expected retain to drain before queued fetch");
             };
 
@@ -1502,7 +1348,7 @@ mod tests {
             actor
                 .requests
                 .insert(key, Attempt::Scheduled(context.current()));
-            actor.subscribers.insert(key, BTreeSet::from([subscriber]));
+            actor.subscribers.insert(key, non_empty_vec![subscriber]);
             actor.start_fetch(key);
             let first_state = actor.requests.remove(&key).expect("missing first state");
             let Attempt::Fetching { id: first_id, .. } = first_state else {
@@ -1512,7 +1358,7 @@ mod tests {
             actor
                 .requests
                 .insert(key, Attempt::Scheduled(context.current()));
-            actor.subscribers.insert(key, BTreeSet::from([subscriber]));
+            actor.subscribers.insert(key, non_empty_vec![subscriber]);
             actor.start_fetch(key);
             let Some(Attempt::Fetching { id: second_id, .. }) = actor.requests.get(&key) else {
                 panic!("expected second fetch attempt to be active");
