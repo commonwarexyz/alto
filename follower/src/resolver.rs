@@ -7,16 +7,16 @@ use commonware_consensus::{
     types::{Height, Round},
 };
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
-use commonware_resolver::direct;
+use commonware_resolver::opaque;
 use commonware_runtime::{Clock, Metrics, Spawner};
 use std::{future::Future, num::NonZeroUsize, time::Duration};
 use tracing::{debug, warn};
 
 type Key = handler::Key<Digest>;
 type Subscriber = handler::Annotation;
-pub type Resolver = direct::Resolver<Key, Subscriber, PublicKey>;
+pub type Resolver = opaque::Resolver<Key, Subscriber, PublicKey>;
 
-/// Adapts an Alto source client to the resolver's direct raw fetch API.
+/// Adapts an Alto source client to the resolver's opaque raw fetch API.
 #[derive(Clone)]
 struct SourceFetcher<C>(C);
 
@@ -32,7 +32,7 @@ where
     C: Source,
 {
     let (handler_rx, handler) = handler::init(context.child("handler"), mailbox_size);
-    let resolver = direct::init::<_, _, _, PublicKey>(
+    let resolver = opaque::init::<_, _, _, PublicKey>(
         context.child("resolver"),
         SourceFetcher(client),
         handler,
@@ -42,7 +42,7 @@ where
     (handler_rx, resolver)
 }
 
-impl<C> direct::Fetcher for SourceFetcher<C>
+impl<C> opaque::Fetcher for SourceFetcher<C>
 where
     C: Source,
 {
@@ -137,7 +137,7 @@ mod tests {
     use alto_client::Query;
     use commonware_cryptography::{ed25519::PrivateKey, Digestible, Signer};
     use commonware_macros::test_traced;
-    use commonware_resolver::{Consumer, Delivery, Resolver as _};
+    use commonware_resolver::{Consumer, Delivery, Resolver as _, TargetedResolver as _};
     use commonware_runtime::{deterministic, Clock, Runner as _, Supervisor as _};
     use commonware_utils::{channel::oneshot, sync::Mutex, vec::NonEmptyVec, NZUsize};
     use futures::stream;
@@ -269,7 +269,7 @@ mod tests {
         source: C,
         consumer: TestConsumer,
     ) -> Resolver {
-        direct::init::<_, _, _, PublicKey>(
+        opaque::init::<_, _, _, PublicKey>(
             context,
             SourceFetcher(source),
             consumer,
