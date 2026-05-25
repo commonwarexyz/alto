@@ -1,6 +1,7 @@
 use alto_chain::{
     Config, Peers, DEFAULT_BACKFILLER_MAX_ACTIVE, DEFAULT_BACKFILLER_RETRY_MS,
-    DEFAULT_BLOCKING_THREADS,
+    DEFAULT_BLOCKING_THREADS, DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS,
+    DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS,
 };
 use alto_types::NAMESPACE;
 use clap::{value_parser, Arg, ArgMatches, Command};
@@ -278,10 +279,12 @@ fn main() {
                 .unwrap_or(DEFAULT_BLOCKING_THREADS);
             let storage_buffer_pool_max_per_class = sub_matches
                 .get_one::<NonZeroU32>("storage_buffer_pool_max_per_class")
-                .copied();
+                .copied()
+                .or(Some(DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS));
             let network_buffer_pool_max_per_class = sub_matches
                 .get_one::<NonZeroU32>("network_buffer_pool_max_per_class")
-                .copied();
+                .copied()
+                .or(Some(DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS));
             let storage_buffer_pool_parallelism = sub_matches
                 .get_one::<NonZeroUsize>("storage_buffer_pool_parallelism")
                 .copied();

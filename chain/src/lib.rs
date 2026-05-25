@@ -1,4 +1,4 @@
-use commonware_utils::NZUsize;
+use commonware_utils::{NZUsize, NZU32};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -14,6 +14,8 @@ pub mod utils;
 pub const DEFAULT_BACKFILLER_MAX_ACTIVE: NonZeroUsize = NZUsize!(16);
 pub const DEFAULT_BACKFILLER_RETRY_MS: u64 = 1_000;
 pub const DEFAULT_BLOCKING_THREADS: usize = 512;
+pub const DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(16_384);
+pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(4_096);
 
 fn default_backfiller_max_active() -> NonZeroUsize {
     DEFAULT_BACKFILLER_MAX_ACTIVE
@@ -25,6 +27,14 @@ fn default_backfiller_retry_ms() -> u64 {
 
 fn default_blocking_threads() -> usize {
     DEFAULT_BLOCKING_THREADS
+}
+
+fn default_storage_buffer_pool_max_per_class() -> Option<NonZeroU32> {
+    Some(DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS)
+}
+
+fn default_network_buffer_pool_max_per_class() -> Option<NonZeroU32> {
+    Some(DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS)
 }
 
 /// Configuration for the [engine::Engine].
@@ -40,9 +50,9 @@ pub struct Config {
     pub worker_threads: usize,
     #[serde(default = "default_blocking_threads")]
     pub blocking_threads: usize,
-    #[serde(default)]
+    #[serde(default = "default_storage_buffer_pool_max_per_class")]
     pub storage_buffer_pool_max_per_class: Option<NonZeroU32>,
-    #[serde(default)]
+    #[serde(default = "default_network_buffer_pool_max_per_class")]
     pub network_buffer_pool_max_per_class: Option<NonZeroU32>,
     #[serde(default)]
     pub storage_buffer_pool_parallelism: Option<NonZeroUsize>,
