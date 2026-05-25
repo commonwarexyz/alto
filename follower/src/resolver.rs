@@ -9,7 +9,10 @@ use commonware_consensus::{
 };
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
 use commonware_macros::select_loop;
-use commonware_resolver::{Consumer, Delivery, Fetch};
+use commonware_resolver::{
+    delivery::{Completion as DeliveryCompletion, Tracker as DeliveryTracker},
+    Consumer, Delivery, Fetch,
+};
 use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner};
 use commonware_utils::{
     futures::{AbortablePool, Aborter},
@@ -241,11 +244,13 @@ struct Actor<
     context: ContextCell<E>,
     client: C,
     mailbox: mailbox::Receiver<Message>,
-    handler: H,
-    // Runs source fetches and marshal deliveries concurrently. The per-request
-    // Attempt owns each aborter, so removing/replacing the Attempt cancels the
-    // corresponding future.
-    active: AbortablePool<Completion>,
+    // Runs source fetches concurrently. The per-request Attempt owns each
+    // aborter, so removing/replacing the Attempt cancels the corresponding
+    // fetch future.
+    fetches: AbortablePool<FetchCompletion>,
+    // Runs marshal delivery validation and caches accepted source bytes for
+    // subscribers that arrive while validation is in flight.
+    deliveries: DeliveryTracker<H, u64>,
     // Keys with a source fetch, marshal delivery, or retry currently outstanding.
     requests: BTreeMap<Key, Attempt>,
     // Local subscribers still waiting for each key. This is separate from
@@ -264,39 +269,17 @@ enum Attempt {
     //
     // The id lets us ignore stale completions from an earlier attempt, and
     // dropping the aborter cancels the current attempt.
-    Fetching {
-        id: u64,
-        _aborter: Aborter,
-    },
+    Fetching { id: u64, _aborter: Aborter },
     // Marshal is currently validating a source response.
-    //
-    // The value is retained so subscribers added during validation can receive
-    // the same accepted response locally.
-    Delivering {
-        id: u64,
-        _aborter: Aborter,
-        value: Bytes,
-        accepted: bool,
-    },
+    Delivering { id: u64 },
     // A retry is queued for the recorded deadline.
     Scheduled(SystemTime),
 }
 
-enum Completion {
-    // Completed source lookup. A Value still needs to be delivered to marshal
-    // before this resolver can treat the request as satisfied.
-    Fetched {
-        key: Key,
-        id: u64,
-        result: FetchResult,
-    },
-    // Completed marshal validation for one batch of local subscribers.
-    Delivered {
-        key: Key,
-        id: u64,
-        delivered: NonEmptyVec<Subscriber>,
-        valid: bool,
-    },
+struct FetchCompletion {
+    key: Key,
+    id: u64,
+    result: FetchResult,
 }
 
 enum FetchResult {
@@ -352,8 +335,8 @@ where
             context: ContextCell::new(context),
             client,
             mailbox,
-            handler,
-            active: AbortablePool::default(),
+            deliveries: DeliveryTracker::new(handler),
+            fetches: AbortablePool::default(),
             requests: BTreeMap::new(),
             subscribers: BTreeMap::new(),
             retry_schedule: BTreeSet::new(),
@@ -374,8 +357,15 @@ where
             on_stopped => {},
             // Aborted futures also complete through this pool. They are ignored
             // by the `Ok(...)` pattern and by the id checks below if stale.
-            Ok(result) = self.active.next_completed() else continue => {
-                self.handle_completed(result);
+            Ok(result) = self.fetches.next_completed() else continue => {
+                self.handle_fetch_completed(result);
+            },
+            delivery = self.deliveries.next_completion() => {
+                let delivery = match delivery {
+                    Ok(delivery) => delivery,
+                    Err(_) => continue,
+                };
+                self.handle_delivery_completed(delivery);
             },
             _ = match self.retry_schedule.first() {
                 Some((deadline, _)) => Either::Left(self.context.sleep_until(*deadline)),
@@ -409,6 +399,7 @@ where
         subscribers_for_key.extend(subscribers);
 
         if is_new {
+            assert!(self.deliveries.insert(key), "delivery entry");
             // Insert a scheduled placeholder before starting the fetch so
             // start_fetch can atomically replace it with an active attempt.
             self.requests
@@ -429,8 +420,9 @@ where
 
         for key in removed {
             self.subscribers.remove(&key);
-            // Removing an active Attempt drops its aborter, which cancels any
-            // source fetch or marshal delivery no longer needed by subscribers.
+            self.deliveries.remove(&key);
+            // Removing an active Attempt drops any source fetch aborter. The
+            // delivery tracker cancels marshal validation for delivering keys.
             if let Some(Attempt::Scheduled(deadline)) = self.requests.remove(&key) {
                 self.retry_schedule.remove(&(deadline, key));
             }
@@ -442,7 +434,7 @@ where
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
         let future = Self::fetch(key, id, self.client.clone());
-        let aborter = self.active.push(future);
+        let aborter = self.fetches.push(future);
         // The aborter is kept for its Drop behavior. Dropping/replacing this
         // Attempt aborts the fetch; dropping it immediately would cancel the
         // newly pushed future.
@@ -456,56 +448,56 @@ where
     }
 
     /// Start delivery of fetched bytes to marshal for the current subscriber batch.
-    fn start_delivery(
-        &mut self,
-        key: Key,
-        value: Bytes,
-        delivered: NonEmptyVec<Subscriber>,
-        accepted: bool,
-    ) {
+    fn start_delivery(&mut self, key: Key, value: Bytes, delivered: NonEmptyVec<Subscriber>) {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
-        let future = Self::deliver_once(key, id, value.clone(), self.handler.clone(), delivered);
-        let aborter = self.active.push(future);
-        // Retain the fetched bytes while marshal validates this delivery. If a
-        // new subscriber arrives before validation finishes, the accepted bytes
-        // can be redelivered locally instead of issuing another source request.
-        self.requests.insert(
-            key,
-            Attempt::Delivering {
-                id,
-                _aborter: aborter,
-                value,
-                accepted,
+        self.deliveries.deliver(
+            Delivery {
+                key,
+                subscribers: delivered,
             },
+            id,
+            value,
         );
+        self.requests.insert(key, Attempt::Delivering { id });
     }
 
-    /// Dispatch an active future completion after rejecting stale attempt ids.
-    fn handle_completed(&mut self, completion: Completion) {
-        match completion {
-            Completion::Fetched { key, id, result } => {
-                // A completion can race with retain cancellation or a replacement
-                // attempt. Only the id currently recorded for the key may mutate state.
-                if !self.current_fetch(key, id) {
-                    return;
-                }
-                self.handle_fetched(key, result);
-            }
-            Completion::Delivered {
-                key,
-                id,
-                delivered,
-                valid,
-            } => {
-                // Deliveries are also id-checked because retain or retry handling
-                // may have replaced the attempt while marshal was validating.
-                if !self.current_delivery(key, id) {
-                    return;
-                }
-                self.handle_delivered(key, delivered, valid);
-            }
+    /// Redeliver accepted source bytes to another subscriber batch.
+    fn redeliver(&mut self, key: Key, delivered: NonEmptyVec<Subscriber>) {
+        self.deliveries.redeliver(Delivery {
+            key,
+            subscribers: delivered,
+        });
+    }
+
+    /// Dispatch a source fetch completion after rejecting stale attempt ids.
+    fn handle_fetch_completed(&mut self, completion: FetchCompletion) {
+        let FetchCompletion { key, id, result } = completion;
+        // A completion can race with retain cancellation or a replacement
+        // attempt. Only the id currently recorded for the key may mutate state.
+        if !self.current_fetch(key, id) {
+            return;
         }
+        self.handle_fetched(key, result);
+    }
+
+    /// Dispatch a marshal delivery completion after rejecting stale attempt ids.
+    fn handle_delivery_completed(&mut self, completion: DeliveryCompletion<Key, Subscriber, u64>) {
+        let DeliveryCompletion {
+            context: id,
+            delivery,
+            valid,
+        } = completion;
+        let Delivery {
+            key,
+            subscribers: delivered,
+        } = delivery;
+        // Delivery completions are id-checked because retain or retry handling
+        // may have replaced the attempt while marshal was validating.
+        if !self.current_delivery(key, id) {
+            return;
+        }
+        self.handle_delivered(key, delivered, valid);
     }
 
     /// Return whether a source fetch completion belongs to the current attempt.
@@ -516,12 +508,21 @@ where
         };
         match attempt {
             Attempt::Fetching { id: active_id, .. } if *active_id == id => true,
-            Attempt::Fetching { id: active_id, .. } | Attempt::Delivering { id: active_id, .. } => {
+            Attempt::Fetching { id: active_id, .. } => {
                 trace!(
                     ?key,
                     completed_id = id,
                     active_id,
                     "ignoring replaced fetch completion",
+                );
+                false
+            }
+            Attempt::Delivering { id: active_id } => {
+                trace!(
+                    ?key,
+                    completed_id = id,
+                    active_id,
+                    "ignoring fetch completion for delivery attempt",
                 );
                 false
             }
@@ -539,13 +540,22 @@ where
             return false;
         };
         match attempt {
-            Attempt::Delivering { id: active_id, .. } if *active_id == id => true,
-            Attempt::Fetching { id: active_id, .. } | Attempt::Delivering { id: active_id, .. } => {
+            Attempt::Delivering { id: active_id } if *active_id == id => true,
+            Attempt::Delivering { id: active_id } => {
                 trace!(
                     ?key,
                     completed_id = id,
                     active_id,
                     "ignoring replaced delivery completion",
+                );
+                false
+            }
+            Attempt::Fetching { id: active_id, .. } => {
+                trace!(
+                    ?key,
+                    completed_id = id,
+                    active_id,
+                    "ignoring delivery completion for fetch attempt",
                 );
                 false
             }
@@ -569,10 +579,11 @@ where
                 if let Some(subscribers) = self.pending_subscribers(key) {
                     // Source data is not accepted until marshal validates it, so
                     // transition into delivery rather than completing the request.
-                    self.start_delivery(key, value, subscribers, false);
+                    self.start_delivery(key, value, subscribers);
                 } else {
                     self.requests.remove(&key);
                     self.subscribers.remove(&key);
+                    self.deliveries.remove(&key);
                 }
             }
         }
@@ -580,12 +591,7 @@ where
 
     /// Update subscriber state after marshal accepts or rejects a delivery batch.
     fn handle_delivered(&mut self, key: Key, delivered: NonEmptyVec<Subscriber>, valid: bool) {
-        let (accepted, value) = match self.requests.get(&key).expect("request missing") {
-            Attempt::Delivering {
-                accepted, value, ..
-            } => (*accepted, value.clone()),
-            Attempt::Fetching { .. } | Attempt::Scheduled(_) => unreachable!("current delivery"),
-        };
+        let accepted = self.deliveries.response_accepted(&key);
 
         if valid {
             // Marshal accepted this value for the delivered subscriber set. Remove
@@ -599,10 +605,14 @@ where
             });
 
             if let Some(subscribers) = remaining {
-                self.start_delivery(key, value, subscribers, true);
+                if !accepted {
+                    self.deliveries.accept_response(&key);
+                }
+                self.redeliver(key, subscribers);
             } else {
                 self.requests.remove(&key);
                 self.subscribers.remove(&key);
+                self.deliveries.remove(&key);
             }
             return;
         }
@@ -617,9 +627,12 @@ where
             );
             self.requests.remove(&key);
             self.subscribers.remove(&key);
+            self.deliveries.remove(&key);
             return;
         }
 
+        warn!(?key, "marshal rejected source resolver delivery");
+        self.deliveries.discard_response(&key);
         self.schedule_retry(key);
     }
 
@@ -636,7 +649,8 @@ where
         let Some(attempt) = self.requests.get_mut(&key) else {
             return;
         };
-        // Replacing Fetching/Delivering drops the aborter for the failed attempt.
+        // Replacing a Fetching attempt drops the fetch aborter. Delivery
+        // attempts have already completed before they are scheduled for retry.
         *attempt = Attempt::Scheduled(deadline);
         self.retry_schedule.insert((deadline, key));
         debug!(?key, ?deadline, "scheduled source resolver retry");
@@ -667,9 +681,9 @@ where
     }
 
     /// Fetch and encode a value from the source for a resolver key.
-    async fn fetch(key: Key, id: u64, client: C) -> Completion {
+    async fn fetch(key: Key, id: u64, client: C) -> FetchCompletion {
         // Source calls intentionally only fetch and encode. Signature and chain
-        // validation are left to marshal through deliver_once.
+        // validation are left to marshal through the delivery tracker.
         let result = match key {
             handler::Key::Block(digest) => Self::fetch_block_by_digest(digest, client).await,
             handler::Key::Finalized { height } => {
@@ -679,7 +693,7 @@ where
                 Self::fetch_notarized_by_round(round, client).await
             }
         };
-        Completion::Fetched { key, id, result }
+        FetchCompletion { key, id, result }
     }
 
     /// Fetch and encode a block response by digest.
@@ -748,46 +762,6 @@ where
                 warn!(view, ?error, "failed to fetch notarized block by round");
                 FetchResult::Retry
             }
-        }
-    }
-
-    /// Deliver one subscriber batch to marshal and report its validation result.
-    async fn deliver_once(
-        key: Key,
-        id: u64,
-        value: Bytes,
-        mut handler: H,
-        delivered: NonEmptyVec<Subscriber>,
-    ) -> Completion {
-        // Handler::deliver sends the value into marshal and resolves only after
-        // marshal has accepted or rejected the delivery.
-        let response = handler.deliver(
-            Delivery {
-                key,
-                subscribers: delivered.clone(),
-            },
-            value,
-        );
-        let valid = match response.await {
-            Ok(true) => true,
-            Ok(false) => {
-                warn!(?key, "marshal rejected source resolver delivery");
-                false
-            }
-            Err(error) => {
-                warn!(
-                    ?key,
-                    ?error,
-                    "marshal dropped source resolver delivery response"
-                );
-                false
-            }
-        };
-        Completion::Delivered {
-            key,
-            id,
-            delivered,
-            valid,
         }
     }
 }
@@ -1545,7 +1519,7 @@ mod tests {
             };
             let second_id = *second_id;
 
-            actor.handle_completed(Completion::Fetched {
+            actor.handle_fetch_completed(FetchCompletion {
                 key,
                 id: first_id,
                 result: FetchResult::Retry,

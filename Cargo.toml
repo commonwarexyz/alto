@@ -55,6 +55,25 @@ tower-http = "0.6.2"
 reqwest = { version = "0.12.12", default-features = false }
 tokio-tungstenite = "0.28.0"
 
+[patch."https://github.com/commonwarexyz/monorepo"]
+commonware-actor = { path = "../monorepo-resolver-helper/actor" }
+commonware-broadcast = { path = "../monorepo-resolver-helper/broadcast" }
+commonware-codec = { path = "../monorepo-resolver-helper/codec" }
+commonware-coding = { path = "../monorepo-resolver-helper/coding" }
+commonware-consensus = { path = "../monorepo-resolver-helper/consensus" }
+commonware-cryptography = { path = "../monorepo-resolver-helper/cryptography" }
+commonware-deployer = { path = "../monorepo-resolver-helper/deployer" }
+commonware-formatting = { path = "../monorepo-resolver-helper/formatting" }
+commonware-macros = { path = "../monorepo-resolver-helper/macros" }
+commonware-math = { path = "../monorepo-resolver-helper/math" }
+commonware-p2p = { path = "../monorepo-resolver-helper/p2p" }
+commonware-parallel = { path = "../monorepo-resolver-helper/parallel" }
+commonware-resolver = { path = "../monorepo-resolver-helper/resolver" }
+commonware-runtime = { path = "../monorepo-resolver-helper/runtime" }
+commonware-storage = { path = "../monorepo-resolver-helper/storage" }
+commonware-stream = { path = "../monorepo-resolver-helper/stream" }
+commonware-utils = { path = "../monorepo-resolver-helper/utils" }
+
 [profile.bench]
 # Because we enable overflow checks in "release," we should benchmark with them.
 overflow-checks = true
