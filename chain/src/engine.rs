@@ -24,7 +24,7 @@ use commonware_cryptography::{
 };
 use commonware_p2p::{Blocker, Provider, Receiver, Sender};
 use commonware_parallel::Strategy;
-use commonware_resolver::Resolver;
+use commonware_resolver::TargetedResolver;
 use commonware_runtime::{
     buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
     Spawner, Storage, ThreadPooler,
@@ -384,7 +384,7 @@ where
         ),
         marshal: (
             handler::Receiver<Digest>,
-            impl Resolver<
+            impl TargetedResolver<
                 Key = handler::Key<Digest>,
                 Subscriber = handler::Annotation,
                 PublicKey = PublicKey,
@@ -418,7 +418,7 @@ where
         ),
         marshal: (
             handler::Receiver<Digest>,
-            impl Resolver<
+            impl TargetedResolver<
                 Key = handler::Key<Digest>,
                 Subscriber = handler::Annotation,
                 PublicKey = PublicKey,

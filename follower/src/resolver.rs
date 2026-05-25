@@ -1,312 +1,22 @@
 use crate::Source;
 use alto_client::{consensus::Payload, IndexQuery, Query};
 use bytes::Bytes;
-use commonware_actor::{mailbox, Feedback};
 use commonware_codec::Encode;
 use commonware_consensus::{
     marshal::resolver::handler,
     types::{Height, Round},
 };
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
-use commonware_macros::select_loop;
-use commonware_resolver::{Consumer, Delivery, Fetch};
-use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner};
-use commonware_utils::{
-    futures::{AbortablePool, Aborter},
-    vec::NonEmptyVec,
-};
-use futures::future::{self, Either};
-use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    num::NonZeroUsize,
-    time::{Duration, SystemTime},
-};
-use tracing::{debug, trace, warn};
+use commonware_resolver::opaque;
+use commonware_runtime::{Clock, Metrics, Spawner};
+use std::{future::Future, num::NonZeroUsize, time::Duration};
+use tracing::{debug, warn};
 
 type Key = handler::Key<Digest>;
 type Subscriber = handler::Annotation;
-type FetchRequest = Fetch<Key, Subscriber>;
-type RetainPredicate = Box<dyn Fn(&Key, &Subscriber) -> bool + Send>;
+pub type Resolver = opaque::Resolver<Key, Subscriber, PublicKey>;
 
-/// Handle to the source-backed resolver actor used by marshal.
-#[derive(Clone)]
-pub struct Resolver {
-    mailbox: mailbox::Sender<Message>,
-}
-
-impl commonware_resolver::Resolver for Resolver {
-    type Key = Key;
-    type Subscriber = Subscriber;
-    type PublicKey = PublicKey;
-
-    fn fetch<F>(&mut self, fetch: F) -> Feedback
-    where
-        F: Into<Fetch<Self::Key, Self::Subscriber>> + Send,
-    {
-        self.send(Message::Fetch(vec![FetchKey::from(fetch.into())]))
-    }
-
-    fn fetch_all<F>(&mut self, fetches: Vec<F>) -> Feedback
-    where
-        F: Into<Fetch<Self::Key, Self::Subscriber>> + Send,
-    {
-        self.send(Message::Fetch(
-            fetches
-                .into_iter()
-                .map(|fetch| FetchKey::from(fetch.into()))
-                .collect(),
-        ))
-    }
-
-    fn fetch_targeted(
-        &mut self,
-        fetch: impl Into<Fetch<Self::Key, Self::Subscriber>> + Send,
-        _targets: NonEmptyVec<Self::PublicKey>,
-    ) -> Feedback {
-        self.fetch(fetch)
-    }
-
-    fn fetch_all_targeted<F>(&mut self, fetches: Vec<(F, NonEmptyVec<Self::PublicKey>)>) -> Feedback
-    where
-        F: Into<Fetch<Self::Key, Self::Subscriber>> + Send,
-    {
-        self.fetch_all(fetches.into_iter().map(|(fetch, _)| fetch).collect())
-    }
-
-    fn retain(
-        &mut self,
-        predicate: impl Fn(&Self::Key, &Self::Subscriber) -> bool + Send + 'static,
-    ) -> Feedback {
-        self.send(Message::Retain(Box::new(predicate)))
-    }
-}
-
-impl Resolver {
-    /// Submit a resolver message to the actor mailbox and return mailbox feedback.
-    fn send(&self, message: Message) -> Feedback {
-        self.mailbox.enqueue(message)
-    }
-}
-
-enum Message {
-    // Fetch requests can be coalesced by resolver key while preserving every
-    // distinct local subscriber that needs the resolved value.
-    Fetch(Vec<FetchKey>),
-    // Retain predicates are marshal pruning updates. They remove subscribers
-    // from both queued and active requests.
-    Retain(RetainPredicate),
-}
-
-// A peer-visible resolver key plus the local marshal annotations waiting on it.
-//
-// Marshal may ask for the same key for multiple reasons. Keeping subscribers
-// grouped here lets overflow and the actor deduplicate the network fetch while
-// still notifying every local path that depends on the value.
-struct FetchKey {
-    key: Key,
-    subscribers: NonEmptyVec<Subscriber>,
-}
-
-impl From<FetchRequest> for FetchKey {
-    /// Convert a resolver fetch into the actor's coalesced key format.
-    fn from(fetch: FetchRequest) -> Self {
-        Self {
-            key: fetch.key,
-            subscribers: NonEmptyVec::new(fetch.subscriber),
-        }
-    }
-}
-
-#[derive(Default)]
-struct Pending {
-    // Retain predicates are drained before fetches so pruning updates can drop
-    // stale queued work before it reaches the actor.
-    modifications: VecDeque<RetainPredicate>,
-    // Queued fetches are coalesced by key. Each entry owns all subscribers that
-    // still need the value for that key.
-    fetches: Vec<FetchKey>,
-}
-
-impl mailbox::Overflow<Message> for Pending {
-    fn is_empty(&self) -> bool {
-        self.modifications.is_empty() && self.fetches.is_empty()
-    }
-
-    /// Refill the ready queue with retained messages in actor-visible order.
-    fn drain<F>(&mut self, mut push: F)
-    where
-        F: FnMut(Message) -> Option<Message>,
-    {
-        while let Some(predicate) = self.modifications.pop_front() {
-            let message = Message::Retain(predicate);
-            if let Some(message) = push(message) {
-                // Ready is full again. Put back the retain predicate that was
-                // not delivered so its relative order with later retains is kept.
-                self.push_front(message);
-                return;
-            }
-        }
-
-        if !self.fetches.is_empty() {
-            let fetches = std::mem::take(&mut self.fetches);
-            if let Some(message) = push(Message::Fetch(fetches)) {
-                // Any undelivered fetch batch still represents pending demand.
-                // Restore it at the front of the retained fetch set.
-                self.push_front(message);
-            }
-        }
-    }
-}
-
-impl Pending {
-    /// Restore a message that could not be pushed back into the ready queue.
-    fn push_front(&mut self, message: Message) {
-        match message {
-            Message::Fetch(fetches) => {
-                self.fetches.splice(0..0, fetches);
-            }
-            Message::Retain(predicate) => {
-                self.modifications.push_front(predicate);
-            }
-        }
-    }
-}
-
-/// Apply a retain predicate to a queued fetch and drop it if no subscribers remain.
-fn retain_fetch(
-    mut fetch: FetchKey,
-    predicate: &(dyn Fn(&Key, &Subscriber) -> bool + Send),
-) -> Option<FetchKey> {
-    // A retain predicate can remove some local subscribers without invalidating
-    // the shared peer-visible key for the subscribers that remain.
-    let mut subscribers = fetch.subscribers.into_vec();
-    subscribers.retain(|subscriber| predicate(&fetch.key, subscriber));
-    fetch.subscribers = NonEmptyVec::try_from(subscribers).ok()?;
-    Some(fetch)
-}
-
-/// Merge a new subscriber set into an existing key without duplicate annotations.
-fn merge_subscribers(existing: &mut NonEmptyVec<Subscriber>, incoming: NonEmptyVec<Subscriber>) {
-    // Subscribers are local processing annotations. Duplicate annotations do not
-    // need duplicate delivery attempts for the same resolved value.
-    for subscriber in incoming {
-        if !existing.contains(&subscriber) {
-            existing.push(subscriber);
-        }
-    }
-}
-
-impl mailbox::Policy for Message {
-    type Overflow = Pending;
-
-    /// Retain, prune, and coalesce messages that arrive while the ready queue is full.
-    fn handle(overflow: &mut Pending, message: Self) {
-        match message {
-            Self::Fetch(fetches) => {
-                for fetch in fetches {
-                    if let Some(existing) = overflow
-                        .fetches
-                        .iter_mut()
-                        .find(|existing| existing.key == fetch.key)
-                    {
-                        merge_subscribers(&mut existing.subscribers, fetch.subscribers);
-                    } else {
-                        overflow.fetches.push(fetch);
-                    }
-                }
-            }
-            Self::Retain(predicate) => {
-                // Apply the pruning update to fetches still trapped in overflow,
-                // then retain the predicate so active actor state observes it too.
-                overflow.fetches = std::mem::take(&mut overflow.fetches)
-                    .into_iter()
-                    .filter_map(|fetch| retain_fetch(fetch, predicate.as_ref()))
-                    .collect();
-                overflow.modifications.push_back(predicate);
-            }
-        }
-    }
-}
-
-/// Actor that fetches blocks and certificates from a [Source] on behalf of marshal.
-///
-/// The [Source] should be constructed without verification because marshal
-/// validates all signatures before accepting resolved data. Rejections are
-/// logged and retried.
-struct Actor<
-    E: Clock + Spawner,
-    C: Source,
-    H: Consumer<Key = Key, Value = Bytes, Subscriber = Subscriber>,
-> {
-    context: ContextCell<E>,
-    client: C,
-    mailbox: mailbox::Receiver<Message>,
-    handler: H,
-    // Runs source fetches and marshal deliveries concurrently. The per-request
-    // Attempt owns each aborter, so removing/replacing the Attempt cancels the
-    // corresponding future.
-    active: AbortablePool<Completion>,
-    // Keys with a source fetch, marshal delivery, or retry currently outstanding.
-    requests: BTreeMap<Key, Attempt>,
-    // Local subscribers still waiting for each key. This is separate from
-    // Attempt so retain predicates can prune subscribers without depending on
-    // whether the key is fetching, delivering, or scheduled for retry.
-    subscribers: BTreeMap<Key, BTreeSet<Subscriber>>,
-    // Mirrors Attempt::Scheduled deadlines so the actor can sleep until the next
-    // retry without scanning every request.
-    retry_schedule: BTreeSet<(SystemTime, Key)>,
-    fetch_retry_timeout: Duration,
-    next_id: u64,
-}
-
-enum Attempt {
-    // A source fetch is currently running.
-    //
-    // The id lets us ignore stale completions from an earlier attempt, and
-    // dropping the aborter cancels the current attempt.
-    Fetching {
-        id: u64,
-        _aborter: Aborter,
-    },
-    // Marshal is currently validating a source response.
-    //
-    // The value is retained so subscribers added during validation can receive
-    // the same accepted response locally.
-    Delivering {
-        id: u64,
-        _aborter: Aborter,
-        value: Bytes,
-        accepted: bool,
-    },
-    // A retry is queued for the recorded deadline.
-    Scheduled(SystemTime),
-}
-
-enum Completion {
-    // Completed source lookup. A Value still needs to be delivered to marshal
-    // before this resolver can treat the request as satisfied.
-    Fetched {
-        key: Key,
-        id: u64,
-        result: FetchResult,
-    },
-    // Completed marshal validation for one batch of local subscribers.
-    Delivered {
-        key: Key,
-        id: u64,
-        delivered: NonEmptyVec<Subscriber>,
-        valid: bool,
-    },
-}
-
-enum FetchResult {
-    // Encoded bytes returned by the Source. Marshal validates the bytes before
-    // they are considered accepted.
-    Value(Bytes),
-    // Any source error or wrong payload type is retried while subscribers remain.
-    Retry,
-}
-
+/// Start the follower resolver and marshal handler backed by `client`.
 pub fn init<E, C>(
     context: E,
     client: C,
@@ -318,407 +28,84 @@ where
     C: Source,
 {
     let (handler_rx, handler) = handler::init(context.child("handler"), mailbox_size);
-    let (mailbox_tx, mailbox_rx) = mailbox::new(context.child("mailbox"), mailbox_size);
-    Actor::new(
-        context.child("actor"),
-        client,
-        mailbox_rx,
+    let resolver = opaque::init::<_, _, _, PublicKey>(
+        context.child("resolver"),
+        Fetcher::new(client),
         handler,
+        mailbox_size,
         fetch_retry_timeout,
-    )
-    .start();
-    (
-        handler_rx,
-        Resolver {
-            mailbox: mailbox_tx,
-        },
-    )
+    );
+    (handler_rx, resolver)
 }
 
-impl<E, C, H> Actor<E, C, H>
+/// Fetches and encodes marshal resolver payloads from an Alto source client.
+#[derive(Clone)]
+struct Fetcher<C>(C);
+
+impl<C> Fetcher<C> {
+    const fn new(client: C) -> Self {
+        Self(client)
+    }
+}
+
+impl<C> opaque::Fetcher for Fetcher<C>
 where
-    E: Clock + Spawner,
     C: Source,
-    H: Consumer<Key = Key, Value = Bytes, Subscriber = Subscriber>,
 {
-    fn new(
-        context: E,
-        client: C,
-        mailbox: mailbox::Receiver<Message>,
-        handler: H,
-        fetch_retry_timeout: Duration,
-    ) -> Self {
-        Self {
-            context: ContextCell::new(context),
-            client,
-            mailbox,
-            handler,
-            active: AbortablePool::default(),
-            requests: BTreeMap::new(),
-            subscribers: BTreeMap::new(),
-            retry_schedule: BTreeSet::new(),
-            fetch_retry_timeout,
-            next_id: 0,
-        }
-    }
+    type Key = Key;
+    type Value = Bytes;
 
-    /// Spawn the resolver actor on its runtime context.
-    fn start(mut self) -> Handle<()> {
-        spawn_cell!(self.context, self.run())
-    }
-
-    /// Drive mailbox messages, source fetch completions, delivery completions, and retries.
-    async fn run(mut self) {
-        select_loop! {
-            self.context,
-            on_stopped => {},
-            // Aborted futures also complete through this pool. They are ignored
-            // by the `Ok(...)` pattern and by the id checks below if stale.
-            Ok(result) = self.active.next_completed() else continue => {
-                self.handle_completed(result);
-            },
-            _ = match self.retry_schedule.first() {
-                Some((deadline, _)) => Either::Left(self.context.sleep_until(*deadline)),
-                None => Either::Right(future::pending()),
-            } => {
-                self.process_retries();
-            },
-            Some(message) = self.mailbox.recv() else break => {
-                self.handle_message(message);
-            },
-        }
-    }
-
-    /// Apply a single actor message to resolver state.
-    fn handle_message(&mut self, message: Message) {
-        match message {
-            Message::Fetch(fetches) => {
-                for fetch in fetches {
-                    self.add_fetch(fetch);
+    fn fetch(&self, key: Self::Key) -> impl Future<Output = Option<Self::Value>> + Send {
+        let client = self.0.clone();
+        async move {
+            match key {
+                handler::Key::Block(digest) => Self::fetch_block_by_digest(digest, client).await,
+                handler::Key::Finalized { height } => {
+                    Self::fetch_finalized_by_height(height, client).await
                 }
-            }
-            Message::Retain(predicate) => self.retain(predicate),
-        }
-    }
-
-    /// Add subscribers for a key and start the first source fetch if needed.
-    fn add_fetch(&mut self, fetch: FetchKey) {
-        let FetchKey { key, subscribers } = fetch;
-        let is_new = !self.requests.contains_key(&key);
-        let subscribers_for_key = self.subscribers.entry(key).or_default();
-        subscribers_for_key.extend(subscribers);
-
-        if is_new {
-            // Insert a scheduled placeholder before starting the fetch so
-            // start_fetch can atomically replace it with an active attempt.
-            self.requests
-                .insert(key, Attempt::Scheduled(self.context.current()));
-            self.start_fetch(key);
-        }
-    }
-
-    /// Prune subscribers that no longer satisfy marshal's retain predicate.
-    fn retain(&mut self, predicate: RetainPredicate) {
-        let mut removed = Vec::new();
-        for (key, subscribers) in self.subscribers.iter_mut() {
-            subscribers.retain(|subscriber| predicate(key, subscriber));
-            if subscribers.is_empty() {
-                removed.push(*key);
-            }
-        }
-
-        for key in removed {
-            self.subscribers.remove(&key);
-            // Removing an active Attempt drops its aborter, which cancels any
-            // source fetch or marshal delivery no longer needed by subscribers.
-            if let Some(Attempt::Scheduled(deadline)) = self.requests.remove(&key) {
-                self.retry_schedule.remove(&(deadline, key));
-            }
-        }
-    }
-
-    /// Start a source fetch attempt for an already-registered key.
-    fn start_fetch(&mut self, key: Key) {
-        let id = self.next_id;
-        self.next_id = self.next_id.wrapping_add(1);
-        let future = Self::fetch(key, id, self.client.clone());
-        let aborter = self.active.push(future);
-        // The aborter is kept for its Drop behavior. Dropping/replacing this
-        // Attempt aborts the fetch; dropping it immediately would cancel the
-        // newly pushed future.
-        self.requests.insert(
-            key,
-            Attempt::Fetching {
-                id,
-                _aborter: aborter,
-            },
-        );
-    }
-
-    /// Start delivery of fetched bytes to marshal for the current subscriber batch.
-    fn start_delivery(
-        &mut self,
-        key: Key,
-        value: Bytes,
-        delivered: NonEmptyVec<Subscriber>,
-        accepted: bool,
-    ) {
-        let id = self.next_id;
-        self.next_id = self.next_id.wrapping_add(1);
-        let future = Self::deliver_once(key, id, value.clone(), self.handler.clone(), delivered);
-        let aborter = self.active.push(future);
-        // Retain the fetched bytes while marshal validates this delivery. If a
-        // new subscriber arrives before validation finishes, the accepted bytes
-        // can be redelivered locally instead of issuing another source request.
-        self.requests.insert(
-            key,
-            Attempt::Delivering {
-                id,
-                _aborter: aborter,
-                value,
-                accepted,
-            },
-        );
-    }
-
-    /// Dispatch an active future completion after rejecting stale attempt ids.
-    fn handle_completed(&mut self, completion: Completion) {
-        match completion {
-            Completion::Fetched { key, id, result } => {
-                // A completion can race with retain cancellation or a replacement
-                // attempt. Only the id currently recorded for the key may mutate state.
-                if !self.current_fetch(key, id) {
-                    return;
-                }
-                self.handle_fetched(key, result);
-            }
-            Completion::Delivered {
-                key,
-                id,
-                delivered,
-                valid,
-            } => {
-                // Deliveries are also id-checked because retain or retry handling
-                // may have replaced the attempt while marshal was validating.
-                if !self.current_delivery(key, id) {
-                    return;
-                }
-                self.handle_delivered(key, delivered, valid);
-            }
-        }
-    }
-
-    /// Return whether a source fetch completion belongs to the current attempt.
-    fn current_fetch(&self, key: Key, id: u64) -> bool {
-        let Some(attempt) = self.requests.get(&key) else {
-            trace!(?key, id, "ignoring stale fetch completion");
-            return false;
-        };
-        match attempt {
-            Attempt::Fetching { id: active_id, .. } if *active_id == id => true,
-            Attempt::Fetching { id: active_id, .. } | Attempt::Delivering { id: active_id, .. } => {
-                trace!(
-                    ?key,
-                    completed_id = id,
-                    active_id,
-                    "ignoring replaced fetch completion",
-                );
-                false
-            }
-            Attempt::Scheduled(deadline) => {
-                trace!(?key, id, ?deadline, "ignoring scheduled fetch completion",);
-                false
-            }
-        }
-    }
-
-    /// Return whether a marshal delivery completion belongs to the current attempt.
-    fn current_delivery(&self, key: Key, id: u64) -> bool {
-        let Some(attempt) = self.requests.get(&key) else {
-            trace!(?key, id, "ignoring stale delivery completion");
-            return false;
-        };
-        match attempt {
-            Attempt::Delivering { id: active_id, .. } if *active_id == id => true,
-            Attempt::Fetching { id: active_id, .. } | Attempt::Delivering { id: active_id, .. } => {
-                trace!(
-                    ?key,
-                    completed_id = id,
-                    active_id,
-                    "ignoring replaced delivery completion",
-                );
-                false
-            }
-            Attempt::Scheduled(deadline) => {
-                trace!(
-                    ?key,
-                    id,
-                    ?deadline,
-                    "ignoring scheduled delivery completion",
-                );
-                false
-            }
-        }
-    }
-
-    /// Transition a completed source lookup into retry, delivery, or cleanup.
-    fn handle_fetched(&mut self, key: Key, result: FetchResult) {
-        match result {
-            FetchResult::Retry => self.schedule_retry(key),
-            FetchResult::Value(value) => {
-                if let Some(subscribers) = self.pending_subscribers(key) {
-                    // Source data is not accepted until marshal validates it, so
-                    // transition into delivery rather than completing the request.
-                    self.start_delivery(key, value, subscribers, false);
-                } else {
-                    self.requests.remove(&key);
-                    self.subscribers.remove(&key);
+                handler::Key::Notarized { round } => {
+                    Self::fetch_notarized_by_round(round, client).await
                 }
             }
         }
     }
+}
 
-    /// Update subscriber state after marshal accepts or rejects a delivery batch.
-    fn handle_delivered(&mut self, key: Key, delivered: NonEmptyVec<Subscriber>, valid: bool) {
-        let (accepted, value) = match self.requests.get(&key).expect("request missing") {
-            Attempt::Delivering {
-                accepted, value, ..
-            } => (*accepted, value.clone()),
-            Attempt::Fetching { .. } | Attempt::Scheduled(_) => unreachable!("current delivery"),
-        };
-
-        if valid {
-            // Marshal accepted this value for the delivered subscriber set. Remove
-            // those subscribers, then redeliver the same value to any subscribers
-            // that arrived while validation was in flight.
-            let remaining = self.subscribers.get_mut(&key).and_then(|subscribers| {
-                for subscriber in delivered {
-                    subscribers.remove(&subscriber);
-                }
-                NonEmptyVec::try_from(subscribers.iter().cloned().collect::<Vec<_>>()).ok()
-            });
-
-            if let Some(subscribers) = remaining {
-                self.start_delivery(key, value, subscribers, true);
-            } else {
-                self.requests.remove(&key);
-                self.subscribers.remove(&key);
-            }
-            return;
-        }
-
-        if accepted {
-            // The same bytes were already accepted for an earlier subscriber. A
-            // later local rejection should not cause an external refetch for data
-            // known to be peer-valid, so drop the remaining local demand.
-            warn!(
-                ?key,
-                "previously accepted source resolver response rejected during local redelivery",
-            );
-            self.requests.remove(&key);
-            self.subscribers.remove(&key);
-            return;
-        }
-
-        self.schedule_retry(key);
-    }
-
-    /// Snapshot the subscribers currently waiting on a key.
-    fn pending_subscribers(&self, key: Key) -> Option<NonEmptyVec<Subscriber>> {
-        self.subscribers.get(&key).and_then(|subscribers| {
-            NonEmptyVec::try_from(subscribers.iter().cloned().collect::<Vec<_>>()).ok()
-        })
-    }
-
-    /// Queue a retry for a key that still has active local demand.
-    fn schedule_retry(&mut self, key: Key) {
-        let deadline = self.context.current() + self.fetch_retry_timeout;
-        let Some(attempt) = self.requests.get_mut(&key) else {
-            return;
-        };
-        // Replacing Fetching/Delivering drops the aborter for the failed attempt.
-        *attempt = Attempt::Scheduled(deadline);
-        self.retry_schedule.insert((deadline, key));
-        debug!(?key, ?deadline, "scheduled source resolver retry");
-    }
-
-    /// Start all retry attempts whose deadlines have elapsed.
-    fn process_retries(&mut self) {
-        let now = self.context.current();
-        while let Some((deadline, key)) = self.retry_schedule.pop_first() {
-            if deadline > now {
-                self.retry_schedule.insert((deadline, key));
-                break;
-            }
-
-            let Some(state) = self.requests.get(&key) else {
-                continue;
-            };
-            match state {
-                Attempt::Scheduled(state_deadline) if *state_deadline == deadline => {
-                    debug!(?key, "retrying source resolver fetch");
-                    self.start_fetch(key);
-                }
-                // A stale schedule entry may remain after the request was
-                // rescheduled. Active attempts do not need retry work yet.
-                Attempt::Scheduled(_) | Attempt::Fetching { .. } | Attempt::Delivering { .. } => {}
-            }
-        }
-    }
-
-    /// Fetch and encode a value from the source for a resolver key.
-    async fn fetch(key: Key, id: u64, client: C) -> Completion {
-        // Source calls intentionally only fetch and encode. Signature and chain
-        // validation are left to marshal through deliver_once.
-        let result = match key {
-            handler::Key::Block(digest) => Self::fetch_block_by_digest(digest, client).await,
-            handler::Key::Finalized { height } => {
-                Self::fetch_finalized_by_height(height, client).await
-            }
-            handler::Key::Notarized { round } => {
-                Self::fetch_notarized_by_round(round, client).await
-            }
-        };
-        Completion::Fetched { key, id, result }
-    }
-
+impl<C> Fetcher<C>
+where
+    C: Source,
+{
     /// Fetch and encode a block response by digest.
-    async fn fetch_block_by_digest(digest: Digest, client: C) -> FetchResult {
+    async fn fetch_block_by_digest(digest: Digest, client: C) -> Option<Bytes> {
         debug!(?digest, "fetching block by digest");
         match client.block(Query::Digest(digest)).await {
-            Ok(Payload::Block(block)) => {
-                let value = Bytes::from(block.encode().to_vec());
-                FetchResult::Value(value)
-            }
+            Ok(Payload::Block(block)) => Some(Bytes::from(block.encode().to_vec())),
             Ok(_) => {
                 warn!(?digest, "wrong payload returned for block by digest");
-                FetchResult::Retry
+                None
             }
             Err(error) => {
                 warn!(?digest, ?error, "failed to fetch block by digest");
-                FetchResult::Retry
+                None
             }
         }
     }
 
     /// Fetch and encode a finalization plus block by finalized height.
-    async fn fetch_finalized_by_height(height: Height, client: C) -> FetchResult {
+    async fn fetch_finalized_by_height(height: Height, client: C) -> Option<Bytes> {
         debug!(height = height.get(), "fetching finalized block by height");
         match client.block(Query::Index(height.get())).await {
-            Ok(Payload::Finalized(finalized)) => {
-                let value = Bytes::from(
-                    (finalized.proof.clone(), finalized.block.clone())
-                        .encode()
-                        .to_vec(),
-                );
-                FetchResult::Value(value)
-            }
+            Ok(Payload::Finalized(finalized)) => Some(Bytes::from(
+                (finalized.proof.clone(), finalized.block.clone())
+                    .encode()
+                    .to_vec(),
+            )),
             Ok(_) => {
                 warn!(
                     height = height.get(),
                     "wrong payload returned for finalized block by height"
                 );
-                FetchResult::Retry
+                None
             }
             Err(error) => {
                 warn!(
@@ -726,68 +113,25 @@ where
                     ?error,
                     "failed to fetch finalized block by height"
                 );
-                FetchResult::Retry
+                None
             }
         }
     }
 
     /// Fetch and encode a notarization plus block by consensus round.
-    async fn fetch_notarized_by_round(round: Round, client: C) -> FetchResult {
+    async fn fetch_notarized_by_round(round: Round, client: C) -> Option<Bytes> {
         let view = round.view().get();
         debug!(view, "fetching notarized block by round");
         match client.notarized(IndexQuery::Index(view)).await {
-            Ok(notarized) => {
-                let value = Bytes::from(
-                    (notarized.proof.clone(), notarized.block.clone())
-                        .encode()
-                        .to_vec(),
-                );
-                FetchResult::Value(value)
-            }
+            Ok(notarized) => Some(Bytes::from(
+                (notarized.proof.clone(), notarized.block.clone())
+                    .encode()
+                    .to_vec(),
+            )),
             Err(error) => {
                 warn!(view, ?error, "failed to fetch notarized block by round");
-                FetchResult::Retry
+                None
             }
-        }
-    }
-
-    /// Deliver one subscriber batch to marshal and report its validation result.
-    async fn deliver_once(
-        key: Key,
-        id: u64,
-        value: Bytes,
-        mut handler: H,
-        delivered: NonEmptyVec<Subscriber>,
-    ) -> Completion {
-        // Handler::deliver sends the value into marshal and resolves only after
-        // marshal has accepted or rejected the delivery.
-        let response = handler.deliver(
-            Delivery {
-                key,
-                subscribers: delivered.clone(),
-            },
-            value,
-        );
-        let valid = match response.await {
-            Ok(true) => true,
-            Ok(false) => {
-                warn!(?key, "marshal rejected source resolver delivery");
-                false
-            }
-            Err(error) => {
-                warn!(
-                    ?key,
-                    ?error,
-                    "marshal dropped source resolver delivery response"
-                );
-                false
-            }
-        };
-        Completion::Delivered {
-            key,
-            id,
-            delivered,
-            valid,
         }
     }
 }
@@ -799,13 +143,16 @@ mod tests {
     use alto_client::Query;
     use commonware_cryptography::{ed25519::PrivateKey, Digestible, Signer};
     use commonware_macros::test_traced;
-    use commonware_resolver::Resolver as _;
+    use commonware_resolver::{Consumer, Delivery, Resolver as _, TargetedResolver as _};
     use commonware_runtime::{deterministic, Clock, Runner as _, Supervisor as _};
-    use commonware_utils::{channel::oneshot, sync::Mutex, NZUsize};
+    use commonware_utils::{channel::oneshot, sync::Mutex, vec::NonEmptyVec, NZUsize};
     use futures::stream;
-    use std::sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc,
+    use std::{
+        collections::VecDeque,
+        sync::{
+            atomic::{AtomicU32, Ordering},
+            Arc,
+        },
     };
 
     const DEFAULT_FETCH_RETRY_TIMEOUT: Duration = Duration::from_secs(1);
@@ -928,18 +275,13 @@ mod tests {
         source: C,
         consumer: TestConsumer,
     ) -> Resolver {
-        let (mailbox_tx, mailbox_rx) = mailbox::new(context.child("mailbox"), NZUsize!(16));
-        Actor::new(
-            context.child("actor"),
-            source,
-            mailbox_rx,
+        opaque::init::<_, _, _, PublicKey>(
+            context,
+            Fetcher::new(source),
             consumer,
+            NZUsize!(16),
             DEFAULT_FETCH_RETRY_TIMEOUT,
         )
-        .start();
-        Resolver {
-            mailbox: mailbox_tx,
-        }
     }
 
     async fn wait_for_delivery(
@@ -1382,180 +724,6 @@ mod tests {
 
             context.sleep(Duration::from_millis(100)).await;
             assert_eq!(consumer.len(), 0);
-        });
-    }
-
-    #[test_traced]
-    fn retain_removes_unwanted_subscribers() {
-        let fixture = TestFixture::new();
-        let digest = fixture.create_block(1, 1).digest();
-
-        deterministic::Runner::default().start(|context| async move {
-            let source = MockSource::new();
-            let consumer = TestConsumer::default();
-            let (mailbox_tx, mailbox_rx) = mailbox::new(context.child("mailbox"), NZUsize!(16));
-            let mut actor = Actor::new(
-                context.child("actor"),
-                source,
-                mailbox_rx,
-                consumer,
-                DEFAULT_FETCH_RETRY_TIMEOUT,
-            );
-            let mut resolver = Resolver {
-                mailbox: mailbox_tx,
-            };
-            let keep = handler::Annotation::Certified {
-                height: Height::new(2),
-            };
-            let discard = handler::Annotation::Certified {
-                height: Height::new(1),
-            };
-            let key = handler::Key::Block(digest);
-            actor
-                .requests
-                .insert(key, Attempt::Scheduled(context.current()));
-            actor
-                .subscribers
-                .insert(key, BTreeSet::from([keep, discard]));
-
-            assert!(resolver
-                .retain(move |_, subscriber| *subscriber == keep)
-                .accepted());
-            let message = actor.mailbox.recv().await.expect("missing retain");
-            actor.handle_message(message);
-
-            let subscribers = actor
-                .subscribers
-                .get(&key)
-                .expect("request should be retained")
-                .clone();
-            assert_eq!(subscribers, BTreeSet::from([keep]));
-        });
-    }
-
-    #[test_traced]
-    fn overflow_retain_prunes_queued_fetches_before_delivery() {
-        let fixture = TestFixture::new();
-        let ready_digest = fixture.create_block(1, 1).digest();
-        let queued_digest = fixture.create_block(2, 2).digest();
-
-        deterministic::Runner::default().start(|context| async move {
-            let (mailbox_tx, mut mailbox_rx) = mailbox::new(context.child("mailbox"), NZUsize!(1));
-            let mut resolver = Resolver {
-                mailbox: mailbox_tx,
-            };
-            let discard = handler::Annotation::Certified {
-                height: Height::new(2),
-            };
-            let keep = handler::Annotation::Finalized(handler::Finalized::ByHeight {
-                height: Height::new(2),
-            });
-
-            assert!(resolver
-                .fetch(handler::Request::certified_block(
-                    ready_digest,
-                    Height::new(1)
-                ))
-                .accepted());
-            assert!(resolver
-                .fetch(handler::Request::certified_block(
-                    queued_digest,
-                    Height::new(2)
-                ))
-                .accepted());
-            assert!(resolver
-                .fetch(handler::Request::finalized_block_by_height(
-                    queued_digest,
-                    Height::new(2)
-                ))
-                .accepted());
-            assert!(resolver
-                .retain(move |key, subscriber| {
-                    !matches!(key, handler::Key::Block(digest) if *digest == queued_digest)
-                        || *subscriber == keep
-                })
-                .accepted());
-
-            let ready = mailbox_rx.recv().await.expect("missing ready fetch");
-            let Message::Fetch(fetches) = ready else {
-                panic!("expected initial ready fetch");
-            };
-            assert_eq!(fetches.len(), 1);
-            assert!(
-                matches!(fetches[0].key, handler::Key::Block(digest) if digest == ready_digest)
-            );
-
-            let retained = mailbox_rx.recv().await.expect("missing retained predicate");
-            let Message::Retain(_) = retained else {
-                panic!("expected retain to drain before queued fetch");
-            };
-
-            let queued = mailbox_rx.recv().await.expect("missing queued fetch");
-            let Message::Fetch(fetches) = queued else {
-                panic!("expected retained fetch");
-            };
-            assert_eq!(fetches.len(), 1);
-            assert!(
-                matches!(fetches[0].key, handler::Key::Block(digest) if digest == queued_digest)
-            );
-            assert_eq!(fetches[0].subscribers.len().get(), 1);
-            assert!(fetches[0].subscribers.contains(&keep));
-            assert!(!fetches[0].subscribers.contains(&discard));
-        });
-    }
-
-    #[test_traced]
-    fn stale_completion_does_not_mutate_replaced_request() {
-        let fixture = TestFixture::new();
-        let digest = fixture.create_block(1, 1).digest();
-
-        deterministic::Runner::default().start(|context| async move {
-            let source = MockSource::new();
-            let consumer = TestConsumer::default();
-            let (_, mailbox_rx) = mailbox::new(context.child("mailbox"), NZUsize!(16));
-            let mut actor = Actor::new(
-                context.child("actor"),
-                source,
-                mailbox_rx,
-                consumer,
-                DEFAULT_FETCH_RETRY_TIMEOUT,
-            );
-
-            let key = handler::Key::Block(digest);
-            let subscriber = handler::Annotation::Certified {
-                height: Height::new(1),
-            };
-            actor
-                .requests
-                .insert(key, Attempt::Scheduled(context.current()));
-            actor.subscribers.insert(key, BTreeSet::from([subscriber]));
-            actor.start_fetch(key);
-            let first_state = actor.requests.remove(&key).expect("missing first state");
-            let Attempt::Fetching { id: first_id, .. } = first_state else {
-                panic!("expected first fetch attempt to be active");
-            };
-
-            actor
-                .requests
-                .insert(key, Attempt::Scheduled(context.current()));
-            actor.subscribers.insert(key, BTreeSet::from([subscriber]));
-            actor.start_fetch(key);
-            let Some(Attempt::Fetching { id: second_id, .. }) = actor.requests.get(&key) else {
-                panic!("expected second fetch attempt to be active");
-            };
-            let second_id = *second_id;
-
-            actor.handle_completed(Completion::Fetched {
-                key,
-                id: first_id,
-                result: FetchResult::Retry,
-            });
-
-            assert!(matches!(
-                actor.requests.get(&key),
-                Some(Attempt::Fetching { id, .. }) if *id == second_id
-            ));
-            assert!(actor.retry_schedule.is_empty());
         });
     }
 
