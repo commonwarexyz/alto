@@ -37,7 +37,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         </p>
                         {MODE === 'public' && (
                             <p>
-                                <i>You can replicate this devnet in your own AWS account with <a href="https://docs.rs/commonware-deployer/latest/commonware_deployer/">deployer::ec2</a> by following the
+                                <i>You can replicate this devnet in your own AWS account with <a href="https://docs.rs/commonware-deployer/latest/commonware_deployer/aws/">commonware_deployer::aws</a> by following the
                                     instructions <a href="https://github.com/commonwarexyz/alto/blob/main/deploy/README.md">here</a>.</i>
                             </p>
                         )}

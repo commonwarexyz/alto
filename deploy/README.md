@@ -85,7 +85,7 @@ _To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/
 #### Install `commonware-deployer`
 
 ```bash
-cargo install commonware-deployer
+cargo install commonware-deployer --features aws
 ```
 
 #### Create Artifacts
