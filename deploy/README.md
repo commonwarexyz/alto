@@ -168,6 +168,8 @@ cd assets
 deployer aws create --config config.yaml
 ```
 
+_If your deployer machine has limited bandwidth, use `--concurrency <concurrency>` to lower the maximum number of instances configured at once (must be >= 1, default: 128)._
+
 #### Monitor Performance on Grafana
 
 Visit `http://<monitoring-ip>:3000/d/chain`
