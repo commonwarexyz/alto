@@ -100,7 +100,7 @@ pub struct Config<
     pub indexer: Option<C>,
 }
 
-type Marshaled<E> = Deferred<E, Scheme, Application<E>, Block, FixedEpocher>;
+type Marshaled<E> = Deferred<E, Scheme, Application, Block, FixedEpocher>;
 
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
@@ -244,7 +244,7 @@ where
             .expect("failed to create scheme");
         let provider = ConstantProvider::new(scheme.clone());
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-        let genesis = Application::<E>::genesis();
+        let genesis = Application::genesis();
         let genesis_digest = genesis.digest();
         let (marshal, marshal_mailbox, _) = MarshalActor::init(
             context.child("marshal"),
@@ -302,10 +302,10 @@ where
             )
             .await;
             let (producer, pusher, consumer) = indexer.split();
-            let app = Application::new(context.child("application")).with_backfiller(producer);
+            let app = Application::new().with_backfiller(producer);
             (app, Some(pusher), Some(consumer))
         } else {
-            (Application::new(context.child("application")), None, None)
+            (Application::new(), None, None)
         };
 
         // Create the application

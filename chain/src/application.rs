@@ -11,10 +11,7 @@ use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
 use rand::Rng;
-use std::{
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::time::{Duration, SystemTime};
 use tracing::info;
 
 /// Genesis message to use during initialization.
@@ -26,21 +23,12 @@ const GENESIS: &[u8] = b"commonware is neat";
 /// timestamp to ensure consistent application of block validity rules.
 const MAX_BLOCK_TIMESTAMP_MS: u64 = 7_258_118_400_000;
 
-pub struct Application<E: Clock + Storage + Metrics> {
-    context: Arc<E>,
+#[derive(Clone, Default)]
+pub struct Application {
     backfiller: Option<indexer::Producer>,
 }
 
-impl<E: Clock + Storage + Metrics> Clone for Application<E> {
-    fn clone(&self) -> Self {
-        Self {
-            context: self.context.clone(),
-            backfiller: self.backfiller.clone(),
-        }
-    }
-}
-
-impl<E: Clock + Storage + Metrics> Application<E> {
+impl Application {
     pub fn genesis() -> Block {
         let genesis_context = Context {
             round: Round::new(EPOCH, View::zero()),
@@ -50,11 +38,8 @@ impl<E: Clock + Storage + Metrics> Application<E> {
         Block::new(genesis_context, Sha256::hash(GENESIS), Height::zero(), 0)
     }
 
-    pub fn new(context: E) -> Self {
-        Self {
-            context: Arc::new(context),
-            backfiller: None,
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub(crate) fn with_backfiller(mut self, backfiller: indexer::Producer) -> Self {
@@ -63,7 +48,7 @@ impl<E: Clock + Storage + Metrics> Application<E> {
     }
 }
 
-impl<E: Clock + Storage + Metrics> ConsensusApplication<E> for Application<E>
+impl<E> ConsensusApplication<E> for Application
 where
     E: Rng + Spawner + Metrics + Clock + Storage,
 {
@@ -127,7 +112,7 @@ where
     }
 }
 
-impl<E: Clock + Storage + Metrics> Reporter for Application<E> {
+impl Reporter for Application {
     type Activity = Update<Block>;
 
     fn report(&mut self, activity: Self::Activity) -> Feedback {
@@ -165,15 +150,9 @@ mod tests {
         }
     }
 
-    async fn setup_application_test(
-        context: deterministic::Context,
-    ) -> Application<deterministic::Context> {
-        Application::new(context)
-    }
-
     async fn verify_block(
         context: deterministic::Context,
-        application: &mut Application<deterministic::Context>,
+        application: &mut Application,
         block: &Block,
         parent: &Block,
     ) -> bool {
@@ -183,7 +162,7 @@ mod tests {
 
     async fn propose_child(
         context: deterministic::Context,
-        application: &mut Application<deterministic::Context>,
+        application: &mut Application,
         child_context: Context,
         parent: &Block,
     ) -> Block {
@@ -197,7 +176,7 @@ mod tests {
     fn verify_waits_for_far_future_block_timestamp() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = setup_application_test(context.child("application")).await;
+            let mut application = Application::new();
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -225,7 +204,7 @@ mod tests {
     fn verify_rejects_equal_parent_timestamp() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = setup_application_test(context.child("application")).await;
+            let mut application = Application::new();
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -251,7 +230,7 @@ mod tests {
     fn verify_returns_immediately_for_mature_block_timestamp() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = setup_application_test(context.child("application")).await;
+            let mut application = Application::new();
 
             context.sleep(Duration::from_millis(10)).await;
             let now = context.current().epoch_millis();
@@ -279,7 +258,7 @@ mod tests {
     fn propose_uses_parent_timestamp_plus_one_when_clock_is_behind() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = setup_application_test(context.child("application")).await;
+            let mut application = Application::new();
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -306,7 +285,7 @@ mod tests {
     fn verify_rejects_timestamp_above_maximum() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = setup_application_test(context.child("application")).await;
+            let mut application = Application::new();
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -335,7 +314,7 @@ mod tests {
     fn propose_panics_when_parent_timestamp_is_maximum() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = setup_application_test(context.child("application")).await;
+            let mut application = Application::new();
 
             let parent = Block::new(
                 test_context(1, (View::zero(), sha256::Digest::EMPTY)),

@@ -777,8 +777,7 @@ mod tests {
             assert!(indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
-            let genesis_digest =
-                application::Application::<deterministic::Context>::genesis().digest();
+            let genesis_digest = application::Application::genesis().digest();
             let started_digests = indexer.block_upload_started_digests.lock().clone();
             let expected_genesis_uploads = n as usize;
             assert_eq!(
@@ -961,8 +960,7 @@ mod tests {
                 queue_outstanding(&metrics) > 0,
                 "expected finalized queue work while certificate uploads were blocked",
             );
-            let genesis_digest =
-                application::Application::<deterministic::Context>::genesis().digest();
+            let genesis_digest = application::Application::genesis().digest();
             let expected_genesis_uploads = n as usize;
             let started_digests = indexer.block_upload_started_digests.lock().clone();
             assert_eq!(
