@@ -224,6 +224,13 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates f
         }
     }
 
+    async fn has(&self, height: Height) -> Result<bool, Self::Error> {
+        match self {
+            Self::Immutable(a) => Archive::has(a, Identifier::Index(height.get())).await,
+            Self::Prunable(a) => Archive::has(a, Identifier::Index(height.get())).await,
+        }
+    }
+
     async fn prune(&mut self, min: Height) -> Result<(), Self::Error> {
         match self {
             Self::Immutable(_) => Ok(()),

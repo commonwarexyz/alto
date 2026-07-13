@@ -141,6 +141,7 @@ mod tests {
     use super::*;
     use commonware_consensus::marshal::ancestry;
     use commonware_runtime::{deterministic, Runner as _, Supervisor as _};
+    use std::sync::Arc;
 
     fn test_context(view: u64, parent: (View, sha256::Digest)) -> Context {
         Context {
@@ -156,7 +157,7 @@ mod tests {
         block: &Block,
         parent: &Block,
     ) -> bool {
-        let ancestry = ancestry::from_iter([block.clone(), parent.clone()]);
+        let ancestry = ancestry::from_iter([Arc::new(block.clone()), Arc::new(parent.clone())]);
         ConsensusApplication::verify(application, (context, block.context.clone()), ancestry).await
     }
 
@@ -166,7 +167,7 @@ mod tests {
         child_context: Context,
         parent: &Block,
     ) -> Block {
-        let ancestry = ancestry::from_iter([parent.clone()]);
+        let ancestry = ancestry::from_iter([Arc::new(parent.clone())]);
         ConsensusApplication::propose(application, (context, child_context), ancestry)
             .await
             .expect("expected proposal")

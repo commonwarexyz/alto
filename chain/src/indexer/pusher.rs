@@ -133,6 +133,7 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
                     warn!(%view, "subscription for block cancelled");
                     return;
                 };
+                let block = Arc::unwrap_or_clone(block);
 
                 let height = block.height.get();
                 guard.cache_block(block.clone());

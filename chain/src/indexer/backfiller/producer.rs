@@ -10,7 +10,7 @@ use commonware_runtime::{
 };
 use commonware_storage::queue;
 use commonware_utils::{acknowledgement::Exact, Acknowledgement};
-use std::{collections::VecDeque, num::NonZeroUsize};
+use std::{collections::VecDeque, num::NonZeroUsize, sync::Arc};
 
 /// Records finalized block digests in the backfill queue from the application's
 /// block stream.
@@ -22,7 +22,7 @@ pub struct Producer {
 // Carries a finalized block while holding its marshal ack until the block is
 // durably queued.
 struct Message {
-    block: Block,
+    block: Arc<Block>,
     ack: Exact,
 }
 
