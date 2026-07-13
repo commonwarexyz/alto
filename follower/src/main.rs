@@ -7,7 +7,7 @@ use commonware_consensus::types::Height;
 use commonware_formatting::from_hex;
 use commonware_macros::select;
 use commonware_parallel::Sequential;
-use commonware_runtime::{tokio, Clock, Runner, Supervisor as _, ThreadPooler};
+use commonware_runtime::{tokio, Clock, Runner, Strategizer, Supervisor as _};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -19,6 +19,9 @@ use std::{
     time::Duration,
 };
 use tracing::{error, info, warn, Level};
+
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod application;
 mod archive;
@@ -152,7 +155,7 @@ fn main() {
         let log_level = Level::from_str(&config.log_level).expect("Invalid log level");
         tokio::telemetry::init(
             context.child("telemetry"),
-            tokio::telemetry::Logging {
+            tokio::telemetry::Logs {
                 level: log_level,
                 json: false,
             },
@@ -193,9 +196,7 @@ fn main() {
         info!("connected to certificate source");
 
         // Create engine
-        let strategy = context
-            .create_strategy(config.signature_threads)
-            .unwrap();
+        let strategy = context.strategy(config.signature_threads);
         let (engine, mailbox, last_processed_height) = engine::Engine::new(
             context.child("engine"),
             scheme.clone(),

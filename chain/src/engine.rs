@@ -17,7 +17,7 @@ use commonware_consensus::{
 };
 use commonware_cryptography::{
     bls12381::primitives::{group, sharing::Sharing, variant::MinSig},
-    certificate::{ConstantProvider, Scheme as _},
+    certificate::{ConstantProvider, Verifier as _},
     ed25519::PublicKey,
     sha256::Digest,
     Digestible,
@@ -27,7 +27,7 @@ use commonware_parallel::Strategy;
 use commonware_resolver::TargetedResolver;
 use commonware_runtime::{
     buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
-    Spawner, Storage, ThreadPooler,
+    Spawner, Storage, Strategizer,
 };
 use commonware_storage::{archive::immutable, queue};
 use commonware_utils::{ordered::Set, NZU16};
@@ -135,7 +135,7 @@ where
 
 impl<E, B, P, S, C> Engine<E, B, P, S, C>
 where
-    E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + ThreadPooler + Storage + Metrics,
+    E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Strategizer + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     P: Provider<PublicKey = PublicKey>,
     S: Strategy,

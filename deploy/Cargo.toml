@@ -17,6 +17,7 @@ commonware-formatting = { workspace = true }
 commonware-macros = { workspace = true }
 commonware-math = { workspace = true }
 commonware-utils = { workspace = true }
+mimalloc = { workspace = true }
 rand = { workspace = true }
 serde = { version = "1.0.218", features = ["derive"] }
 serde_yaml = "0.9.34"

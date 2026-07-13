@@ -7,7 +7,8 @@ use commonware_consensus::marshal::{
 use commonware_cryptography::sha256::Digest;
 use commonware_macros::select_loop;
 use commonware_runtime::{
-    spawn_cell, telemetry::metrics::status, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
+    spawn_cell, telemetry::metrics::status, BufferPooler, Clock, ContextCell, Handle, Metrics,
+    Spawner, Storage,
 };
 use commonware_storage::queue;
 use commonware_utils::futures::{OptionFuture, Pool};
@@ -28,7 +29,7 @@ enum Completion {
     Skipped { position: u64, height: u64 },
 }
 
-pub struct Consumer<E: Spawner + Clock + Storage + Metrics, C: Client> {
+pub struct Consumer<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> {
     context: ContextCell<E>,
     client: C,
     marshal: MarshalMailbox<Scheme, Standard<Block>>,
@@ -41,7 +42,7 @@ pub struct Consumer<E: Spawner + Clock + Storage + Metrics, C: Client> {
     retry: Duration,
 }
 
-impl<E: Spawner + Clock + Storage + Metrics, C: Client> Consumer<E, C> {
+impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Consumer<E, C> {
     pub fn new(
         context: E,
         client: C,

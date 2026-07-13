@@ -92,6 +92,9 @@ use utils::{
     parse_query, IndexQueryKind, QueryKind,
 };
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod utils;
 
 const DEFAULT_INDEXER: &str = "https://global.alto.exoware.xyz";

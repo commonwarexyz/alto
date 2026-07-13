@@ -16,7 +16,7 @@
 
 use alto_types::{Block, Finalization, Scheme};
 use commonware_consensus::{marshal, types::Height};
-use commonware_cryptography::{certificate::Scheme as CertScheme, sha256::Digest, Digestible};
+use commonware_cryptography::{certificate::Verifier as _, sha256::Digest, Digestible};
 use commonware_runtime::{buffer::paged::CacheRef, BufferPooler, Clock, Metrics, Storage};
 use commonware_storage::{
     archive::{self, immutable, prunable, Archive, Identifier},

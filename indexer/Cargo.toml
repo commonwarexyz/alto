@@ -20,6 +20,7 @@ commonware-formatting = { workspace = true }
 commonware-utils = { workspace = true }
 commonware-parallel = { workspace = true }
 bytes = { workspace = true }
+mimalloc = { workspace = true }
 rand = { workspace = true }
 futures = { workspace = true }
 thiserror = { workspace = true }

@@ -20,6 +20,7 @@ commonware-parallel = { workspace = true }
 alto-types = { workspace = true }
 alto-client = { workspace = true }
 bytes =  { workspace = true }
+mimalloc = { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
 clap = { workspace = true }
