@@ -403,7 +403,7 @@ fn generate_local(
         "bootstrappers must be less than or equal to peers"
     );
     let mut peer_signers = (0..peers)
-        .map(|_| PrivateKey::random(&mut sys_rng()))
+        .map(|_| PrivateKey::random(sys_rng()))
         .collect::<Vec<_>>();
     peer_signers.sort_by_key(|signer| signer.public_key());
     let allowed_peers: Vec<String> = peer_signers
@@ -608,7 +608,7 @@ fn generate_remote(
         "bootstrappers must be less than or equal to peers"
     );
     let mut peer_signers = (0..peers)
-        .map(|_| PrivateKey::random(&mut sys_rng()))
+        .map(|_| PrivateKey::random(sys_rng()))
         .collect::<Vec<_>>();
     peer_signers.sort_by_key(|signer| signer.public_key());
     let allowed_peers: Vec<String> = peer_signers
