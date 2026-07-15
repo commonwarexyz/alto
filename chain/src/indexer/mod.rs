@@ -17,7 +17,7 @@
 use alto_types::{Block, Finalized, Notarized, Scheme, Seed};
 use commonware_consensus::marshal::{core::Mailbox as MarshalMailbox, standard::Standard};
 use commonware_parallel::Strategy;
-use commonware_runtime::{Clock, Metrics, Spawner, Storage};
+use commonware_runtime::{BufferPooler, Clock, Metrics, Spawner, Storage};
 use commonware_storage::queue;
 use commonware_utils::sync::Mutex;
 use std::{future::Future, num::NonZeroUsize, sync::Arc, time::Duration};
@@ -88,13 +88,13 @@ impl<S: Strategy> Client for alto_client::Client<S> {
 /// - a producer for the application's finalized block stream;
 /// - a pusher for consensus activity;
 /// - a consumer for the background retry task.
-pub(crate) struct Indexer<E: Spawner + Clock + Storage + Metrics, C: Client> {
+pub(crate) struct Indexer<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> {
     producer: Producer,
     pusher: Pusher<E, C>,
     consumer: Consumer<E, C>,
 }
 
-impl<E: Spawner + Clock + Storage + Metrics, C: Client> Indexer<E, C> {
+impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Indexer<E, C> {
     pub(crate) async fn new(
         context: E,
         client: C,

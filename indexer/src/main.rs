@@ -7,6 +7,9 @@ use commonware_parallel::Sequential;
 use std::sync::Arc;
 use tracing::info;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {

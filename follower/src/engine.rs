@@ -241,8 +241,9 @@ mod tests {
             let response = handler.deliver(
                 Delivery {
                     key: handler::Key::Finalized { height },
-                    subscribers: NonEmptyVec::new(handler::Annotation::Finalized(
-                        handler::Finalized::ByHeight { height },
+                    subscribers: NonEmptyVec::new((
+                        handler::Annotation::Finalized(handler::Finalized::ByHeight { height }),
+                        tracing::Span::none(),
                     )),
                 },
                 value,
@@ -272,7 +273,10 @@ mod tests {
             let response = handler.deliver(
                 Delivery {
                     key: handler::Key::Notarized { round },
-                    subscribers: NonEmptyVec::new(handler::Annotation::Notarization { round }),
+                    subscribers: NonEmptyVec::new((
+                        handler::Annotation::Notarization { round },
+                        tracing::Span::none(),
+                    )),
                 },
                 value,
             );

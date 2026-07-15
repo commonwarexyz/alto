@@ -112,7 +112,7 @@ mod tests {
     use engine::{Config, Engine};
     use governor::Quota;
     use indexer::mocks;
-    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use rand::{rngs::StdRng, RngExt, SeedableRng};
     use std::{collections::HashMap, num::NonZeroU32, time::Duration};
     use tracing::info;
 
@@ -674,7 +674,7 @@ mod tests {
 
                 // Exit at random points until finished
                 let wait =
-                    context.gen_range(Duration::from_millis(250)..Duration::from_millis(1_000));
+                    context.random_range(Duration::from_millis(250)..Duration::from_millis(1_000));
 
                 // Wait for one to finish
                 select! {

@@ -16,7 +16,7 @@
 
 use alto_types::{Block, Finalization, Scheme};
 use commonware_consensus::{marshal, types::Height};
-use commonware_cryptography::{certificate::Scheme as CertScheme, sha256::Digest, Digestible};
+use commonware_cryptography::{certificate::Verifier as _, sha256::Digest, Digestible};
 use commonware_runtime::{buffer::paged::CacheRef, BufferPooler, Clock, Metrics, Storage};
 use commonware_storage::{
     archive::{self, immutable, prunable, Archive, Identifier},
@@ -221,6 +221,13 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates f
         match self {
             Self::Immutable(a) => Archive::get(a, id).await,
             Self::Prunable(a) => Archive::get(a, id).await,
+        }
+    }
+
+    async fn has(&self, height: Height) -> Result<bool, Self::Error> {
+        match self {
+            Self::Immutable(a) => Archive::has(a, Identifier::Index(height.get())).await,
+            Self::Prunable(a) => Archive::has(a, Identifier::Index(height.get())).await,
         }
     }
 

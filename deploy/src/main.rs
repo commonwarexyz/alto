@@ -19,8 +19,8 @@ use commonware_cryptography::{
 use commonware_deployer::aws::{self, METRICS_PORT};
 use commonware_formatting::{from_hex, hex};
 use commonware_math::algebra::Random;
-use commonware_utils::NZU32;
-use rand::{rngs::OsRng, seq::IteratorRandom};
+use commonware_utils::{sys_rng, NZU32};
+use rand::seq::IteratorRandom;
 use std::{
     collections::{BTreeMap, HashMap},
     fs,
@@ -29,6 +29,9 @@ use std::{
 };
 use tracing::{error, info};
 use uuid::Uuid;
+
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 const BINARY_NAME: &str = "validator";
 const PORT: u16 = 4545;
@@ -400,7 +403,7 @@ fn generate_local(
         "bootstrappers must be less than or equal to peers"
     );
     let mut peer_signers = (0..peers)
-        .map(|_| PrivateKey::random(&mut OsRng))
+        .map(|_| PrivateKey::random(sys_rng()))
         .collect::<Vec<_>>();
     peer_signers.sort_by_key(|signer| signer.public_key());
     let allowed_peers: Vec<String> = peer_signers
@@ -409,7 +412,7 @@ fn generate_local(
         .collect();
     let bootstrappers = allowed_peers
         .iter()
-        .choose_multiple(&mut OsRng, bootstrappers)
+        .sample(&mut sys_rng(), bootstrappers)
         .into_iter()
         .cloned()
         .collect::<Vec<_>>();
@@ -417,7 +420,7 @@ fn generate_local(
     // Generate consensus key
     let peers_u32 = peers as u32;
     let Fixture { schemes, .. } =
-        bls12381_threshold::fixture::<MinSig, _>(&mut OsRng, NAMESPACE, peers_u32);
+        bls12381_threshold::fixture::<MinSig, _>(&mut sys_rng(), NAMESPACE, peers_u32);
 
     let identity = schemes[0].polynomial().public();
     info!(%identity, "generated network key");
@@ -605,7 +608,7 @@ fn generate_remote(
         "bootstrappers must be less than or equal to peers"
     );
     let mut peer_signers = (0..peers)
-        .map(|_| PrivateKey::random(&mut OsRng))
+        .map(|_| PrivateKey::random(sys_rng()))
         .collect::<Vec<_>>();
     peer_signers.sort_by_key(|signer| signer.public_key());
     let allowed_peers: Vec<String> = peer_signers
@@ -614,7 +617,7 @@ fn generate_remote(
         .collect();
     let bootstrappers = allowed_peers
         .iter()
-        .choose_multiple(&mut OsRng, bootstrappers)
+        .sample(&mut sys_rng(), bootstrappers)
         .into_iter()
         .cloned()
         .collect::<Vec<_>>();
@@ -622,7 +625,7 @@ fn generate_remote(
     // Generate consensus key
     let peers_u32 = peers as u32;
     let Fixture { schemes, .. } =
-        bls12381_threshold::fixture::<MinSig, _>(&mut OsRng, NAMESPACE, peers_u32);
+        bls12381_threshold::fixture::<MinSig, _>(&mut sys_rng(), NAMESPACE, peers_u32);
 
     let identity = schemes[0].polynomial().public();
     info!(%identity, "generated network key");
@@ -676,9 +679,12 @@ fn generate_remote(
         let instance = aws::InstanceConfig {
             name: name.clone(),
             region,
+            availability_zone_group: None,
             instance_type: instance_type.clone(),
             storage_size,
             storage_class: STORAGE_CLASS.to_string(),
+            storage_iops: None,
+            storage_throughput: None,
             binary: BINARY_NAME.to_string(),
             config: peer_config_file,
             profiling: false,
@@ -752,6 +758,8 @@ fn generate_remote(
             instance_type: monitoring_instance_type,
             storage_size: monitoring_storage_size,
             storage_class: STORAGE_CLASS.to_string(),
+            storage_iops: None,
+            storage_throughput: None,
             dashboard: DASHBOARD_FILE.to_string(),
         },
         ports: vec![aws::PortConfig {

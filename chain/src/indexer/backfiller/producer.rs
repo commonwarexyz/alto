@@ -5,10 +5,12 @@ use commonware_actor::{
     Feedback,
 };
 use commonware_consensus::{marshal::Update, Reporter};
-use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage};
+use commonware_runtime::{
+    spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
+};
 use commonware_storage::queue;
 use commonware_utils::{acknowledgement::Exact, Acknowledgement};
-use std::{collections::VecDeque, num::NonZeroUsize};
+use std::{collections::VecDeque, num::NonZeroUsize, sync::Arc};
 
 /// Records finalized block digests in the backfill queue from the application's
 /// block stream.
@@ -20,7 +22,7 @@ pub struct Producer {
 // Carries a finalized block while holding its marshal ack until the block is
 // durably queued.
 struct Message {
-    block: Block,
+    block: Arc<Block>,
     ack: Exact,
 }
 
@@ -32,7 +34,7 @@ impl Policy for Message {
     }
 }
 
-struct Actor<E: Clock + Storage + Metrics> {
+struct Actor<E: Clock + Storage + Metrics + BufferPooler> {
     context: ContextCell<E>,
     uploads: SharedState,
     writer: queue::Writer<E, Entry>,
@@ -50,7 +52,7 @@ impl Reporter for Producer {
     }
 }
 
-impl<E: Clock + Storage + Metrics + Spawner> Actor<E> {
+impl<E: Clock + Storage + Metrics + Spawner + BufferPooler> Actor<E> {
     pub fn new(
         context: E,
         uploads: SharedState,
@@ -101,7 +103,7 @@ pub fn init<E>(
     mailbox_size: NonZeroUsize,
 ) -> Producer
 where
-    E: Clock + Storage + Metrics + Spawner,
+    E: Clock + Storage + Metrics + Spawner + BufferPooler,
 {
     let (actor, producer) = Actor::new(context, uploads, writer, mailbox_size);
     actor.start();

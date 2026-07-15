@@ -16,7 +16,7 @@ use commonware_cryptography::{
 use commonware_deployer::aws::Hosts;
 use commonware_formatting::from_hex;
 use commonware_p2p::{authenticated::discovery as authenticated, Ingress, Manager};
-use commonware_runtime::{tokio, BufferPoolConfig, Runner, Supervisor as _, ThreadPooler};
+use commonware_runtime::{tokio, BufferPoolConfig, Runner, Strategizer, Supervisor as _};
 use commonware_utils::{ordered::Set, union_unique, NZUsize, NZU32};
 use futures::future::try_join_all;
 use governor::Quota;
@@ -29,6 +29,9 @@ use std::{
     time::Duration,
 };
 use tracing::{error, info, Level};
+
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 const PENDING_CHANNEL: u64 = 0;
 const RECOVERED_CHANNEL: u64 = 1;
@@ -118,7 +121,7 @@ fn main() {
         let log_level = Level::from_str(&config.log_level).expect("Invalid log level");
         tokio::telemetry::init(
             context.child("telemetry"),
-            tokio::telemetry::Logging {
+            tokio::telemetry::Logs {
                 level: log_level,
                 // If we are using `commonware-deployer`, we should use structured logging.
                 json: hosts_file.is_some(),
@@ -266,9 +269,7 @@ fn main() {
         // Create network
         let p2p = network.start();
 
-        let strategy = context
-            .create_strategy(NZUsize!(config.signature_threads))
-            .unwrap();
+        let strategy = context.strategy(NZUsize!(config.signature_threads));
 
         // Create indexer
         let mut indexer = None;

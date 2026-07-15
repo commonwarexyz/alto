@@ -20,6 +20,7 @@ commonware-utils = { workspace = true }
 futures = { workspace = true }
 governor = { workspace = true }
 clap = { workspace = true }
+mimalloc = { workspace = true }
 tracing = { workspace = true }
 serde_yaml = "0.9.34"
 

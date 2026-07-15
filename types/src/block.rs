@@ -4,7 +4,7 @@ use commonware_codec::{varint::UInt, Encode, EncodeSize, Error, Read, ReadExt, W
 use commonware_consensus::{types::Height, CertifiableBlock, Heightable};
 use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256};
 use commonware_parallel::Strategy;
-use rand::rngs::OsRng;
+use commonware_utils::sys_rng;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
@@ -109,7 +109,7 @@ impl Notarized {
     }
 
     pub fn verify(&self, scheme: &Scheme, strategy: &impl Strategy) -> bool {
-        self.proof.verify(&mut OsRng, scheme, strategy)
+        self.proof.verify(&mut sys_rng(), scheme, strategy)
     }
 }
 
@@ -156,7 +156,7 @@ impl Finalized {
     }
 
     pub fn verify(&self, scheme: &Scheme, strategy: &impl Strategy) -> bool {
-        self.proof.verify(&mut OsRng, scheme, strategy)
+        self.proof.verify(&mut sys_rng(), scheme, strategy)
     }
 }
 

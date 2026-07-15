@@ -322,7 +322,8 @@ mod tests {
             assert!(delivery
                 .delivery
                 .subscribers
-                .contains(&handler::Annotation::Certified { height }));
+                .iter()
+                .any(|(a, _)| *a == handler::Annotation::Certified { height }));
             assert!(!delivery.value.is_empty());
             delivery.response.send(true).expect("response dropped");
         });
@@ -577,12 +578,8 @@ mod tests {
 
             let second = wait_for_delivery(&context, &consumer).await;
             assert!(matches!(second.delivery.key, handler::Key::Block(d) if d == digest));
-            assert!(second
-                .delivery
-                .subscribers
-                .contains(&handler::Annotation::Finalized(
-                    handler::Finalized::ByHeight { height }
-                )));
+            assert!(second.delivery.subscribers.iter().any(|(a, _)| *a
+                == handler::Annotation::Finalized(handler::Finalized::ByHeight { height })));
             second.response.send(true).expect("response dropped");
 
             context.sleep(Duration::from_millis(100)).await;
@@ -661,7 +658,11 @@ mod tests {
                 .fetch(handler::Request::certified_block(digest, Height::new(2)))
                 .accepted());
             let delivery = wait_for_delivery(&context, &consumer).await;
-            assert!(delivery.delivery.subscribers.contains(&subscriber));
+            assert!(delivery
+                .delivery
+                .subscribers
+                .iter()
+                .any(|(a, _)| *a == subscriber));
 
             assert!(resolver
                 .retain(move |_, candidate| *candidate == subscriber)
