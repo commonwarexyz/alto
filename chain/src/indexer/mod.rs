@@ -89,7 +89,7 @@ impl<S: Strategy> Client for alto_client::Client<S> {
 /// - a pusher for consensus activity;
 /// - a consumer for the background retry task.
 pub(crate) struct Indexer<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> {
-    producer: Producer,
+    producer: Producer<E>,
     pusher: Pusher<E, C>,
     consumer: Consumer<E, C>,
 }
@@ -100,7 +100,6 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Indexer<E
         client: C,
         marshal: MarshalMailbox<Scheme, Standard<Block>>,
         backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
-        mailbox_size: NonZeroUsize,
         backfiller_max_active: NonZeroUsize,
         backfiller_retry: Duration,
     ) -> Self {
@@ -112,12 +111,7 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Indexer<E
             uploads.clone(),
         );
         let (writer, reader) = backfiller;
-        let producer = backfiller::producer::init(
-            context.child("producer"),
-            uploads.clone(),
-            writer.clone(),
-            mailbox_size,
-        );
+        let producer = Producer::new(context.child("producer"), uploads.clone(), writer.clone());
         let consumer = Consumer::new(
             context.child("consumer"),
             client,
@@ -136,7 +130,7 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Indexer<E
     }
 
     /// Consumes the runtime and returns the actor handles it constructed.
-    pub(crate) fn split(self) -> (Producer, Pusher<E, C>, Consumer<E, C>) {
+    pub(crate) fn split(self) -> (Producer<E>, Pusher<E, C>, Consumer<E, C>) {
         let Self {
             producer,
             pusher,

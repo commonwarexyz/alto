@@ -31,12 +31,14 @@ impl Block {
         height: Height,
         timestamp: u64,
     ) -> Digest {
-        let mut hasher = Sha256::new();
-        hasher.update(&context.encode());
-        hasher.update(parent);
-        hasher.update(&height.get().to_be_bytes());
-        hasher.update(&timestamp.to_be_bytes());
-        hasher.finalize()
+        let mut hasher = Sha256::default();
+        hasher
+            .update(&context.encode())
+            .update(parent)
+            .update(&height.get().to_be_bytes())
+            .update(&timestamp.to_be_bytes());
+        let (_, digest) = hasher.finalize();
+        digest
     }
 
     pub fn new(context: Context, parent: Digest, height: Height, timestamp: u64) -> Self {

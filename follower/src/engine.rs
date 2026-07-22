@@ -50,7 +50,7 @@ fn genesis() -> Block {
     };
     Block::new(
         genesis_context,
-        Sha256::hash(GENESIS),
+        Sha256::hash(&[GENESIS]),
         commonware_consensus::types::Height::zero(),
         0,
     )
@@ -133,7 +133,7 @@ where
                 start: marshal::Start::Genesis(genesis()),
                 partition_prefix: "follower-marshal".to_string(),
                 mailbox_size,
-                view_retention_timeout: VIEW_RETENTION_TIMEOUT,
+                view_retention: VIEW_RETENTION_TIMEOUT,
                 prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
                 replay_buffer: REPLAY_BUFFER,
                 key_write_buffer: WRITE_BUFFER,

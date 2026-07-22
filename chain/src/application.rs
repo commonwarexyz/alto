@@ -4,10 +4,10 @@ use commonware_actor::Feedback;
 use commonware_consensus::{
     marshal::{ancestry::Ancestry, Update},
     types::{Height, Round, View},
-    Application as ConsensusApplication, Heightable, Reporter,
+    Heightable, Reporter,
 };
 use commonware_cryptography::{ed25519, sha256, Digest as _, Digestible, Hasher, Sha256, Signer};
-use commonware_runtime::{Clock, Metrics, Spawner, Storage};
+use commonware_runtime::{BufferPooler, Clock, Metrics, Spawner, Storage};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
 use rand::Rng;
@@ -22,55 +22,78 @@ const GENESIS: &[u8] = b"commonware is neat";
 /// Different platforms have different `SystemTime` limits, so we use a fixed
 /// timestamp to ensure consistent application of block validity rules.
 const MAX_BLOCK_TIMESTAMP_MS: u64 = 7_258_118_400_000;
+const TARGET_BLOCK_INTERVAL_MS: u64 = 50;
+const MAX_FUTURE_SKEW_MS: u64 = 1_000;
 
-#[derive(Clone, Default)]
-pub struct Application {
-    backfiller: Option<indexer::Producer>,
+pub struct Application<E: Clock + Storage + Metrics + Spawner + BufferPooler> {
+    backfiller: Option<indexer::Producer<E>>,
 }
 
-impl Application {
-    pub fn genesis() -> Block {
+impl<E: Clock + Storage + Metrics + Spawner + BufferPooler> Clone for Application<E> {
+    fn clone(&self) -> Self {
+        Self {
+            backfiller: self.backfiller.clone(),
+        }
+    }
+}
+
+impl<E: Clock + Storage + Metrics + Spawner + BufferPooler> Application<E> {
+    pub fn new() -> Self {
+        Self { backfiller: None }
+    }
+
+    pub(crate) fn genesis_block() -> Block {
         let genesis_context = Context {
             round: Round::new(EPOCH, View::zero()),
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::zero(), sha256::Digest::EMPTY),
         };
-        Block::new(genesis_context, Sha256::hash(GENESIS), Height::zero(), 0)
+        Block::new(genesis_context, Sha256::hash(&[GENESIS]), Height::zero(), 0)
     }
 
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn with_backfiller(mut self, backfiller: indexer::Producer) -> Self {
+    pub(crate) fn with_backfiller(mut self, backfiller: indexer::Producer<E>) -> Self {
         self.backfiller = Some(backfiller);
         self
     }
 }
 
-impl<E> ConsensusApplication<E> for Application
+impl<E: Clock + Storage + Metrics + Spawner + BufferPooler> Default for Application<E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<E: Clock + Storage + Metrics> commonware_consensus::Application<E> for Application<E>
 where
-    E: Rng + Spawner + Metrics + Clock + Storage,
+    E: Rng + Spawner + Metrics + Clock + Storage + BufferPooler,
 {
     type SigningScheme = Scheme;
     type Context = Context;
     type Block = Block;
+    type Input = ();
 
     async fn propose(
         &mut self,
         (runtime_context, context): (E, Self::Context),
         mut ancestry: impl Ancestry<Self::Block>,
+        _input: Self::Input,
     ) -> Option<Self::Block> {
         let parent = ancestry.next().await?;
 
         // Create a new block.
+        let min_timestamp = parent
+            .timestamp
+            .checked_add(TARGET_BLOCK_INTERVAL_MS)
+            .expect("parent timestamp overflowed");
         let mut current = runtime_context.current().epoch_millis();
-        if current <= parent.timestamp {
-            current = parent
-                .timestamp
-                .checked_add(1)
-                .expect("parent timestamp overflowed");
+        if current < min_timestamp {
+            let deadline = SystemTime::UNIX_EPOCH
+                .checked_add(Duration::from_millis(min_timestamp))
+                .expect("proposed timestamp exceeded maximum");
+            runtime_context.sleep_until(deadline).await;
+            current = runtime_context.current().epoch_millis();
         }
+        current = current.max(min_timestamp);
         assert!(
             current <= MAX_BLOCK_TIMESTAMP_MS,
             "proposed timestamp exceeded maximum",
@@ -96,14 +119,14 @@ where
             return false;
         };
 
-        // Verify the block (waiting until the block timestamp has passed to vote in case of skew).
+        // Verify the block (allowing a bounded amount of future clock skew).
         if block.timestamp <= parent.timestamp || block.timestamp > MAX_BLOCK_TIMESTAMP_MS {
             return false;
         }
-        let deadline = SystemTime::UNIX_EPOCH
-            .checked_add(Duration::from_millis(block.timestamp))
-            .expect("block timestamp exceeded maximum");
-        runtime_context.sleep_until(deadline).await;
+        let now = runtime_context.current().epoch_millis();
+        if block.timestamp > now.saturating_add(MAX_FUTURE_SKEW_MS) {
+            return false;
+        }
 
         // The height and digest invariants are enforced in `Marshaled`:
         // - The block height must be one greater than the parent's height.
@@ -112,25 +135,17 @@ where
     }
 }
 
-impl Reporter for Application {
+impl<E: Clock + Storage + Metrics + Spawner + BufferPooler> Reporter for Application<E> {
     type Activity = Update<Block>;
 
     fn report(&mut self, activity: Self::Activity) -> Feedback {
-        if let Update::Block(block, _) = &activity {
-            info!(
-                height = %block.height(),
-                digest = ?block.digest(),
-                timestamp = block.timestamp,
-                "finalized block"
-            );
-        }
-
-        if let Some(backfiller) = &mut self.backfiller {
-            return backfiller.report(activity);
-        }
-
-        if let Update::Block(_, ack_rx) = activity {
-            ack_rx.acknowledge();
+        if let Update::Block(block, ack_rx) = activity {
+            info!(height = %block.height(), "finalized block");
+            if let Some(backfiller) = &self.backfiller {
+                backfiller.record(Update::Block(block, ack_rx));
+            } else {
+                ack_rx.acknowledge();
+            }
         }
         Feedback::Ok
     }
@@ -151,38 +166,54 @@ mod tests {
         }
     }
 
+    async fn setup_application_test(
+        _context: deterministic::Context,
+    ) -> Application<deterministic::Context> {
+        Application::new()
+    }
+
     async fn verify_block(
         context: deterministic::Context,
-        application: &mut Application,
+        application: &mut Application<deterministic::Context>,
         block: &Block,
         parent: &Block,
     ) -> bool {
         let ancestry = ancestry::from_iter([Arc::new(block.clone()), Arc::new(parent.clone())]);
-        ConsensusApplication::verify(application, (context, block.context.clone()), ancestry).await
+        commonware_consensus::Application::verify(
+            application,
+            (context, block.context.clone()),
+            ancestry,
+        )
+        .await
     }
 
     async fn propose_child(
         context: deterministic::Context,
-        application: &mut Application,
+        application: &mut Application<deterministic::Context>,
         child_context: Context,
         parent: &Block,
     ) -> Block {
         let ancestry = ancestry::from_iter([Arc::new(parent.clone())]);
-        ConsensusApplication::propose(application, (context, child_context), ancestry)
-            .await
-            .expect("expected proposal")
+        commonware_consensus::Application::propose(
+            application,
+            (context, child_context),
+            ancestry,
+            (),
+        )
+        .await
+        .expect("expected proposal")
     }
 
     #[test]
-    fn verify_waits_for_far_future_block_timestamp() {
+    fn verify_rejects_far_future_block_timestamp() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new();
+            let mut application = setup_application_test(context.child("application")).await;
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
                 test_context(1, (View::zero(), sha256::Digest::EMPTY)),
-                Sha256::hash(b"genesis"),
+                Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now,
             );
@@ -190,14 +221,15 @@ mod tests {
                 test_context(2, (View::new(1), parent.digest())),
                 parent.digest(),
                 parent.height.next(),
-                now + 5_000,
+                now + MAX_FUTURE_SKEW_MS + 100_000,
             );
 
             let start = context.current();
-            assert!(verify_block(context.child("verify"), &mut application, &block, &parent).await);
+            assert!(
+                !verify_block(context.child("verify"), &mut application, &block, &parent).await
+            );
             let finished = context.current();
-            assert!(finished.duration_since(start).unwrap() > Duration::ZERO);
-            assert!(finished.epoch_millis() >= block.timestamp);
+            assert!(finished.duration_since(start).unwrap() < Duration::from_millis(10));
         });
     }
 
@@ -205,12 +237,12 @@ mod tests {
     fn verify_rejects_equal_parent_timestamp() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new();
+            let mut application = setup_application_test(context.child("application")).await;
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
                 test_context(1, (View::zero(), sha256::Digest::EMPTY)),
-                Sha256::hash(b"genesis"),
+                Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now,
             );
@@ -231,13 +263,13 @@ mod tests {
     fn verify_returns_immediately_for_mature_block_timestamp() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new();
+            let mut application = setup_application_test(context.child("application")).await;
 
             context.sleep(Duration::from_millis(10)).await;
             let now = context.current().epoch_millis();
             let parent = Block::new(
                 test_context(1, (View::zero(), sha256::Digest::EMPTY)),
-                Sha256::hash(b"genesis"),
+                Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now - 1,
             );
@@ -256,15 +288,15 @@ mod tests {
     }
 
     #[test]
-    fn propose_uses_parent_timestamp_plus_one_when_clock_is_behind() {
+    fn propose_uses_parent_timestamp_plus_interval_when_clock_is_behind() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new();
+            let mut application = setup_application_test(context.child("application")).await;
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
                 test_context(1, (View::zero(), sha256::Digest::EMPTY)),
-                Sha256::hash(b"genesis"),
+                Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now + 5_000,
             );
@@ -278,7 +310,10 @@ mod tests {
 
             assert_eq!(proposal.parent, parent.digest());
             assert_eq!(proposal.height, parent.height.next());
-            assert_eq!(proposal.timestamp, parent.timestamp + 1);
+            assert_eq!(
+                proposal.timestamp,
+                parent.timestamp + TARGET_BLOCK_INTERVAL_MS
+            );
         });
     }
 
@@ -286,12 +321,12 @@ mod tests {
     fn verify_rejects_timestamp_above_maximum() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new();
+            let mut application = setup_application_test(context.child("application")).await;
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
                 test_context(1, (View::zero(), sha256::Digest::EMPTY)),
-                Sha256::hash(b"genesis"),
+                Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now,
             );
@@ -315,11 +350,11 @@ mod tests {
     fn propose_panics_when_parent_timestamp_is_maximum() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new();
+            let mut application = setup_application_test(context.child("application")).await;
 
             let parent = Block::new(
                 test_context(1, (View::zero(), sha256::Digest::EMPTY)),
-                Sha256::hash(b"genesis"),
+                Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 // Proposing on top of a parent already at the maximum would
                 // require `parent.timestamp + 1`, which must be rejected.

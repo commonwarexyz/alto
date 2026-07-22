@@ -7,8 +7,9 @@ use commonware_consensus::marshal::{
 use commonware_cryptography::sha256::Digest;
 use commonware_macros::select_loop;
 use commonware_runtime::{
-    spawn_cell, telemetry::metrics::status, BufferPooler, Clock, ContextCell, Handle, Metrics,
-    Spawner, Storage,
+    spawn_cell,
+    telemetry::metrics::{status, MetricsExt as _},
+    BufferPooler, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
 };
 use commonware_storage::queue;
 use commonware_utils::futures::{OptionFuture, Pool};
@@ -52,10 +53,9 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Consumer<
         max_active: NonZeroUsize,
         retry: Duration,
     ) -> Self {
-        let upload_results = context.register(
+        let upload_results = context.family(
             "uploads",
             "Total number of finalized block upload attempt outcomes by status",
-            status::Raw::default(),
         );
         let (writer, reader) = backfiller;
         Self {
@@ -234,6 +234,7 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Consumer<
             FetchFromMarshal,
         }
 
+        let mut yielded_to_live_path = false;
         loop {
             let next = {
                 let uploads = uploads.lock();
@@ -250,6 +251,10 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Consumer<
             match next {
                 NextBlock::AlreadyUploaded => return None,
                 NextBlock::WaitForCertificate => {
+                    context.sleep(retry).await;
+                }
+                NextBlock::Ready(_) if !yielded_to_live_path => {
+                    yielded_to_live_path = true;
                     context.sleep(retry).await;
                 }
                 NextBlock::Ready(block) => return Some(*block),
@@ -284,9 +289,18 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Consumer<
         };
 
         // Acknowledge the queue entry and advance the queue floor if needed.
-        let floor = self.reader.ack_floor().await;
+        let floor = self
+            .reader
+            .ack_floor()
+            .await
+            .expect("failed to read ack floor");
         self.reader.ack(position).await.expect("failed to ack");
-        let floor_advanced = self.reader.ack_floor().await > floor;
+        let floor_advanced = self
+            .reader
+            .ack_floor()
+            .await
+            .expect("failed to read ack floor")
+            > floor;
         self.writer.sync().await.expect("failed to sync after ack");
         if floor_advanced {
             self.uploads.lock().advance_queue_floor(height);

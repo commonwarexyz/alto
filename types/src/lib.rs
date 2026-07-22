@@ -92,7 +92,7 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(8), sha256::Digest::EMPTY),
         };
-        let digest = Sha256::hash(b"hello world");
+        let digest = Sha256::hash(&[b"hello world"]);
         let block = Block::new(context, digest, Height::new(10), 100);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
@@ -132,7 +132,7 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(8), sha256::Digest::EMPTY),
         };
-        let digest = Sha256::hash(b"hello world");
+        let digest = Sha256::hash(&[b"hello world"]);
         let block = Block::new(context, digest, Height::new(10), 100);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),

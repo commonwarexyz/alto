@@ -16,7 +16,8 @@ use commonware_cryptography::{
 use commonware_deployer::aws::Hosts;
 use commonware_formatting::from_hex;
 use commonware_p2p::{authenticated::discovery as authenticated, Ingress, Manager};
-use commonware_runtime::{tokio, BufferPoolConfig, Runner, Strategizer, Supervisor as _};
+use commonware_parallel::Rayon;
+use commonware_runtime::{tokio, BufferPoolConfig, Runner, Supervisor as _};
 use commonware_utils::{ordered::Set, union_unique, NZUsize, NZU32};
 use futures::future::try_join_all;
 use governor::Quota;
@@ -39,12 +40,16 @@ const RESOLVER_CHANNEL: u64 = 2;
 const BROADCASTER_CHANNEL: u64 = 3;
 const MARSHAL_CHANNEL: u64 = 4;
 
+const BASE_CHANNEL_QUOTA_PER_SECOND: u32 = 1_280;
+const VOTING_CHANNEL_QUOTA_PER_SECOND: u32 = 2_560;
+
 const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 const CERTIFICATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NULLIFY_RETRY: Duration = Duration::from_secs(10);
 const ACTIVITY_TIMEOUT: ViewDelta = ViewDelta::new(256);
-const SKIP_TIMEOUT: ViewDelta = ViewDelta::new(32);
+const SKIP_TIMEOUT: Duration = Duration::from_secs(11);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(2);
+const MARSHAL_RESOLVER_TIMEOUT: Duration = Duration::from_secs(10);
 const FETCH_CONCURRENT: usize = 4;
 const MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
 const MAX_FETCH_COUNT: usize = 16;
@@ -242,20 +247,24 @@ fn main() {
         oracle.track(EPOCH.get(), participants.clone());
 
         // Register pending channel
-        let pending_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
+        let pending_limit =
+            Quota::per_second(NonZeroU32::new(BASE_CHANNEL_QUOTA_PER_SECOND).unwrap());
         let pending = network.register(PENDING_CHANNEL, pending_limit, config.message_backlog);
 
         // Register recovered channel
-        let recovered_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
+        let recovered_limit =
+            Quota::per_second(NonZeroU32::new(BASE_CHANNEL_QUOTA_PER_SECOND).unwrap());
         let recovered =
             network.register(RECOVERED_CHANNEL, recovered_limit, config.message_backlog);
 
         // Register resolver channel
-        let resolver_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
+        let resolver_limit =
+            Quota::per_second(NonZeroU32::new(BASE_CHANNEL_QUOTA_PER_SECOND).unwrap());
         let resolver = network.register(RESOLVER_CHANNEL, resolver_limit, config.message_backlog);
 
         // Register broadcast channel
-        let broadcaster_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
+        let broadcaster_limit =
+            Quota::per_second(NonZeroU32::new(VOTING_CHANNEL_QUOTA_PER_SECOND).unwrap());
         let broadcaster = network.register(
             BROADCASTER_CHANNEL,
             broadcaster_limit,
@@ -263,13 +272,14 @@ fn main() {
         );
 
         // Register marshal channel
-        let marshal_quota = Quota::per_second(NonZeroU32::new(8).unwrap());
+        let marshal_quota =
+            Quota::per_second(NonZeroU32::new(VOTING_CHANNEL_QUOTA_PER_SECOND).unwrap());
         let marshal = network.register(MARSHAL_CHANNEL, marshal_quota, config.message_backlog);
 
         // Create network
         let p2p = network.start();
 
-        let strategy = context.strategy(NZUsize!(config.signature_threads));
+        let strategy = Rayon::new(NZUsize!(config.signature_threads)).unwrap();
 
         // Create indexer
         let mut indexer = None;
@@ -313,7 +323,7 @@ fn main() {
             blocker: oracle,
             mailbox_size: NZUsize!(config.mailbox_size),
             initial: Duration::from_secs(1),
-            timeout: Duration::from_secs(2),
+            timeout: MARSHAL_RESOLVER_TIMEOUT,
             fetch_retry_timeout: Duration::from_millis(100),
             priority_requests: false,
             priority_responses: false,

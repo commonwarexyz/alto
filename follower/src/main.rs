@@ -6,8 +6,8 @@ use commonware_codec::DecodeExt;
 use commonware_consensus::types::Height;
 use commonware_formatting::from_hex;
 use commonware_macros::select;
-use commonware_parallel::Sequential;
-use commonware_runtime::{tokio, Clock, Runner, Strategizer, Supervisor as _};
+use commonware_parallel::{Rayon, Sequential};
+use commonware_runtime::{tokio, Clock, Runner, Supervisor as _};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -196,7 +196,7 @@ fn main() {
         info!("connected to certificate source");
 
         // Create engine
-        let strategy = context.strategy(config.signature_threads);
+        let strategy = Rayon::new(config.signature_threads).unwrap();
         let (engine, mailbox, last_processed_height) = engine::Engine::new(
             context.child("engine"),
             scheme.clone(),

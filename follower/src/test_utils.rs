@@ -118,7 +118,7 @@ impl TestFixture {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(view.saturating_sub(1)), sha256::Digest::EMPTY),
         };
-        let parent_digest = Sha256::hash(format!("parent-{height}").as_bytes());
+        let parent_digest = Sha256::hash(&[format!("parent-{height}").as_bytes()]);
         Block::new(context, parent_digest, Height::new(height), height * 100)
     }
 

@@ -96,7 +96,7 @@ mod tests {
     };
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519::PublicKey,
-        Digestible, Signer,
+        Signer,
     };
     use commonware_macros::{select, test_traced};
     use commonware_p2p::{
@@ -326,6 +326,9 @@ mod tests {
         registration: Registration,
         cfg: ValidatorConfig,
     ) {
+        let timeout_retry = cfg.certification_timeout + Duration::from_millis(50);
+        let skip_timeout = timeout_retry + Duration::from_millis(50);
+
         let public_key = signer.public_key();
         let uid = format!("validator_{public_key}");
         let config: Config<_, _, mocks::Client, _> = engine::Config {
@@ -342,10 +345,10 @@ mod tests {
             deque_size: 10,
             leader_timeout: cfg.leader_timeout,
             certification_timeout: cfg.certification_timeout,
-            nullify_retry: Duration::from_secs(10),
+            nullify_retry: timeout_retry,
             fetch_timeout: Duration::from_secs(1),
             activity_timeout: ViewDelta::new(10),
-            skip_timeout: ViewDelta::new(5),
+            skip_timeout,
             max_fetch_count: 10,
             max_fetch_size: 1024 * 512,
             fetch_concurrent: 10,
@@ -777,18 +780,11 @@ mod tests {
             assert!(indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
-            let genesis_digest = application::Application::genesis().digest();
-            let started_digests = indexer.block_upload_started_digests.lock().clone();
-            let expected_genesis_uploads = n as usize;
             assert_eq!(
-                started_digests.len(),
-                expected_genesis_uploads,
-                "only genesis should be uploaded as a bare block when certified uploads succeed",
-            );
-            assert!(
-                started_digests
-                    .iter()
-                    .all(|digest| *digest == genesis_digest),
+                indexer
+                    .block_upload_started
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                0,
                 "non-genesis block uploads should stay idle when certified uploads succeed",
             );
         });
@@ -960,16 +956,11 @@ mod tests {
                 queue_outstanding(&metrics) > 0,
                 "expected finalized queue work while certificate uploads were blocked",
             );
-            let genesis_digest = application::Application::genesis().digest();
-            let expected_genesis_uploads = n as usize;
-            let started_digests = indexer.block_upload_started_digests.lock().clone();
             assert_eq!(
-                started_digests.len(),
-                expected_genesis_uploads,
-                "only genesis should be uploaded as a bare block while certificate uploads are in flight",
-            );
-            assert!(
-                started_digests.iter().all(|digest| *digest == genesis_digest),
+                indexer
+                    .block_upload_started
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                0,
                 "non-genesis block uploads should wait while certificate uploads are still in flight",
             );
 
@@ -990,14 +981,11 @@ mod tests {
             assert!(indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
-            let started_digests = indexer.block_upload_started_digests.lock().clone();
             assert_eq!(
-                started_digests.len(),
-                expected_genesis_uploads,
-                "only genesis should be uploaded as a bare block when certificate uploads eventually succeed",
-            );
-            assert!(
-                started_digests.iter().all(|digest| *digest == genesis_digest),
+                indexer
+                    .block_upload_started
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                0,
                 "non-genesis block uploads should remain idle when certificate uploads eventually succeed",
             );
         });
@@ -1435,7 +1423,7 @@ mod tests {
         use commonware_cryptography::{Hasher, Sha256};
         use indexer::Entry;
 
-        let digest = Sha256::hash(b"test block");
+        let digest = Sha256::hash(&[b"test block"]);
         let entry = Entry { height: 42, digest };
 
         let encoded = entry.encode();

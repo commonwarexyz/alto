@@ -11,8 +11,8 @@ use commonware_consensus::{
         resolver::handler,
         standard::{Deferred, Standard},
     },
-    simplex::{self, elector::Random, Engine as Consensus},
-    types::{Epoch, FixedEpocher, ViewDelta},
+    simplex::{self, elector::RoundRobin, Engine as Consensus},
+    types::{Epoch, FixedEpocher, TermLength, ViewDelta},
     Reporters,
 };
 use commonware_cryptography::{
@@ -20,18 +20,18 @@ use commonware_cryptography::{
     certificate::{ConstantProvider, Verifier as _},
     ed25519::PublicKey,
     sha256::Digest,
-    Digestible,
+    Digestible as _,
 };
 use commonware_p2p::{Blocker, Provider, Receiver, Sender};
 use commonware_parallel::Strategy;
 use commonware_resolver::TargetedResolver;
 use commonware_runtime::{
     buffer::paged::CacheRef, spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics,
-    Spawner, Storage, Strategizer,
+    Spawner, Storage,
 };
 use commonware_storage::{archive::immutable, queue};
 use commonware_utils::{ordered::Set, NZU16};
-use commonware_utils::{NZUsize, NZU64};
+use commonware_utils::{NZUsize, NZU32, NZU64};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use governor::Quota;
@@ -62,6 +62,10 @@ const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(16);
+const TERM_LENGTH: TermLength = TermLength::new(NZU32!(1000));
+const TERM_STALL_TIMEOUT: Duration = Duration::from_secs(12);
+const TERM_OPTIMISTIC_VIEWS: ViewDelta = ViewDelta::new(100);
+const FORWARDING_POLICY: simplex::ForwardingPolicy = simplex::ForwardingPolicy::Disabled;
 
 /// Configuration for the [Engine].
 pub struct Config<
@@ -87,7 +91,7 @@ pub struct Config<
     pub nullify_retry: Duration,
     pub fetch_timeout: Duration,
     pub activity_timeout: ViewDelta,
-    pub skip_timeout: ViewDelta,
+    pub skip_timeout: Duration,
     pub max_fetch_count: usize,
     pub max_fetch_size: usize,
     pub fetch_concurrent: usize,
@@ -100,7 +104,7 @@ pub struct Config<
     pub indexer: Option<C>,
 }
 
-type Marshaled<E> = Deferred<E, Scheme, Application, Block, FixedEpocher>;
+type Marshaled<E> = Deferred<E, Scheme, Application<E>, Block, FixedEpocher>;
 
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
@@ -128,14 +132,14 @@ where
     marshaled: Marshaled<E>,
 
     consensus:
-        Consensus<E, Scheme, Random, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, C>, S>,
+        Consensus<E, Scheme, RoundRobin, B, Digest, Marshaled<E>, Marshaled<E>, Reporter<E, C>, S>,
 
     consumer: Option<indexer::Consumer<E, C>>,
 }
 
 impl<E, B, P, S, C> Engine<E, B, P, S, C>
 where
-    E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Strategizer + Storage + Metrics,
+    E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     P: Provider<PublicKey = PublicKey>,
     S: Strategy,
@@ -143,12 +147,17 @@ where
 {
     /// Create a new [Engine].
     pub async fn new(context: E, cfg: Config<B, P, C, S>) -> Self {
+        let mailbox_size =
+            NonZeroUsize::new(cfg.mailbox_size).expect("mailbox size must be non-zero");
+        let fetch_concurrent =
+            NonZeroUsize::new(cfg.fetch_concurrent).expect("fetch concurrent must be non-zero");
+
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
             context.child("buffer"),
             buffered::Config {
                 public_key: cfg.me,
-                mailbox_size: NZUsize!(cfg.mailbox_size),
+                mailbox_size,
                 deque_size: cfg.deque_size,
                 priority: true,
                 codec_config: (),
@@ -244,7 +253,7 @@ where
             .expect("failed to create scheme");
         let provider = ConstantProvider::new(scheme.clone());
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-        let genesis = Application::genesis();
+        let genesis = Application::<E>::genesis_block();
         let genesis_digest = genesis.digest();
         let (marshal, marshal_mailbox, _) = MarshalActor::init(
             context.child("marshal"),
@@ -254,8 +263,8 @@ where
                 provider,
                 epocher: epocher.clone(),
                 partition_prefix: cfg.partition_prefix.clone(),
-                mailbox_size: NZUsize!(cfg.mailbox_size),
-                view_retention_timeout: ViewDelta::new(
+                mailbox_size,
+                view_retention: ViewDelta::new(
                     cfg.activity_timeout
                         .get()
                         .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
@@ -296,7 +305,6 @@ where
                 indexer,
                 marshal_mailbox.clone(),
                 queue,
-                NZUsize!(cfg.mailbox_size),
                 cfg.backfiller_max_active,
                 cfg.backfiller_retry,
             )
@@ -317,7 +325,7 @@ where
         );
 
         // Create the reporter.
-        let reporter = (marshal_mailbox.clone(), pusher).into();
+        let reporter: Reporter<E, C> = (marshal_mailbox.clone(), pusher).into();
 
         // Create the consensus engine
         let consensus = Consensus::new(
@@ -329,21 +337,25 @@ where
                 relay: marshaled.clone(),
                 reporter,
                 partition: format!("{}-consensus", cfg.partition_prefix),
-                mailbox_size: NZUsize!(cfg.mailbox_size),
+                mailbox_size,
                 floor: simplex::Floor::Genesis(genesis_digest),
                 leader_timeout: cfg.leader_timeout,
                 certification_timeout: cfg.certification_timeout,
                 timeout_retry: cfg.nullify_retry,
                 fetch_timeout: cfg.fetch_timeout,
-                activity_timeout: cfg.activity_timeout,
+                view_retention: cfg.activity_timeout,
                 skip_timeout: cfg.skip_timeout,
-                fetch_concurrent: NZUsize!(cfg.fetch_concurrent),
-                forwarding: simplex::ForwardingPolicy::Disabled,
+                fetch_concurrent,
+                forwarding: FORWARDING_POLICY,
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
                 blocker: cfg.blocker,
                 page_cache,
-                elector: Random,
+                elector: RoundRobin::default().with_term(
+                    TERM_LENGTH,
+                    TERM_STALL_TIMEOUT,
+                    TERM_OPTIMISTIC_VIEWS,
+                ),
                 strategy: cfg.strategy,
             },
         );

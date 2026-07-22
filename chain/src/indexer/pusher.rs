@@ -133,11 +133,9 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
                     warn!(%view, "subscription for block cancelled");
                     return;
                 };
-                let block = Arc::unwrap_or_clone(block);
-
                 let height = block.height.get();
-                guard.cache_block(block.clone());
-                if let Err(e) = upload_fn(client, block).await {
+                guard.cache_block((*block).clone());
+                if let Err(e) = upload_fn(client, Arc::unwrap_or_clone(block)).await {
                     warn!(?e, %view, label, "failed to upload certificate");
                     return;
                 }

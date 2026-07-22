@@ -98,7 +98,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod utils;
 
 const DEFAULT_INDEXER: &str = "https://global.alto.exoware.xyz";
-const DEFAULT_IDENTITY: &str = "915435a0866d71ada4cd75f33e92c8bc4f31e0b17fbe867c288343b8d770e680240c92aad97d68c2b7144538fc13693209884cd00cbec266e3943feda753ac1db4c6b9756cc682b7bd0aba6ae2cc3aa336a701965cd133b616ca66be445247ff";
+const DEFAULT_IDENTITY: &str = "86b0c5b2322be1a2627dd9d0f167df28ceedd049e4ebc4c7c80d829fb58513e0ba692defb26893c4bd00151f4355c47006b942893b83cb7f1e527385eb3bdeb3a338cade76f92477b07e367ed1895dd700d55ee2492bedb40b917a91de89cad8";
 
 #[tokio::main]
 async fn main() {
