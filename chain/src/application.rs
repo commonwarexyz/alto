@@ -22,7 +22,7 @@ const GENESIS: &[u8] = b"commonware is neat";
 /// Different platforms have different `SystemTime` limits, so we use a fixed
 /// timestamp to ensure consistent application of block validity rules.
 const MAX_BLOCK_TIMESTAMP_MS: u64 = 7_258_118_400_000;
-const TARGET_BLOCK_INTERVAL_MS: u64 = 50;
+const TARGET_BLOCK_INTERVAL_MS: u64 = 10;
 const MAX_FUTURE_SKEW_MS: u64 = 1_000;
 
 #[derive(Clone, Default)]

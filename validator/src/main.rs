@@ -40,8 +40,17 @@ const RESOLVER_CHANNEL: u64 = 2;
 const BROADCASTER_CHANNEL: u64 = 3;
 const MARSHAL_CHANNEL: u64 = 4;
 
-const BASE_CHANNEL_QUOTA_PER_SECOND: u32 = 1_280;
-const VOTING_CHANNEL_QUOTA_PER_SECOND: u32 = 2_560;
+// Trusted testing network: set per-peer, per-channel ingest limits far above any
+// realistic steady-state so the rate limiter never binds. Each peer connection gets
+// its own `RateLimiter::direct_with_clock(rate)`, so these are per-peer allowances.
+const BASE_CHANNEL_QUOTA_PER_SECOND: u32 = 50_000;
+const VOTING_CHANNEL_QUOTA_PER_SECOND: u32 = 100_000;
+
+// Fraction of traces sampled and exported to the monitoring host's OTLP collector.
+// Export everything: partial sampling hides the rare events we care about (a leader
+// missing its deadline shows up a handful of times per hour, so a 10% sample is
+// likely to miss it entirely).
+const TRACES_SAMPLE_RATE: f64 = 1.0;
 
 const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 const CERTIFICATION_TIMEOUT: Duration = Duration::from_secs(2);
@@ -124,6 +133,20 @@ fn main() {
     executor.start(|context| async move {
         // Configure telemetry
         let log_level = Level::from_str(&config.log_level).expect("Invalid log level");
+        // When deployed via `commonware-deployer` (a hosts file is present), export
+        // traces to the monitoring host's OTLP collector (:4318). The deployer opens
+        // the traces ingress from binary to monitoring security groups.
+        let traces = hosts_file.map(|hosts_file| {
+            let hosts_file =
+                std::fs::read_to_string(hosts_file).expect("Could not read hosts file");
+            let hosts: Hosts =
+                serde_yaml::from_str(&hosts_file).expect("Could not parse hosts file");
+            tokio::tracing::Config {
+                endpoint: format!("http://{}:4318/v1/traces", hosts.monitoring.private),
+                name: public_key.to_string(),
+                rate: TRACES_SAMPLE_RATE,
+            }
+        });
         tokio::telemetry::init(
             context.child("telemetry"),
             tokio::telemetry::Logs {
@@ -135,7 +158,7 @@ fn main() {
                 IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                 config.metrics_port,
             )),
-            None,
+            traces,
         );
 
         // Load peers

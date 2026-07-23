@@ -19,8 +19,10 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # Set PKG_CONFIG_PATH for OpenSSL
 ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
 
-# Optimize for AWS Graviton4 (Neoverse V2) and enable debug symbols (used for samply profiling)
-ENV RUSTFLAGS="-C target-cpu=neoverse-v2"
+# Optimize for AWS Graviton3 (Neoverse V1) and enable debug symbols (used for samply profiling).
+# We deploy on c7gd (Graviton3) in all 10 regions; neoverse-v1 runs on both Graviton3 and
+# Graviton4, whereas a neoverse-v2 binary SIGILLs on Graviton3.
+ENV RUSTFLAGS="-C target-cpu=neoverse-v1"
 ENV CARGO_PROFILE_RELEASE_DEBUG=true
 
 # Install Rust target
