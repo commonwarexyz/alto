@@ -42,7 +42,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "alto-chain"
-version = "2026.7.0"
+version = "2026.7.1"
 dependencies = [
  "alto-client",
  "alto-types",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "alto-client"
-version = "2026.7.0"
+version = "2026.7.1"
 dependencies = [
  "alto-types",
  "bytes",
@@ -94,7 +94,7 @@ dependencies = [
 
 [[package]]
 name = "alto-deploy"
-version = "2026.7.0"
+version = "2026.7.1"
 dependencies = [
  "alto-chain",
  "alto-types",
@@ -118,7 +118,7 @@ dependencies = [
 
 [[package]]
 name = "alto-follower"
-version = "2026.7.0"
+version = "2026.7.1"
 dependencies = [
  "alto-client",
  "alto-types",
@@ -150,7 +150,7 @@ dependencies = [
 
 [[package]]
 name = "alto-indexer"
-version = "2026.7.0"
+version = "2026.7.1"
 dependencies = [
  "alto-client",
  "alto-types",
@@ -183,7 +183,7 @@ dependencies = [
 
 [[package]]
 name = "alto-inspector"
-version = "2026.7.0"
+version = "2026.7.1"
 dependencies = [
  "alto-client",
  "alto-types",
@@ -206,7 +206,7 @@ dependencies = [
 
 [[package]]
 name = "alto-types"
-version = "2026.7.0"
+version = "2026.7.1"
 dependencies = [
  "bytes",
  "commonware-codec",
@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "alto-validator"
-version = "2026.7.0"
+version = "2026.7.1"
 dependencies = [
  "alto-chain",
  "alto-client",

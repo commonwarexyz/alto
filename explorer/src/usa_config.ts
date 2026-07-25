@@ -1,5 +1,5 @@
 export const BACKEND_URL = "usa.alto.exoware.xyz";
-export const PUBLIC_KEY_HEX = "a52b4f29239278707d223d22e2aefecdad40fc6dbff44a85465e890cfe90d8172d1e266b7208a828056cf6e3366bd02e0fb8dfc14c0e5d3a611c4e4e9f57342ec5fc4770ce4fe63bd9c111c788f6c310679e28934fce01576428fdcde1bafd1f";
+export const PUBLIC_KEY_HEX = "a156881f2d99ecd30cc7b9550d65765482cf04be7ec740b8ae64abb3ad8630a61619319c3d4abba4b1791bf774424a7f096cf35654524187cafd338f7c89523c68676a80c941ed40c7de045869fb00326df1eadb26b62eb2096318814ee9d080";
 export const LOCATIONS: [[number, number], string][] = [
     [[38.8339, -77.3074], "Ashburn"],
     [[40.0946, -82.7541], "Columbus"],
