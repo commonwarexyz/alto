@@ -2,14 +2,14 @@ ARG BASE_IMAGE=ubuntu:24.04
 FROM ${BASE_IMAGE}
 
 ARG RUST_TOOLCHAIN=stable
-ARG TARGET_TRIPLE=aarch64-unknown-linux-gnu
-ARG TARGET_CARGO_NAME=AARCH64_UNKNOWN_LINUX_GNU
-ARG TARGET_CC_NAME=aarch64_unknown_linux_gnu
-ARG TARGET_CPU=neoverse-v1
-ARG TARGET_LINKER=aarch64-linux-gnu-gcc
-ARG TARGET_CXX=aarch64-linux-gnu-g++
-ARG TARGET_AR=aarch64-linux-gnu-ar
-ARG TARGET_STRIP=aarch64-linux-gnu-strip
+ARG TARGET_TRIPLE
+ARG TARGET_CARGO_NAME
+ARG TARGET_CC_NAME
+ARG TARGET_CPU
+ARG TARGET_LINKER
+ARG TARGET_CXX
+ARG TARGET_AR
+ARG TARGET_STRIP
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     binutils-aarch64-linux-gnu \

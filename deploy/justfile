@@ -1,0 +1,17 @@
+source-mounts := "-v ${PWD}:/alto -v ${PWD}/.docker-cache/cargo:/cargo-home -v ${PWD}/.docker-cache/target:/alto/target"
+cache-env := "-e CARGO_HOME=/cargo-home"
+
+prepare-docker-cache:
+    mkdir -p .docker-cache/cargo .docker-cache/target
+
+build-graviton-image:
+    docker buildx bake --progress plain -f deploy/docker-bake.hcl graviton
+
+validator-graviton-binary: build-graviton-image prepare-docker-cache
+    docker run --rm {{source-mounts}} {{cache-env}} alto-validator-builder:graviton-local
+
+build-intel-image:
+    docker buildx bake --progress plain -f deploy/docker-bake.hcl intel
+
+validator-intel-binary: build-intel-image prepare-docker-cache
+    docker run --rm {{source-mounts}} {{cache-env}} alto-validator-builder:intel-local

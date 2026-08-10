@@ -43,8 +43,8 @@ const RESOLVER_CHANNEL: u64 = 2;
 const BROADCASTER_CHANNEL: u64 = 3;
 const MARSHAL_CHANNEL: u64 = 4;
 
-const BASE_CHANNEL_QUOTA_PER_SECOND: u32 = 1_280;
-const VOTING_CHANNEL_QUOTA_PER_SECOND: u32 = 2_560;
+const BASE_CHANNEL_QUOTA_PER_SECOND: u32 = 1_500;
+const VOTING_CHANNEL_QUOTA_PER_SECOND: u32 = 3_000;
 
 // Fraction of traces sampled and exported to the monitoring host's OTLP collector.
 // Export everything: partial sampling hides the rare events we care about (a leader
@@ -262,6 +262,7 @@ fn main() {
             )
         };
         p2p_cfg.mailbox_size = NZUsize!(config.mailbox_size);
+        p2p_cfg.tracked_peer_sets = NZUsize!(1);
 
         // Start p2p
         let (mut network, mut oracle) =

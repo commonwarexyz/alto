@@ -80,7 +80,7 @@ _MacOS defaults to 256 open files, which is too low for the default settings (wh
 
 ### Remote
 
-_To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/install) and [Docker](https://www.docker.com/get-started/)._
+_To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/install), [Docker with Buildx](https://docs.docker.com/build/buildx/install/), and [just](https://just.systems/man/en/packages.html)._
 
 #### Install `commonware-deployer`
 
@@ -139,25 +139,17 @@ sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/usa.yml
 
 #### Build Validator Binary
 
-##### Build Cross-Platform Compiler for Intel I7i
+The build platform is an explicit recipe:
+
+| Recipe | Output architecture | CPU target | Example instances |
+| --- | --- | --- | --- |
+| `just validator-graviton-binary` | ARM64 | `neoverse-v1` | Graviton 3/4 (`c7g`, `c8g`) |
+| `just validator-intel-binary` | x86-64 | `emeraldrapids` | Intel I7i |
+
+##### Intel I7i
 
 ```bash
-docker build --progress plain -t validator-builder:intel-i7i \
-  --build-arg TARGET_TRIPLE=x86_64-unknown-linux-gnu \
-  --build-arg TARGET_CARGO_NAME=X86_64_UNKNOWN_LINUX_GNU \
-  --build-arg TARGET_CC_NAME=x86_64_unknown_linux_gnu \
-  --build-arg TARGET_CPU=emeraldrapids \
-  --build-arg TARGET_LINKER=x86_64-linux-gnu-gcc \
-  --build-arg TARGET_CXX=x86_64-linux-gnu-g++ \
-  --build-arg TARGET_AR=x86_64-linux-gnu-ar \
-  --build-arg TARGET_STRIP=x86_64-linux-gnu-strip \
-  deploy/
-```
-
-##### Compile Binary for Intel I7i
-
-```bash
-docker run --rm -v "${PWD}:/alto" validator-builder:intel-i7i
+just validator-intel-binary
 ```
 
 The Intel binary is compiled with `target-cpu=emeraldrapids` and must only be deployed to
@@ -165,19 +157,22 @@ compatible Intel hosts such as `i7i`.
 The builder runs on the local Docker architecture and cross-compiles the validator, so no
 `--platform` argument is needed on an ARM64 development machine.
 
-##### Build and Compile Binary for Graviton
+##### Graviton
 
 ```bash
-docker build -t validator-builder deploy/
-docker run --rm -v "${PWD}:/alto" validator-builder
+just validator-graviton-binary
 ```
+
+Both recipes write `assets/validator` and `assets/validator-debug`. Run the recipe matching the
+deployment's instance type last.
 
 ###### Local Compilation
 
 _Before running this command, ensure you change any `version` dependencies you'd like to compile locally to `path` dependencies in `Cargo.toml`._
 
 ```bash
-docker run --rm -v "${PWD}:/alto" -v "${PWD}/../monorepo:/monorepo" validator-builder:intel-i7i
+just build-intel-image
+docker run --rm -v "${PWD}:/alto" -v "${PWD}/../monorepo:/monorepo" alto-validator-builder:intel-local
 ```
 
 _Emitted binary `validator` is placed in `assets/`._
@@ -203,10 +198,10 @@ _This dashboard is only accessible from the IP used to deploy the infrastructure
 
 ```bash
 # Intel I7i
-docker run --rm -v "${PWD}:/alto" validator-builder:intel-i7i
+just validator-intel-binary
 
-# Graviton 3
-docker run --rm -v "${PWD}:/alto" validator-builder
+# Graviton
+just validator-graviton-binary
 ```
 
 ##### Restart Validator Binary on EC2 Instances
