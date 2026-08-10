@@ -199,21 +199,25 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates f
     type Error = archive::Error;
 
     async fn put(
-        &mut self,
+        self,
         height: Height,
         commitment: Digest,
         finalization: Finalization,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<Self, Self::Error> {
         match self {
-            Self::Immutable(a) => Archive::put(a, height.get(), commitment, finalization).await,
-            Self::Prunable(a) => Archive::put(a, height.get(), commitment, finalization).await,
+            Self::Immutable(a) => Archive::put(a, height.get(), commitment, finalization)
+                .await
+                .map(Self::Immutable),
+            Self::Prunable(a) => Archive::put(a, height.get(), commitment, finalization)
+                .await
+                .map(Self::Prunable),
         }
     }
 
-    async fn sync(&mut self) -> Result<(), Self::Error> {
+    async fn sync(self) -> Result<Self, Self::Error> {
         match self {
-            Self::Immutable(a) => Archive::sync(a).await,
-            Self::Prunable(a) => Archive::sync(a).await,
+            Self::Immutable(a) => Archive::sync(a).await.map(Self::Immutable),
+            Self::Prunable(a) => Archive::sync(a).await.map(Self::Prunable),
         }
     }
 
@@ -231,10 +235,12 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates f
         }
     }
 
-    async fn prune(&mut self, min: Height) -> Result<(), Self::Error> {
+    async fn prune(self, min: Height) -> Result<Self, Self::Error> {
         match self {
-            Self::Immutable(_) => Ok(()),
-            Self::Prunable(a) => prunable::Archive::prune(a, min.get()).await,
+            Self::Immutable(a) => Ok(Self::Immutable(a)),
+            Self::Prunable(a) => prunable::Archive::prune(a, min.get())
+                .await
+                .map(Self::Prunable),
         }
     }
 
@@ -270,19 +276,23 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Blocks for Blo
     type Block = Block;
     type Error = archive::Error;
 
-    async fn put(&mut self, block: Block) -> Result<(), Self::Error> {
+    async fn put(self, block: Block) -> Result<Self, Self::Error> {
         let height = block.height.get();
         let digest = block.digest();
         match self {
-            Self::Immutable(a) => Archive::put(a, height, digest, block).await,
-            Self::Prunable(a) => Archive::put(a, height, digest, block).await,
+            Self::Immutable(a) => Archive::put(a, height, digest, block)
+                .await
+                .map(Self::Immutable),
+            Self::Prunable(a) => Archive::put(a, height, digest, block)
+                .await
+                .map(Self::Prunable),
         }
     }
 
-    async fn sync(&mut self) -> Result<(), Self::Error> {
+    async fn sync(self) -> Result<Self, Self::Error> {
         match self {
-            Self::Immutable(a) => Archive::sync(a).await,
-            Self::Prunable(a) => Archive::sync(a).await,
+            Self::Immutable(a) => Archive::sync(a).await.map(Self::Immutable),
+            Self::Prunable(a) => Archive::sync(a).await.map(Self::Prunable),
         }
     }
 
@@ -293,10 +303,12 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Blocks for Blo
         }
     }
 
-    async fn prune(&mut self, min: Height) -> Result<(), Self::Error> {
+    async fn prune(self, min: Height) -> Result<Self, Self::Error> {
         match self {
-            Self::Immutable(_) => Ok(()),
-            Self::Prunable(a) => prunable::Archive::prune(a, min.get()).await,
+            Self::Immutable(a) => Ok(Self::Immutable(a)),
+            Self::Prunable(a) => prunable::Archive::prune(a, min.get())
+                .await
+                .map(Self::Prunable),
         }
     }
 

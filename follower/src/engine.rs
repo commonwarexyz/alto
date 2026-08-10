@@ -123,7 +123,7 @@ where
         // Create marshal
         let provider = ConstantProvider::new(scheme);
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-        let (marshal, mailbox, last_processed_height) = MarshalActor::init(
+        let (marshal, mailbox, floor) = MarshalActor::init(
             context.child("marshal"),
             finalizations_by_height,
             finalized_blocks,
@@ -155,7 +155,7 @@ where
             marshal_mailbox: mailbox.clone(),
             mailbox_size,
         };
-        (engine, mailbox, last_processed_height)
+        (engine, mailbox, floor.height())
     }
 
     /// Start the [Engine].

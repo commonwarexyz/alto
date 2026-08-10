@@ -182,6 +182,7 @@ mod tests {
         type Key = Key;
         type Value = Bytes;
         type Subscriber = Subscriber;
+        type Outcome = bool;
 
         fn deliver(
             &mut self,

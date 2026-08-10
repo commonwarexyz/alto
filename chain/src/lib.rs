@@ -64,7 +64,6 @@ pub struct Config {
     pub allowed_peers: Vec<String>,
     pub bootstrappers: Vec<String>,
 
-    pub message_backlog: usize,
     pub mailbox_size: usize,
     pub deque_size: usize,
 
@@ -351,7 +350,6 @@ mod tests {
             skip_timeout,
             max_fetch_count: 10,
             max_fetch_size: 1024 * 512,
-            fetch_concurrent: 10,
             fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
             backfiller_max_active: cfg.backfiller_max_active,
             backfiller_retry: cfg.backfiller_retry,
@@ -415,6 +413,7 @@ mod tests {
                 context.child("network"),
                 simulated::Config {
                     max_size: 1024 * 1024,
+                    max_peers_per_set: NZUsize!(n as usize),
                     disconnect_on_block: true,
                     tracked_peer_sets: NZUsize!(1),
                 },
@@ -498,6 +497,7 @@ mod tests {
                 context.child("network"),
                 simulated::Config {
                     max_size: 1024 * 1024,
+                    max_peers_per_set: NZUsize!(n as usize),
                     disconnect_on_block: true,
                     tracked_peer_sets: NZUsize!(1),
                 },
@@ -598,6 +598,7 @@ mod tests {
                     context.child("network"),
                     simulated::Config {
                         max_size: 1024 * 1024,
+                        max_peers_per_set: NZUsize!(n as usize),
                         disconnect_on_block: true,
                         tracked_peer_sets: NZUsize!(1),
                     },
@@ -725,6 +726,7 @@ mod tests {
                 context.child("network"),
                 simulated::Config {
                     max_size: 1024 * 1024,
+                    max_peers_per_set: NZUsize!(n as usize),
                     disconnect_on_block: true,
                     tracked_peer_sets: NZUsize!(1),
                 },
@@ -800,6 +802,7 @@ mod tests {
                 context.child("network"),
                 simulated::Config {
                     max_size: 1024 * 1024,
+                    max_peers_per_set: NZUsize!(n as usize),
                     disconnect_on_block: true,
                     tracked_peer_sets: NZUsize!(1),
                 },
@@ -883,6 +886,7 @@ mod tests {
                 context.child("network"),
                 simulated::Config {
                     max_size: 1024 * 1024,
+                    max_peers_per_set: NZUsize!(n as usize),
                     disconnect_on_block: true,
                     tracked_peer_sets: NZUsize!(1),
                 },
@@ -1000,6 +1004,7 @@ mod tests {
                 context.child("network"),
                 simulated::Config {
                     max_size: 1024 * 1024,
+                    max_peers_per_set: NZUsize!(n as usize),
                     disconnect_on_block: true,
                     tracked_peer_sets: NZUsize!(1),
                 },
@@ -1186,6 +1191,7 @@ mod tests {
                     context.child("network"),
                     simulated::Config {
                         max_size: 1024 * 1024,
+                        max_peers_per_set: NZUsize!(n as usize),
                         disconnect_on_block: true,
                         tracked_peer_sets: NZUsize!(1),
                     },
@@ -1310,6 +1316,7 @@ mod tests {
                 context.child("network"),
                 simulated::Config {
                     max_size: 1024 * 1024,
+                    max_peers_per_set: NZUsize!(n as usize),
                     disconnect_on_block: true,
                     tracked_peer_sets: NZUsize!(1),
                 },

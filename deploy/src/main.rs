@@ -157,12 +157,6 @@ fn main() {
                         .value_parser(value_parser!(String)),
                 )
                 .arg(
-                    Arg::new("message_backlog")
-                        .long("message-backlog")
-                        .required(true)
-                        .value_parser(value_parser!(usize)),
-                )
-                .arg(
                     Arg::new("mailbox_size")
                         .long("mailbox-size")
                         .required(true)
@@ -295,7 +289,6 @@ fn main() {
                 .get_one::<NonZeroUsize>("network_buffer_pool_parallelism")
                 .copied();
             let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
-            let message_backlog = *sub_matches.get_one::<usize>("message_backlog").unwrap();
             let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
             let deque_size = *sub_matches.get_one::<usize>("deque_size").unwrap();
             let signature_threads = *sub_matches.get_one::<usize>("signature_threads").unwrap();
@@ -312,7 +305,6 @@ fn main() {
                     storage_buffer_pool_parallelism,
                     network_buffer_pool_parallelism,
                     log_level,
-                    message_backlog,
                     mailbox_size,
                     deque_size,
                     signature_threads,
@@ -329,7 +321,6 @@ fn main() {
                     storage_buffer_pool_parallelism,
                     network_buffer_pool_parallelism,
                     log_level,
-                    message_backlog,
                     mailbox_size,
                     deque_size,
                     signature_threads,
@@ -375,7 +366,6 @@ fn generate_local(
     storage_buffer_pool_parallelism: Option<NonZeroUsize>,
     network_buffer_pool_parallelism: Option<NonZeroUsize>,
     log_level: String,
-    message_backlog: usize,
     mailbox_size: usize,
     deque_size: usize,
     signature_threads: usize,
@@ -458,7 +448,6 @@ fn generate_local(
             allowed_peers: allowed_peers.clone(),
             bootstrappers: bootstrappers.clone(),
 
-            message_backlog,
             mailbox_size,
             deque_size,
 
@@ -560,7 +549,6 @@ fn generate_remote(
     storage_buffer_pool_parallelism: Option<NonZeroUsize>,
     network_buffer_pool_parallelism: Option<NonZeroUsize>,
     log_level: String,
-    message_backlog: usize,
     mailbox_size: usize,
     deque_size: usize,
     signature_threads: usize,
@@ -661,7 +649,6 @@ fn generate_remote(
             allowed_peers: allowed_peers.clone(),
             bootstrappers: bootstrappers.clone(),
 
-            message_backlog,
             mailbox_size,
             deque_size,
 

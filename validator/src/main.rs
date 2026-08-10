@@ -15,7 +15,10 @@ use commonware_cryptography::{
 };
 use commonware_deployer::aws::Hosts;
 use commonware_formatting::from_hex;
-use commonware_p2p::{authenticated::discovery as authenticated, Ingress, Manager};
+use commonware_p2p::{
+    authenticated::{discovery as authenticated, peer_set_limit},
+    Ingress, Manager,
+};
 use commonware_parallel::Rayon;
 use commonware_runtime::{tokio, BufferPoolConfig, Runner, Supervisor as _};
 use commonware_utils::{ordered::Set, union_unique, NZUsize, NZU32};
@@ -59,7 +62,6 @@ const ACTIVITY_TIMEOUT: ViewDelta = ViewDelta::new(256);
 const SKIP_TIMEOUT: Duration = Duration::from_secs(11);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(2);
 const MARSHAL_RESOLVER_TIMEOUT: Duration = Duration::from_secs(10);
-const FETCH_CONCURRENT: usize = 4;
 const MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
 const MAX_FETCH_COUNT: usize = 16;
 const MAX_FETCH_SIZE: usize = 512 * 1024;
@@ -240,6 +242,7 @@ fn main() {
 
         // Configure network
         let p2p_namespace = union_unique(NAMESPACE, b"_P2P");
+        let max_peers_per_set = peer_set_limit(&peers, &public_key);
         let mut p2p_cfg = if config.local {
             authenticated::Config::local(
                 signer.clone(),
@@ -247,6 +250,7 @@ fn main() {
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
                 SocketAddr::new(ip, config.port),
                 bootstrappers,
+                max_peers_per_set,
                 MAX_MESSAGE_SIZE,
             )
         } else {
@@ -256,6 +260,7 @@ fn main() {
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
                 SocketAddr::new(ip, config.port),
                 bootstrappers,
+                max_peers_per_set,
                 MAX_MESSAGE_SIZE,
             )
         };
@@ -272,32 +277,27 @@ fn main() {
         // Register pending channel
         let pending_limit =
             Quota::per_second(NonZeroU32::new(BASE_CHANNEL_QUOTA_PER_SECOND).unwrap());
-        let pending = network.register(PENDING_CHANNEL, pending_limit, config.message_backlog);
+        let pending = network.register(PENDING_CHANNEL, pending_limit);
 
         // Register recovered channel
         let recovered_limit =
             Quota::per_second(NonZeroU32::new(BASE_CHANNEL_QUOTA_PER_SECOND).unwrap());
-        let recovered =
-            network.register(RECOVERED_CHANNEL, recovered_limit, config.message_backlog);
+        let recovered = network.register(RECOVERED_CHANNEL, recovered_limit);
 
         // Register resolver channel
         let resolver_limit =
             Quota::per_second(NonZeroU32::new(BASE_CHANNEL_QUOTA_PER_SECOND).unwrap());
-        let resolver = network.register(RESOLVER_CHANNEL, resolver_limit, config.message_backlog);
+        let resolver = network.register(RESOLVER_CHANNEL, resolver_limit);
 
         // Register broadcast channel
         let broadcaster_limit =
             Quota::per_second(NonZeroU32::new(VOTING_CHANNEL_QUOTA_PER_SECOND).unwrap());
-        let broadcaster = network.register(
-            BROADCASTER_CHANNEL,
-            broadcaster_limit,
-            config.message_backlog,
-        );
+        let broadcaster = network.register(BROADCASTER_CHANNEL, broadcaster_limit);
 
         // Register marshal channel
         let marshal_quota =
             Quota::per_second(NonZeroU32::new(VOTING_CHANNEL_QUOTA_PER_SECOND).unwrap());
-        let marshal = network.register(MARSHAL_CHANNEL, marshal_quota, config.message_backlog);
+        let marshal = network.register(MARSHAL_CHANNEL, marshal_quota);
 
         // Create network
         let p2p = network.start();
@@ -329,7 +329,6 @@ fn main() {
             fetch_timeout: FETCH_TIMEOUT,
             max_fetch_count: MAX_FETCH_COUNT,
             max_fetch_size: MAX_FETCH_SIZE,
-            fetch_concurrent: FETCH_CONCURRENT,
             fetch_rate_per_peer: resolver_limit,
             backfiller_max_active: config.backfiller_max_active,
             backfiller_retry: Duration::from_millis(config.backfiller_retry_ms),

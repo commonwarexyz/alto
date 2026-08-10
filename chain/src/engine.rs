@@ -94,7 +94,6 @@ pub struct Config<
     pub skip_timeout: Duration,
     pub max_fetch_count: usize,
     pub max_fetch_size: usize,
-    pub fetch_concurrent: usize,
     pub fetch_rate_per_peer: Quota,
     pub backfiller_max_active: NonZeroUsize,
     pub backfiller_retry: Duration,
@@ -149,8 +148,6 @@ where
     pub async fn new(context: E, cfg: Config<B, P, C, S>) -> Self {
         let mailbox_size =
             NonZeroUsize::new(cfg.mailbox_size).expect("mailbox size must be non-zero");
-        let fetch_concurrent =
-            NonZeroUsize::new(cfg.fetch_concurrent).expect("fetch concurrent must be non-zero");
 
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
@@ -337,6 +334,7 @@ where
                 automaton: marshaled.clone(),
                 relay: marshaled.clone(),
                 reporter,
+                track_historical_votes: false,
                 partition: format!("{}-consensus", cfg.partition_prefix),
                 mailbox_size,
                 floor: simplex::Floor::Genesis(genesis_digest),
@@ -346,7 +344,6 @@ where
                 fetch_timeout: cfg.fetch_timeout,
                 view_retention: cfg.activity_timeout,
                 skip_timeout: cfg.skip_timeout,
-                fetch_concurrent,
                 forwarding: FORWARDING_POLICY,
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
