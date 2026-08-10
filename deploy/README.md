@@ -152,8 +152,8 @@ The build platform is an explicit recipe:
 just validator-intel-binary
 ```
 
-The Intel binary is compiled with `target-cpu=emeraldrapids` and must only be deployed to
-compatible Intel hosts such as `i7i`.
+_The Intel binary is compiled with `target-cpu=emeraldrapids`._
+
 The builder runs on the local Docker architecture and cross-compiles the validator, so no
 `--platform` argument is needed on an ARM64 development machine.
 
@@ -162,6 +162,8 @@ The builder runs on the local Docker architecture and cross-compiles the validat
 ```bash
 just validator-graviton-binary
 ```
+
+_The Graviton binary is compiled with `target-cpu=neoverse-v1`._
 
 Both recipes write `assets/validator` and `assets/validator-debug`. Run the recipe matching the
 deployment's instance type last.
