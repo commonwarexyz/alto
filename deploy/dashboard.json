@@ -26,6 +26,7 @@
                 "type": "prometheus",
                 "uid": "PBFA97CFB590B2093"
             },
+            "description": "Consensus view identifier. Stable-leader nullifications jump to the next 1,000-view term, so this is not a block height.",
             "fieldConfig": {
                 "defaults": {
                     "color": {
@@ -119,7 +120,7 @@
                     "useBackend": false
                 }
             ],
-            "title": "Current View",
+            "title": "Current Consensus View",
             "type": "timeseries"
         },
         {
@@ -127,6 +128,7 @@
                 "type": "prometheus",
                 "uid": "PBFA97CFB590B2093"
             },
+            "description": "Per-validator growth rate of contiguous processed block height. Skipped consensus view identifiers do not count as blocks.",
             "fieldConfig": {
                 "defaults": {
                     "color": {
@@ -211,7 +213,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "irate(engine_consensus_voter_state_current_view{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[1m])",
+                    "expr": "deriv(engine_marshal_processed_height{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[1m])",
                     "fullMetaSearch": false,
                     "includeNullMetadata": true,
                     "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
@@ -220,7 +222,7 @@
                     "useBackend": false
                 }
             ],
-            "title": "Views per Second",
+            "title": "Finalized Blocks per Second",
             "type": "timeseries"
         },
         {
@@ -228,6 +230,7 @@
                 "type": "prometheus",
                 "uid": "PBFA97CFB590B2093"
             },
+            "description": "Reciprocal of the fleet-average contiguous block rate. This is a throughput interval, not proposal verification or finalization latency.",
             "fieldConfig": {
                 "defaults": {
                     "color": {
@@ -313,7 +316,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "avg(irate(engine_consensus_voter_state_current_view{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[1m]))",
+                    "expr": "avg(deriv(engine_marshal_processed_height{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[1m]))",
                     "fullMetaSearch": false,
                     "hide": true,
                     "includeNullMetadata": true,
@@ -330,11 +333,11 @@
                     },
                     "expression": "1/$A",
                     "hide": false,
-                    "refId": "Latency",
+                    "refId": "Interval",
                     "type": "math"
                 }
             ],
-            "title": "View Latency",
+            "title": "Finalized Block Interval",
             "type": "timeseries"
         },
         {
@@ -709,6 +712,7 @@
                 "y": 10
             },
             "id": 31,
+            "description": "Consensus timeout counters split by reason. Quorum nullification after a timeout can skip the unused remainder of a stable-leader term.",
             "options": {
                 "legend": {
                     "calcs": [],
@@ -734,13 +738,13 @@
                     "expr": "engine_consensus_voter_state_timeouts_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
                     "fullMetaSearch": false,
                     "includeNullMetadata": true,
-                    "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
+                    "legendFormat": "{{reason}} · {{deployer_name}} ({{deployer_ip}})",
                     "range": true,
                     "refId": "A",
                     "useBackend": false
                 }
             ],
-            "title": "Skipped Views",
+            "title": "Consensus Timeouts by Reason",
             "type": "timeseries"
         },
         {

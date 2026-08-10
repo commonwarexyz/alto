@@ -43,11 +43,8 @@ const RESOLVER_CHANNEL: u64 = 2;
 const BROADCASTER_CHANNEL: u64 = 3;
 const MARSHAL_CHANNEL: u64 = 4;
 
-// Trusted testing network: set per-peer, per-channel ingest limits far above any
-// realistic steady-state so the rate limiter never binds. Each peer connection gets
-// its own `RateLimiter::direct_with_clock(rate)`, so these are per-peer allowances.
-const BASE_CHANNEL_QUOTA_PER_SECOND: u32 = 50_000;
-const VOTING_CHANNEL_QUOTA_PER_SECOND: u32 = 100_000;
+const BASE_CHANNEL_QUOTA_PER_SECOND: u32 = 1_280;
+const VOTING_CHANNEL_QUOTA_PER_SECOND: u32 = 2_560;
 
 // Fraction of traces sampled and exported to the monitoring host's OTLP collector.
 // Export everything: partial sampling hides the rare events we care about (a leader
