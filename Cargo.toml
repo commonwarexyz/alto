@@ -13,14 +13,14 @@ exclude = ["vendor/commonware"]
 resolver = "2"
 
 [workspace.package]
-version = "2026.7.0"
+version = "2026.7.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-alto-chain = { version = "2026.7.0", path = "chain" }
-alto-client = { version = "2026.7.0", path = "client" }
-alto-types = { version = "2026.7.0", path = "types" }
+alto-chain = { version = "2026.7.1", path = "chain" }
+alto-client = { version = "2026.7.1", path = "client" }
+alto-types = { version = "2026.7.1", path = "types" }
 commonware-actor = { git = "https://github.com/commonwarexyz/monorepo", rev = "f8ecbf9165c098bc5b02f2927f0b84fd8f2a3847" }
 commonware-broadcast = { git = "https://github.com/commonwarexyz/monorepo", rev = "f8ecbf9165c098bc5b02f2927f0b84fd8f2a3847" }
 commonware-codec = { git = "https://github.com/commonwarexyz/monorepo", rev = "f8ecbf9165c098bc5b02f2927f0b84fd8f2a3847" }
