@@ -17,12 +17,15 @@
 use alto_types::{Block, Finalization, Scheme};
 use commonware_consensus::{marshal, types::Height};
 use commonware_cryptography::{certificate::Verifier as _, sha256::Digest, Digestible};
-use commonware_runtime::{buffer::paged::CacheRef, BufferPooler, Clock, Metrics, Storage};
+use commonware_runtime::{
+    buffer::paged::{page_size, CacheRef},
+    BufferPooler, Clock, Metrics, Storage,
+};
 use commonware_storage::{
     archive::{self, immutable, prunable, Archive, Identifier},
     translator::FourCap,
 };
-use commonware_utils::{NZUsize, NZU16, NZU64};
+use commonware_utils::{NZUsize, NZU64};
 use std::num::NonZero;
 
 // Shared constants (also used by marshal config in engine.rs)
@@ -32,7 +35,8 @@ pub(crate) const WRITE_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8M
 
 // Finalized archive constants.
 const FINALIZED_COMPRESSION: Option<u8> = Some(3);
-const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = NZU16!(4_096); // 4KB
+const PAGE_CACHE_PHYSICAL_PAGE_SIZE: u32 = 4_096;
+const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = page_size(PAGE_CACHE_PHYSICAL_PAGE_SIZE);
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 
 // Prunable archive partitions.
