@@ -3,14 +3,20 @@ use crate::{
     indexer::{self, Client},
     Leader,
 };
-use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
-use commonware_broadcast::buffered;
+use alto_types::{
+    Activity, Block, CodedBlock, CodingScheme, Commitment, Finalization, MarshalCoding, PublicKey,
+    Scheme, StoredCodedBlock, EPOCH, EPOCH_LENGTH, NAMESPACE,
+};
+use commonware_coding::{CodecConfig, Config as CodingConfig};
 use commonware_consensus::{
     marshal::{
         self,
+        coding::{
+            shards, types::coding_config_for_participants, Marshaled as CodingMarshaled,
+            MarshaledConfig,
+        },
         core::{Actor as MarshalActor, Mailbox as MarshalMailbox},
         resolver::handler,
-        standard::{Deferred, Standard},
     },
     simplex::{
         self,
@@ -23,9 +29,8 @@ use commonware_consensus::{
 use commonware_cryptography::{
     bls12381::primitives::{group, sharing::Sharing, variant::MinSig},
     certificate::{ConstantProvider, Verifier as CertificateVerifier},
-    ed25519::PublicKey,
     sha256::{Digest, Sha256},
-    Digestible as _,
+    Committable as _,
 };
 use commonware_p2p::{Blocker, Provider, Receiver, Sender};
 use commonware_parallel::Strategy;
@@ -48,7 +53,7 @@ use tracing::{error, info, warn};
 
 /// Reporter type for [simplex::Engine].
 type Reporter<E, C> =
-    Reporters<Activity, Option<indexer::Pusher<E, C>>, MarshalMailbox<Scheme, Standard<Block>>>;
+    Reporters<Activity, Option<indexer::Pusher<E, C>>, MarshalMailbox<Scheme, MarshalCoding>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -69,6 +74,22 @@ const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(16);
 const STABLE_LEADER_STALL_TIMEOUT: Duration = Duration::from_secs(12);
 const STABLE_LEADER_OPTIMISTIC_VIEWS: ViewDelta = ViewDelta::new(100);
+
+fn maximum_shard_size(max_message_size: u32, coding_config: CodingConfig) -> usize {
+    let minimum_shards = usize::from(coding_config.minimum_shards.get());
+    let encoded_block_bound =
+        usize::try_from(max_message_size).expect("maximum message size is unsupported");
+    // The transport bound already covers the encoded CodedBlock, including its coding config.
+    // Reed-Solomon adds a four-byte length prefix before splitting that payload into shards.
+    let mut shard_size = encoded_block_bound
+        .checked_add(std::mem::size_of::<u32>())
+        .expect("maximum message size overflowed")
+        .div_ceil(minimum_shards);
+    if !shard_size.is_multiple_of(2) {
+        shard_size += 1;
+    }
+    shard_size
+}
 
 /// Adapts the serialized leader policy to Simplex's statically typed elector configuration.
 #[derive(Clone, Default)]
@@ -135,12 +156,12 @@ pub struct Config<
     pub partition_prefix: String,
     pub blocks_freezer_table_initial_size: u32,
     pub finalized_freezer_table_initial_size: u32,
-    pub me: PublicKey,
     pub polynomial: Sharing<MinSig>,
     pub share: group::Share,
     pub participants: Set<PublicKey>,
     pub mailbox_size: usize,
     pub deque_size: usize,
+    pub max_message_size: u32,
     pub block_size: u32,
     pub leader: Leader,
 
@@ -161,41 +182,60 @@ pub struct Config<
     pub indexer: Option<C>,
 }
 
-type Marshaled<E> = Deferred<E, Scheme, Application, Block, FixedEpocher>;
+type Marshaled<E, S> = CodingMarshaled<
+    E,
+    Application,
+    Block,
+    CodingScheme,
+    Sha256,
+    ConstantProvider<Scheme, Epoch>,
+    S,
+    FixedEpocher,
+>;
 
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
 pub struct Engine<E, B, P, S, C>
 where
     E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
-    B: Blocker<PublicKey = PublicKey>,
+    B: Blocker<PublicKey = PublicKey> + Clone,
     P: Provider<PublicKey = PublicKey>,
     S: Strategy,
     C: Client,
 {
     context: ContextCell<E>,
 
-    buffer: buffered::Engine<E, PublicKey, Block, P>,
-    buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
+    shards: shards::Engine<
+        E,
+        ConstantProvider<Scheme, Epoch>,
+        B,
+        P,
+        CodingScheme,
+        Sha256,
+        Block,
+        PublicKey,
+        S,
+    >,
+    shards_mailbox: shards::Mailbox<Block, CodingScheme, Sha256, PublicKey>,
     marshal: MarshalActor<
         E,
-        Standard<Block>,
+        MarshalCoding,
         ConstantProvider<Scheme, Epoch>,
         immutable::Archive<E, Digest, Finalization>,
-        immutable::Archive<E, Digest, Block>,
+        immutable::Archive<E, Digest, StoredCodedBlock>,
         FixedEpocher,
         S,
     >,
-    marshaled: Marshaled<E>,
+    marshaled: Marshaled<E, S>,
 
     consensus: Consensus<
         E,
         Scheme,
         ElectorConfig,
         B,
-        Digest,
-        Marshaled<E>,
-        Marshaled<E>,
+        Commitment,
+        Marshaled<E, S>,
+        Marshaled<E, S>,
         Reporter<E, C>,
         S,
     >,
@@ -206,7 +246,7 @@ where
 impl<E, B, P, S, C> Engine<E, B, P, S, C>
 where
     E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
-    B: Blocker<PublicKey = PublicKey>,
+    B: Blocker<PublicKey = PublicKey> + Clone,
     P: Provider<PublicKey = PublicKey>,
     S: Strategy,
     C: Client,
@@ -215,21 +255,14 @@ where
     pub async fn new(context: E, cfg: Config<B, P, C, S>) -> Self {
         let mailbox_size =
             NonZeroUsize::new(cfg.mailbox_size).expect("mailbox size must be non-zero");
+        let peer_buffer_size =
+            NonZeroUsize::new(cfg.deque_size).expect("deque size must be non-zero");
+        let participants = u16::try_from(cfg.participants.len())
+            .expect("validator count must fit in the coding configuration");
+        let coding_config = coding_config_for_participants(participants);
+        let shard_size = maximum_shard_size(cfg.max_message_size, coding_config);
         let proposal_delay_ms = cfg.leader.delay_ms();
         let elector = ElectorConfig(cfg.leader);
-
-        // Create the buffer
-        let (buffer, buffer_mailbox) = buffered::Engine::new(
-            context.child("buffer"),
-            buffered::Config {
-                public_key: cfg.me,
-                mailbox_size,
-                deque_size: cfg.deque_size,
-                priority: true,
-                codec_config: (),
-                peer_provider: cfg.provider,
-            },
-        );
 
         // Create the page cache
         let page_cache = CacheRef::from_pooler(&context, PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
@@ -319,14 +352,33 @@ where
             .expect("failed to create scheme");
         let provider = ConstantProvider::new(scheme.clone());
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-        let genesis = Application::genesis();
-        let genesis_digest = genesis.digest();
+        let genesis = CodedBlock::new(Application::genesis(), coding_config, &cfg.strategy);
+        let genesis_commitment = genesis.commitment();
+
+        // Create the erasure-coded shard broadcaster.
+        let (shards, shards_mailbox) = shards::Engine::new(
+            context.child("shards"),
+            shards::Config {
+                scheme_provider: provider.clone(),
+                blocker: cfg.blocker.clone(),
+                shard_codec_cfg: CodecConfig {
+                    maximum_shard_size: shard_size,
+                },
+                block_codec_cfg: (),
+                strategy: cfg.strategy.clone(),
+                mailbox_size,
+                peer_buffer_size,
+                background_channel_capacity: mailbox_size,
+                peer_provider: cfg.provider,
+            },
+        );
+
         let (marshal, marshal_mailbox, _) = MarshalActor::init(
             context.child("marshal"),
             finalizations_by_height,
             finalized_blocks,
             marshal::Config {
-                provider,
+                provider: provider.clone(),
                 epocher: epocher.clone(),
                 partition_prefix: cfg.partition_prefix.clone(),
                 mailbox_size,
@@ -390,11 +442,16 @@ where
         };
 
         // Create the application
-        let marshaled = Marshaled::new(
+        let marshaled = CodingMarshaled::new(
             context.child("marshaled"),
-            app,
-            marshal_mailbox.clone(),
-            epocher,
+            MarshaledConfig {
+                application: app,
+                marshal: marshal_mailbox.clone(),
+                shards: shards_mailbox.clone(),
+                scheme_provider: provider,
+                strategy: cfg.strategy.clone(),
+                epocher,
+            },
         );
 
         // Create the reporter.
@@ -412,7 +469,7 @@ where
                 track_historical_votes: false,
                 partition: format!("{}-consensus", cfg.partition_prefix),
                 mailbox_size,
-                floor: simplex::Floor::Genesis(genesis_digest),
+                floor: simplex::Floor::Genesis(genesis_commitment),
                 leader_timeout: cfg.leader_timeout,
                 certification_timeout: cfg.certification_timeout,
                 timeout_retry: cfg.nullify_retry,
@@ -433,8 +490,8 @@ where
         Self {
             context: ContextCell::new(context),
 
-            buffer,
-            buffer_mailbox,
+            shards,
+            shards_mailbox,
             marshal,
             marshaled,
             consensus,
@@ -459,14 +516,14 @@ where
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        broadcast: (
+        shards: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
         marshal: (
-            handler::Receiver<Digest>,
+            handler::Receiver<Commitment>,
             impl TargetedResolver<
-                Key = handler::Key<Digest>,
+                Key = handler::Key<Commitment>,
                 Subscriber = handler::Annotation,
                 PublicKey = PublicKey,
             >,
@@ -474,7 +531,7 @@ where
     ) -> Handle<()> {
         spawn_cell!(
             self.context,
-            self.run(pending, recovered, resolver, broadcast, marshal)
+            self.run(pending, recovered, resolver, shards, marshal)
         )
     }
 
@@ -493,26 +550,26 @@ where
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
-        broadcast: (
+        shards: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
         marshal: (
-            handler::Receiver<Digest>,
+            handler::Receiver<Commitment>,
             impl TargetedResolver<
-                Key = handler::Key<Digest>,
+                Key = handler::Key<Commitment>,
                 Subscriber = handler::Annotation,
                 PublicKey = PublicKey,
             >,
         ),
     ) {
-        // Start the buffer
-        let buffer_handle = self.buffer.start(broadcast);
+        // Start shard dissemination.
+        let shards_handle = self.shards.start(shards);
 
         // Start marshal
         let marshal_handle = self
             .marshal
-            .start(self.marshaled, self.buffer_mailbox, marshal);
+            .start(self.marshaled, self.shards_mailbox, marshal);
 
         // Start draining queued block uploads before consensus so recovered work
         // resumes immediately on startup.
@@ -525,7 +582,7 @@ where
         let consensus_handle = self.consensus.start(pending, recovered, resolver);
 
         // Wait for any actor to finish
-        let mut handles: Vec<Handle<()>> = vec![buffer_handle, marshal_handle, consensus_handle];
+        let mut handles: Vec<Handle<()>> = vec![shards_handle, marshal_handle, consensus_handle];
         if let Some(h) = consumer_handle {
             handles.push(h);
         }
@@ -540,7 +597,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
+    use commonware_codec::{Decode, Encode};
     use commonware_consensus::{
+        marshal::coding::types::Shard,
         simplex::{scheme::bls12381_threshold::vrf, types::Subject},
         types::View,
     };
@@ -552,6 +612,33 @@ mod tests {
     use commonware_parallel::Sequential;
     use commonware_utils::{Faults, N3f1, NZU32, NZU64};
     use rand::{rngs::StdRng, SeedableRng};
+
+    #[test]
+    fn one_mib_shards_fit_128_validator_transport() {
+        const PARTICIPANTS: u16 = 128;
+        const MAX_MESSAGE_SIZE: u32 = 2 * 1024 * 1024 + 4;
+
+        let coding_config = coding_config_for_participants(PARTICIPANTS);
+        let maximum_shard_size = maximum_shard_size(MAX_MESSAGE_SIZE, coding_config);
+        let genesis = Application::genesis();
+        let block = Block::new(
+            genesis.context,
+            genesis.parent,
+            genesis.height,
+            genesis.timestamp,
+            Bytes::from(vec![0xa5; 1024 * 1024]),
+        );
+        let coded = CodedBlock::new(block, coding_config, &Sequential);
+        let shard_codec = CodecConfig { maximum_shard_size };
+
+        assert_eq!(coded.shards(&Sequential).len(), usize::from(PARTICIPANTS));
+        for index in 0..PARTICIPANTS {
+            let encoded = coded.shard(index).expect("shard should exist").encode();
+            assert!(encoded.len() <= MAX_MESSAGE_SIZE as usize);
+            Shard::<CodingScheme, Sha256>::decode_cfg(encoded, &shard_codec)
+                .expect("configured shard limit should admit a 1 MiB block");
+        }
+    }
 
     #[test]
     fn configured_elector_preserves_rotating_and_stable_terms() {

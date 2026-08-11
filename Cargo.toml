@@ -21,7 +21,7 @@ alto-chain = { version = "2026.7.1", path = "chain" }
 alto-client = { version = "2026.7.1", path = "client" }
 alto-types = { version = "2026.7.1", path = "types" }
 commonware-actor = { git = "https://github.com/commonwarexyz/monorepo", rev = "fca67b22d2b667ed9659d736f726a30ba89dfc3a" }
-commonware-broadcast = { git = "https://github.com/commonwarexyz/monorepo", rev = "fca67b22d2b667ed9659d736f726a30ba89dfc3a" }
+commonware-coding = { git = "https://github.com/commonwarexyz/monorepo", rev = "fca67b22d2b667ed9659d736f726a30ba89dfc3a" }
 commonware-codec = { git = "https://github.com/commonwarexyz/monorepo", rev = "fca67b22d2b667ed9659d736f726a30ba89dfc3a" }
 commonware-consensus = { git = "https://github.com/commonwarexyz/monorepo", rev = "fca67b22d2b667ed9659d736f726a30ba89dfc3a" }
 commonware-cryptography = { git = "https://github.com/commonwarexyz/monorepo", rev = "fca67b22d2b667ed9659d736f726a30ba89dfc3a" }

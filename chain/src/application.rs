@@ -1,5 +1,5 @@
 use crate::indexer;
-use alto_types::{Block, Context, Scheme, EPOCH};
+use alto_types::{genesis_parent_commitment, Block, Context, Scheme, EPOCH};
 use bytes::Bytes;
 use commonware_actor::Feedback;
 use commonware_consensus::{
@@ -7,7 +7,7 @@ use commonware_consensus::{
     types::{Height, Round, View},
     Application as ConsensusApplication, Heightable, Reporter,
 };
-use commonware_cryptography::{ed25519, sha256, Digest as _, Digestible, Hasher, Sha256, Signer};
+use commonware_cryptography::{ed25519, Digestible, Hasher, Sha256, Signer};
 use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
@@ -40,7 +40,7 @@ impl Application {
         let genesis_context = Context {
             round: Round::new(EPOCH, View::zero()),
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
-            parent: (View::zero(), sha256::Digest::EMPTY),
+            parent: (View::zero(), genesis_parent_commitment()),
         };
         Block::new(
             genesis_context,
@@ -183,17 +183,31 @@ impl Reporter for Application {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use commonware_consensus::marshal::ancestry;
+    use alto_types::{CodedBlock, Commitment};
+    use commonware_consensus::{
+        marshal::ancestry, marshal::coding::types::coding_config_for_participants,
+    };
+    use commonware_cryptography::Committable as _;
+    use commonware_parallel::Sequential;
     use commonware_runtime::{deterministic, Runner as _, Supervisor as _};
     use commonware_utils::NZU64;
     use std::sync::Arc;
 
-    fn test_context(view: u64, parent: (View, sha256::Digest)) -> Context {
+    fn test_context(view: u64, parent: (View, Commitment)) -> Context {
         Context {
             round: Round::new(EPOCH, View::new(view)),
             leader: ed25519::PrivateKey::from_seed(view).public_key(),
             parent,
         }
+    }
+
+    fn commitment(block: &Block) -> Commitment {
+        CodedBlock::new(
+            block.clone(),
+            coding_config_for_participants(4),
+            &Sequential,
+        )
+        .commitment()
     }
 
     async fn verify_block(
@@ -226,14 +240,14 @@ mod tests {
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
-                test_context(1, (View::zero(), sha256::Digest::EMPTY)),
+                test_context(1, (View::zero(), genesis_parent_commitment())),
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now,
                 Bytes::new(),
             );
             let block = Block::new(
-                test_context(2, (View::new(1), parent.digest())),
+                test_context(2, (View::new(1), commitment(&parent))),
                 parent.digest(),
                 parent.height.next(),
                 now + MAX_FUTURE_SKEW_MS + 1,
@@ -262,14 +276,14 @@ mod tests {
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
-                test_context(1, (View::zero(), sha256::Digest::EMPTY)),
+                test_context(1, (View::zero(), genesis_parent_commitment())),
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now,
                 Bytes::new(),
             );
             let block = Block::new(
-                test_context(2, (View::new(1), parent.digest())),
+                test_context(2, (View::new(1), commitment(&parent))),
                 parent.digest(),
                 parent.height.next(),
                 now,
@@ -292,13 +306,13 @@ mod tests {
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
-                test_context(1, (View::zero(), sha256::Digest::EMPTY)),
+                test_context(1, (View::zero(), genesis_parent_commitment())),
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now,
                 Bytes::new(),
             );
-            let child_context = test_context(2, (View::new(1), parent.digest()));
+            let child_context = test_context(2, (View::new(1), commitment(&parent)));
 
             for size in [0, 3, 5] {
                 let block = Block::new(
@@ -333,14 +347,14 @@ mod tests {
             context.sleep(Duration::from_millis(10)).await;
             let now = context.current().epoch_millis();
             let parent = Block::new(
-                test_context(1, (View::zero(), sha256::Digest::EMPTY)),
+                test_context(1, (View::zero(), genesis_parent_commitment())),
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now - 1,
                 Bytes::new(),
             );
             let block = Block::new(
-                test_context(2, (View::new(1), parent.digest())),
+                test_context(2, (View::new(1), commitment(&parent))),
                 parent.digest(),
                 parent.height.next(),
                 now,
@@ -363,7 +377,7 @@ mod tests {
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
-                test_context(1, (View::zero(), sha256::Digest::EMPTY)),
+                test_context(1, (View::zero(), genesis_parent_commitment())),
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now + 5_000,
@@ -372,7 +386,7 @@ mod tests {
             let proposal = propose_child(
                 context.child("propose"),
                 &mut application,
-                test_context(2, (View::new(1), parent.digest())),
+                test_context(2, (View::new(1), commitment(&parent))),
                 &parent,
             )
             .await;
@@ -394,7 +408,7 @@ mod tests {
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
-                test_context(1, (View::zero(), sha256::Digest::EMPTY)),
+                test_context(1, (View::zero(), genesis_parent_commitment())),
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now,
@@ -403,7 +417,7 @@ mod tests {
             let proposal = propose_child(
                 context.child("propose"),
                 &mut application,
-                test_context(2, (View::new(1), parent.digest())),
+                test_context(2, (View::new(1), commitment(&parent))),
                 &parent,
             )
             .await;
@@ -421,14 +435,14 @@ mod tests {
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
-                test_context(1, (View::zero(), sha256::Digest::EMPTY)),
+                test_context(1, (View::zero(), genesis_parent_commitment())),
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now,
                 Bytes::new(),
             );
             let block = Block::new(
-                test_context(2, (View::new(1), parent.digest())),
+                test_context(2, (View::new(1), commitment(&parent))),
                 parent.digest(),
                 parent.height.next(),
                 // Verification should reject timestamps outside the fixed
@@ -451,7 +465,7 @@ mod tests {
             let mut application = Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS);
 
             let parent = Block::new(
-                test_context(1, (View::zero(), sha256::Digest::EMPTY)),
+                test_context(1, (View::zero(), genesis_parent_commitment())),
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 // Proposing on top of a parent already at the maximum would
@@ -462,7 +476,7 @@ mod tests {
             let _ = propose_child(
                 context.child("propose"),
                 &mut application,
-                test_context(2, (View::new(1), parent.digest())),
+                test_context(2, (View::new(1), commitment(&parent))),
                 &parent,
             )
             .await;

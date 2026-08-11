@@ -40,7 +40,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 const PENDING_CHANNEL: u64 = 0;
 const RECOVERED_CHANNEL: u64 = 1;
 const RESOLVER_CHANNEL: u64 = 2;
-const BROADCASTER_CHANNEL: u64 = 3;
+const SHARDS_CHANNEL: u64 = 3;
 const MARSHAL_CHANNEL: u64 = 4;
 
 const BASE_CHANNEL_QUOTA_PER_SECOND: u32 = 1_500;
@@ -300,10 +300,10 @@ fn main() {
             Quota::per_second(NonZeroU32::new(BASE_CHANNEL_QUOTA_PER_SECOND).unwrap());
         let resolver = network.register(RESOLVER_CHANNEL, resolver_limit);
 
-        // Register broadcast channel
-        let broadcaster_limit =
+        // Register erasure-coded shard channel
+        let shards_limit =
             Quota::per_second(NonZeroU32::new(VOTING_CHANNEL_QUOTA_PER_SECOND).unwrap());
-        let broadcaster = network.register(BROADCASTER_CHANNEL, broadcaster_limit);
+        let shards = network.register(SHARDS_CHANNEL, shards_limit);
 
         // Register marshal channel
         let marshal_quota =
@@ -328,10 +328,10 @@ fn main() {
             partition_prefix: "engine".to_string(),
             blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
             finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
-            me: public_key.clone(),
             participants,
             mailbox_size: config.mailbox_size,
             deque_size: config.deque_size,
+            max_message_size,
             block_size: config.block_size,
             leader: config.leader,
             leader_timeout: LEADER_TIMEOUT,
@@ -370,7 +370,7 @@ fn main() {
         );
 
         // Start engine
-        let engine = engine.start(pending, recovered, resolver, broadcaster, marshal_resolver);
+        let engine = engine.start(pending, recovered, resolver, shards, marshal_resolver);
 
         // Wait for any task to error
         if let Err(e) = try_join_all(vec![p2p, engine]).await {

@@ -223,8 +223,7 @@ mod tests {
                 oracle.register(1, TEST_QUOTA).await.unwrap();
             let (resolver_sender, resolver_receiver) =
                 oracle.register(2, TEST_QUOTA).await.unwrap();
-            let (broadcast_sender, broadcast_receiver) =
-                oracle.register(3, TEST_QUOTA).await.unwrap();
+            let (shards_sender, shards_receiver) = oracle.register(3, TEST_QUOTA).await.unwrap();
             let (backfill_sender, backfill_receiver) =
                 oracle.register(4, TEST_QUOTA).await.unwrap();
             registrations.insert(
@@ -233,7 +232,7 @@ mod tests {
                     (pending_sender, pending_receiver),
                     (recovered_sender, recovered_receiver),
                     (resolver_sender, resolver_receiver),
-                    (broadcast_sender, broadcast_receiver),
+                    (shards_sender, shards_receiver),
                     (backfill_sender, backfill_receiver),
                 ),
             );
@@ -361,6 +360,8 @@ mod tests {
         leader: Leader,
         leader_timeout: Duration,
         certification_timeout: Duration,
+        block_size: u32,
+        max_message_size: u32,
         backfiller_max_active: NonZeroUsize,
         backfiller_retry: Duration,
         indexer: Option<mocks::Client>,
@@ -372,6 +373,8 @@ mod tests {
                 leader: Leader::default(),
                 leader_timeout: Duration::from_secs(1),
                 certification_timeout: Duration::from_secs(2),
+                block_size: 0,
+                max_message_size: 1024 * 1024,
                 backfiller_max_active: DEFAULT_BACKFILLER_MAX_ACTIVE,
                 backfiller_retry: Duration::from_millis(DEFAULT_BACKFILLER_RETRY_MS),
                 indexer: None,
@@ -423,13 +426,13 @@ mod tests {
             partition_prefix: uid.clone(),
             blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
             finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-            me: signer.public_key(),
             polynomial: scheme.polynomial().clone(),
             share: scheme.share().cloned().unwrap(),
             participants,
             mailbox_size: 1024,
             deque_size: 10,
-            block_size: 0,
+            max_message_size: cfg.max_message_size,
+            block_size: cfg.block_size,
             leader: cfg.leader,
             leader_timeout: cfg.leader_timeout,
             certification_timeout: cfg.certification_timeout,
@@ -446,7 +449,7 @@ mod tests {
             strategy: Sequential,
         };
         let validator_context = context.child("validator").with_attribute("id", &uid);
-        let (pending, recovered, resolver, broadcast, backfill) = registration;
+        let (pending, recovered, resolver, shards, backfill) = registration;
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),
             peer_provider: oracle.manager(),
@@ -464,7 +467,7 @@ mod tests {
             backfill,
         );
         let engine = Engine::new(validator_context.child("engine"), config).await;
-        engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
+        engine.start(pending, recovered, resolver, shards, marshal_resolver);
     }
 
     async fn poll_until_height(context: &deterministic::Context, required: u64) {
@@ -495,13 +498,23 @@ mod tests {
     }
 
     fn all_online(n: u32, seed: u64, link: Link, required: u64) -> String {
+        all_online_with(n, seed, link, required, ValidatorConfig::default())
+    }
+
+    fn all_online_with(
+        n: u32,
+        seed: u64,
+        link: Link,
+        required: u64,
+        validator_cfg: ValidatorConfig,
+    ) -> String {
         let cfg = deterministic::Config::default().with_seed(seed);
         let executor = Runner::from(cfg);
         executor.start(|mut context| async move {
             let (network, mut oracle) = Network::new(
                 context.child("network"),
                 simulated::Config {
-                    max_size: 1024 * 1024,
+                    max_size: validator_cfg.max_message_size,
                     max_peers_per_set: NZUsize!(n as usize),
                     disconnect_on_block: true,
                     tracked_peer_sets: NZUsize!(1),
@@ -522,14 +535,14 @@ mod tests {
 
             for (signer, scheme) in private_keys.iter().zip(schemes.iter()) {
                 let registration = registrations.remove(&signer.public_key()).unwrap();
-                start_validator(
+                start_validator_with(
                     &context,
                     &oracle,
                     signer,
                     scheme,
                     participants_set.clone(),
                     registration,
-                    None,
+                    validator_cfg.clone(),
                 )
                 .await;
             }
@@ -563,6 +576,26 @@ mod tests {
             let state = all_online(5, seed, link.clone(), 25);
             assert_eq!(state, all_online(5, seed, link.clone(), 25));
         }
+    }
+
+    #[test_traced]
+    fn test_one_mib_coded_blocks() {
+        let link = Link {
+            latency: Duration::from_millis(10),
+            jitter: Duration::from_millis(1),
+            success_rate: 1.0,
+        };
+        all_online_with(
+            4,
+            0,
+            link,
+            1,
+            ValidatorConfig {
+                block_size: 1024 * 1024,
+                max_message_size: 2 * 1024 * 1024,
+                ..Default::default()
+            },
+        );
     }
 
     #[test_traced]

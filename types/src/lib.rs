@@ -8,10 +8,15 @@ use std::num::NonZero;
 mod block;
 pub use block::{Block, Finalized, Notarized};
 
+mod coding;
+pub use coding::{
+    genesis_parent_commitment, CodedBlock, CodingScheme, MarshalCoding, StoredCodedBlock,
+};
+
 mod consensus;
 pub use consensus::{
-    Activity, Context, Finalization, Identity, Notarization, PublicKey, Scheme, Seed, Seedable,
-    Signature,
+    Activity, Commitment, Context, Finalization, Identity, Notarization, PublicKey, Scheme, Seed,
+    Seedable, Signature,
 };
 
 pub mod wasm;
@@ -66,6 +71,7 @@ mod tests {
     use bytes::Bytes;
     use commonware_codec::{DecodeExt, Encode, EncodeSize, ReadExt};
     use commonware_consensus::{
+        marshal::coding::types::coding_config_for_participants,
         simplex::{
             scheme::bls12381_threshold::vrf as bls12381_threshold,
             types::{Finalization, Finalize, Notarization, Notarize, Proposal},
@@ -74,17 +80,26 @@ mod tests {
     };
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519, sha256,
-        Digest, Digestible, Hasher, Sha256, Signer,
+        Committable, Digestible, Hasher, Sha256, Signer,
     };
     use commonware_parallel::Sequential;
     use rand::{rngs::StdRng, SeedableRng};
+
+    fn commitment(block: &Block) -> Commitment {
+        CodedBlock::new(
+            block.clone(),
+            coding_config_for_participants(4),
+            &Sequential,
+        )
+        .commitment()
+    }
 
     #[test]
     fn block_data_above_one_mib_round_trips_and_is_committed_by_digest() {
         let context = Context {
             round: Round::new(EPOCH, View::new(9)),
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
-            parent: (View::new(8), sha256::Digest::EMPTY),
+            parent: (View::new(8), genesis_parent_commitment()),
         };
         let parent = Sha256::hash(&[b"parent"]);
         let empty = Block::new(context.clone(), parent, Height::new(10), 100, Bytes::new());
@@ -98,6 +113,14 @@ mod tests {
         assert_eq!(block.encode_inline_size(), block.encode_size() - data.len());
         assert_ne!(block.digest(), empty.digest());
         assert_eq!(Block::decode(block.encode()).unwrap(), block);
+
+        let coded = CodedBlock::new(
+            block.clone(),
+            coding_config_for_participants(4),
+            &Sequential,
+        );
+        assert_eq!(coded.commitment().block::<sha256::Digest>(), block.digest());
+        assert_ne!(coded.commitment().block::<sha256::Digest>(), empty.digest());
 
         let mut encoded = block.encode().to_vec();
         let suffix = [1, 2, 3, 4];
@@ -119,7 +142,7 @@ mod tests {
         let context = Context {
             round: Round::new(EPOCH, View::new(9)),
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
-            parent: (View::new(8), sha256::Digest::EMPTY),
+            parent: (View::new(8), genesis_parent_commitment()),
         };
         let digest = Sha256::hash(&[b"hello world"]);
         let block = Block::new(
@@ -132,7 +155,7 @@ mod tests {
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
-            block.digest(),
+            commitment(&block),
         );
 
         // Create a notarization
@@ -165,14 +188,14 @@ mod tests {
         let context = Context {
             round: Round::new(EPOCH, View::new(9)),
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
-            parent: (View::new(8), sha256::Digest::EMPTY),
+            parent: (View::new(8), genesis_parent_commitment()),
         };
         let digest = Sha256::hash(&[b"hello world"]);
         let block = Block::new(context, digest, Height::new(10), 100, Bytes::new());
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
-            block.digest(),
+            commitment(&block),
         );
 
         // Create a finalization
