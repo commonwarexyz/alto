@@ -1,9 +1,7 @@
 use super::{Decision, Entry, SharedState};
 use crate::indexer::Client;
-use alto_types::{Block, Scheme};
-use commonware_consensus::marshal::{
-    core::Mailbox as MarshalMailbox, standard::Standard, Identifier,
-};
+use alto_types::{Block, MarshalCoding, Scheme};
+use commonware_consensus::marshal::{core::Mailbox as MarshalMailbox, Identifier};
 use commonware_cryptography::sha256::Digest;
 use commonware_macros::select_loop;
 use commonware_runtime::{
@@ -33,7 +31,7 @@ enum Completion {
 pub struct Consumer<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> {
     context: ContextCell<E>,
     client: C,
-    marshal: MarshalMailbox<Scheme, Standard<Block>>,
+    marshal: MarshalMailbox<Scheme, MarshalCoding>,
     upload_results: status::Counter,
     uploads: SharedState,
     writer: queue::Writer<E, Entry>,
@@ -47,7 +45,7 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Consumer<
     pub fn new(
         context: E,
         client: C,
-        marshal: MarshalMailbox<Scheme, Standard<Block>>,
+        marshal: MarshalMailbox<Scheme, MarshalCoding>,
         uploads: SharedState,
         backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
         max_active: NonZeroUsize,
@@ -218,7 +216,7 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Consumer<
 
     async fn wait_for_uploadable_block(
         context: &E,
-        marshal: &MarshalMailbox<Scheme, Standard<Block>>,
+        marshal: &MarshalMailbox<Scheme, MarshalCoding>,
         uploads: &SharedState,
         digest: Digest,
         retry: Duration,
@@ -255,6 +253,7 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Consumer<
                 NextBlock::Ready(block) => return Some(*block),
                 NextBlock::FetchFromMarshal => {
                     if let Some(block) = marshal.get_block(Identifier::Digest(digest)).await {
+                        let block = block.into_inner();
                         uploads.lock().cache_block(block.clone());
                         return Some(block);
                     }

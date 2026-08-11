@@ -57,8 +57,8 @@ dependencies = [
  "alto-types",
  "bytes",
  "commonware-actor",
- "commonware-broadcast",
  "commonware-codec",
+ "commonware-coding",
  "commonware-consensus",
  "commonware-cryptography",
  "commonware-macros",
@@ -218,6 +218,7 @@ version = "2026.7.1"
 dependencies = [
  "bytes",
  "commonware-codec",
+ "commonware-coding",
  "commonware-consensus",
  "commonware-cryptography",
  "commonware-formatting",

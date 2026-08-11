@@ -175,7 +175,7 @@ pub type SharedState = Arc<Mutex<State>>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alto_types::{Context, EPOCH};
+    use alto_types::{genesis_parent_commitment, Context, EPOCH};
     use bytes::Bytes;
     use commonware_consensus::types::{Height, Round, View};
     use commonware_cryptography::{ed25519, Digestible, Hasher, Sha256, Signer};
@@ -187,7 +187,7 @@ mod tests {
                 leader: ed25519::PrivateKey::from_seed(view).public_key(),
                 parent: (
                     View::new(view.saturating_sub(1)),
-                    Sha256::hash(&[format!("parent-{view}").as_bytes()]),
+                    genesis_parent_commitment(),
                 ),
             },
             Sha256::hash(&[label]),

@@ -1,8 +1,8 @@
 use super::{Client, SharedState};
-use alto_types::{Activity, Block, Scheme, Seed, Seedable};
+use alto_types::{Activity, Block, MarshalCoding, Scheme, Seed, Seedable};
 use commonware_actor::Feedback;
 use commonware_consensus::{
-    marshal::{core::DigestFallback, core::Mailbox as MarshalMailbox, standard::Standard},
+    marshal::{core::DigestFallback, core::Mailbox as MarshalMailbox},
     types::{Round, View},
     Reporter, Viewable,
 };
@@ -21,7 +21,7 @@ use tracing::{debug, warn};
 pub(crate) struct Pusher<E: Spawner + Metrics, C: Client> {
     context: Arc<E>,
     client: C,
-    marshal: MarshalMailbox<Scheme, Standard<Block>>,
+    marshal: MarshalMailbox<Scheme, MarshalCoding>,
     uploads: SharedState,
 }
 
@@ -41,7 +41,7 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
     pub(crate) fn new(
         context: E,
         client: C,
-        marshal: MarshalMailbox<Scheme, Standard<Block>>,
+        marshal: MarshalMailbox<Scheme, MarshalCoding>,
         uploads: SharedState,
     ) -> Self {
         Self {
@@ -130,7 +130,7 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
                     warn!(%view, "subscription for block cancelled");
                     return;
                 };
-                let block = Arc::unwrap_or_clone(block);
+                let block = Arc::unwrap_or_clone(block).into_inner();
                 let height = block.height.get();
                 guard.cache_block(block.clone());
                 if let Err(e) = upload_fn(client, block).await {
@@ -157,7 +157,7 @@ impl<E: Spawner + Metrics, C: Client> Reporter for Pusher<E, C> {
                     "notarized_block",
                     view,
                     notarization.round(),
-                    notarization.proposal.payload,
+                    notarization.proposal.payload.block(),
                     |indexer, block| async move {
                         indexer
                             .notarized_upload(alto_types::Notarized::new(notarization, block))
@@ -172,7 +172,7 @@ impl<E: Spawner + Metrics, C: Client> Reporter for Pusher<E, C> {
                     "finalized_block",
                     view,
                     finalization.round(),
-                    finalization.proposal.payload,
+                    finalization.proposal.payload.block(),
                     |indexer, block| async move {
                         indexer
                             .finalized_upload(alto_types::Finalized::new(finalization, block))

@@ -14,8 +14,8 @@
 //! the application's finalized block stream, the consensus reporter, and a
 //! background consumer task.
 
-use alto_types::{Block, Finalized, Notarized, Scheme, Seed};
-use commonware_consensus::marshal::{core::Mailbox as MarshalMailbox, standard::Standard};
+use alto_types::{Block, Finalized, MarshalCoding, Notarized, Scheme, Seed};
+use commonware_consensus::marshal::core::Mailbox as MarshalMailbox;
 use commonware_parallel::Strategy;
 use commonware_runtime::{BufferPooler, Clock, Metrics, Spawner, Storage};
 use commonware_storage::queue;
@@ -98,7 +98,7 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Indexer<E
     pub(crate) async fn new(
         context: E,
         client: C,
-        marshal: MarshalMailbox<Scheme, Standard<Block>>,
+        marshal: MarshalMailbox<Scheme, MarshalCoding>,
         backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
         mailbox_size: NonZeroUsize,
         backfiller_max_active: NonZeroUsize,
