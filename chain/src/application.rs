@@ -11,7 +11,10 @@ use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
 use rand::Rng;
-use std::time::{Duration, SystemTime};
+use std::{
+    num::NonZeroU64,
+    time::{Duration, SystemTime},
+};
 use tracing::info;
 
 /// Genesis message to use during initialization.
@@ -22,12 +25,12 @@ const GENESIS: &[u8] = b"commonware is neat";
 /// Different platforms have different `SystemTime` limits, so we use a fixed
 /// timestamp to ensure consistent application of block validity rules.
 const MAX_BLOCK_TIMESTAMP_MS: u64 = 7_258_118_400_000;
-const TARGET_BLOCK_INTERVAL_MS: u64 = 10;
 const MAX_FUTURE_SKEW_MS: u64 = 1_000;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Application {
     backfiller: Option<indexer::Producer>,
+    delay_ms: NonZeroU64,
 }
 
 impl Application {
@@ -40,8 +43,11 @@ impl Application {
         Block::new(genesis_context, Sha256::hash(&[GENESIS]), Height::zero(), 0)
     }
 
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(delay_ms: NonZeroU64) -> Self {
+        Self {
+            backfiller: None,
+            delay_ms,
+        }
     }
 
     pub(crate) fn with_backfiller(mut self, backfiller: indexer::Producer) -> Self {
@@ -70,7 +76,7 @@ where
         // Create a new block.
         let min_timestamp = parent
             .timestamp
-            .checked_add(TARGET_BLOCK_INTERVAL_MS)
+            .checked_add(self.delay_ms.get())
             .expect("parent timestamp overflowed");
         let mut current = runtime_context.current().epoch_millis();
         if current < min_timestamp {
@@ -110,10 +116,12 @@ where
         if block.timestamp <= parent.timestamp || block.timestamp > MAX_BLOCK_TIMESTAMP_MS {
             return false;
         }
-        let now = runtime_context.current().epoch_millis();
-        if block.timestamp > now.saturating_add(MAX_FUTURE_SKEW_MS) {
+        let Some(deadline) = SystemTime::UNIX_EPOCH.checked_add(Duration::from_millis(
+            block.timestamp.saturating_sub(MAX_FUTURE_SKEW_MS),
+        )) else {
             return false;
-        }
+        };
+        runtime_context.sleep_until(deadline).await;
 
         // The height and digest invariants are enforced in `Marshaled`:
         // - The block height must be one greater than the parent's height.
@@ -151,6 +159,7 @@ mod tests {
     use super::*;
     use commonware_consensus::marshal::ancestry;
     use commonware_runtime::{deterministic, Runner as _, Supervisor as _};
+    use commonware_utils::NZU64;
     use std::sync::Arc;
 
     fn test_context(view: u64, parent: (View, sha256::Digest)) -> Context {
@@ -184,10 +193,10 @@ mod tests {
     }
 
     #[test]
-    fn verify_rejects_far_future_block_timestamp() {
+    fn verify_waits_until_future_block_enters_skew_window() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new();
+            let mut application = Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -200,15 +209,20 @@ mod tests {
                 test_context(2, (View::new(1), parent.digest())),
                 parent.digest(),
                 parent.height.next(),
-                now + MAX_FUTURE_SKEW_MS + 100_000,
+                now + MAX_FUTURE_SKEW_MS + 1,
             );
 
             let start = context.current();
-            assert!(
-                !verify_block(context.child("verify"), &mut application, &block, &parent).await
-            );
+            assert!(verify_block(context.child("verify"), &mut application, &block, &parent).await);
             let finished = context.current();
-            assert!(finished.duration_since(start).unwrap() < Duration::from_millis(10));
+            assert_eq!(
+                finished.duration_since(start).unwrap(),
+                Duration::from_millis(1)
+            );
+            assert_eq!(
+                finished.epoch_millis(),
+                block.timestamp - MAX_FUTURE_SKEW_MS
+            );
         });
     }
 
@@ -216,7 +230,7 @@ mod tests {
     fn verify_rejects_equal_parent_timestamp() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new();
+            let mut application = Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -242,7 +256,7 @@ mod tests {
     fn verify_returns_immediately_for_mature_block_timestamp() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new();
+            let mut application = Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS);
 
             context.sleep(Duration::from_millis(10)).await;
             let now = context.current().epoch_millis();
@@ -267,10 +281,11 @@ mod tests {
     }
 
     #[test]
-    fn propose_uses_parent_timestamp_plus_interval_when_clock_is_behind() {
+    fn propose_uses_configured_delay_when_clock_is_behind() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new();
+            let delay_ms = NZU64!(37);
+            let mut application = Application::new(delay_ms);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -289,10 +304,7 @@ mod tests {
 
             assert_eq!(proposal.parent, parent.digest());
             assert_eq!(proposal.height, parent.height.next());
-            assert_eq!(
-                proposal.timestamp,
-                parent.timestamp + TARGET_BLOCK_INTERVAL_MS
-            );
+            assert_eq!(proposal.timestamp, parent.timestamp + delay_ms.get());
         });
     }
 
@@ -300,7 +312,7 @@ mod tests {
     fn verify_rejects_timestamp_above_maximum() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new();
+            let mut application = Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -329,7 +341,7 @@ mod tests {
     fn propose_panics_when_parent_timestamp_is_maximum() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new();
+            let mut application = Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS);
 
             let parent = Block::new(
                 test_context(1, (View::zero(), sha256::Digest::EMPTY)),

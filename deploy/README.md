@@ -12,14 +12,23 @@ _To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/
 
 _To configure local indexer upload, add `--indexers '<url>:<count>[;<url>:<count>...]'` to the `generate local` command. For example, `http://localhost:8080:1` assigns one validator to upload to that indexer._
 
+Leader election is selected for every generated validator with `--leader-mode`, and
+`--leader-delay-ms` sets the minimum proposal interval. Use `--leader-mode rotating` for a new
+VRF-derived leader each view. Stable mode keeps one round-robin leader for each term and also
+requires `--leader-term-length` to set the number of views in each term.
+
 Generated validator configs use:
 
 ```yaml
+leader:
+  mode: stable
+  delay_ms: 10
+  term_length: 1000
 indexer: http://localhost:8080
 ```
 
 ```bash
-cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --mailbox-size 16384 --deque-size 256 --signature-threads 2 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
+cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
 ```
 
 _If the command succeeds, you should see the following output:_
@@ -101,7 +110,7 @@ indexer: https://your-indexer.example.com
 ##### Global
 
 ```bash
-cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --mailbox-size 16384 --deque-size 256 --signature-threads 2 --output assets remote --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,eu-north-1,ap-south-1,sa-east-1,eu-central-1,ap-northeast-2,ap-southeast-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 25 --dashboard deploy/dashboard.json
+cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --output assets remote --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,eu-north-1,ap-south-1,sa-east-1,eu-central-1,ap-northeast-2,ap-southeast-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 25 --dashboard deploy/dashboard.json
 ```
 
 _This configuration consumes ~10MB of disk space per hour per validator (~5 views per second). With 25GB of storage allocated, validators will exhaust available storage in ~3 months._
@@ -109,7 +118,7 @@ _This configuration consumes ~10MB of disk space per hour per validator (~5 view
 ##### USA
 
 ```bash
-cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --mailbox-size 16384 --deque-size 256 --signature-threads 2 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 75 --dashboard deploy/dashboard.json
+cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 75 --dashboard deploy/dashboard.json
 ```
 
 _This configuration consumes ~30MB of disk space per hour per validator (~13 views per second). With 75GB of storage allocated, validators will exhaust available storage in ~3 months._

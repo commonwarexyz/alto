@@ -116,16 +116,13 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
         F: FnOnce(C, Block) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), C::Error>> + Send,
     {
+        // Claim the digest before the marshal reporter can enqueue the same
+        // activity for durable backfill.
+        let mut guard = CertificateUploadGuard::new(self.uploads.clone(), digest);
         self.context.child(label).spawn({
             let client = self.client.clone();
             let marshal = self.marshal.clone();
-            let uploads = self.uploads.clone();
             move |_| async move {
-                // Mark the digest as being handled by the live certificate path
-                // before waiting on marshal so the backfiller does not race it
-                // while the block is still being fetched.
-                let mut guard = CertificateUploadGuard::new(uploads, digest);
-
                 let block = marshal
                     .subscribe_by_digest(digest, DigestFallback::FetchByRound { round })
                     .await;
@@ -133,9 +130,10 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
                     warn!(%view, "subscription for block cancelled");
                     return;
                 };
+                let block = Arc::unwrap_or_clone(block);
                 let height = block.height.get();
-                guard.cache_block((*block).clone());
-                if let Err(e) = upload_fn(client, Arc::unwrap_or_clone(block)).await {
+                guard.cache_block(block.clone());
+                if let Err(e) = upload_fn(client, block).await {
                     warn!(?e, %view, label, "failed to upload certificate");
                     return;
                 }

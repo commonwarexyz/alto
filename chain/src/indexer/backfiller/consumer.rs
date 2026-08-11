@@ -234,7 +234,6 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Consumer<
             FetchFromMarshal,
         }
 
-        let mut yielded_to_live_path = false;
         loop {
             let next = {
                 let uploads = uploads.lock();
@@ -251,10 +250,6 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Consumer<
             match next {
                 NextBlock::AlreadyUploaded => return None,
                 NextBlock::WaitForCertificate => {
-                    context.sleep(retry).await;
-                }
-                NextBlock::Ready(_) if !yielded_to_live_path => {
-                    yielded_to_live_path = true;
                     context.sleep(retry).await;
                 }
                 NextBlock::Ready(block) => return Some(*block),

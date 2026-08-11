@@ -1,9 +1,9 @@
-use commonware_utils::{NZUsize, NZU32};
+use commonware_utils::{NZUsize, NZU32, NZU64};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    num::{NonZeroU32, NonZeroUsize},
+    num::{NonZeroU32, NonZeroU64, NonZeroUsize},
 };
 
 pub mod application;
@@ -16,6 +16,8 @@ pub const DEFAULT_BACKFILLER_RETRY_MS: u64 = 1_000;
 pub const DEFAULT_BLOCKING_THREADS: usize = 512;
 pub const DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(16_384);
 pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(4_096);
+const DEFAULT_STABLE_LEADER_DELAY_MS: NonZeroU64 = NZU64!(10);
+const DEFAULT_STABLE_LEADER_TERM_LENGTH: NonZeroU32 = NZU32!(1_000);
 
 fn default_backfiller_max_active() -> NonZeroUsize {
     DEFAULT_BACKFILLER_MAX_ACTIVE
@@ -35,6 +37,84 @@ fn default_storage_buffer_pool_max_per_class() -> Option<NonZeroU32> {
 
 fn default_network_buffer_pool_max_per_class() -> Option<NonZeroU32> {
     Some(DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS)
+}
+
+/// Leader election policy for the consensus engine.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum Leader {
+    /// Select a new VRF-derived leader for every view.
+    Rotating { delay_ms: NonZeroU64 },
+    /// Keep one round-robin leader for a term and pace its proposals.
+    Stable {
+        delay_ms: NonZeroU64,
+        term_length: NonZeroU32,
+    },
+}
+
+impl<'de> Deserialize<'de> for Leader {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+        enum Config {
+            Rotating {
+                delay_ms: NonZeroU64,
+            },
+            Stable {
+                delay_ms: NonZeroU64,
+                term_length: NonZeroU32,
+            },
+        }
+
+        match Config::deserialize(deserializer)? {
+            Config::Rotating { delay_ms } => Ok(Self::rotating(delay_ms)),
+            Config::Stable {
+                delay_ms,
+                term_length,
+            } if term_length.get() > 1 => Ok(Self::stable(delay_ms, term_length)),
+            Config::Stable { .. } => Err(serde::de::Error::custom(
+                "stable leader term length must be greater than 1",
+            )),
+        }
+    }
+}
+
+impl Leader {
+    /// Creates a rotating leader configuration.
+    pub const fn rotating(delay_ms: NonZeroU64) -> Self {
+        Self::Rotating { delay_ms }
+    }
+
+    /// Creates a stable leader configuration.
+    pub const fn stable(delay_ms: NonZeroU64, term_length: NonZeroU32) -> Self {
+        assert!(
+            term_length.get() > 1,
+            "stable leader term length must be greater than 1"
+        );
+        Self::Stable {
+            delay_ms,
+            term_length,
+        }
+    }
+
+    /// Minimum timestamp increase between proposals.
+    pub(crate) const fn delay_ms(self) -> NonZeroU64 {
+        match self {
+            Self::Rotating { delay_ms } | Self::Stable { delay_ms, .. } => delay_ms,
+        }
+    }
+}
+
+impl Default for Leader {
+    fn default() -> Self {
+        Self::stable(
+            DEFAULT_STABLE_LEADER_DELAY_MS,
+            DEFAULT_STABLE_LEADER_TERM_LENGTH,
+        )
+    }
 }
 
 /// Configuration for the [engine::Engine].
@@ -69,6 +149,9 @@ pub struct Config {
 
     pub signature_threads: usize,
 
+    #[serde(default)]
+    pub leader: Leader,
+
     #[serde(default = "default_backfiller_max_active")]
     pub backfiller_max_active: NonZeroUsize,
     #[serde(default = "default_backfiller_retry_ms")]
@@ -95,7 +178,7 @@ mod tests {
     };
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519::PublicKey,
-        Signer,
+        Digestible, Signer,
     };
     use commonware_macros::{select, test_traced};
     use commonware_p2p::{
@@ -273,6 +356,7 @@ mod tests {
 
     #[derive(Clone)]
     struct ValidatorConfig {
+        leader: Leader,
         leader_timeout: Duration,
         certification_timeout: Duration,
         backfiller_max_active: NonZeroUsize,
@@ -283,6 +367,7 @@ mod tests {
     impl Default for ValidatorConfig {
         fn default() -> Self {
             Self {
+                leader: Leader::default(),
                 leader_timeout: Duration::from_secs(1),
                 certification_timeout: Duration::from_secs(2),
                 backfiller_max_active: DEFAULT_BACKFILLER_MAX_ACTIVE,
@@ -342,6 +427,7 @@ mod tests {
             participants,
             mailbox_size: 1024,
             deque_size: 10,
+            leader: cfg.leader,
             leader_timeout: cfg.leader_timeout,
             certification_timeout: cfg.certification_timeout,
             nullify_retry: timeout_retry,
@@ -782,11 +868,18 @@ mod tests {
             assert!(indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
+            let genesis_digest = application::Application::genesis().digest();
+            let started_digests = indexer.block_upload_started_digests.lock().clone();
+            let expected_genesis_uploads = n as usize;
             assert_eq!(
-                indexer
-                    .block_upload_started
-                    .load(std::sync::atomic::Ordering::SeqCst),
-                0,
+                started_digests.len(),
+                expected_genesis_uploads,
+                "only genesis should be uploaded as a bare block when certified uploads succeed",
+            );
+            assert!(
+                started_digests
+                    .iter()
+                    .all(|digest| *digest == genesis_digest),
                 "non-genesis block uploads should stay idle when certified uploads succeed",
             );
         });
@@ -960,11 +1053,16 @@ mod tests {
                 queue_outstanding(&metrics) > 0,
                 "expected finalized queue work while certificate uploads were blocked",
             );
+            let genesis_digest = application::Application::genesis().digest();
+            let expected_genesis_uploads = n as usize;
+            let started_digests = indexer.block_upload_started_digests.lock().clone();
             assert_eq!(
-                indexer
-                    .block_upload_started
-                    .load(std::sync::atomic::Ordering::SeqCst),
-                0,
+                started_digests.len(),
+                expected_genesis_uploads,
+                "only genesis should be uploaded as a bare block while certificate uploads are in flight",
+            );
+            assert!(
+                started_digests.iter().all(|digest| *digest == genesis_digest),
                 "non-genesis block uploads should wait while certificate uploads are still in flight",
             );
 
@@ -985,11 +1083,14 @@ mod tests {
             assert!(indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
+            let started_digests = indexer.block_upload_started_digests.lock().clone();
             assert_eq!(
-                indexer
-                    .block_upload_started
-                    .load(std::sync::atomic::Ordering::SeqCst),
-                0,
+                started_digests.len(),
+                expected_genesis_uploads,
+                "only genesis should be uploaded as a bare block when certificate uploads eventually succeed",
+            );
+            assert!(
+                started_digests.iter().all(|digest| *digest == genesis_digest),
                 "non-genesis block uploads should remain idle when certificate uploads eventually succeed",
             );
         });

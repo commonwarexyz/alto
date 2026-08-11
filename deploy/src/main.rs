@@ -1,5 +1,5 @@
 use alto_chain::{
-    Config, Peers, DEFAULT_BACKFILLER_MAX_ACTIVE, DEFAULT_BACKFILLER_RETRY_MS,
+    Config, Leader, Peers, DEFAULT_BACKFILLER_MAX_ACTIVE, DEFAULT_BACKFILLER_RETRY_MS,
     DEFAULT_BLOCKING_THREADS, DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS,
     DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS,
 };
@@ -25,7 +25,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    num::{NonZeroU32, NonZeroUsize},
+    num::{NonZeroU32, NonZeroU64, NonZeroUsize},
 };
 use tracing::{error, info};
 use uuid::Uuid;
@@ -37,6 +37,23 @@ const BINARY_NAME: &str = "validator";
 const PORT: u16 = 4545;
 const STORAGE_CLASS: &str = "gp3";
 const DASHBOARD_FILE: &str = "dashboard.json";
+
+fn leader_args() -> [Arg; 3] {
+    [
+        Arg::new("leader_mode")
+            .long("leader-mode")
+            .required(true)
+            .value_parser(["rotating", "stable"]),
+        Arg::new("leader_delay_ms")
+            .long("leader-delay-ms")
+            .required(true)
+            .value_parser(value_parser!(NonZeroU64)),
+        Arg::new("leader_term_length")
+            .long("leader-term-length")
+            .required_if_eq("leader_mode", "stable")
+            .value_parser(value_parser!(u32).range(2..)),
+    ]
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ConfiguredIndexer {
@@ -90,6 +107,23 @@ fn parse_indexers(specs: Option<&String>) -> Vec<ConfiguredIndexer> {
             }
         })
         .collect()
+}
+
+fn parse_leader(matches: &ArgMatches) -> Result<Leader, &'static str> {
+    let delay_ms = *matches.get_one::<NonZeroU64>("leader_delay_ms").unwrap();
+    match matches.get_one::<String>("leader_mode").unwrap().as_str() {
+        "rotating" => {
+            if matches.get_one::<u32>("leader_term_length").is_some() {
+                return Err("rotating leader mode does not accept --leader-term-length");
+            }
+            Ok(Leader::rotating(delay_ms))
+        }
+        "stable" => Ok(Leader::stable(
+            delay_ms,
+            NonZeroU32::new(*matches.get_one::<u32>("leader_term_length").unwrap()).unwrap(),
+        )),
+        _ => unreachable!("clap validates leader mode"),
+    }
 }
 
 fn main() {
@@ -174,6 +208,7 @@ fn main() {
                         .required(true)
                         .value_parser(value_parser!(usize)),
                 )
+                .args(leader_args())
                 .arg(
                     Arg::new("output")
                         .long("output")
@@ -292,6 +327,10 @@ fn main() {
             let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
             let deque_size = *sub_matches.get_one::<usize>("deque_size").unwrap();
             let signature_threads = *sub_matches.get_one::<usize>("signature_threads").unwrap();
+            let leader = parse_leader(sub_matches).unwrap_or_else(|message| {
+                error!("{message}");
+                std::process::exit(2);
+            });
             let output = sub_matches.get_one::<String>("output").unwrap().clone();
             match sub_matches.subcommand() {
                 Some(("local", sub_matches)) => generate_local(
@@ -308,6 +347,7 @@ fn main() {
                     mailbox_size,
                     deque_size,
                     signature_threads,
+                    leader,
                     output,
                 ),
                 Some(("remote", sub_matches)) => generate_remote(
@@ -324,6 +364,7 @@ fn main() {
                     mailbox_size,
                     deque_size,
                     signature_threads,
+                    leader,
                     output,
                 ),
                 _ => {
@@ -369,6 +410,7 @@ fn generate_local(
     mailbox_size: usize,
     deque_size: usize,
     signature_threads: usize,
+    leader: Leader,
     output: String,
 ) {
     // Extract arguments
@@ -452,6 +494,7 @@ fn generate_local(
             deque_size,
 
             signature_threads,
+            leader,
             backfiller_max_active: DEFAULT_BACKFILLER_MAX_ACTIVE,
             backfiller_retry_ms: DEFAULT_BACKFILLER_RETRY_MS,
 
@@ -552,6 +595,7 @@ fn generate_remote(
     mailbox_size: usize,
     deque_size: usize,
     signature_threads: usize,
+    leader: Leader,
     output: String,
 ) {
     // Extract arguments
@@ -653,6 +697,7 @@ fn generate_remote(
             deque_size,
 
             signature_threads,
+            leader,
             backfiller_max_active: DEFAULT_BACKFILLER_MAX_ACTIVE,
             backfiller_retry_ms: DEFAULT_BACKFILLER_RETRY_MS,
 
@@ -889,7 +934,111 @@ fn explorer_remote(dir: String, backend_url: String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_indexers, ConfiguredIndexer};
+    use super::{leader_args, parse_indexers, parse_leader, ConfiguredIndexer};
+    use alto_chain::Leader;
+    use clap::Command;
+    use commonware_utils::{NZU32, NZU64};
+
+    #[test]
+    fn parse_rotating_leader() {
+        let result = Command::new("test")
+            .args(leader_args())
+            .try_get_matches_from(["test", "--leader-mode", "rotating"]);
+        assert!(result.is_err());
+
+        let matches = Command::new("test")
+            .args(leader_args())
+            .try_get_matches_from([
+                "test",
+                "--leader-mode",
+                "rotating",
+                "--leader-delay-ms",
+                "7",
+            ])
+            .unwrap();
+        assert_eq!(parse_leader(&matches).unwrap(), Leader::rotating(NZU64!(7)));
+    }
+
+    #[test]
+    fn parse_stable_leader() {
+        let matches = Command::new("test")
+            .args(leader_args())
+            .try_get_matches_from([
+                "test",
+                "--leader-mode",
+                "stable",
+                "--leader-delay-ms",
+                "10",
+                "--leader-term-length",
+                "1000",
+            ])
+            .unwrap();
+        assert_eq!(
+            parse_leader(&matches).unwrap(),
+            Leader::stable(NZU64!(10), NZU32!(1_000))
+        );
+    }
+
+    #[test]
+    fn stable_leader_requires_delay_and_term_length() {
+        let result = Command::new("test")
+            .args(leader_args())
+            .try_get_matches_from(["test", "--leader-mode", "stable"]);
+        assert!(result.is_err());
+
+        let result = Command::new("test")
+            .args(leader_args())
+            .try_get_matches_from([
+                "test",
+                "--leader-mode",
+                "stable",
+                "--leader-delay-ms",
+                "10",
+                "--leader-term-length",
+                "1",
+            ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rotating_leader_rejects_term_length() {
+        let matches = Command::new("test")
+            .args(leader_args())
+            .try_get_matches_from([
+                "test",
+                "--leader-mode",
+                "rotating",
+                "--leader-delay-ms",
+                "10",
+                "--leader-term-length",
+                "1000",
+            ])
+            .unwrap();
+        assert!(parse_leader(&matches).is_err());
+    }
+
+    #[test]
+    fn leader_config_round_trips() {
+        for leader in [
+            Leader::rotating(NZU64!(7)),
+            Leader::stable(NZU64!(10), NZU32!(1_000)),
+        ] {
+            let encoded = serde_yaml::to_string(&leader).unwrap();
+            assert_eq!(serde_yaml::from_str::<Leader>(&encoded).unwrap(), leader);
+        }
+    }
+
+    #[test]
+    fn leader_config_rejects_invalid_fields() {
+        assert!(
+            serde_yaml::from_str::<Leader>("mode: stable\ndelay_ms: 10\nterm_length: 1\n").is_err()
+        );
+        assert!(serde_yaml::from_str::<Leader>("mode: rotating\n").is_err());
+        assert!(serde_yaml::from_str::<Leader>(
+            "mode: rotating\ndelay_ms: 10\nterm_length: 1000\n"
+        )
+        .is_err());
+    }
 
     #[test]
     fn parse_indexers_supports_multiple_specs() {

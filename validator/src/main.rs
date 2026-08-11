@@ -135,16 +135,15 @@ fn main() {
         // When deployed via `commonware-deployer` (a hosts file is present), export
         // traces to the monitoring host's OTLP collector (:4318). The deployer opens
         // the traces ingress from binary to monitoring security groups.
-        let traces = hosts_file.map(|hosts_file| {
+        let hosts = hosts_file.map(|hosts_file| {
             let hosts_file =
                 std::fs::read_to_string(hosts_file).expect("Could not read hosts file");
-            let hosts: Hosts =
-                serde_yaml::from_str(&hosts_file).expect("Could not parse hosts file");
-            tokio::tracing::Config {
-                endpoint: format!("http://{}:4318/v1/traces", hosts.monitoring.private),
-                name: public_key.to_string(),
-                rate: TRACES_SAMPLE_RATE,
-            }
+            serde_yaml::from_str::<Hosts>(&hosts_file).expect("Could not parse hosts file")
+        });
+        let traces = hosts.as_ref().map(|hosts| tokio::tracing::Config {
+            endpoint: format!("http://{}:4318/v1/traces", hosts.monitoring.private),
+            name: public_key.to_string(),
+            rate: TRACES_SAMPLE_RATE,
         });
         tokio::telemetry::init(
             context.child("telemetry"),
@@ -161,10 +160,7 @@ fn main() {
         );
 
         // Load peers
-        let (ip, peers, bootstrappers) = if let Some(hosts_file) = hosts_file {
-            let hosts_file = std::fs::read_to_string(hosts_file).unwrap();
-            let hosts: Hosts =
-                serde_yaml::from_str(&hosts_file).expect("Could not parse peers file");
+        let (ip, peers, bootstrappers) = if let Some(hosts) = hosts {
             let peers: HashMap<PublicKey, IpAddr> = hosts
                 .hosts
                 .into_iter()
@@ -319,6 +315,7 @@ fn main() {
             participants,
             mailbox_size: config.mailbox_size,
             deque_size: config.deque_size,
+            leader: config.leader,
             leader_timeout: LEADER_TIMEOUT,
             certification_timeout: CERTIFICATION_TIMEOUT,
             nullify_retry: NULLIFY_RETRY,

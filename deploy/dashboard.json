@@ -26,7 +26,7 @@
                 "type": "prometheus",
                 "uid": "PBFA97CFB590B2093"
             },
-            "description": "Consensus view identifier. Stable-leader nullifications jump to the next 1,000-view term, so this is not a block height.",
+            "description": "Consensus view identifier. Views can advance without producing a block, so this is not a block height.",
             "fieldConfig": {
                 "defaults": {
                     "color": {
@@ -4050,7 +4050,7 @@
                 {
                     "disableTextWrap": false,
                     "editorMode": "code",
-                    "expr": "sum by(deployer_name, deployer_ip) (rate(runtime_storage_buffer_pool_buffer_pool_exhausted_total_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])) or on(deployer_name, deployer_ip) (0 * sum by(deployer_name, deployer_ip) (runtime_storage_buffer_pool_buffer_pool_created{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}))",
+                    "expr": "sum by(deployer_name, deployer_ip) (rate(runtime_storage_buffer_pool_buffer_pool_exhausted_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])) or on(deployer_name, deployer_ip) (0 * sum by(deployer_name, deployer_ip) (runtime_storage_buffer_pool_buffer_pool_created{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}))",
                     "fullMetaSearch": false,
                     "includeNullMetadata": true,
                     "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
@@ -4148,7 +4148,7 @@
                 {
                     "disableTextWrap": false,
                     "editorMode": "code",
-                    "expr": "sum by(deployer_name, deployer_ip) (rate(runtime_network_buffer_pool_buffer_pool_exhausted_total_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])) or on(deployer_name, deployer_ip) (0 * sum by(deployer_name, deployer_ip) (runtime_network_buffer_pool_buffer_pool_created{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}))",
+                    "expr": "sum by(deployer_name, deployer_ip) (rate(runtime_network_buffer_pool_buffer_pool_exhausted_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}[$__rate_interval])) or on(deployer_name, deployer_ip) (0 * sum by(deployer_name, deployer_ip) (runtime_network_buffer_pool_buffer_pool_created{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}))",
                     "fullMetaSearch": false,
                     "includeNullMetadata": true,
                     "legendFormat": "{{deployer_name}} ({{deployer_ip}})",
