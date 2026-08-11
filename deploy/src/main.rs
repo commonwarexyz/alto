@@ -55,6 +55,13 @@ fn leader_args() -> [Arg; 3] {
     ]
 }
 
+fn block_size_arg() -> Arg {
+    Arg::new("block_size")
+        .long("block-size")
+        .default_value("0")
+        .value_parser(value_parser!(u32))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ConfiguredIndexer {
     url: String,
@@ -202,6 +209,7 @@ fn main() {
                         .required(true)
                         .value_parser(value_parser!(usize)),
                 )
+                .arg(block_size_arg())
                 .arg(
                     Arg::new("signature_threads")
                         .long("signature-threads")
@@ -326,6 +334,7 @@ fn main() {
             let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
             let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
             let deque_size = *sub_matches.get_one::<usize>("deque_size").unwrap();
+            let block_size = *sub_matches.get_one::<u32>("block_size").unwrap();
             let signature_threads = *sub_matches.get_one::<usize>("signature_threads").unwrap();
             let leader = parse_leader(sub_matches).unwrap_or_else(|message| {
                 error!("{message}");
@@ -346,6 +355,7 @@ fn main() {
                     log_level,
                     mailbox_size,
                     deque_size,
+                    block_size,
                     signature_threads,
                     leader,
                     output,
@@ -363,6 +373,7 @@ fn main() {
                     log_level,
                     mailbox_size,
                     deque_size,
+                    block_size,
                     signature_threads,
                     leader,
                     output,
@@ -409,6 +420,7 @@ fn generate_local(
     log_level: String,
     mailbox_size: usize,
     deque_size: usize,
+    block_size: u32,
     signature_threads: usize,
     leader: Leader,
     output: String,
@@ -492,6 +504,7 @@ fn generate_local(
 
             mailbox_size,
             deque_size,
+            block_size,
 
             signature_threads,
             leader,
@@ -594,6 +607,7 @@ fn generate_remote(
     log_level: String,
     mailbox_size: usize,
     deque_size: usize,
+    block_size: u32,
     signature_threads: usize,
     leader: Leader,
     output: String,
@@ -695,6 +709,7 @@ fn generate_remote(
 
             mailbox_size,
             deque_size,
+            block_size,
 
             signature_threads,
             leader,
@@ -934,10 +949,55 @@ fn explorer_remote(dir: String, backend_url: String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{leader_args, parse_indexers, parse_leader, ConfiguredIndexer};
+    use super::{block_size_arg, leader_args, parse_indexers, parse_leader, ConfiguredIndexer};
     use alto_chain::Leader;
     use clap::Command;
     use commonware_utils::{NZU32, NZU64};
+
+    #[test]
+    fn block_size_defaults_to_zero() {
+        let matches = Command::new("test")
+            .arg(block_size_arg())
+            .try_get_matches_from(["test"])
+            .unwrap();
+        assert_eq!(*matches.get_one::<u32>("block_size").unwrap(), 0);
+
+        let matches = Command::new("test")
+            .arg(block_size_arg())
+            .try_get_matches_from(["test", "--block-size", "2097152"])
+            .unwrap();
+        assert_eq!(
+            *matches.get_one::<u32>("block_size").unwrap(),
+            2 * 1024 * 1024
+        );
+    }
+
+    #[test]
+    fn validator_config_defaults_block_size_to_zero() {
+        let yaml = r#"
+private_key: key
+share: share
+polynomial: polynomial
+port: 1
+metrics_port: 2
+directory: data
+worker_threads: 1
+log_level: info
+local: true
+allowed_peers: []
+bootstrappers: []
+mailbox_size: 1
+deque_size: 1
+signature_threads: 1
+"#;
+
+        let config: alto_chain::Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.block_size, 0);
+
+        let config: alto_chain::Config =
+            serde_yaml::from_str(&format!("{yaml}\nblock_size: 4096\n")).unwrap();
+        assert_eq!(config.block_size, 4096);
+    }
 
     #[test]
     fn parse_rotating_leader() {

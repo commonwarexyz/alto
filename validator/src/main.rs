@@ -2,7 +2,7 @@ use alto_chain::{engine, Config, Peers};
 use alto_client::Client;
 use alto_types::{EPOCH, NAMESPACE};
 use clap::{Arg, Command};
-use commonware_codec::{Decode, DecodeExt};
+use commonware_codec::{Decode, DecodeExt, EncodeSize};
 use commonware_consensus::{marshal, types::ViewDelta};
 use commonware_cryptography::{
     bls12381::primitives::{
@@ -59,11 +59,27 @@ const ACTIVITY_TIMEOUT: ViewDelta = ViewDelta::new(256);
 const SKIP_TIMEOUT: Duration = Duration::from_secs(11);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(2);
 const MARSHAL_RESOLVER_TIMEOUT: Duration = Duration::from_secs(10);
-const MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
+const BASE_MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
 const MAX_FETCH_COUNT: usize = 16;
 const MAX_FETCH_SIZE: usize = 512 * 1024;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
+
+fn configured_max_message_size(block_size: u32) -> u32 {
+    // Block data contributes its bytes and the codec's variable-length prefix to each message.
+    let block_size =
+        usize::try_from(block_size).expect("configured block size is unsupported on this platform");
+    let encoded_size = block_size
+        .checked_add(block_size.encode_size())
+        .and_then(|size| u32::try_from(size).ok())
+        .expect("block size exceeds authenticated transport maximum");
+
+    // The configured maximum must remain within the authenticated transport payload limit.
+    BASE_MAX_MESSAGE_SIZE
+        .checked_add(encoded_size)
+        .filter(|size| *size <= authenticated::MAX_SIZE)
+        .expect("block size exceeds authenticated transport maximum")
+}
 
 fn main() {
     // Parse arguments
@@ -86,6 +102,7 @@ fn main() {
     let config_file = matches.get_one::<String>("config").unwrap();
     let config_file = std::fs::read_to_string(config_file).expect("Could not read config file");
     let config: Config = serde_yaml::from_str(&config_file).expect("Could not parse config file");
+    let max_message_size = configured_max_message_size(config.block_size);
     let key = from_hex(&config.private_key).expect("Could not parse private key");
     let signer = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
     let public_key = signer.public_key();
@@ -244,7 +261,7 @@ fn main() {
                 SocketAddr::new(ip, config.port),
                 bootstrappers,
                 max_peers_per_set,
-                MAX_MESSAGE_SIZE,
+                max_message_size,
             )
         } else {
             authenticated::Config::recommended(
@@ -254,7 +271,7 @@ fn main() {
                 SocketAddr::new(ip, config.port),
                 bootstrappers,
                 max_peers_per_set,
-                MAX_MESSAGE_SIZE,
+                max_message_size,
             )
         };
         p2p_cfg.mailbox_size = NZUsize!(config.mailbox_size);
@@ -315,6 +332,7 @@ fn main() {
             participants,
             mailbox_size: config.mailbox_size,
             deque_size: config.deque_size,
+            block_size: config.block_size,
             leader: config.leader,
             leader_timeout: LEADER_TIMEOUT,
             certification_timeout: CERTIFICATION_TIMEOUT,
@@ -359,4 +377,24 @@ fn main() {
             error!(?e, "task failed");
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_message_size_includes_block_data() {
+        assert_eq!(configured_max_message_size(0), BASE_MAX_MESSAGE_SIZE + 1);
+        assert_eq!(
+            configured_max_message_size(2 * 1024 * 1024),
+            BASE_MAX_MESSAGE_SIZE + 2 * 1024 * 1024 + 4
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "block size exceeds authenticated transport maximum")]
+    fn max_message_size_rejects_unsupported_block_size() {
+        configured_max_message_size(u32::MAX);
+    }
 }

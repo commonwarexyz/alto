@@ -6,6 +6,7 @@ use crate::{
     resolver::Resolver,
 };
 use alto_types::{Block, Context, Scheme, EPOCH, EPOCH_LENGTH};
+use bytes::Bytes;
 use commonware_consensus::{
     marshal::{
         self,
@@ -53,6 +54,7 @@ fn genesis() -> Block {
         Sha256::hash(&[GENESIS]),
         commonware_consensus::types::Height::zero(),
         0,
+        Bytes::new(),
     )
 }
 

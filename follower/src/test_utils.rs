@@ -4,6 +4,7 @@ use crate::Source;
 use alto_client::consensus::{Message, Payload};
 use alto_client::{IndexQuery, Query};
 use alto_types::{Block, Context, Finalized, Notarized, Scheme, EPOCH, NAMESPACE};
+use bytes::Bytes;
 use commonware_consensus::{
     simplex::{
         scheme::bls12381_threshold::vrf as bls12381_threshold,
@@ -119,7 +120,13 @@ impl TestFixture {
             parent: (View::new(view.saturating_sub(1)), sha256::Digest::EMPTY),
         };
         let parent_digest = Sha256::hash(&[format!("parent-{height}").as_bytes()]);
-        Block::new(context, parent_digest, Height::new(height), height * 100)
+        Block::new(
+            context,
+            parent_digest,
+            Height::new(height),
+            height * 100,
+            Bytes::new(),
+        )
     }
 
     pub fn create_finalized(&self, height: u64, view: u64) -> Finalized {

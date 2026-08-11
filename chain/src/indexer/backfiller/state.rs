@@ -176,6 +176,7 @@ pub type SharedState = Arc<Mutex<State>>;
 mod tests {
     use super::*;
     use alto_types::{Context, EPOCH};
+    use bytes::Bytes;
     use commonware_consensus::types::{Height, Round, View};
     use commonware_cryptography::{ed25519, Digestible, Hasher, Sha256, Signer};
 
@@ -192,6 +193,7 @@ mod tests {
             Sha256::hash(&[label]),
             Height::new(height),
             height,
+            Bytes::new(),
         )
     }
 

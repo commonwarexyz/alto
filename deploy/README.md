@@ -17,6 +17,10 @@ Leader election is selected for every generated validator with `--leader-mode`, 
 VRF-derived leader each view. Stable mode keeps one round-robin leader for each term and also
 requires `--leader-term-length` to set the number of views in each term.
 
+`--block-size` is a `u32` setting for the number of random bytes appended to each proposed block
+and defaults to `0`. Validators reject only values whose encoded blocks exceed the authenticated
+transport capacity. All validators in a network must use the same value.
+
 Generated validator configs use:
 
 ```yaml
@@ -24,6 +28,7 @@ leader:
   mode: stable
   delay_ms: 10
   term_length: 1000
+block_size: 0
 indexer: http://localhost:8080
 ```
 

@@ -429,7 +429,13 @@ mod tests {
                 leader: ed25519::PrivateKey::from_seed(0).public_key(),
                 parent: (View::new(0), sha256::Digest::EMPTY),
             };
-            Block::new(context, Sha256::hash(&[b"genesis"]), Height::new(1), 1000)
+            Block::new(
+                context,
+                Sha256::hash(&[b"genesis"]),
+                Height::new(1),
+                1000,
+                Bytes::new(),
+            )
         }
 
         /// Create a proposal for the given block at view 1.
@@ -673,7 +679,13 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
-        let block = Block::new(context, Sha256::hash(&[b"genesis"]), Height::new(1), 1000);
+        let block = Block::new(
+            context,
+            Sha256::hash(&[b"genesis"]),
+            Height::new(1),
+            1000,
+            Bytes::new(),
+        );
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),
@@ -795,7 +807,13 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
-        let block = Block::new(context, Sha256::hash(&[b"genesis"]), Height::new(1), 1000);
+        let block = Block::new(
+            context,
+            Sha256::hash(&[b"genesis"]),
+            Height::new(1),
+            1000,
+            Bytes::new(),
+        );
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),
@@ -832,7 +850,13 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
-        let block = Block::new(context, Sha256::hash(&[b"genesis"]), Height::new(1), 1000);
+        let block = Block::new(
+            context,
+            Sha256::hash(&[b"genesis"]),
+            Height::new(1),
+            1000,
+            Bytes::new(),
+        );
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),

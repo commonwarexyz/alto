@@ -146,6 +146,8 @@ pub struct Config {
 
     pub mailbox_size: usize,
     pub deque_size: usize,
+    #[serde(default)]
+    pub block_size: u32,
 
     pub signature_threads: usize,
 
@@ -427,6 +429,7 @@ mod tests {
             participants,
             mailbox_size: 1024,
             deque_size: 10,
+            block_size: 0,
             leader: cfg.leader,
             leader_timeout: cfg.leader_timeout,
             certification_timeout: cfg.certification_timeout,

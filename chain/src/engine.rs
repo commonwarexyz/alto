@@ -141,6 +141,7 @@ pub struct Config<
     pub participants: Set<PublicKey>,
     pub mailbox_size: usize,
     pub deque_size: usize,
+    pub block_size: u32,
     pub leader: Leader,
 
     pub leader_timeout: Duration,
@@ -376,10 +377,16 @@ where
             )
             .await;
             let (producer, pusher, consumer) = indexer.split();
-            let app = Application::new(proposal_delay_ms).with_backfiller(producer);
+            let app = Application::new(proposal_delay_ms)
+                .with_block_size(cfg.block_size)
+                .with_backfiller(producer);
             (app, Some(pusher), Some(consumer))
         } else {
-            (Application::new(proposal_delay_ms), None, None)
+            (
+                Application::new(proposal_delay_ms).with_block_size(cfg.block_size),
+                None,
+                None,
+            )
         };
 
         // Create the application

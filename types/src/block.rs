@@ -1,6 +1,8 @@
 use crate::consensus::{Context, Finalization, Notarization, Scheme};
-use bytes::{Buf, BufMut};
-use commonware_codec::{varint::UInt, Encode, EncodeSize, Error, Read, ReadExt, Write};
+use bytes::{Buf, BufMut, Bytes};
+use commonware_codec::{
+    varint::UInt, BufsMut, Encode, EncodeSize, Error, RangeCfg, Read, ReadExt, Write,
+};
 use commonware_consensus::{types::Height, CertifiableBlock, Heightable};
 use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256};
 use commonware_parallel::Strategy;
@@ -20,6 +22,9 @@ pub struct Block {
     /// The timestamp of the block (in milliseconds since the Unix epoch).
     pub timestamp: u64,
 
+    /// Opaque data appended to the encoded block.
+    pub data: Bytes,
+
     /// Pre-computed digest of the block.
     digest: Digest,
 }
@@ -30,24 +35,37 @@ impl Block {
         parent: &Digest,
         height: Height,
         timestamp: u64,
+        data: &[u8],
     ) -> Digest {
         let mut hasher = Sha256::default();
         hasher
             .update(&context.encode())
             .update(parent)
             .update(&height.get().to_be_bytes())
-            .update(&timestamp.to_be_bytes());
+            .update(&timestamp.to_be_bytes())
+            .update(data);
         let (_, digest) = hasher.finalize();
         digest
     }
 
-    pub fn new(context: Context, parent: Digest, height: Height, timestamp: u64) -> Self {
-        let digest = Self::compute_digest(&context, &parent, height, timestamp);
+    pub fn new(
+        context: Context,
+        parent: Digest,
+        height: Height,
+        timestamp: u64,
+        data: Bytes,
+    ) -> Self {
+        assert!(
+            u32::try_from(data.len()).is_ok(),
+            "block data exceeds codec maximum"
+        );
+        let digest = Self::compute_digest(&context, &parent, height, timestamp, &data);
         Self {
             context,
             parent,
             height,
             timestamp,
+            data,
             digest,
         }
     }
@@ -59,6 +77,15 @@ impl Write for Block {
         self.parent.write(writer);
         self.height.write(writer);
         UInt(self.timestamp).write(writer);
+        self.data.write(writer);
+    }
+
+    fn write_bufs(&self, writer: &mut impl BufsMut) {
+        self.context.write_bufs(writer);
+        self.parent.write_bufs(writer);
+        self.height.write_bufs(writer);
+        UInt(self.timestamp).write_bufs(writer);
+        self.data.write_bufs(writer);
     }
 }
 
@@ -70,13 +97,15 @@ impl Read for Block {
         let parent = Digest::read(reader)?;
         let height = Height::read(reader)?;
         let timestamp = UInt::read(reader)?.0;
+        let data = Bytes::read_cfg(reader, &RangeCfg::from(..))?;
 
-        let digest = Self::compute_digest(&context, &parent, height, timestamp);
+        let digest = Self::compute_digest(&context, &parent, height, timestamp, &data);
         Ok(Self {
             context,
             parent,
             height,
             timestamp,
+            data,
             digest,
         })
     }
@@ -88,6 +117,15 @@ impl EncodeSize for Block {
             + self.parent.encode_size()
             + self.height.encode_size()
             + UInt(self.timestamp).encode_size()
+            + self.data.encode_size()
+    }
+
+    fn encode_inline_size(&self) -> usize {
+        self.context.encode_inline_size()
+            + self.parent.encode_inline_size()
+            + self.height.encode_inline_size()
+            + UInt(self.timestamp).encode_inline_size()
+            + self.data.encode_inline_size()
     }
 }
 
@@ -120,6 +158,11 @@ impl Write for Notarized {
         self.proof.write(buf);
         self.block.write(buf);
     }
+
+    fn write_bufs(&self, buf: &mut impl BufsMut) {
+        self.proof.write_bufs(buf);
+        self.block.write_bufs(buf);
+    }
 }
 
 impl Read for Notarized {
@@ -144,6 +187,10 @@ impl EncodeSize for Notarized {
     fn encode_size(&self) -> usize {
         self.proof.encode_size() + self.block.encode_size()
     }
+
+    fn encode_inline_size(&self) -> usize {
+        self.proof.encode_inline_size() + self.block.encode_inline_size()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -166,6 +213,11 @@ impl Write for Finalized {
     fn write(&self, buf: &mut impl BufMut) {
         self.proof.write(buf);
         self.block.write(buf);
+    }
+
+    fn write_bufs(&self, buf: &mut impl BufsMut) {
+        self.proof.write_bufs(buf);
+        self.block.write_bufs(buf);
     }
 }
 
@@ -190,6 +242,10 @@ impl Read for Finalized {
 impl EncodeSize for Finalized {
     fn encode_size(&self) -> usize {
         self.proof.encode_size() + self.block.encode_size()
+    }
+
+    fn encode_inline_size(&self) -> usize {
+        self.proof.encode_inline_size() + self.block.encode_inline_size()
     }
 }
 

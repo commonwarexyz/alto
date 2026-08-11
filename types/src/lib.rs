@@ -63,7 +63,8 @@ impl Kind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use commonware_codec::{DecodeExt, Encode};
+    use bytes::Bytes;
+    use commonware_codec::{DecodeExt, Encode, EncodeSize, ReadExt};
     use commonware_consensus::{
         simplex::{
             scheme::bls12381_threshold::vrf as bls12381_threshold,
@@ -77,6 +78,34 @@ mod tests {
     };
     use commonware_parallel::Sequential;
     use rand::{rngs::StdRng, SeedableRng};
+
+    #[test]
+    fn block_data_above_one_mib_round_trips_and_is_committed_by_digest() {
+        let context = Context {
+            round: Round::new(EPOCH, View::new(9)),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::new(8), sha256::Digest::EMPTY),
+        };
+        let parent = Sha256::hash(&[b"parent"]);
+        let empty = Block::new(context.clone(), parent, Height::new(10), 100, Bytes::new());
+        let data = Bytes::from(vec![0xa5; 1024 * 1024 + 1]);
+        let block = Block::new(context, parent, Height::new(10), 100, data.clone());
+
+        assert_eq!(
+            block.encode_size(),
+            empty.encode_size() - Bytes::new().encode_size() + data.encode_size()
+        );
+        assert_eq!(block.encode_inline_size(), block.encode_size() - data.len());
+        assert_ne!(block.digest(), empty.digest());
+        assert_eq!(Block::decode(block.encode()).unwrap(), block);
+
+        let mut encoded = block.encode().to_vec();
+        let suffix = [1, 2, 3, 4];
+        encoded.extend_from_slice(&suffix);
+        let mut reader = encoded.as_slice();
+        assert_eq!(Block::read(&mut reader).unwrap(), block);
+        assert_eq!(reader, suffix);
+    }
 
     #[test]
     fn test_notarized() {
@@ -93,7 +122,13 @@ mod tests {
             parent: (View::new(8), sha256::Digest::EMPTY),
         };
         let digest = Sha256::hash(&[b"hello world"]);
-        let block = Block::new(context, digest, Height::new(10), 100);
+        let block = Block::new(
+            context,
+            digest,
+            Height::new(10),
+            100,
+            Bytes::from_static(b"random junk bytes"),
+        );
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
@@ -133,7 +168,7 @@ mod tests {
             parent: (View::new(8), sha256::Digest::EMPTY),
         };
         let digest = Sha256::hash(&[b"hello world"]);
-        let block = Block::new(context, digest, Height::new(10), 100);
+        let block = Block::new(context, digest, Height::new(10), 100, Bytes::new());
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),

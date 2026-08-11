@@ -1,5 +1,6 @@
 use crate::indexer;
 use alto_types::{Block, Context, Scheme, EPOCH};
+use bytes::Bytes;
 use commonware_actor::Feedback;
 use commonware_consensus::{
     marshal::{ancestry::Ancestry, Update},
@@ -31,6 +32,7 @@ const MAX_FUTURE_SKEW_MS: u64 = 1_000;
 pub struct Application {
     backfiller: Option<indexer::Producer>,
     delay_ms: NonZeroU64,
+    block_size: u32,
 }
 
 impl Application {
@@ -40,14 +42,26 @@ impl Application {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::zero(), sha256::Digest::EMPTY),
         };
-        Block::new(genesis_context, Sha256::hash(&[GENESIS]), Height::zero(), 0)
+        Block::new(
+            genesis_context,
+            Sha256::hash(&[GENESIS]),
+            Height::zero(),
+            0,
+            Bytes::new(),
+        )
     }
 
     pub fn new(delay_ms: NonZeroU64) -> Self {
         Self {
             backfiller: None,
             delay_ms,
+            block_size: 0,
         }
+    }
+
+    pub(crate) fn with_block_size(mut self, block_size: u32) -> Self {
+        self.block_size = block_size;
+        self
     }
 
     pub(crate) fn with_backfiller(mut self, backfiller: indexer::Producer) -> Self {
@@ -67,7 +81,7 @@ where
 
     async fn propose(
         &mut self,
-        (runtime_context, context): (E, Self::Context),
+        (mut runtime_context, context): (E, Self::Context),
         mut ancestry: impl Ancestry<Self::Block>,
         _input: Self::Input,
     ) -> Option<Self::Block> {
@@ -92,11 +106,18 @@ where
             "proposed timestamp exceeded maximum",
         );
 
+        // Each proposal carries a fresh opaque payload of the configured size.
+        let block_size = usize::try_from(self.block_size)
+            .expect("configured block size is unsupported on this platform");
+        let mut data = vec![0; block_size];
+        runtime_context.fill_bytes(&mut data);
+
         Some(Block::new(
             context,
             parent.digest(),
             parent.height.next(),
             current,
+            data.into(),
         ))
     }
 
@@ -111,6 +132,11 @@ where
         let Some(parent) = ancestry.next().await else {
             return false;
         };
+
+        // Block size is a consensus rule, so every proposal must match the local configuration.
+        if usize::try_from(self.block_size).ok() != Some(block.data.len()) {
+            return false;
+        }
 
         // Verify the block (allowing a bounded amount of future clock skew).
         if block.timestamp <= parent.timestamp || block.timestamp > MAX_BLOCK_TIMESTAMP_MS {
@@ -204,12 +230,14 @@ mod tests {
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now,
+                Bytes::new(),
             );
             let block = Block::new(
                 test_context(2, (View::new(1), parent.digest())),
                 parent.digest(),
                 parent.height.next(),
                 now + MAX_FUTURE_SKEW_MS + 1,
+                Bytes::new(),
             );
 
             let start = context.current();
@@ -238,17 +266,61 @@ mod tests {
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now,
+                Bytes::new(),
             );
             let block = Block::new(
                 test_context(2, (View::new(1), parent.digest())),
                 parent.digest(),
                 parent.height.next(),
                 now,
+                Bytes::new(),
             );
 
             assert!(
                 !verify_block(context.child("verify"), &mut application, &block, &parent).await
             );
+        });
+    }
+
+    #[test]
+    fn verify_requires_configured_block_size() {
+        let runner = deterministic::Runner::default();
+        runner.start(|context| async move {
+            let block_size = 4;
+            let mut application =
+                Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS).with_block_size(block_size);
+
+            let now = context.current().epoch_millis();
+            let parent = Block::new(
+                test_context(1, (View::zero(), sha256::Digest::EMPTY)),
+                Sha256::hash(&[b"genesis"]),
+                Height::new(1),
+                now,
+                Bytes::new(),
+            );
+            let child_context = test_context(2, (View::new(1), parent.digest()));
+
+            for size in [0, 3, 5] {
+                let block = Block::new(
+                    child_context.clone(),
+                    parent.digest(),
+                    parent.height.next(),
+                    now + 1,
+                    Bytes::from(vec![0; size]),
+                );
+                assert!(
+                    !verify_block(context.child("verify"), &mut application, &block, &parent).await
+                );
+            }
+
+            let block = Block::new(
+                child_context,
+                parent.digest(),
+                parent.height.next(),
+                now + 1,
+                Bytes::from(vec![0; usize::try_from(block_size).unwrap()]),
+            );
+            assert!(verify_block(context.child("verify"), &mut application, &block, &parent).await);
         });
     }
 
@@ -265,12 +337,14 @@ mod tests {
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now - 1,
+                Bytes::new(),
             );
             let block = Block::new(
                 test_context(2, (View::new(1), parent.digest())),
                 parent.digest(),
                 parent.height.next(),
                 now,
+                Bytes::new(),
             );
 
             let start = context.current();
@@ -293,6 +367,7 @@ mod tests {
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now + 5_000,
+                Bytes::new(),
             );
             let proposal = propose_child(
                 context.child("propose"),
@@ -305,6 +380,36 @@ mod tests {
             assert_eq!(proposal.parent, parent.digest());
             assert_eq!(proposal.height, parent.height.next());
             assert_eq!(proposal.timestamp, parent.timestamp + delay_ms.get());
+            assert!(proposal.data.is_empty());
+        });
+    }
+
+    #[test]
+    fn propose_appends_configured_random_data() {
+        let runner = deterministic::Runner::default();
+        runner.start(|context| async move {
+            let block_size = 128;
+            let mut application =
+                Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS).with_block_size(block_size);
+
+            let now = context.current().epoch_millis();
+            let parent = Block::new(
+                test_context(1, (View::zero(), sha256::Digest::EMPTY)),
+                Sha256::hash(&[b"genesis"]),
+                Height::new(1),
+                now,
+                Bytes::new(),
+            );
+            let proposal = propose_child(
+                context.child("propose"),
+                &mut application,
+                test_context(2, (View::new(1), parent.digest())),
+                &parent,
+            )
+            .await;
+
+            assert_eq!(proposal.data.len(), usize::try_from(block_size).unwrap());
+            assert!(proposal.data.iter().any(|byte| *byte != 0));
         });
     }
 
@@ -320,6 +425,7 @@ mod tests {
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
                 now,
+                Bytes::new(),
             );
             let block = Block::new(
                 test_context(2, (View::new(1), parent.digest())),
@@ -328,6 +434,7 @@ mod tests {
                 // Verification should reject timestamps outside the fixed
                 // protocol range before attempting to sleep.
                 MAX_BLOCK_TIMESTAMP_MS + 1,
+                Bytes::new(),
             );
 
             assert!(
@@ -350,6 +457,7 @@ mod tests {
                 // Proposing on top of a parent already at the maximum would
                 // require `parent.timestamp + 1`, which must be rejected.
                 MAX_BLOCK_TIMESTAMP_MS,
+                Bytes::new(),
             );
             let _ = propose_child(
                 context.child("propose"),
