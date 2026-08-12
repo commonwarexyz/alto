@@ -21,6 +21,7 @@ import {
   VerifiedConsensusArtifact,
 } from "./consensusWorkerPool";
 import { scaleTimelineWidth } from "./timeline";
+import { getTimelineIdentifier, SEED_SIGNATURE_COLOR } from "./timelineIdentifier";
 import "./App.css";
 import AboutModal from './AboutModal';
 import './AboutModal.css';
@@ -118,6 +119,7 @@ const App: React.FC = () => {
   const allConfigs = useMemo(() => getClusters(), []);
   const { BACKEND_URL, PUBLIC_KEY_HEX, LOCATIONS, PARTICIPANTS } = clusterConfig;
   const standardCertificates = clusterConfig.CERTIFICATE_MODE === 'standard';
+  const timelineIdentifier = getTimelineIdentifier(standardCertificates);
   const PUBLIC_KEY = useMemo(() => hexToUint8Array(PUBLIC_KEY_HEX), [PUBLIC_KEY_HEX]);
 
   const [views, setViews] = useState<ViewData[]>([]);
@@ -941,9 +943,10 @@ const App: React.FC = () => {
           <div className="bars-header">
             <h2 className="bars-title">Timeline</h2>
             <div className="legend-container">
-              <LegendItem color={"#0000eeff"} label={standardCertificates ? "Proposed" : "Seeded"} />
+              <LegendItem color={SEED_SIGNATURE_COLOR} label={standardCertificates ? "Proposed" : "Seeded"} />
               <LegendItem color={"#000"} label="Locked" />
               <LegendItem color={"#228B22ff"} label="Finalized" />
+              <LegendItem color={timelineIdentifier.color} label={timelineIdentifier.label} textMarker />
             </div>
           </div>
 
@@ -954,6 +957,7 @@ const App: React.FC = () => {
                 viewData={viewData}
                 currentTime={currentTimeRef.current}
                 isMobile={isMobile}
+                standardCertificates={standardCertificates}
               />
             ))}
           </div>
@@ -991,12 +995,17 @@ const App: React.FC = () => {
 interface LegendItemProps {
   color: string;
   label: string;
+  textMarker?: boolean;
 }
 
-const LegendItem: React.FC<LegendItemProps> = ({ color, label }) => {
+const LegendItem: React.FC<LegendItemProps> = ({ color, label, textMarker = false }) => {
   return (
     <div className="legend-item">
-      <div className="legend-color" style={{ backgroundColor: color }}></div>
+      {textMarker ? (
+        <span className="legend-text-marker" style={{ color }}>abc</span>
+      ) : (
+        <div className="legend-color" style={{ backgroundColor: color }}></div>
+      )}
       <span className="legend-label">{label}</span>
     </div>
   );
@@ -1006,13 +1015,15 @@ interface BarProps {
   viewData: ViewData;
   currentTime: number;
   isMobile: boolean;
+  standardCertificates: boolean;
   maxContainerWidth?: number;
 }
 
 // Replace the existing Bar component with this updated version
 
-const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
+const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, standardCertificates }) => {
   const { view, status, startTime, notarizationTime, finalizationTime, signature, block, actualNotarizationLatency, actualFinalizationLatency } = viewData;
+  const timelineIdentifier = getTimelineIdentifier(standardCertificates, signature, block?.digest);
   const [measuredWidth, setMeasuredWidth] = useState(isMobile ? 200 : 500); // Reasonable default
   const barContainerRef = useRef<HTMLDivElement>(null);
 
@@ -1190,8 +1201,12 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     <div className="bar-row">
       <div className="view-info" style={{ width: `${viewInfoWidth}px` }}>
         <div className="view-number">{view}</div>
-        <div className="view-signature">
-          {signature ? hexUint8Array(signature) : ""}
+        <div
+          className="view-identifier"
+          style={{ color: timelineIdentifier.color }}
+          title={timelineIdentifier.fullValue ? `${timelineIdentifier.label}: ${timelineIdentifier.fullValue}` : undefined}
+        >
+          {timelineIdentifier.value}
         </div>
       </div>
 
