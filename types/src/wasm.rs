@@ -26,6 +26,7 @@ pub struct ProofJs {
 
 #[derive(Serialize)]
 pub struct BlockJs {
+    pub leader: Vec<u8>,
     pub parent: Vec<u8>,
     pub height: u64,
     pub timestamp: u64,
@@ -84,6 +85,7 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
             signature: certificate.vote_signature.encode().to_vec(),
         },
         block: BlockJs {
+            leader: notarized.block.context.leader.encode().to_vec(),
             parent: notarized.block.parent.to_vec(),
             height: notarized.block.height.get(),
             timestamp: notarized.block.timestamp,
@@ -114,6 +116,7 @@ pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
             signature: certificate.vote_signature.encode().to_vec(),
         },
         block: BlockJs {
+            leader: finalized.block.context.leader.encode().to_vec(),
             parent: finalized.block.parent.to_vec(),
             height: finalized.block.height.get(),
             timestamp: finalized.block.timestamp,
@@ -129,6 +132,7 @@ pub fn parse_block(bytes: Vec<u8>) -> JsValue {
         return JsValue::NULL;
     };
     let block_js = BlockJs {
+        leader: block.context.leader.encode().to_vec(),
         parent: block.parent.to_vec(),
         height: block.height.get(),
         timestamp: block.timestamp,

@@ -54,6 +54,8 @@ struct DeployerConfig {
 struct ExplorerConfig {
     name: String,
     description: String,
+    #[serde(default)]
+    participants: Vec<String>,
     locations: Vec<([f64; 2], String)>,
 }
 
@@ -70,6 +72,8 @@ struct RuntimeExplorerConfig<'a> {
     public_key_hex: &'a str,
     #[serde(rename = "LOCATIONS")]
     locations: &'a [([f64; 2], String)],
+    #[serde(rename = "PARTICIPANTS")]
+    participants: &'a [String],
     name: &'a str,
     description: &'a str,
     mode: &'a str,
@@ -82,6 +86,7 @@ fn local_explorer_config() -> ExplorerConfig {
     ExplorerConfig {
         name: "Local Indexer".to_string(),
         description: "An Alto indexer running on this machine.".to_string(),
+        participants: Vec::new(),
         locations: Vec::new(),
     }
 }
@@ -118,6 +123,7 @@ fn explorer_script(settings: &Settings) -> Result<String, serde_json::Error> {
     let config = RuntimeExplorerConfig {
         public_key_hex: &settings.identity,
         locations: &settings.explorer.locations,
+        participants: &settings.explorer.participants,
         name: &settings.explorer.name,
         description: &settings.explorer.description,
         mode: settings.explorer_mode,
@@ -235,6 +241,7 @@ mod tests {
             explorer: ExplorerConfig {
                 name: "Live Cluster".to_string(),
                 description: "description".to_string(),
+                participants: vec!["participant".to_string()],
                 locations: vec![([1.0, 2.0], "City".to_string())],
             },
             explorer_mode: "public",
@@ -242,6 +249,7 @@ mod tests {
 
         let script = explorer_script(&settings).unwrap();
         assert!(script.contains(r#""PUBLIC_KEY_HEX":"abcd""#));
+        assert!(script.contains(r#""PARTICIPANTS":["participant"]"#));
         assert!(script.contains(r#""LOCATIONS":[[[1.0,2.0],"City"]]"#));
         assert!(script.contains("window.location.host"));
     }

@@ -83,6 +83,7 @@ struct DeployedIndexerConfig {
 struct DeployedExplorerConfig {
     name: String,
     description: String,
+    participants: Vec<String>,
     locations: Vec<([f64; 2], String)>,
 }
 
@@ -837,13 +838,16 @@ fn generate_remote(
     }
 
     let deployed_indexer_config = deploy_indexer.then(|| {
-        let locations = instance_configs
+        let (participants, locations) = instance_configs
             .iter()
             .map(|instance| {
-                get_aws_location(&instance.region)
-                    .unwrap_or_else(|| panic!("unknown AWS region: {}", instance.region))
+                (
+                    instance.name.clone(),
+                    get_aws_location(&instance.region)
+                        .unwrap_or_else(|| panic!("unknown AWS region: {}", instance.region)),
+                )
             })
-            .collect();
+            .unzip();
         let unique_regions = regions.iter().fold(Vec::new(), |mut unique, region| {
             if !unique.contains(region) {
                 unique.push(region.clone());
@@ -861,6 +865,7 @@ fn generate_remote(
                     unique_regions.len(),
                     unique_regions.join(", ")
                 ),
+                participants,
                 locations,
             },
         }

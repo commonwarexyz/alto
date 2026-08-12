@@ -6,6 +6,7 @@ export type SearchType = 'block' | 'notarization' | 'finalization' | 'seed';
 
 // Block data
 export interface BlockJs {
+    leader: Uint8Array;
     height: number;
     timestamp: number;
     digest: Uint8Array;

@@ -9,6 +9,7 @@ export interface ClusterConfig {
     BACKEND_URL: string;
     PUBLIC_KEY_HEX: string;
     LOCATIONS: [[number, number], string][];
+    PARTICIPANTS?: string[];
     name: string;
     description: string;
 }
