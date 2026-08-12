@@ -137,23 +137,31 @@ impl Digestible for Block {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Notarized {
-    pub proof: Notarization,
+#[derive(Clone, Debug)]
+pub struct Notarized<S: Scheme> {
+    pub proof: Notarization<S>,
     pub block: Block,
 }
 
-impl Notarized {
-    pub fn new(proof: Notarization, block: Block) -> Self {
+impl<S: Scheme> PartialEq for Notarized<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.proof == other.proof && self.block == other.block
+    }
+}
+
+impl<S: Scheme> Eq for Notarized<S> {}
+
+impl<S: Scheme> Notarized<S> {
+    pub fn new(proof: Notarization<S>, block: Block) -> Self {
         Self { proof, block }
     }
 
-    pub fn verify(&self, scheme: &Scheme, strategy: &impl Strategy) -> bool {
+    pub fn verify(&self, scheme: &S, strategy: &impl Strategy) -> bool {
         self.proof.verify(&mut sys_rng(), scheme, strategy)
     }
 }
 
-impl Write for Notarized {
+impl<S: Scheme> Write for Notarized<S> {
     fn write(&self, buf: &mut impl BufMut) {
         self.proof.write(buf);
         self.block.write(buf);
@@ -165,11 +173,11 @@ impl Write for Notarized {
     }
 }
 
-impl Read for Notarized {
+impl<S: Scheme> Read for Notarized<S> {
     type Cfg = ();
 
     fn read_cfg(buf: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
-        let proof = Notarization::read(buf)?;
+        let proof = Notarization::<S>::read(buf)?;
         let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
@@ -183,7 +191,7 @@ impl Read for Notarized {
     }
 }
 
-impl EncodeSize for Notarized {
+impl<S: Scheme> EncodeSize for Notarized<S> {
     fn encode_size(&self) -> usize {
         self.proof.encode_size() + self.block.encode_size()
     }
@@ -193,23 +201,31 @@ impl EncodeSize for Notarized {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Finalized {
-    pub proof: Finalization,
+#[derive(Clone, Debug)]
+pub struct Finalized<S: Scheme> {
+    pub proof: Finalization<S>,
     pub block: Block,
 }
 
-impl Finalized {
-    pub fn new(proof: Finalization, block: Block) -> Self {
+impl<S: Scheme> PartialEq for Finalized<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.proof == other.proof && self.block == other.block
+    }
+}
+
+impl<S: Scheme> Eq for Finalized<S> {}
+
+impl<S: Scheme> Finalized<S> {
+    pub fn new(proof: Finalization<S>, block: Block) -> Self {
         Self { proof, block }
     }
 
-    pub fn verify(&self, scheme: &Scheme, strategy: &impl Strategy) -> bool {
+    pub fn verify(&self, scheme: &S, strategy: &impl Strategy) -> bool {
         self.proof.verify(&mut sys_rng(), scheme, strategy)
     }
 }
 
-impl Write for Finalized {
+impl<S: Scheme> Write for Finalized<S> {
     fn write(&self, buf: &mut impl BufMut) {
         self.proof.write(buf);
         self.block.write(buf);
@@ -221,11 +237,11 @@ impl Write for Finalized {
     }
 }
 
-impl Read for Finalized {
+impl<S: Scheme> Read for Finalized<S> {
     type Cfg = ();
 
     fn read_cfg(buf: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
-        let proof = Finalization::read(buf)?;
+        let proof = Finalization::<S>::read(buf)?;
         let block = Block::read(buf)?;
 
         // Ensure the proof is for the block
@@ -239,7 +255,7 @@ impl Read for Finalized {
     }
 }
 
-impl EncodeSize for Finalized {
+impl<S: Scheme> EncodeSize for Finalized<S> {
     fn encode_size(&self) -> usize {
         self.proof.encode_size() + self.block.encode_size()
     }

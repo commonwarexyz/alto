@@ -115,13 +115,6 @@ impl Leader {
         }
     }
 
-    /// Minimum timestamp increase between proposals.
-    pub(crate) const fn delay_ms(self) -> NonZeroU64 {
-        match self {
-            Self::Rotating { delay_ms } | Self::Stable { delay_ms, .. } => delay_ms,
-        }
-    }
-
     /// Threshold certificate construction required by this leader policy.
     pub const fn certificate_mode(self) -> CertificateMode {
         match self {
@@ -200,10 +193,13 @@ mod tests {
     use super::*;
     use alto_types::NAMESPACE;
     use commonware_consensus::{
-        marshal, simplex::scheme::bls12381_threshold::vrf as bls12381_threshold, types::ViewDelta,
+        marshal, simplex::scheme::bls12381_threshold::standard as bls12381_threshold,
+        types::ViewDelta,
     };
     use commonware_cryptography::{
-        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519::PublicKey,
+        bls12381::primitives::variant::MinSig,
+        certificate::{mocks::Fixture, Scheme as _},
+        ed25519::PublicKey,
         Digestible, Signer,
     };
     use commonware_macros::{select, test_traced};
@@ -217,7 +213,7 @@ mod tests {
         Clock, Metrics, Runner as _, Spawner, Supervisor as _,
     };
     use commonware_utils::{channel::oneshot, ordered::Set, NZUsize, NZU32};
-    use engine::{Config, Engine};
+    use engine::Engine;
     use governor::Quota;
     use indexer::mocks;
     use rand::{rngs::StdRng, RngExt, SeedableRng};
@@ -437,18 +433,26 @@ mod tests {
 
         let public_key = signer.public_key();
         let uid = format!("validator_{public_key}");
-        let config: Config<_, _, mocks::Client, _> = engine::Config {
+        assert_eq!(scheme.participants(), &participants);
+        let Leader::Stable {
+            delay_ms,
+            term_length,
+            optimistic_views,
+        } = cfg.leader
+        else {
+            panic!("standard test scheme requires stable leadership");
+        };
+        let config = engine::Config {
             blocker: oracle.control(public_key.clone()),
             provider: oracle.manager(),
             partition_prefix: uid.clone(),
             me: signer.public_key(),
-            polynomial: scheme.polynomial().clone(),
-            share: scheme.share().cloned().unwrap(),
-            participants,
+            scheme: scheme.clone(),
+            elector: engine::stable_elector(term_length, optimistic_views),
             mailbox_size: 1024,
             deque_size: 10,
             block_size: 0,
-            leader: cfg.leader,
+            proposal_delay_ms: delay_ms,
             leader_timeout: cfg.leader_timeout,
             certification_timeout: cfg.certification_timeout,
             nullify_retry: timeout_retry,
@@ -889,7 +893,8 @@ mod tests {
             assert!(indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
-            let genesis_digest = application::Application::genesis().digest();
+            let genesis_digest =
+                application::Application::<alto_types::StandardScheme>::genesis().digest();
             let started_digests = indexer.block_upload_started_digests.lock().clone();
             let expected_genesis_uploads = n as usize;
             assert_eq!(
@@ -1074,7 +1079,8 @@ mod tests {
                 queue_outstanding(&metrics) > 0,
                 "expected finalized queue work while certificate uploads were blocked",
             );
-            let genesis_digest = application::Application::genesis().digest();
+            let genesis_digest =
+                application::Application::<alto_types::StandardScheme>::genesis().digest();
             let expected_genesis_uploads = n as usize;
             let started_digests = indexer.block_upload_started_digests.lock().clone();
             assert_eq!(

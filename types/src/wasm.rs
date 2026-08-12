@@ -1,6 +1,6 @@
 use crate::{
-    Block, CertificateMode, Finalized, Identity, Notarized, Scheme, Seed, Signature, EPOCH,
-    NAMESPACE,
+    Block, Finalized, Identity, Notarized, Scheme, Seed, Signature, StandardScheme, VrfScheme,
+    EPOCH, NAMESPACE,
 };
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::{
@@ -51,13 +51,12 @@ pub struct FinalizedJs {
 #[wasm_bindgen]
 pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier =
-        Scheme::certificate_verifier(CertificateMode::Vrf, NAMESPACE, identity);
+    let certificate_verifier = VrfScheme::certificate_verifier(NAMESPACE, identity);
 
     let Ok(seed) = Seed::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
-    if !certificate_verifier.verify_seed(&seed) {
+    if !seed.verify(&certificate_verifier) {
         return JsValue::NULL;
     }
     let seed_js = SeedJs {
@@ -70,20 +69,23 @@ pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 #[wasm_bindgen]
 pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let mode = if standard {
-        CertificateMode::Standard
+    if standard {
+        parse_notarized_with::<StandardScheme>(identity, bytes)
     } else {
-        CertificateMode::Vrf
-    };
-    let certificate_verifier = Scheme::certificate_verifier(mode, NAMESPACE, identity);
+        parse_notarized_with::<VrfScheme>(identity, bytes)
+    }
+}
 
-    let Ok(notarized) = Notarized::decode(bytes.as_ref()) else {
+fn parse_notarized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValue {
+    let certificate_verifier = S::certificate_verifier(NAMESPACE, identity);
+
+    let Ok(notarized) = Notarized::<S>::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
     if !notarized.verify(&certificate_verifier, &Sequential) {
         return JsValue::NULL;
     }
-    let Some(certificate) = notarized.proof.certificate.get() else {
+    let Some(signature) = S::vote_signature(&notarized.proof.certificate) else {
         return JsValue::NULL;
     };
     let notarized_js = NotarizedJs {
@@ -91,7 +93,7 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsV
             view: notarized.proof.view().get(),
             parent: notarized.proof.proposal.parent.get(),
             payload: notarized.proof.proposal.payload.to_vec(),
-            signature: certificate.vote_signature.encode().to_vec(),
+            signature: signature.encode().to_vec(),
         },
         block: BlockJs {
             leader: notarized.block.context.leader.encode().to_vec(),
@@ -107,19 +109,22 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsV
 #[wasm_bindgen]
 pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let mode = if standard {
-        CertificateMode::Standard
+    if standard {
+        parse_finalized_with::<StandardScheme>(identity, bytes)
     } else {
-        CertificateMode::Vrf
-    };
-    let certificate_verifier = Scheme::certificate_verifier(mode, NAMESPACE, identity);
-    let Ok(finalized) = Finalized::decode(bytes.as_ref()) else {
+        parse_finalized_with::<VrfScheme>(identity, bytes)
+    }
+}
+
+fn parse_finalized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValue {
+    let certificate_verifier = S::certificate_verifier(NAMESPACE, identity);
+    let Ok(finalized) = Finalized::<S>::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
     if !finalized.verify(&certificate_verifier, &Sequential) {
         return JsValue::NULL;
     }
-    let Some(certificate) = finalized.proof.certificate.get() else {
+    let Some(signature) = S::vote_signature(&finalized.proof.certificate) else {
         return JsValue::NULL;
     };
     let finalized_js = FinalizedJs {
@@ -127,7 +132,7 @@ pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsV
             view: finalized.proof.view().get(),
             parent: finalized.proof.proposal.parent.get(),
             payload: finalized.proof.proposal.payload.to_vec(),
-            signature: certificate.vote_signature.encode().to_vec(),
+            signature: signature.encode().to_vec(),
         },
         block: BlockJs {
             leader: finalized.block.context.leader.encode().to_vec(),

@@ -17,16 +17,15 @@ Leader election is selected for every generated validator with `--leader-mode`, 
 VRF-derived leader each view. Stable mode keeps one round-robin leader for each term and also
 requires `--leader-term-length` to set the number of views in each term and
 `--leader-optimistic-views` to cap proposal issuance and vote admission ahead of directly
-notarized ancestry. Values above the term length add no window. Stable mode uses standard
-threshold crypto with one signature; that signature is duplicated only to retain Alto's fixed-size
-certificate framing. Rotating mode computes the additional VRF seed signature needed to select
-the next leader.
+notarized ancestry. Values above the term length add no window. Stable mode uses native standard
+threshold crypto with one signature per vote and certificate. Rotating mode carries an additional
+VRF seed signature used to select the next leader.
 
-Changing an existing network from VRF to standard certificates is not a rolling upgrade: old and
-new verifiers intentionally reject each other's certificates even though the fixed-size framing is
-unchanged. Start with newly generated network configuration and empty validator/indexer state, and
-switch every validator and verifier together. `deploy.sh` generates a new network identity and
-infrastructure for this purpose.
+Changing an existing network from VRF or wrapper-framed standard certificates to native standard
+certificates is not a rolling upgrade: the untagged wire and persistent certificate layouts have
+different fixed sizes. Start with newly generated network configuration and empty validator and
+follower certificate state, then switch every validator, indexer, follower, and browser verifier
+together. `deploy.sh` generates a new network identity and infrastructure for this purpose.
 
 `--block-size` is a `u32` setting for the number of random bytes appended to each proposed block
 and defaults to `0`. Validators reject only values whose encoded blocks exceed the authenticated

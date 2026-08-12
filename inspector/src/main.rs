@@ -78,10 +78,10 @@
 
 use alto_client::{
     consensus::{Message, Payload},
-    Client, IndexQuery, Query,
+    ClientBuilder, IndexQuery, Query,
 };
-use alto_types::{CertificateMode, Identity};
-use clap::{value_parser, Arg, Command};
+use alto_types::{CertificateMode, Identity, Scheme, StandardScheme, VrfScheme, NAMESPACE};
+use clap::{value_parser, Arg, ArgMatches, Command};
 use commonware_codec::DecodeExt;
 use commonware_formatting::from_hex;
 use commonware_parallel::Sequential;
@@ -193,13 +193,24 @@ async fn main() {
         _ => unreachable!("clap validates certificate mode"),
     };
 
+    match certificate_mode {
+        CertificateMode::Standard => run::<StandardScheme>(&matches).await,
+        CertificateMode::Vrf => run::<VrfScheme>(&matches).await,
+    }
+}
+
+async fn run<C: Scheme>(matches: &ArgMatches) {
     if let Some(matches) = matches.subcommand_matches("listen") {
         let indexer = matches.get_one::<String>("indexer").unwrap();
         let identity = matches.get_one::<String>("identity").unwrap();
         let identity = from_hex(identity).expect("Failed to decode identity");
         let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
-        let client =
-            Client::new_with_certificate_mode(indexer, identity, certificate_mode, Sequential);
+        let client = ClientBuilder::<_, C>::new_with_scheme(
+            indexer,
+            C::certificate_verifier(NAMESPACE, identity),
+            Sequential,
+        )
+        .build();
 
         let mut stream = client.listen().await.expect("Failed to connect to indexer");
         info!("listening for consensus messages...");
@@ -218,8 +229,12 @@ async fn main() {
         let identity = matches.get_one::<String>("identity").unwrap();
         let identity = from_hex(identity).expect("Failed to decode identity");
         let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
-        let client =
-            Client::new_with_certificate_mode(indexer, identity, certificate_mode, Sequential);
+        let client = ClientBuilder::<_, C>::new_with_scheme(
+            indexer,
+            C::certificate_verifier(NAMESPACE, identity),
+            Sequential,
+        )
+        .build();
         let prepare_flag = matches.get_flag("prepare");
 
         if prepare_flag {

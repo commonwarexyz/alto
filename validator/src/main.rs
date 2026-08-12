@@ -1,9 +1,8 @@
-use alto_chain::{engine, Config, Peers};
-use alto_client::Client;
-use alto_types::{EPOCH, NAMESPACE};
+use alto_chain::{engine, Config, Leader, Peers};
+use alto_types::{Scheme, StandardScheme, VrfScheme, EPOCH, NAMESPACE};
 use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt, EncodeSize};
-use commonware_consensus::{marshal, types::ViewDelta};
+use commonware_consensus::{marshal, simplex::elector::Random, types::ViewDelta};
 use commonware_cryptography::{
     bls12381::primitives::{
         group,
@@ -282,7 +281,7 @@ fn main() {
             &(NZU32!(peers_u32), ModeVersion::v0()),
         )
         .expect("polynomial is invalid");
-        let identity = polynomial.public();
+        let identity = *polynomial.public();
         info!(
             ?public_key,
             ?identity,
@@ -356,50 +355,10 @@ fn main() {
 
         let strategy = Rayon::new(NZUsize!(config.signature_threads)).unwrap();
 
-        // Create indexer
-        let mut indexer = None;
-        if let Some(indexer_url) = config.indexer.as_deref() {
-            indexer = Some(Client::new_with_certificate_mode(
-                indexer_url,
-                *identity,
-                config.leader.certificate_mode(),
-                strategy.clone(),
-            ));
-        }
-
-        // Create engine
-        let engine_cfg = engine::Config {
-            blocker: oracle.clone(),
-            provider: oracle.clone(),
-            partition_prefix: "engine".to_string(),
-            me: public_key.clone(),
-            participants,
-            mailbox_size: config.mailbox_size,
-            deque_size: config.deque_size,
-            block_size: config.block_size,
-            leader: config.leader,
-            leader_timeout: LEADER_TIMEOUT,
-            certification_timeout: CERTIFICATION_TIMEOUT,
-            nullify_retry: NULLIFY_RETRY,
-            activity_timeout: ACTIVITY_TIMEOUT,
-            skip_timeout: SKIP_TIMEOUT,
-            fetch_timeout: FETCH_TIMEOUT,
-            max_fetch_count: MAX_FETCH_COUNT,
-            max_fetch_size: MAX_FETCH_SIZE,
-            fetch_rate_per_peer: resolver_limit,
-            backfiller_max_active: config.backfiller_max_active,
-            backfiller_retry: Duration::from_millis(config.backfiller_retry_ms),
-            indexer,
-            polynomial,
-            share,
-            strategy,
-        };
-        let engine = engine::Engine::new(context.child("engine"), engine_cfg).await;
-
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),
             peer_provider: oracle.clone(),
-            blocker: oracle,
+            blocker: oracle.clone(),
             mailbox_size: NZUsize!(config.mailbox_size),
             initial: Duration::from_secs(1),
             timeout: MARSHAL_RESOLVER_TIMEOUT,
@@ -413,8 +372,66 @@ fn main() {
             marshal,
         );
 
-        // Start engine
-        let engine = engine.start(pending, recovered, resolver, broadcaster, marshal_resolver);
+        macro_rules! start_consensus {
+            ($scheme:ty, $elector:expr, $delay_ms:expr) => {{
+                let scheme =
+                    <$scheme as Scheme>::signer(NAMESPACE, participants, polynomial, share)
+                        .expect("failed to create consensus scheme");
+                let indexer = config.indexer.as_deref().map(|indexer_url| {
+                    alto_client::ClientBuilder::<_, $scheme>::new_with_scheme(
+                        indexer_url,
+                        <$scheme as Scheme>::certificate_verifier(NAMESPACE, identity),
+                        strategy.clone(),
+                    )
+                    .build()
+                });
+                let engine_cfg = engine::Config {
+                    blocker: oracle.clone(),
+                    provider: oracle.clone(),
+                    partition_prefix: "engine".to_string(),
+                    me: public_key.clone(),
+                    scheme,
+                    elector: $elector,
+                    mailbox_size: config.mailbox_size,
+                    deque_size: config.deque_size,
+                    block_size: config.block_size,
+                    proposal_delay_ms: $delay_ms,
+                    leader_timeout: LEADER_TIMEOUT,
+                    certification_timeout: CERTIFICATION_TIMEOUT,
+                    nullify_retry: NULLIFY_RETRY,
+                    activity_timeout: ACTIVITY_TIMEOUT,
+                    skip_timeout: SKIP_TIMEOUT,
+                    fetch_timeout: FETCH_TIMEOUT,
+                    max_fetch_count: MAX_FETCH_COUNT,
+                    max_fetch_size: MAX_FETCH_SIZE,
+                    fetch_rate_per_peer: resolver_limit,
+                    backfiller_max_active: config.backfiller_max_active,
+                    backfiller_retry: Duration::from_millis(config.backfiller_retry_ms),
+                    indexer,
+                    strategy,
+                };
+                engine::Engine::new(context.child("engine"), engine_cfg)
+                    .await
+                    .start(pending, recovered, resolver, broadcaster, marshal_resolver)
+            }};
+        }
+
+        // A validator owns one concrete certificate format for its process lifetime. Every
+        // persistent and wire-facing component is constructed inside the selected branch.
+        let engine = match config.leader {
+            Leader::Stable {
+                delay_ms,
+                term_length,
+                optimistic_views,
+            } => start_consensus!(
+                StandardScheme,
+                engine::stable_elector(term_length, optimistic_views),
+                delay_ms
+            ),
+            Leader::Rotating { delay_ms } => {
+                start_consensus!(VrfScheme, Random, delay_ms)
+            }
+        };
 
         // Wait for any task to error
         if let Err(e) = try_join_all(vec![p2p, engine]).await {

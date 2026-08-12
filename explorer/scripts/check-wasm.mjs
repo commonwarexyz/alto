@@ -12,6 +12,16 @@ const fromHex = (hex) => Uint8Array.from(
   hex.match(/../g).map((byte) => Number.parseInt(byte, 16)),
 );
 
+const withoutSeedSignature = (encoded) => {
+  const bytes = fromHex(encoded);
+  const proposalSize = 39;
+  const signatureSize = 48;
+  return Uint8Array.from([
+    ...bytes.slice(0, proposalSize + signatureSize),
+    ...bytes.slice(proposalSize + 2 * signatureSize),
+  ]);
+};
+
 const identity = fromHex(
   "90577f9eefba4e54f98aa6cda386718e82863d4989b7282f09446bdb408469dc" +
   "3dec0097ef3dc9359d88b04d700290e902628bc56fe9295ad92794114a65b2ee" +
@@ -55,4 +65,13 @@ const artifacts = [
 
 for (const [name, parse, encoded] of artifacts) {
   assert.notEqual(parse(identity, fromHex(encoded)), null, `${name} did not verify`);
+  if (name !== "seed") {
+    // Standard certificates use the same vote domain as VRF certificates but omit the
+    // second, 48-byte seed signature.
+    assert.notEqual(
+      parse(identity, withoutSeedSignature(encoded), true),
+      null,
+      `standard ${name} did not verify`,
+    );
+  }
 }

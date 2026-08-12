@@ -1,5 +1,5 @@
 use alto_indexer::{Api, Indexer};
-use alto_types::{CertificateMode, Identity, Scheme, NAMESPACE};
+use alto_types::{CertificateMode, Identity, Scheme, StandardScheme, VrfScheme, NAMESPACE};
 use axum::{
     body::{Body, Bytes},
     extract::Extension,
@@ -212,9 +212,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let identity: Identity =
         Identity::decode(&mut bytes.as_slice()).map_err(|_| "Failed to decode identity")?;
 
-    // Initialize indexer
-    let certificate_verifier =
-        Scheme::certificate_verifier(settings.certificate_mode, NAMESPACE, identity);
+    match settings.certificate_mode {
+        CertificateMode::Standard => {
+            serve::<StandardScheme>(settings, identity, explorer_script).await
+        }
+        CertificateMode::Vrf => serve::<VrfScheme>(settings, identity, explorer_script).await,
+    }
+}
+
+async fn serve<C: Scheme>(
+    settings: Settings,
+    identity: Identity,
+    explorer_script: ExplorerScript,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let certificate_verifier = C::certificate_verifier(NAMESPACE, identity);
     let indexer = Arc::new(Indexer::new(certificate_verifier, Sequential));
     let app = Api::new(indexer)
         .router()

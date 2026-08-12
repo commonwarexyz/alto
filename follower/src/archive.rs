@@ -16,7 +16,7 @@
 
 use alto_types::{Block, Finalization, Scheme};
 use commonware_consensus::{marshal, types::Height};
-use commonware_cryptography::{certificate::Verifier as _, sha256::Digest, Digestible};
+use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_runtime::{
     buffer::paged::{page_size, CacheRef},
     BufferPooler, Clock, Metrics, Storage,
@@ -77,13 +77,14 @@ const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1_073_741_824; // 1GB
 ///
 /// Returns the two archive wrappers plus the shared page cache (needed by
 /// marshal for its own prunable internal stores).
-pub(crate) async fn init<E>(
+pub(crate) async fn init<E, C>(
     context: &mut E,
-    scheme: &Scheme,
+    scheme: &C,
     pruning_depth: Option<u64>,
-) -> (Certificates<E>, Blocks<E>, CacheRef)
+) -> (Certificates<E, C>, Blocks<E>, CacheRef)
 where
     E: BufferPooler + Storage + Metrics + Clock,
+    C: Scheme,
 {
     let page_cache = CacheRef::from_pooler(context, PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
 
@@ -191,22 +192,26 @@ where
 /// Wrapper over [immutable::Archive] and [prunable::Archive] for finalization
 /// certificates. Implements [marshal::store::Certificates].
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum Certificates<E: BufferPooler + Storage + Metrics + Clock> {
-    Immutable(immutable::Archive<E, Digest, Finalization>),
-    Prunable(prunable::Archive<FourCap, E, Digest, Finalization>),
+pub(crate) enum Certificates<E: BufferPooler + Storage + Metrics + Clock, C: Scheme> {
+    Immutable(immutable::Archive<E, Digest, Finalization<C>>),
+    Prunable(prunable::Archive<FourCap, E, Digest, Finalization<C>>),
 }
 
-impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates for Certificates<E> {
+impl<E, C> marshal::store::Certificates for Certificates<E, C>
+where
+    E: BufferPooler + Storage + Metrics + Clock,
+    C: Scheme,
+{
     type BlockDigest = Digest;
     type Commitment = Digest;
-    type Scheme = Scheme;
+    type Scheme = C;
     type Error = archive::Error;
 
     async fn put(
         self,
         height: Height,
         commitment: Digest,
-        finalization: Finalization,
+        finalization: Finalization<C>,
     ) -> Result<Self, Self::Error> {
         match self {
             Self::Immutable(a) => Archive::put(a, height.get(), commitment, finalization)
@@ -225,7 +230,10 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Certificates f
         }
     }
 
-    async fn get(&self, id: Identifier<'_, Digest>) -> Result<Option<Finalization>, Self::Error> {
+    async fn get(
+        &self,
+        id: Identifier<'_, Digest>,
+    ) -> Result<Option<Finalization<C>>, Self::Error> {
         match self {
             Self::Immutable(a) => Archive::get(a, id).await,
             Self::Prunable(a) => Archive::get(a, id).await,

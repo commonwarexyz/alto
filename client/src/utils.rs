@@ -1,11 +1,12 @@
 use crate::{Client, Error};
+use alto_types::Scheme;
 use commonware_parallel::Strategy;
 
 fn healthy_path(base: String) -> String {
     format!("{base}/health")
 }
 
-impl<S: Strategy> Client<S> {
+impl<S: Strategy, C: Scheme> Client<S, C> {
     pub async fn health(&self) -> Result<(), Error> {
         let result = self
             .http_client
