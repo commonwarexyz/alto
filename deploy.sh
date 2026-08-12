@@ -37,6 +37,7 @@ cargo run --locked --bin deploy -- generate \
     --log-level info \
     --mailbox-size 16384 \
     --deque-size 256 \
+    --block-size 0 \
     --signature-threads 12 \
     --leader-mode stable \
     --leader-delay-ms 5 \
