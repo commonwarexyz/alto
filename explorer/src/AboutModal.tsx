@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { MODE } from './config';
-import { getTimelineIdentifier } from './timelineIdentifier';
+import { getLeaderIndicator, getTimelineIdentifier } from './timelineIdentifier';
 
 interface AboutModalProps {
     isOpen: boolean;
@@ -10,6 +10,7 @@ interface AboutModalProps {
 
 const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, standardCertificates }) => {
     const timelineIdentifier = getTimelineIdentifier(standardCertificates);
+    const leaderIndicator = getLeaderIndicator(standardCertificates);
     // Add effect to handle link targets
     useEffect(() => {
         if (isOpen) {
@@ -80,8 +81,8 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, standardCertif
                         <ul className="status-list">
                             <li>
                                 <div className="status-indicator-wrapper">
-                                    <div className="about-status-indicator" style={{ backgroundColor: "#0000eeff" }}></div>
-                                    <strong>{standardCertificates ? 'Proposed' : 'Seeded'}</strong>
+                                    <div className="about-status-indicator" style={{ backgroundColor: leaderIndicator.color }}></div>
+                                    <strong>{leaderIndicator.label}</strong>
                                 </div>
                                 {standardCertificates
                                     ? 'The stable round-robin leader has proposed a block.'

@@ -21,7 +21,7 @@ import {
   VerifiedConsensusArtifact,
 } from "./consensusWorkerPool";
 import { scaleTimelineWidth } from "./timeline";
-import { getTimelineIdentifier, SEED_SIGNATURE_COLOR } from "./timelineIdentifier";
+import { getLeaderIndicator, getTimelineIdentifier } from "./timelineIdentifier";
 import "./App.css";
 import AboutModal from './AboutModal';
 import './AboutModal.css';
@@ -69,18 +69,6 @@ const retainNewestViews = (views: ViewData[]): ViewData[] => {
 };
 
 const center = new LatLng(0, 0);
-const markerIcon = new DivIcon({
-  className: "custom-div-icon",
-  html: `<div style="
-        background-color: #0000eeff;
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        "></div>`,
-  iconSize: [12, 12],
-  iconAnchor: [6, 6],
-});
-
 // ASCII Logo animation logic
 const initializeLogoAnimations = () => {
   const horizontalSymbols = [" ", "*", "+", "-", "~"];
@@ -119,7 +107,19 @@ const App: React.FC = () => {
   const allConfigs = useMemo(() => getClusters(), []);
   const { BACKEND_URL, PUBLIC_KEY_HEX, LOCATIONS, PARTICIPANTS } = clusterConfig;
   const standardCertificates = clusterConfig.CERTIFICATE_MODE === 'standard';
+  const leaderIndicator = getLeaderIndicator(standardCertificates);
   const timelineIdentifier = getTimelineIdentifier(standardCertificates);
+  const markerIcon = useMemo(() => new DivIcon({
+    className: "custom-div-icon",
+    html: `<div style="
+          background-color: ${leaderIndicator.color};
+          width: 16px;
+          height: 16px;
+          border-radius: 50%;
+          "></div>`,
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+  }), [leaderIndicator.color]);
   const PUBLIC_KEY = useMemo(() => hexToUint8Array(PUBLIC_KEY_HEX), [PUBLIC_KEY_HEX]);
 
   const [views, setViews] = useState<ViewData[]>([]);
@@ -943,7 +943,7 @@ const App: React.FC = () => {
           <div className="bars-header">
             <h2 className="bars-title">Timeline</h2>
             <div className="legend-container">
-              <LegendItem color={SEED_SIGNATURE_COLOR} label={standardCertificates ? "Proposed" : "Seeded"} />
+              <LegendItem color={leaderIndicator.color} label={leaderIndicator.label} />
               <LegendItem color={"#000"} label="Locked" />
               <LegendItem color={"#228B22ff"} label="Finalized" />
               <LegendItem color={timelineIdentifier.color} label={timelineIdentifier.label} textMarker />

@@ -10,6 +10,18 @@ export interface TimelineIdentifier {
   fullValue: string;
 }
 
+export interface LeaderIndicator {
+  label: "Proposed" | "Seeded";
+  color: string;
+}
+
+export const getLeaderIndicator = (
+  standardCertificates: boolean,
+): LeaderIndicator => ({
+  label: standardCertificates ? "Proposed" : "Seeded",
+  color: standardCertificates ? BLOCK_HASH_COLOR : SEED_SIGNATURE_COLOR,
+});
+
 export const getTimelineIdentifier = (
   standardCertificates: boolean,
   seedSignature?: Uint8Array,
