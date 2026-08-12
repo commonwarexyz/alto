@@ -13,13 +13,25 @@ export interface ClusterConfig {
     description: string;
 }
 
+interface DeployedClusterConfig extends ClusterConfig {
+    mode: Mode;
+}
+
+declare global {
+    interface Window {
+        ALTO_DEPLOYMENT?: DeployedClusterConfig;
+    }
+}
+
+const deployedConfig = window.ALTO_DEPLOYMENT;
+
 // Detect mode from environment variable (set at build time)
 // Usage: REACT_APP_MODE=local npm start
 // Default to 'public' if not set
-export const MODE: Mode = (process.env.REACT_APP_MODE as Mode) || 'public';
+export const MODE: Mode = deployedConfig?.mode || (process.env.REACT_APP_MODE as Mode) || 'public';
 
 // Build configs based on mode
-const publicConfigs: Record<'global' | 'usa', ClusterConfig> = {
+const defaultPublicConfigs: Record<'global' | 'usa', ClusterConfig> = {
     global: {
         ...globalConfig,
         name: 'Global Cluster',
@@ -32,11 +44,17 @@ const publicConfigs: Record<'global' | 'usa', ClusterConfig> = {
     },
 };
 
-const localClusterConfig: ClusterConfig = {
-    ...localConfig,
-    name: 'Local Cluster',
-    description: `A local test cluster running on localhost.`,
-};
+const publicConfigs: Partial<Record<'global' | 'usa', ClusterConfig>> = deployedConfig
+    ? { global: deployedConfig }
+    : defaultPublicConfigs;
+
+const localClusterConfig: ClusterConfig = deployedConfig && MODE === 'local'
+    ? deployedConfig
+    : {
+        ...localConfig,
+        name: 'Local Cluster',
+        description: `A local test cluster running on localhost.`,
+    };
 
 export const DEFAULT_CLUSTER: Cluster = MODE === 'public' ? 'global' : 'local';
 
@@ -47,7 +65,7 @@ export const getClusterConfig = (cluster: Cluster): ClusterConfig => {
     if (cluster === 'local') {
         return localClusterConfig;
     }
-    return publicConfigs[cluster];
+    return publicConfigs[cluster] || publicConfigs.global!;
 };
 
 export const getClusters = (): Record<Cluster, ClusterConfig> => {
@@ -55,4 +73,19 @@ export const getClusters = (): Record<Cluster, ClusterConfig> => {
         return { local: localClusterConfig } as Record<Cluster, ClusterConfig>;
     }
     return publicConfigs as Record<Cluster, ClusterConfig>;
+};
+
+export const getHttpBackendUrl = (backendUrl: string): string => {
+    if (backendUrl === window.location.host) {
+        return window.location.origin;
+    }
+    return `${MODE === 'local' ? 'http' : 'https'}://${backendUrl}`;
+};
+
+export const getWebSocketBackendUrl = (backendUrl: string): string => {
+    if (backendUrl === window.location.host) {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${protocol}//${window.location.host}`;
+    }
+    return `${MODE === 'local' ? 'ws' : 'wss'}://${backendUrl}`;
 };

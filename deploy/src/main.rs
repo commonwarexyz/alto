@@ -4,7 +4,7 @@ use alto_chain::{
     DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS,
 };
 use alto_types::NAMESPACE;
-use clap::{value_parser, Arg, ArgMatches, Command};
+use clap::{value_parser, Arg, ArgAction, ArgMatches, Command};
 use commonware_codec::{Decode, DecodeExt, Encode};
 use commonware_consensus::simplex::scheme::bls12381_threshold::vrf as bls12381_threshold;
 use commonware_cryptography::{
@@ -22,7 +22,7 @@ use commonware_math::algebra::Random;
 use commonware_utils::{sys_rng, NZU32};
 use rand::seq::IteratorRandom;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::{NonZeroU32, NonZeroU64, NonZeroUsize},
@@ -34,6 +34,10 @@ use uuid::Uuid;
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 const BINARY_NAME: &str = "validator";
+const INDEXER_BINARY_NAME: &str = "indexer";
+const INDEXER_HOST: &str = "indexer";
+const INDEXER_CONFIG_FILE: &str = "indexer.yaml";
+const INDEXER_PORT: u16 = 8080;
 const PORT: u16 = 4545;
 const STORAGE_CLASS: &str = "gp3";
 const DASHBOARD_FILE: &str = "dashboard.json";
@@ -66,6 +70,20 @@ fn block_size_arg() -> Arg {
 struct ConfiguredIndexer {
     url: String,
     count: usize,
+}
+
+#[derive(serde::Serialize)]
+struct DeployedIndexerConfig {
+    port: u16,
+    identity: String,
+    explorer: DeployedExplorerConfig,
+}
+
+#[derive(serde::Serialize)]
+struct DeployedExplorerConfig {
+    name: String,
+    description: String,
+    locations: Vec<([f64; 2], String)>,
 }
 
 fn local_indexer_port(url: &str) -> Option<u16> {
@@ -114,6 +132,44 @@ fn parse_indexers(specs: Option<&String>) -> Vec<ConfiguredIndexer> {
             }
         })
         .collect()
+}
+
+fn select_regional_peers(
+    regions: &[String],
+    count: usize,
+) -> (Vec<usize>, BTreeMap<String, usize>) {
+    assert!(
+        count <= regions.len(),
+        "indexer count exceeds number of peers"
+    );
+
+    let mut region_to_peers: BTreeMap<String, VecDeque<usize>> = BTreeMap::new();
+    for (index, region) in regions.iter().enumerate() {
+        region_to_peers
+            .entry(region.clone())
+            .or_default()
+            .push_back(index);
+    }
+
+    let mut selected = Vec::with_capacity(count);
+    let mut assigned = BTreeMap::new();
+    while selected.len() < count {
+        let mut progressed = false;
+        for (region, peers) in &mut region_to_peers {
+            let Some(peer) = peers.pop_front() else {
+                continue;
+            };
+            selected.push(peer);
+            *assigned.entry(region.clone()).or_insert(0) += 1;
+            progressed = true;
+            if selected.len() == count {
+                break;
+            }
+        }
+        assert!(progressed, "indexer count exceeds number of peers");
+    }
+
+    (selected, assigned)
 }
 
 fn parse_leader(matches: &ArgMatches) -> Result<Leader, &'static str> {
@@ -276,6 +332,15 @@ fn main() {
                                 .long("dashboard")
                                 .required(true)
                                 .value_parser(value_parser!(String)),
+                        )
+                        .arg(
+                            Arg::new("indexer")
+                                .long("indexer")
+                                .action(ArgAction::SetTrue)
+                                .conflicts_with("indexers")
+                                .help(
+                                    "Deploy an indexer and configure one validator per region to upload to it",
+                                ),
                         )
                         .arg(
                             Arg::new("indexers")
@@ -631,7 +696,15 @@ fn generate_remote(
         .get_one::<i32>("monitoring_storage_size")
         .unwrap();
     let dashboard = sub_matches.get_one::<String>("dashboard").unwrap().clone();
-    let configured_indexers = parse_indexers(sub_matches.get_one::<String>("indexers"));
+    let deploy_indexer = sub_matches.get_flag("indexer");
+    let mut configured_indexers = parse_indexers(sub_matches.get_one::<String>("indexers"));
+    if deploy_indexer {
+        let region_count = regions.iter().collect::<BTreeSet<_>>().len();
+        configured_indexers.push(ConfiguredIndexer {
+            url: format!("http://{INDEXER_HOST}:{INDEXER_PORT}"),
+            count: region_count,
+        });
+    }
 
     // Construct output path
     let raw_current_dir = std::env::current_dir().unwrap();
@@ -745,46 +818,12 @@ fn generate_remote(
             .iter()
             .map(|indexer| indexer.count)
             .sum();
-        assert!(
-            total_indexer_count <= peer_configs.len(),
-            "indexer count exceeds number of peers"
-        );
-
-        // Group peers by region
-        let mut region_to_peers: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-        for (idx, instance) in instance_configs.iter().enumerate() {
-            region_to_peers
-                .entry(instance.region.clone())
-                .or_default()
-                .push(idx);
-        }
-
-        // Sort peers within each region for deterministic selection
-        for peers in region_to_peers.values_mut() {
-            peers.sort();
-        }
-
-        // Get sorted list of regions for consistent iteration
-        let region_list: Vec<String> = region_to_peers.keys().cloned().collect();
-
-        // Select peers for indexers in a round-robin fashion across regions
-        let mut selected_indices = Vec::new();
-        let mut region_index = 0;
-        let mut assigned_regions: BTreeMap<&String, usize> = BTreeMap::new();
-        while selected_indices.len() < total_indexer_count && !region_to_peers.is_empty() {
-            let region = &region_list[region_index % region_list.len()];
-            if let Some(peers) = region_to_peers.get_mut(region) {
-                if !peers.is_empty() {
-                    let peer_idx = peers.remove(0);
-                    selected_indices.push(peer_idx);
-                    if peers.is_empty() {
-                        region_to_peers.remove(region);
-                    }
-                    *assigned_regions.entry(region).or_insert(0) += 1;
-                }
-            }
-            region_index += 1;
-        }
+        let peer_regions = instance_configs
+            .iter()
+            .map(|instance| instance.region.clone())
+            .collect::<Vec<_>>();
+        let (selected_indices, assigned_regions) =
+            select_regional_peers(&peer_regions, total_indexer_count);
 
         // Update selected peer configs
         let indexer_assignments = configured_indexers
@@ -797,7 +836,65 @@ fn generate_remote(
         info!(assignments = ?assigned_regions, "configured indexers");
     }
 
+    let deployed_indexer_config = deploy_indexer.then(|| {
+        let locations = instance_configs
+            .iter()
+            .map(|instance| {
+                get_aws_location(&instance.region)
+                    .unwrap_or_else(|| panic!("unknown AWS region: {}", instance.region))
+            })
+            .collect();
+        let unique_regions = regions.iter().fold(Vec::new(), |mut unique, region| {
+            if !unique.contains(region) {
+                unique.push(region.clone());
+            }
+            unique
+        });
+
+        DeployedIndexerConfig {
+            port: INDEXER_PORT,
+            identity: hex(&identity.encode()),
+            explorer: DeployedExplorerConfig {
+                name: "Live Global Cluster".to_string(),
+                description: format!(
+                    "A live cluster of <strong>{peers} validators</strong> running {instance_type} nodes on AWS in <strong>{} regions</strong> ({}).",
+                    unique_regions.len(),
+                    unique_regions.join(", ")
+                ),
+                locations,
+            },
+        }
+    });
+
+    if deploy_indexer {
+        instance_configs.push(aws::InstanceConfig {
+            name: INDEXER_HOST.to_string(),
+            region: regions[0].clone(),
+            availability_zone_group: None,
+            instance_type: instance_type.clone(),
+            storage_size,
+            storage_class: STORAGE_CLASS.to_string(),
+            storage_iops: None,
+            storage_throughput: None,
+            binary: INDEXER_BINARY_NAME.to_string(),
+            config: INDEXER_CONFIG_FILE.to_string(),
+            profiling: false,
+        });
+    }
+
     // Generate root config file
+    let mut ports = vec![aws::PortConfig {
+        protocol: "tcp".to_string(),
+        port: PORT,
+        cidr: "0.0.0.0/0".to_string(),
+    }];
+    if deploy_indexer {
+        ports.push(aws::PortConfig {
+            protocol: "tcp".to_string(),
+            port: INDEXER_PORT,
+            cidr: "0.0.0.0/0".to_string(),
+        });
+    }
     let config = aws::Config {
         tag,
         instances: instance_configs,
@@ -809,11 +906,7 @@ fn generate_remote(
             storage_throughput: None,
             dashboard: DASHBOARD_FILE.to_string(),
         },
-        ports: vec![aws::PortConfig {
-            protocol: "tcp".to_string(),
-            port: PORT,
-            cidr: "0.0.0.0/0".to_string(),
-        }],
+        ports,
     };
 
     // Write configuration files
@@ -823,6 +916,15 @@ fn generate_remote(
         format!("{output}/{DASHBOARD_FILE}"),
     )
     .unwrap();
+    if let Some(indexer_config) = deployed_indexer_config {
+        let path = format!("{output}/{INDEXER_CONFIG_FILE}");
+        let file = fs::File::create(&path).unwrap();
+        serde_yaml::to_writer(file, &indexer_config).unwrap();
+        info!(
+            path = INDEXER_CONFIG_FILE,
+            "wrote indexer configuration file"
+        );
+    }
     for (peer_config_file, peer_config) in peer_configs {
         let path = format!("{output}/{peer_config_file}");
         let file = fs::File::create(&path).unwrap();
@@ -898,8 +1000,13 @@ fn explorer_remote(dir: String, backend_url: String) {
     let config_content = fs::read_to_string(&config_path).expect("failed to read config.yaml");
     let config: aws::Config =
         serde_yaml::from_str(&config_content).expect("failed to parse config.yaml");
+    let validator_instances = config
+        .instances
+        .iter()
+        .filter(|instance| instance.binary == BINARY_NAME)
+        .collect::<Vec<_>>();
     let mut participants = BTreeMap::new();
-    for instance in &config.instances {
+    for instance in &validator_instances {
         let region = &instance.region;
         let public_key = from_hex(&instance.name).expect("invalid public key");
         let public_key = PublicKey::decode(public_key.as_ref()).expect("invalid public key");
@@ -918,7 +1025,7 @@ fn explorer_remote(dir: String, backend_url: String) {
 
     // Generate config.ts
     let locations_str = locations.join(",\n");
-    let first_instance = &config.instances[0];
+    let first_instance = validator_instances.first().expect("no validators found");
     let peer_config_path = format!("{}/{}", dir, first_instance.config);
     let peer_config_content =
         fs::read_to_string(&peer_config_path).expect("failed to read peer config");
@@ -949,7 +1056,10 @@ fn explorer_remote(dir: String, backend_url: String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{block_size_arg, leader_args, parse_indexers, parse_leader, ConfiguredIndexer};
+    use super::{
+        block_size_arg, leader_args, parse_indexers, parse_leader, select_regional_peers,
+        ConfiguredIndexer,
+    };
     use alto_chain::Leader;
     use clap::Command;
     use commonware_utils::{NZU32, NZU64};
@@ -1123,5 +1233,25 @@ signature_threads: 1
     #[test]
     fn parse_indexers_allows_empty_configuration() {
         assert!(parse_indexers(None).is_empty());
+    }
+
+    #[test]
+    fn regional_selection_uses_each_region_before_repeating() {
+        let regions = [
+            "us-west-1",
+            "us-east-1",
+            "eu-west-1",
+            "us-west-1",
+            "us-east-1",
+            "eu-west-1",
+        ]
+        .map(str::to_string);
+
+        let (selected, assigned) = select_regional_peers(&regions, 3);
+        assert_eq!(selected, vec![2, 1, 0]);
+        assert_eq!(
+            assigned.values().copied().collect::<Vec<_>>(),
+            vec![1, 1, 1]
+        );
     }
 }

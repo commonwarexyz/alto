@@ -62,8 +62,6 @@ const MARSHAL_RESOLVER_TIMEOUT: Duration = Duration::from_secs(10);
 const BASE_MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
 const MAX_FETCH_COUNT: usize = 16;
 const MAX_FETCH_SIZE: usize = 512 * 1024;
-const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
-const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
 fn configured_max_message_size(block_size: u32) -> u32 {
     // Block data contributes its bytes and the codec's variable-length prefix to each message.
@@ -79,6 +77,32 @@ fn configured_max_message_size(block_size: u32) -> u32 {
         .checked_add(encoded_size)
         .filter(|size| *size <= authenticated::MAX_SIZE)
         .expect("block size exceeds authenticated transport maximum")
+}
+
+fn resolve_named_http_url(url: &str, hosts: &HashMap<String, IpAddr>) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    if !matches!(scheme, "http" | "https") {
+        return url.to_string();
+    }
+
+    let (authority, suffix) = match rest.split_once('/') {
+        Some((authority, suffix)) => (authority, format!("/{suffix}")),
+        None => (rest, String::new()),
+    };
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (authority, None),
+    };
+    let Some(ip) = hosts.get(host) else {
+        return url.to_string();
+    };
+
+    match port {
+        Some(port) => format!("{scheme}://{ip}:{port}{suffix}"),
+        None => format!("{scheme}://{ip}{suffix}"),
+    }
 }
 
 fn main() {
@@ -101,7 +125,8 @@ fn main() {
     // Load config
     let config_file = matches.get_one::<String>("config").unwrap();
     let config_file = std::fs::read_to_string(config_file).expect("Could not read config file");
-    let config: Config = serde_yaml::from_str(&config_file).expect("Could not parse config file");
+    let mut config: Config =
+        serde_yaml::from_str(&config_file).expect("Could not parse config file");
     let max_message_size = configured_max_message_size(config.block_size);
     let key = from_hex(&config.private_key).expect("Could not parse private key");
     let signer = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
@@ -157,6 +182,14 @@ fn main() {
                 std::fs::read_to_string(hosts_file).expect("Could not read hosts file");
             serde_yaml::from_str::<Hosts>(&hosts_file).expect("Could not parse hosts file")
         });
+        if let (Some(hosts), Some(indexer_url)) = (hosts.as_ref(), config.indexer.as_deref()) {
+            let hosts_by_name = hosts
+                .hosts
+                .iter()
+                .map(|host| (host.name.clone(), host.ip))
+                .collect();
+            config.indexer = Some(resolve_named_http_url(indexer_url, &hosts_by_name));
+        }
         let traces = hosts.as_ref().map(|hosts| tokio::tracing::Config {
             endpoint: format!("http://{}:4318/v1/traces", hosts.monitoring.private),
             name: public_key.to_string(),
@@ -178,13 +211,21 @@ fn main() {
 
         // Load peers
         let (ip, peers, bootstrappers) = if let Some(hosts) = hosts {
-            let peers: HashMap<PublicKey, IpAddr> = hosts
+            let hosts_by_name: HashMap<String, IpAddr> = hosts
                 .hosts
                 .into_iter()
+                .map(|host| (host.name, host.ip))
+                .collect();
+            let peers: HashMap<PublicKey, IpAddr> = config
+                .allowed_peers
+                .iter()
                 .map(|peer| {
-                    let key = from_hex(&peer.name).expect("Could not parse peer key");
+                    let ip = hosts_by_name
+                        .get(peer)
+                        .expect("Could not find peer in hosts file");
+                    let key = from_hex(peer).expect("Could not parse peer key");
                     let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
-                    (key, peer.ip)
+                    (key, *ip)
                 })
                 .collect();
 
@@ -326,8 +367,6 @@ fn main() {
             blocker: oracle.clone(),
             provider: oracle.clone(),
             partition_prefix: "engine".to_string(),
-            blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
-            finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
             me: public_key.clone(),
             participants,
             mailbox_size: config.mailbox_size,
@@ -396,5 +435,22 @@ mod tests {
     #[should_panic(expected = "block size exceeds authenticated transport maximum")]
     fn max_message_size_rejects_unsupported_block_size() {
         configured_max_message_size(u32::MAX);
+    }
+
+    #[test]
+    fn named_http_url_resolves_deployed_indexer() {
+        let hosts = HashMap::from([(
+            "indexer".to_string(),
+            "203.0.113.7".parse::<IpAddr>().unwrap(),
+        )]);
+
+        assert_eq!(
+            resolve_named_http_url("http://indexer:8080/consensus", &hosts),
+            "http://203.0.113.7:8080/consensus"
+        );
+        assert_eq!(
+            resolve_named_http_url("https://external.example.com", &hosts),
+            "https://external.example.com"
+        );
     }
 }

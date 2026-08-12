@@ -94,7 +94,7 @@ _MacOS defaults to 256 open files, which is too low for the default settings (wh
 
 ### Remote
 
-_To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/install), [Docker with Buildx](https://docs.docker.com/build/buildx/install/), and [just](https://just.systems/man/en/packages.html)._
+_To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/install), [Node.js with npm](https://nodejs.org/), [Docker with Buildx](https://docs.docker.com/build/buildx/install/), and [just](https://just.systems/man/en/packages.html)._
 
 #### Install `commonware-deployer`
 
@@ -104,7 +104,12 @@ cargo install commonware-deployer --features aws
 
 #### Create Artifacts
 
-_To configure remote indexer upload, add `--indexers '<url>:<count>[;<url>:<count>...]'` to the `generate remote` command. For example, `https://idx-a.example.com:2;https://idx-b.example.com:1`. Indexers are selected in round-robin fashion across regions._
+Pass `--indexer` to deploy Alto's indexer alongside the validators. The generator configures one
+validator in each region to upload to `http://indexer:8080`. The indexer also serves the explorer
+from port 8080, so its public URL can be opened directly from a laptop. To use indexers managed
+outside this deployment instead, pass `--indexers '<url>:<count>[;<url>:<count>...]'`; for example,
+`https://idx-a.example.com:2;https://idx-b.example.com:1`. Uploaders are selected round-robin
+across regions.
 
 Each selected validator config will contain:
 
@@ -115,8 +120,13 @@ indexer: https://your-indexer.example.com
 ##### Global
 
 ```bash
-cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --output assets remote --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,eu-north-1,ap-south-1,sa-east-1,eu-central-1,ap-northeast-2,ap-southeast-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 25 --dashboard deploy/dashboard.json
+./deploy.sh
 ```
+
+This deploys 50 validators on `i7i.4xlarge` NVMe instances with 4 Tokio workers and 12 signature
+threads, a 5ms proposal target, and 100,000-view stable-leader terms. It builds the explorer into an
+indexer on the same instance type, deploys with concurrency 50, and prints the explorer URL when
+deployment completes. Validators use prunable finalized archives but retain the full history.
 
 _This configuration consumes ~10MB of disk space per hour per validator (~5 views per second). With 25GB of storage allocated, validators will exhaust available storage in ~3 months._
 
@@ -151,36 +161,38 @@ NEW_KEY="<new-key-hex>"
 sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/usa.yml
 ```
 
-#### Build Validator Binary
+#### Build Deployment Binaries
 
 The build platform is an explicit recipe:
 
 | Recipe | Output architecture | CPU target | Example instances |
 | --- | --- | --- | --- |
 | `just validator-graviton-binary` | ARM64 | `neoverse-v1` | Graviton 3/4 (`c7g`, `c8g`) |
+| `just indexer-graviton-binary` | ARM64 | `neoverse-v1` | Graviton 3/4 (`c7g`, `c8g`) |
 | `just validator-intel-binary` | x86-64 | `emeraldrapids` | Intel I7i |
+| `just indexer-intel-binary` | x86-64 | `emeraldrapids` | Intel I7i |
 
 ##### Intel I7i
 
 ```bash
-just validator-intel-binary
+just intel-binaries
 ```
 
 _The Intel binary is compiled with `target-cpu=emeraldrapids`._
 
-The builder runs on the local Docker architecture and cross-compiles the validator, so no
+The builder runs on the local Docker architecture and cross-compiles the binaries, so no
 `--platform` argument is needed on an ARM64 development machine.
 
 ##### Graviton
 
 ```bash
-just validator-graviton-binary
+just graviton-binaries
 ```
 
 _The Graviton binary is compiled with `target-cpu=neoverse-v1`._
 
-Both recipes write `assets/validator` and `assets/validator-debug`. Run the recipe matching the
-deployment's instance type last.
+The grouped recipes write `assets/validator`, `assets/indexer`, and their debug-symbol variants.
+Run the recipe matching the deployment's instance type last.
 
 ###### Local Compilation
 
@@ -191,9 +203,9 @@ just build-intel-image
 docker run --rm -v "${PWD}:/alto" -v "${PWD}/../monorepo:/monorepo" alto-validator-builder:intel-local
 ```
 
-_Emitted binary `validator` is placed in `assets/`._
+Emitted binaries are placed in `assets/`.
 
-#### Deploy Validator Binary
+#### Deploy Cluster
 
 ```bash
 cd assets

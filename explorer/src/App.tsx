@@ -3,7 +3,15 @@ import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { DivIcon, LatLng } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
-import { getClusterConfig, getClusters, Cluster, DEFAULT_CLUSTER, MODE } from "./config";
+import {
+  getClusterConfig,
+  getClusters,
+  getHttpBackendUrl,
+  getWebSocketBackendUrl,
+  Cluster,
+  DEFAULT_CLUSTER,
+  MODE,
+} from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, ViewData } from "./types";
 import { hexToUint8Array, hexUint8Array } from "./utils";
 import "./App.css";
@@ -169,8 +177,7 @@ const App: React.FC = () => {
   // Health check function
   const checkHealth = useCallback(async () => {
     try {
-      const protocol = MODE === 'local' ? 'http' : 'https';
-      const response = await fetch(`${protocol}://${BACKEND_URL}/health`, {
+      const response = await fetch(`${getHttpBackendUrl(BACKEND_URL)}/health`, {
         method: "GET",
         headers: {
           "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -634,8 +641,7 @@ const App: React.FC = () => {
 
       // Create new WebSocket connection
       const wsCreationTime = Date.now();
-      const protocol = MODE === 'local' ? 'ws' : 'wss';
-      const ws = new WebSocket(`${protocol}://${BACKEND_URL}/consensus/ws`);
+      const ws = new WebSocket(`${getWebSocketBackendUrl(BACKEND_URL)}/consensus/ws`);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 

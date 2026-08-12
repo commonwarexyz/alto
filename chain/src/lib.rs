@@ -200,10 +200,6 @@ mod tests {
     use std::{collections::HashMap, num::NonZeroU32, time::Duration};
     use tracing::info;
 
-    /// Limit the freezer table size to 1MB because the deterministic runtime stores
-    /// everything in RAM.
-    const FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(14); // 1MB
-
     /// (Effectively) unlimited quota for tests.
     const TEST_QUOTA: Quota = Quota::per_second(NZU32!(u32::MAX));
 
@@ -421,8 +417,6 @@ mod tests {
             blocker: oracle.control(public_key.clone()),
             provider: oracle.manager(),
             partition_prefix: uid.clone(),
-            blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-            finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
             me: signer.public_key(),
             polynomial: scheme.polynomial().clone(),
             share: scheme.share().cloned().unwrap(),
