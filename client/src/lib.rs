@@ -1,6 +1,6 @@
 //! Interact with an `alto` indexer.
 
-use alto_types::{Identity, Scheme, NAMESPACE};
+use alto_types::{CertificateMode, Identity, Scheme, NAMESPACE};
 use commonware_cryptography::sha256::Digest;
 use commonware_formatting::hex;
 use commonware_parallel::Strategy;
@@ -66,6 +66,7 @@ pub struct ClientBuilder<S: Strategy> {
     uri: String,
     ws_uri: String,
     identity: Identity,
+    certificate_mode: CertificateMode,
     tls_certs: Vec<Vec<u8>>,
     strategy: S,
     verify: bool,
@@ -73,6 +74,9 @@ pub struct ClientBuilder<S: Strategy> {
 
 impl<S: Strategy> ClientBuilder<S> {
     /// Create a new builder for the given indexer URI.
+    ///
+    /// The builder defaults to VRF certificates for compatibility with existing rotating-leader
+    /// networks. Stable-leader networks must call [`Self::with_certificate_mode`].
     pub fn new(uri: &str, identity: Identity, strategy: S) -> Self {
         let uri = uri.to_string();
         let ws_uri = if let Some(rest) = uri.strip_prefix("https://") {
@@ -86,10 +90,17 @@ impl<S: Strategy> ClientBuilder<S> {
             uri,
             ws_uri,
             identity,
+            certificate_mode: CertificateMode::Vrf,
             tls_certs: Vec::new(),
             strategy,
             verify: true,
         }
+    }
+
+    /// Select the certificate construction used by the target network.
+    pub fn with_certificate_mode(mut self, certificate_mode: CertificateMode) -> Self {
+        self.certificate_mode = certificate_mode;
+        self
     }
 
     /// Disable signature verification for all returned data.
@@ -108,7 +119,8 @@ impl<S: Strategy> ClientBuilder<S> {
 
     /// Build the client.
     pub fn build(self) -> Client<S> {
-        let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, self.identity);
+        let certificate_verifier =
+            Scheme::certificate_verifier(self.certificate_mode, NAMESPACE, self.identity);
 
         // HTTP/2 multiplexes all requests over a single connection, so
         // DNS is only resolved once on the initial connect.
@@ -173,6 +185,9 @@ pub struct Client<S: Strategy> {
 impl<S: Strategy> Client<S> {
     /// Create a new client for the given indexer URI.
     ///
+    /// This constructor verifies VRF certificates. Use [`Self::new_with_certificate_mode`] for a
+    /// stable-leader network.
+    ///
     /// TLS is automatically configured using the system's root certificates.
     /// For HTTPS/WSS endpoints with certificates signed by trusted CAs,
     /// no additional configuration is needed.
@@ -181,5 +196,17 @@ impl<S: Strategy> Client<S> {
     /// use [`ClientBuilder`] instead.
     pub fn new(uri: &str, identity: Identity, strategy: S) -> Self {
         ClientBuilder::new(uri, identity, strategy).build()
+    }
+
+    /// Create a client for a network using the selected certificate construction.
+    pub fn new_with_certificate_mode(
+        uri: &str,
+        identity: Identity,
+        certificate_mode: CertificateMode,
+        strategy: S,
+    ) -> Self {
+        ClientBuilder::new(uri, identity, strategy)
+            .with_certificate_mode(certificate_mode)
+            .build()
     }
 }

@@ -1,6 +1,6 @@
 use alto_client::consensus::{Message, Payload};
 use alto_client::{ClientBuilder, IndexQuery, Query};
-use alto_types::{Finalized, Identity, Notarized, Scheme, NAMESPACE};
+use alto_types::{CertificateMode, Finalized, Identity, Notarized, Scheme, NAMESPACE};
 use clap::{Arg, Command};
 use commonware_codec::DecodeExt;
 use commonware_consensus::types::Height;
@@ -38,6 +38,7 @@ mod test_utils;
 pub struct Config {
     pub source: String,
     pub identity: String,
+    pub certificate_mode: CertificateMode,
     pub directory: String,
     pub worker_threads: NonZero<usize>,
     pub signature_threads: NonZero<usize>,
@@ -183,8 +184,10 @@ fn main() {
         //
         // Any certificate verification failure is treated as fatal and
         // intentionally crashes the follower (fail-fast).
-        let scheme = Scheme::certificate_verifier(NAMESPACE, identity);
+        let scheme =
+            Scheme::certificate_verifier(config.certificate_mode, NAMESPACE, identity);
         let client = ClientBuilder::new(&config.source, identity, Sequential)
+            .with_certificate_mode(config.certificate_mode)
             .with_verification_disabled()
             .build();
 

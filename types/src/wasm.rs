@@ -1,4 +1,7 @@
-use crate::{Block, Finalized, Identity, Notarized, Scheme, Seed, Signature, EPOCH, NAMESPACE};
+use crate::{
+    Block, CertificateMode, Finalized, Identity, Notarized, Scheme, Seed, Signature, EPOCH,
+    NAMESPACE,
+};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::{
     simplex::elector::Random,
@@ -48,12 +51,13 @@ pub struct FinalizedJs {
 #[wasm_bindgen]
 pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity);
+    let certificate_verifier =
+        Scheme::certificate_verifier(CertificateMode::Vrf, NAMESPACE, identity);
 
     let Ok(seed) = Seed::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
-    if !seed.verify(&certificate_verifier) {
+    if !certificate_verifier.verify_seed(&seed) {
         return JsValue::NULL;
     }
     let seed_js = SeedJs {
@@ -64,9 +68,14 @@ pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 }
 
 #[wasm_bindgen]
-pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
+pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity);
+    let mode = if standard {
+        CertificateMode::Standard
+    } else {
+        CertificateMode::Vrf
+    };
+    let certificate_verifier = Scheme::certificate_verifier(mode, NAMESPACE, identity);
 
     let Ok(notarized) = Notarized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
@@ -96,9 +105,14 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 }
 
 #[wasm_bindgen]
-pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
+pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity);
+    let mode = if standard {
+        CertificateMode::Standard
+    } else {
+        CertificateMode::Vrf
+    };
+    let certificate_verifier = Scheme::certificate_verifier(mode, NAMESPACE, identity);
     let Ok(finalized) = Finalized::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };

@@ -3,7 +3,7 @@ use alto_chain::{
     DEFAULT_BLOCKING_THREADS, DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS,
     DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS,
 };
-use alto_types::NAMESPACE;
+use alto_types::{CertificateMode, NAMESPACE};
 use clap::{value_parser, Arg, ArgAction, ArgMatches, Command};
 use commonware_codec::{Decode, DecodeExt, Encode};
 use commonware_consensus::simplex::scheme::bls12381_threshold::vrf as bls12381_threshold;
@@ -42,7 +42,14 @@ const PORT: u16 = 4545;
 const STORAGE_CLASS: &str = "gp3";
 const DASHBOARD_FILE: &str = "dashboard.json";
 
-fn leader_args() -> [Arg; 3] {
+const fn certificate_mode_name(mode: CertificateMode) -> &'static str {
+    match mode {
+        CertificateMode::Standard => "standard",
+        CertificateMode::Vrf => "vrf",
+    }
+}
+
+fn leader_args() -> [Arg; 4] {
     [
         Arg::new("leader_mode")
             .long("leader-mode")
@@ -56,6 +63,10 @@ fn leader_args() -> [Arg; 3] {
             .long("leader-term-length")
             .required_if_eq("leader_mode", "stable")
             .value_parser(value_parser!(u32).range(2..)),
+        Arg::new("leader_optimistic_views")
+            .long("leader-optimistic-views")
+            .required_if_eq("leader_mode", "stable")
+            .value_parser(value_parser!(u64)),
     ]
 }
 
@@ -76,6 +87,7 @@ struct ConfiguredIndexer {
 struct DeployedIndexerConfig {
     port: u16,
     identity: String,
+    certificate_mode: CertificateMode,
     explorer: DeployedExplorerConfig,
 }
 
@@ -180,11 +192,15 @@ fn parse_leader(matches: &ArgMatches) -> Result<Leader, &'static str> {
             if matches.get_one::<u32>("leader_term_length").is_some() {
                 return Err("rotating leader mode does not accept --leader-term-length");
             }
+            if matches.get_one::<u64>("leader_optimistic_views").is_some() {
+                return Err("rotating leader mode does not accept --leader-optimistic-views");
+            }
             Ok(Leader::rotating(delay_ms))
         }
         "stable" => Ok(Leader::stable(
             delay_ms,
             NonZeroU32::new(*matches.get_one::<u32>("leader_term_length").unwrap()).unwrap(),
+            *matches.get_one::<u64>("leader_optimistic_views").unwrap(),
         )),
         _ => unreachable!("clap validates leader mode"),
     }
@@ -629,8 +645,10 @@ fn generate_local(
         println!("To start local indexers, run:");
         for url in &configured_local_indexers {
             if let Some(port) = local_indexer_port(url) {
-                let command =
-                    format!("cargo run --bin indexer -- --port {port} --identity {identity}");
+                let certificate_mode = certificate_mode_name(leader.certificate_mode());
+                let command = format!(
+                    "cargo run --bin indexer -- --port {port} --identity {identity} --certificate-mode {certificate_mode}"
+                );
                 println!("{url}: {command}");
             }
         }
@@ -858,6 +876,7 @@ fn generate_remote(
         DeployedIndexerConfig {
             port: INDEXER_PORT,
             identity: hex(&identity.encode()),
+            certificate_mode: leader.certificate_mode(),
             explorer: DeployedExplorerConfig {
                 name: "Live Global Cluster".to_string(),
                 description: format!(
@@ -975,6 +994,7 @@ fn explorer_local(dir: String, backend_url: String) {
         fs::read_to_string(&peer_config_path).expect("failed to read peer config");
     let peer_config: Config =
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
+    let certificate_mode = certificate_mode_name(peer_config.leader.certificate_mode());
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
     let polynomial = Sharing::<MinSig>::decode_cfg(
@@ -988,9 +1008,11 @@ fn explorer_local(dir: String, backend_url: String) {
     let config_ts = format!(
         "export const BACKEND_URL = \"{}\";\n\
         export const PUBLIC_KEY_HEX = \"{}\";\n\
+        export const CERTIFICATE_MODE = \"{}\" as const;\n\
         export const LOCATIONS: [[number, number], string][] = [];",
         backend_url,
         hex(&identity.encode()),
+        certificate_mode,
     );
 
     // Write config.ts
@@ -1036,6 +1058,7 @@ fn explorer_remote(dir: String, backend_url: String) {
         fs::read_to_string(&peer_config_path).expect("failed to read peer config");
     let peer_config: Config =
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
+    let certificate_mode = certificate_mode_name(peer_config.leader.certificate_mode());
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
     let polynomial = Sharing::<MinSig>::decode_cfg(
@@ -1047,9 +1070,11 @@ fn explorer_remote(dir: String, backend_url: String) {
     let config_ts = format!(
         "export const BACKEND_URL = \"{}\";\n\
         export const PUBLIC_KEY_HEX = \"{}\";\n\
+        export const CERTIFICATE_MODE = \"{}\" as const;\n\
         export const LOCATIONS: [[number, number], string][] = [\n{}\n];",
         backend_url,
         hex(&identity.encode()),
+        certificate_mode,
         locations_str
     );
 
@@ -1062,10 +1087,11 @@ fn explorer_remote(dir: String, backend_url: String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        block_size_arg, leader_args, parse_indexers, parse_leader, select_regional_peers,
-        ConfiguredIndexer,
+        block_size_arg, certificate_mode_name, leader_args, parse_indexers, parse_leader,
+        select_regional_peers, ConfiguredIndexer,
     };
     use alto_chain::Leader;
+    use alto_types::CertificateMode;
     use clap::Command;
     use commonware_utils::{NZU32, NZU64};
 
@@ -1135,6 +1161,12 @@ signature_threads: 1
     }
 
     #[test]
+    fn certificate_mode_names_match_leader_modes() {
+        assert_eq!(certificate_mode_name(CertificateMode::Standard), "standard");
+        assert_eq!(certificate_mode_name(CertificateMode::Vrf), "vrf");
+    }
+
+    #[test]
     fn parse_stable_leader() {
         let matches = Command::new("test")
             .args(leader_args())
@@ -1146,16 +1178,18 @@ signature_threads: 1
                 "10",
                 "--leader-term-length",
                 "1000",
+                "--leader-optimistic-views",
+                "48",
             ])
             .unwrap();
         assert_eq!(
             parse_leader(&matches).unwrap(),
-            Leader::stable(NZU64!(10), NZU32!(1_000))
+            Leader::stable(NZU64!(10), NZU32!(1_000), 48)
         );
     }
 
     #[test]
-    fn stable_leader_requires_delay_and_term_length() {
+    fn stable_leader_requires_all_settings() {
         let result = Command::new("test")
             .args(leader_args())
             .try_get_matches_from(["test", "--leader-mode", "stable"]);
@@ -1170,7 +1204,22 @@ signature_threads: 1
                 "--leader-delay-ms",
                 "10",
                 "--leader-term-length",
+                "1000",
+            ]);
+        assert!(result.is_err());
+
+        let result = Command::new("test")
+            .args(leader_args())
+            .try_get_matches_from([
+                "test",
+                "--leader-mode",
+                "stable",
+                "--leader-delay-ms",
+                "10",
+                "--leader-term-length",
                 "1",
+                "--leader-optimistic-views",
+                "48",
             ]);
         assert!(result.is_err());
     }
@@ -1190,17 +1239,37 @@ signature_threads: 1
             ])
             .unwrap();
         assert!(parse_leader(&matches).is_err());
+
+        let matches = Command::new("test")
+            .args(leader_args())
+            .try_get_matches_from([
+                "test",
+                "--leader-mode",
+                "rotating",
+                "--leader-delay-ms",
+                "10",
+                "--leader-optimistic-views",
+                "48",
+            ])
+            .unwrap();
+        assert!(parse_leader(&matches).is_err());
     }
 
     #[test]
     fn leader_config_round_trips() {
         for leader in [
             Leader::rotating(NZU64!(7)),
-            Leader::stable(NZU64!(10), NZU32!(1_000)),
+            Leader::stable(NZU64!(10), NZU32!(1_000), 48),
         ] {
             let encoded = serde_yaml::to_string(&leader).unwrap();
             assert_eq!(serde_yaml::from_str::<Leader>(&encoded).unwrap(), leader);
         }
+
+        assert_eq!(
+            serde_yaml::from_str::<Leader>("mode: stable\ndelay_ms: 10\nterm_length: 1000\n")
+                .unwrap(),
+            Leader::stable(NZU64!(10), NZU32!(1_000), 48)
+        );
     }
 
     #[test]

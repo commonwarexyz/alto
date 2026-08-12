@@ -1,5 +1,5 @@
 use alto_indexer::{Api, Indexer};
-use alto_types::{Identity, Scheme, NAMESPACE};
+use alto_types::{CertificateMode, Identity, Scheme, NAMESPACE};
 use axum::{
     body::{Body, Bytes},
     extract::Extension,
@@ -34,6 +34,15 @@ struct Args {
     )]
     identity: Option<String>,
 
+    /// Threshold certificate construction used by the network.
+    #[clap(
+        long,
+        required_unless_present = "config",
+        conflicts_with = "config",
+        value_parser = ["standard", "vrf"]
+    )]
+    certificate_mode: Option<String>,
+
     /// Path to the deployer-generated hosts file.
     #[clap(long, requires = "config", conflicts_with = "identity")]
     hosts: Option<PathBuf>,
@@ -47,6 +56,7 @@ struct Args {
 struct DeployerConfig {
     port: u16,
     identity: String,
+    certificate_mode: CertificateMode,
     explorer: Option<ExplorerConfig>,
 }
 
@@ -62,6 +72,7 @@ struct ExplorerConfig {
 struct Settings {
     port: u16,
     identity: String,
+    certificate_mode: CertificateMode,
     explorer: ExplorerConfig,
     explorer_mode: &'static str,
 }
@@ -74,6 +85,8 @@ struct RuntimeExplorerConfig<'a> {
     locations: &'a [([f64; 2], String)],
     #[serde(rename = "PARTICIPANTS")]
     participants: &'a [String],
+    #[serde(rename = "CERTIFICATE_MODE")]
+    certificate_mode: CertificateMode,
     name: &'a str,
     description: &'a str,
     mode: &'a str,
@@ -104,6 +117,7 @@ fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
         return Ok(Settings {
             port: config.port,
             identity: config.identity,
+            certificate_mode: config.certificate_mode,
             explorer: config.explorer.unwrap_or_else(local_explorer_config),
             explorer_mode,
         });
@@ -114,6 +128,12 @@ fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
         identity: args
             .identity
             .expect("clap requires --identity when --config is absent"),
+        certificate_mode: match args.certificate_mode.as_deref() {
+            Some("standard") => CertificateMode::Standard,
+            Some("vrf") => CertificateMode::Vrf,
+            None => unreachable!("clap requires --certificate-mode in direct mode"),
+            Some(_) => unreachable!("clap validates certificate mode"),
+        },
         explorer: local_explorer_config(),
         explorer_mode: "local",
     })
@@ -124,6 +144,7 @@ fn explorer_script(settings: &Settings) -> Result<String, serde_json::Error> {
         public_key_hex: &settings.identity,
         locations: &settings.explorer.locations,
         participants: &settings.explorer.participants,
+        certificate_mode: settings.certificate_mode,
         name: &settings.explorer.name,
         description: &settings.explorer.description,
         mode: settings.explorer_mode,
@@ -192,7 +213,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Identity::decode(&mut bytes.as_slice()).map_err(|_| "Failed to decode identity")?;
 
     // Initialize indexer
-    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity);
+    let certificate_verifier =
+        Scheme::certificate_verifier(settings.certificate_mode, NAMESPACE, identity);
     let indexer = Arc::new(Indexer::new(certificate_verifier, Sequential));
     let app = Api::new(indexer)
         .router()
@@ -216,12 +238,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{explorer_script, Args, ExplorerConfig, Settings};
+    use super::{explorer_script, Args, CertificateMode, ExplorerConfig, Settings};
     use clap::Parser;
 
     #[test]
     fn accepts_direct_and_deployer_modes() {
-        assert!(Args::try_parse_from(["indexer", "--identity", "abcd"]).is_ok());
+        assert!(Args::try_parse_from([
+            "indexer",
+            "--identity",
+            "abcd",
+            "--certificate-mode",
+            "standard",
+        ])
+        .is_ok());
         assert!(Args::try_parse_from([
             "indexer",
             "--hosts",
@@ -230,6 +259,7 @@ mod tests {
             "config.yaml",
         ])
         .is_ok());
+        assert!(Args::try_parse_from(["indexer", "--identity", "abcd"]).is_err());
         assert!(Args::try_parse_from(["indexer"]).is_err());
     }
 
@@ -238,6 +268,7 @@ mod tests {
         let settings = Settings {
             port: 8080,
             identity: "abcd".to_string(),
+            certificate_mode: CertificateMode::Standard,
             explorer: ExplorerConfig {
                 name: "Live Cluster".to_string(),
                 description: "description".to_string(),
@@ -250,6 +281,7 @@ mod tests {
         let script = explorer_script(&settings).unwrap();
         assert!(script.contains(r#""PUBLIC_KEY_HEX":"abcd""#));
         assert!(script.contains(r#""PARTICIPANTS":["participant"]"#));
+        assert!(script.contains(r#""CERTIFICATE_MODE":"standard""#));
         assert!(script.contains(r#""LOCATIONS":[[[1.0,2.0],"City"]]"#));
         assert!(script.contains("window.location.host"));
     }

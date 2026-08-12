@@ -26,6 +26,9 @@ export const BACKEND_URL = "global.alto.example.com";
 // Consensus threshold key (hex-encoded)
 export const PUBLIC_KEY_HEX = "92b050b6...";
 
+// Certificate construction: standard for stable leaders, vrf for rotating leaders
+export const CERTIFICATE_MODE = "standard" as const;
+
 // Ordered list of validator locations (sorted by validator public key)
 export const LOCATIONS: [[number, number], string][] = [
     [[37.7749, -122.4194], "San Francisco"],
@@ -61,6 +64,9 @@ export const BACKEND_URL = "localhost:8080";
 
 // Consensus threshold key (hex-encoded)
 export const PUBLIC_KEY_HEX = "82f8a77b...";
+
+// Certificate construction: standard for stable leaders, vrf for rotating leaders
+export const CERTIFICATE_MODE = "standard" as const;
 
 // Empty locations array (map will be hidden)
 export const LOCATIONS: [[number, number], string][] = [];

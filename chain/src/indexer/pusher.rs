@@ -152,7 +152,9 @@ impl<E: Spawner + Metrics, C: Client> Reporter for Pusher<E, C> {
         match activity {
             Activity::Notarization(notarization) => {
                 let view = notarization.view();
-                self.spawn_seed_upload("notarized_seed", notarization.seed(), view);
+                if let Some(seed) = notarization.seed() {
+                    self.spawn_seed_upload("notarized_seed", seed, view);
+                }
                 self.spawn_certificate_upload(
                     "notarized_block",
                     view,
@@ -167,7 +169,9 @@ impl<E: Spawner + Metrics, C: Client> Reporter for Pusher<E, C> {
             }
             Activity::Finalization(finalization) => {
                 let view = finalization.view();
-                self.spawn_seed_upload("finalized_seed", finalization.seed(), view);
+                if let Some(seed) = finalization.seed() {
+                    self.spawn_seed_upload("finalized_seed", seed, view);
+                }
                 self.spawn_certificate_upload(
                     "finalized_block",
                     view,

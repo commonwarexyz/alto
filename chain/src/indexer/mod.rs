@@ -1,7 +1,7 @@
 //! Indexer upload integration for the chain engine.
 //!
 //! The indexer integration has two cooperating upload paths:
-//! - the live path, where `Pusher` uploads seeds and certificate-bearing
+//! - the live path, where `Pusher` uploads available seeds and certificate-bearing
 //!   objects as consensus activity happens;
 //! - the backfiller path, where `Producer` persists finalized block digests and
 //!   `Consumer` retries block uploads from the backfill queue across

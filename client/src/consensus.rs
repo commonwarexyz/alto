@@ -82,7 +82,7 @@ impl<S: Strategy> Client<S> {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let seed = Seed::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if self.verify && !seed.verify(&self.certificate_verifier) {
+        if self.verify && !self.certificate_verifier.verify_seed(&seed) {
             return Err(Error::InvalidSignature);
         }
 
@@ -278,7 +278,7 @@ impl<S: Strategy> Client<S> {
                                     let result = Seed::decode(data);
                                     match result {
                                         Ok(seed) => {
-                                            if verify && !seed.verify(&certificate_verifier) {
+                                            if verify && !certificate_verifier.verify_seed(&seed) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;

@@ -14,7 +14,7 @@ use commonware_consensus::{
     },
     simplex::{
         self,
-        elector::{self, Random, RandomElector, RoundRobin, RoundRobinElector},
+        elector::{self, Random, RoundRobin, RoundRobinElector},
         Engine as Consensus,
     },
     types::{Epoch, FixedEpocher, Participant, Round, TermLength, ViewDelta},
@@ -64,7 +64,6 @@ const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(16);
 const STABLE_LEADER_STALL_TIMEOUT: Duration = Duration::from_secs(12);
-const STABLE_LEADER_OPTIMISTIC_VIEWS: ViewDelta = ViewDelta::new(100);
 
 /// Adapts the serialized leader policy to Simplex's statically typed elector configuration.
 #[derive(Clone, Default)]
@@ -76,26 +75,63 @@ impl elector::Config<Scheme> for ElectorConfig {
     fn build(self, participants: &Set<PublicKey>) -> Self::Elector {
         match self.0 {
             Leader::Rotating { .. } => {
-                ConfiguredElector::Rotating(elector::Config::<Scheme>::build(Random, participants))
+                ConfiguredElector::Rotating(RotatingElector::new(participants))
             }
-            Leader::Stable { term_length, .. } => {
-                ConfiguredElector::Stable(elector::Config::<Scheme>::build(
-                    RoundRobin::<Sha256>::default().with_term(
-                        TermLength::new(term_length),
-                        STABLE_LEADER_STALL_TIMEOUT,
-                        STABLE_LEADER_OPTIMISTIC_VIEWS,
-                    ),
-                    participants,
-                ))
-            }
+            Leader::Stable {
+                term_length,
+                optimistic_views,
+                ..
+            } => ConfiguredElector::Stable(elector::Config::<Scheme>::build(
+                RoundRobin::<Sha256>::default().with_term(
+                    TermLength::new(term_length),
+                    STABLE_LEADER_STALL_TIMEOUT,
+                    ViewDelta::new(optimistic_views),
+                ),
+                participants,
+            )),
         }
+    }
+}
+
+#[derive(Clone)]
+struct RotatingElector {
+    participants: u32,
+}
+
+impl RotatingElector {
+    fn new(participants: &Set<PublicKey>) -> Self {
+        assert!(!participants.is_empty(), "no participants");
+        Self {
+            participants: u32::try_from(participants.len()).expect("participant count fits in u32"),
+        }
+    }
+}
+
+impl elector::Elector<Scheme> for RotatingElector {
+    fn terms(&self) -> elector::Terms {
+        elector::Terms::rotating()
+    }
+
+    fn elect(
+        &self,
+        round: Round,
+        certificate: Option<&<Scheme as CertificateVerifier>::Certificate>,
+    ) -> Participant {
+        Random::select_leader::<MinSig>(
+            round,
+            self.participants,
+            certificate.map(|certificate| {
+                Scheme::verified_vrf_seed_signature(certificate)
+                    .expect("rotating leader requires a verified VRF certificate")
+            }),
+        )
     }
 }
 
 /// Holds the initialized runtime choice behind the single elector type required by Simplex.
 #[derive(Clone)]
 enum ConfiguredElector {
-    Rotating(RandomElector<Scheme>),
+    Rotating(RotatingElector),
     Stable(RoundRobinElector<Scheme>),
 }
 
@@ -272,8 +308,14 @@ where
         info!(elapsed = ?start.elapsed(), "restored finalized blocks archive");
 
         // Create marshal
-        let scheme = Scheme::signer(NAMESPACE, cfg.participants, cfg.polynomial, cfg.share)
-            .expect("failed to create scheme");
+        let scheme = Scheme::signer(
+            cfg.leader.certificate_mode(),
+            NAMESPACE,
+            cfg.participants,
+            cfg.polynomial,
+            cfg.share,
+        )
+        .expect("failed to create scheme");
         let provider = ConstantProvider::new(scheme.clone());
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
         let genesis = Application::genesis();
@@ -514,11 +556,15 @@ mod tests {
     fn configured_elector_preserves_rotating_and_stable_terms() {
         let Fixture { schemes, .. } =
             vrf::fixture::<MinSig, _>(&mut StdRng::seed_from_u64(0), NAMESPACE, 4);
+        let schemes: Vec<_> = schemes.into_iter().map(Scheme::from_vrf).collect();
         let participants = schemes[0].participants();
 
         let rotating_config = Leader::rotating(NZU64!(7));
         assert_eq!(rotating_config.delay_ms(), NZU64!(7));
-        assert_eq!(Leader::default(), Leader::stable(NZU64!(10), NZU32!(1_000)));
+        assert_eq!(
+            Leader::default(),
+            Leader::stable(NZU64!(10), NZU32!(1_000), 48)
+        );
 
         let rotating =
             elector::Config::<Scheme>::build(ElectorConfig(rotating_config), participants);
@@ -526,7 +572,7 @@ mod tests {
             elector::Elector::terms(&rotating),
             elector::Terms::rotating()
         );
-        let random = elector::Config::<Scheme>::build(Random, participants);
+        let random = RotatingElector::new(participants);
         let certificate_round = Round::new(EPOCH, View::new(1));
         let attestations: Vec<_> = schemes
             .iter()
@@ -548,13 +594,13 @@ mod tests {
 
         let term_length = NZU32!(9);
         let stable = elector::Config::<Scheme>::build(
-            ElectorConfig(Leader::stable(NZU64!(10), term_length)),
+            ElectorConfig(Leader::stable(NZU64!(10), term_length, 37)),
             participants,
         );
         let terms = elector::Elector::terms(&stable);
         assert_eq!(terms.length(), TermLength::new(term_length));
         assert_eq!(terms.stall_timeout(), Some(STABLE_LEADER_STALL_TIMEOUT));
-        assert_eq!(terms.optimistic_views(), STABLE_LEADER_OPTIMISTIC_VIEWS);
+        assert_eq!(terms.optimistic_views(), ViewDelta::new(37));
 
         let first = elector::Elector::elect(&stable, Round::new(EPOCH, View::new(1)), None);
         let last = elector::Elector::elect(

@@ -117,6 +117,7 @@ const App: React.FC = () => {
   const clusterConfig = useMemo(() => getClusterConfig(selectedCluster), [selectedCluster]);
   const allConfigs = useMemo(() => getClusters(), []);
   const { BACKEND_URL, PUBLIC_KEY_HEX, LOCATIONS, PARTICIPANTS } = clusterConfig;
+  const standardCertificates = clusterConfig.CERTIFICATE_MODE === 'standard';
   const PUBLIC_KEY = useMemo(() => hexToUint8Array(PUBLIC_KEY_HEX), [PUBLIC_KEY_HEX]);
 
   const [views, setViews] = useState<ViewData[]>([]);
@@ -426,6 +427,10 @@ const App: React.FC = () => {
     const view = notarized.proof.view;
     const leaderLocation = resolveLeaderLocation(notarized.block?.leader, PARTICIPANTS, LOCATIONS);
     setViews((prevViews) => {
+      const lastObservedView = lastObservedViewRef.current;
+      if (lastObservedView === null || view > lastObservedView) {
+        lastObservedViewRef.current = view;
+      }
       const index = prevViews.findIndex((v) => v.view === view);
 
       // If the view exists and is already finalized, ignore this notarization completely
@@ -506,6 +511,10 @@ const App: React.FC = () => {
     const view = finalized.proof.view;
     const leaderLocation = resolveLeaderLocation(finalized.block?.leader, PARTICIPANTS, LOCATIONS);
     setViews((prevViews) => {
+      const lastObservedView = lastObservedViewRef.current;
+      if (lastObservedView === null || view > lastObservedView) {
+        lastObservedViewRef.current = view;
+      }
       const index = prevViews.findIndex((v) => v.view === view);
       let newViews = [...prevViews];
       const currentTime = adjustTime(receivedAt);
@@ -762,6 +771,7 @@ const App: React.FC = () => {
           setShowError(true);
         },
         createWorker,
+        standardCertificates,
       );
       connectWebSocket();
     };
@@ -801,7 +811,7 @@ const App: React.FC = () => {
         }
       }
     };
-  }, [isLoading, isInMaintenance, BACKEND_URL, PUBLIC_KEY]);
+  }, [isLoading, isInMaintenance, BACKEND_URL, PUBLIC_KEY, standardCertificates]);
 
   // Loading state - show nothing until we get the result of the health check
   if (isLoading) {
@@ -931,7 +941,7 @@ const App: React.FC = () => {
           <div className="bars-header">
             <h2 className="bars-title">Timeline</h2>
             <div className="legend-container">
-              <LegendItem color={"#0000eeff"} label="Seeded" />
+              <LegendItem color={"#0000eeff"} label={standardCertificates ? "Proposed" : "Seeded"} />
               <LegendItem color={"#000"} label="Locked" />
               <LegendItem color={"#228B22ff"} label="Finalized" />
             </div>
@@ -962,6 +972,7 @@ const App: React.FC = () => {
       <AboutModal
         isOpen={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
+        standardCertificates={standardCertificates}
       />
       <KeyInfoModal
         isOpen={isKeyInfoModalOpen}
@@ -1225,7 +1236,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
           {/* Finalized state with notarization */}
           {status === "finalized" && !renderFinalizedWithoutNotarization && (
             <>
-              {/* Base segment (seed to notarization) */}
+              {/* Base segment (proposal or seed to notarization) */}
               <div
                 className="bar-segment growing"
                 style={{ width: `${notarizedWidth}px` }}

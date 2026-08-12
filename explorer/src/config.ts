@@ -4,10 +4,12 @@ import * as localConfig from './local_config';
 
 export type Cluster = 'global' | 'usa' | 'local';
 export type Mode = 'public' | 'local';
+export type CertificateMode = 'standard' | 'vrf';
 
 export interface ClusterConfig {
     BACKEND_URL: string;
     PUBLIC_KEY_HEX: string;
+    CERTIFICATE_MODE: CertificateMode;
     LOCATIONS: [[number, number], string][];
     PARTICIPANTS?: string[];
     name: string;

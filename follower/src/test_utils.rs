@@ -3,7 +3,7 @@
 use crate::Source;
 use alto_client::consensus::{Message, Payload};
 use alto_client::{IndexQuery, Query};
-use alto_types::{Block, Context, Finalized, Notarized, Scheme, EPOCH, NAMESPACE};
+use alto_types::{Block, CertificateMode, Context, Finalized, Notarized, Scheme, EPOCH, NAMESPACE};
 use bytes::Bytes;
 use commonware_consensus::{
     simplex::{
@@ -110,6 +110,7 @@ impl TestFixture {
         let mut rng = StdRng::seed_from_u64(0);
         let Fixture { schemes, .. } =
             bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
+        let schemes = schemes.into_iter().map(Scheme::from_vrf).collect();
         Self { schemes }
     }
 
@@ -166,8 +167,8 @@ impl TestFixture {
     }
 
     pub fn verifier_scheme(&self) -> Scheme {
-        let identity = *self.schemes[0].polynomial().public();
-        Scheme::certificate_verifier(NAMESPACE, identity)
+        let identity = *self.schemes[0].identity();
+        Scheme::certificate_verifier(CertificateMode::Vrf, NAMESPACE, identity)
     }
 
     pub fn wrong_verifier_scheme(&self) -> Scheme {
@@ -175,6 +176,6 @@ impl TestFixture {
         let Fixture { schemes, .. } =
             bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
         let wrong_identity = *schemes[0].polynomial().public();
-        Scheme::certificate_verifier(NAMESPACE, wrong_identity)
+        Scheme::certificate_verifier(CertificateMode::Vrf, NAMESPACE, wrong_identity)
     }
 }

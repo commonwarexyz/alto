@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-for tool in cargo just docker deployer npm wasm-pack; do
+for tool in cargo file just docker deployer npm wasm-pack; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "missing required command: $tool" >&2
         exit 1
@@ -51,27 +51,28 @@ if [ -d assets ]; then
     rm -rf ./assets
 fi
 
-# Keep enough of the 16-vCPU machine free for networking, storage, and consensus
-# while reserving most of the remaining compute for signature verification.
+# C7gd exposes 16 single-threaded Graviton 3 cores. The 8/16 split is the
+# deployment tuning point for overlapping network and signature work.
 cargo run --locked --bin deploy -- generate \
     --peers 50 \
     --bootstrappers 5 \
-    --worker-threads 4 \
+    --worker-threads 8 \
     --network-buffer-pool-max-per-class 16384 \
     --log-level info \
     --mailbox-size 16384 \
     --deque-size 256 \
     --block-size 0 \
-    --signature-threads 12 \
+    --signature-threads 16 \
     --leader-mode stable \
     --leader-delay-ms 5 \
     --leader-term-length 100000 \
+    --leader-optimistic-views 48 \
     --output assets \
     remote \
     --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,eu-north-1,ap-south-1,sa-east-1,eu-central-1,ap-northeast-2,ap-southeast-2 \
     --monitoring-instance-type c8g.4xlarge \
     --monitoring-storage-size 100 \
-    --instance-type i7i.4xlarge \
+    --instance-type c7gd.4xlarge \
     --storage-size 25 \
     --dashboard deploy/dashboard.json \
     --indexer
@@ -108,16 +109,27 @@ if [ -z "$derived_network_identity" ] || [ "$derived_network_identity" != "$depl
     echo "indexer explorer identity does not match the validator network polynomial" >&2
     exit 1
 fi
+derived_certificate_mode="$(sed -n 's/^export const CERTIFICATE_MODE = "\(.*\)" as const;$/\1/p' "$network_key_check_dir/config.ts")"
+deployed_certificate_mode="$(sed -n 's/^certificate_mode: //p' assets/indexer.yaml)"
+if [ -z "$derived_certificate_mode" ] || [ "$derived_certificate_mode" != "$deployed_certificate_mode" ]; then
+    echo "indexer explorer certificate mode does not match the validator leader mode" >&2
+    exit 1
+fi
 cleanup_network_key_check
 trap - EXIT
 
 validator_config_count=0
 while IFS= read -r validator_config; do
     validator_config_count=$((validator_config_count + 1))
-    if ! grep -qx 'network_buffer_pool_max_per_class: 16384' "assets/${validator_config}"; then
-        echo "validator config has an unexpected network buffer pool limit: assets/${validator_config}" >&2
-        exit 1
-    fi
+    for expected_setting in \
+        'worker_threads: 8' \
+        'network_buffer_pool_max_per_class: 16384' \
+        'signature_threads: 16'; do
+        if ! grep -qx "$expected_setting" "assets/${validator_config}"; then
+            echo "validator config is missing '${expected_setting}': assets/${validator_config}" >&2
+            exit 1
+        fi
+    done
 done < <(awk '
     $1 == "binary:" { binary = $2; next }
     $1 == "config:" && binary == "validator" { print $2 }
@@ -135,10 +147,14 @@ if [ ! -f explorer/build/index.html ]; then
     exit 1
 fi
 
-just intel-binaries
+just graviton-binaries
 for artifact in validator indexer; do
     if [ ! -x "assets/$artifact" ]; then
         echo "build did not create executable assets/$artifact" >&2
+        exit 1
+    fi
+    if ! file "assets/$artifact" | grep -q 'ARM aarch64'; then
+        echo "build did not create an AArch64 assets/$artifact binary" >&2
         exit 1
     fi
 done

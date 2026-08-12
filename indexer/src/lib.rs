@@ -53,7 +53,7 @@ impl<S: Strategy> Indexer<S> {
 
     pub fn submit_seed(&self, seed: Seed) -> Result<(), &'static str> {
         // Verify signature with identity
-        if !seed.verify(&self.scheme) {
+        if !self.scheme.verify_seed(&seed) {
             return Err("Invalid seed signature");
         }
 
@@ -410,10 +410,7 @@ mod tests {
     impl TestContext {
         /// Create a new test context with a running server and client.
         async fn new() -> Self {
-            let mut rng = StdRng::seed_from_u64(0);
-            let Fixture { schemes, .. } =
-                bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-            let identity = *schemes[0].polynomial().public();
+            let (schemes, identity) = fixture(0);
 
             let (addr, _) = start_server(schemes[0].clone(), Sequential).await;
             let client = Client::new(&format!("http://{addr}"), identity, Sequential);
@@ -451,7 +448,7 @@ mod tests {
         fn seed(&self) -> Seed {
             let block = self.test_block();
             let proposal = self.proposal(&block);
-            create_notarization(&self.schemes, proposal).seed()
+            create_notarization(&self.schemes, proposal).seed().unwrap()
         }
 
         /// Create a notarized block.
@@ -523,6 +520,7 @@ mod tests {
         let Fixture { schemes, .. } =
             bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
         let identity = *schemes[0].polynomial().public();
+        let schemes = schemes.into_iter().map(Scheme::from_vrf).collect();
         (schemes, identity)
     }
 
@@ -691,7 +689,7 @@ mod tests {
             View::new(0),
             block.digest(),
         );
-        let seed = create_notarization(&schemes1, proposal).seed();
+        let seed = create_notarization(&schemes1, proposal).seed().unwrap();
 
         // Server accepts it (signed by schemes1, which server uses)
         client.seed_upload(seed).await.unwrap();
@@ -711,7 +709,9 @@ mod tests {
         // Create a seed with wrong schemes
         let block = ctx.test_block();
         let proposal = ctx.proposal(&block);
-        let bad_seed = create_notarization(&wrong_schemes, proposal).seed();
+        let bad_seed = create_notarization(&wrong_schemes, proposal)
+            .seed()
+            .unwrap();
 
         // Server rejects it (signature doesn't match server's identity)
         let result = ctx.client.seed_upload(bad_seed).await;
@@ -792,10 +792,7 @@ mod tests {
     async fn test_tls_https_connection() {
         let cert_key = generate_self_signed_cert();
 
-        let mut rng = StdRng::seed_from_u64(0);
-        let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-        let identity = *schemes[0].polynomial().public();
+        let (schemes, identity) = fixture(0);
 
         let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key, Sequential).await;
         let client = create_tls_client(addr, identity, &cert_key);
@@ -819,7 +816,7 @@ mod tests {
             View::new(0),
             block.digest(),
         );
-        let seed = create_notarization(&schemes, proposal).seed();
+        let seed = create_notarization(&schemes, proposal).seed().unwrap();
 
         // Test HTTPS POST
         client.seed_upload(seed.clone()).await.unwrap();
@@ -835,10 +832,7 @@ mod tests {
     async fn test_tls_websocket_connection() {
         let cert_key = generate_self_signed_cert();
 
-        let mut rng = StdRng::seed_from_u64(0);
-        let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-        let identity = *schemes[0].polynomial().public();
+        let (schemes, identity) = fixture(0);
 
         let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key, Sequential).await;
         let client = create_tls_client(addr, identity, &cert_key);
@@ -862,7 +856,7 @@ mod tests {
             View::new(0),
             block.digest(),
         );
-        let seed = create_notarization(&schemes, proposal).seed();
+        let seed = create_notarization(&schemes, proposal).seed().unwrap();
 
         // Connect to WebSocket over TLS
         let mut stream = client.listen().await.unwrap();

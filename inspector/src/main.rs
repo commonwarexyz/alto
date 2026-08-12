@@ -20,7 +20,7 @@
 //!
 //! # Usage
 //!
-//! _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
+//! _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement). Use `--certificate-mode standard` for a stable-leader network; the default is `vrf`._
 //!
 //! ## Get the latest seed
 //!
@@ -80,7 +80,7 @@ use alto_client::{
     consensus::{Message, Payload},
     Client, IndexQuery, Query,
 };
-use alto_types::Identity;
+use alto_types::{CertificateMode, Identity};
 use clap::{value_parser, Arg, Command};
 use commonware_codec::DecodeExt;
 use commonware_formatting::from_hex;
@@ -111,6 +111,14 @@ async fn main() {
                 .help("Enable debug logging")
                 .global(true)
                 .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("certificate_mode")
+                .long("certificate-mode")
+                .value_parser(["standard", "vrf"])
+                .default_value("vrf")
+                .global(true)
+                .help("Threshold certificate construction used by the network"),
         )
         .subcommand(
             Command::new("listen")
@@ -175,13 +183,23 @@ async fn main() {
         Level::INFO
     };
     tracing_subscriber::fmt().with_max_level(log_level).init();
+    let certificate_mode = match matches
+        .get_one::<String>("certificate_mode")
+        .expect("certificate mode has a default")
+        .as_str()
+    {
+        "standard" => CertificateMode::Standard,
+        "vrf" => CertificateMode::Vrf,
+        _ => unreachable!("clap validates certificate mode"),
+    };
 
     if let Some(matches) = matches.subcommand_matches("listen") {
         let indexer = matches.get_one::<String>("indexer").unwrap();
         let identity = matches.get_one::<String>("identity").unwrap();
         let identity = from_hex(identity).expect("Failed to decode identity");
         let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
-        let client = Client::new(indexer, identity, Sequential);
+        let client =
+            Client::new_with_certificate_mode(indexer, identity, certificate_mode, Sequential);
 
         let mut stream = client.listen().await.expect("Failed to connect to indexer");
         info!("listening for consensus messages...");
@@ -200,7 +218,8 @@ async fn main() {
         let identity = matches.get_one::<String>("identity").unwrap();
         let identity = from_hex(identity).expect("Failed to decode identity");
         let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
-        let client = Client::new(indexer, identity, Sequential);
+        let client =
+            Client::new_with_certificate_mode(indexer, identity, certificate_mode, Sequential);
         let prepare_flag = matches.get_flag("prepare");
 
         if prepare_flag {

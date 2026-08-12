@@ -1,5 +1,6 @@
 export const BACKEND_URL = "usa.alto.exoware.xyz";
 export const PUBLIC_KEY_HEX = "a156881f2d99ecd30cc7b9550d65765482cf04be7ec740b8ae64abb3ad8630a61619319c3d4abba4b1791bf774424a7f096cf35654524187cafd338f7c89523c68676a80c941ed40c7de045869fb00326df1eadb26b62eb2096318814ee9d080";
+export const CERTIFICATE_MODE = "vrf" as const;
 export const LOCATIONS: [[number, number], string][] = [
     [[38.8339, -77.3074], "Ashburn"],
     [[40.0946, -82.7541], "Columbus"],

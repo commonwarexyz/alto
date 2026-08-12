@@ -10,8 +10,8 @@ pub use block::{Block, Finalized, Notarized};
 
 mod consensus;
 pub use consensus::{
-    Activity, Context, Finalization, Identity, Notarization, PublicKey, Scheme, Seed, Seedable,
-    Signature,
+    Activity, CertificateMode, Context, Finalization, Identity, Notarization, PublicKey, Scheme,
+    Seed, Seedable, Signature,
 };
 
 pub mod wasm;
@@ -114,6 +114,7 @@ mod tests {
         let n = 4;
         let Fixture { schemes, .. } =
             bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
+        let schemes: Vec<_> = schemes.into_iter().map(Scheme::from_vrf).collect();
 
         // Create a block with context
         let context = Context {
@@ -160,6 +161,7 @@ mod tests {
         let n = 4;
         let Fixture { schemes, .. } =
             bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
+        let schemes: Vec<_> = schemes.into_iter().map(Scheme::from_vrf).collect();
 
         // Create a block with context
         let context = Context {

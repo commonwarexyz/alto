@@ -12,6 +12,9 @@ source: "https://usa.alto.exoware.xyz"
 # This is the threshold public key used to verify finalization signatures
 identity: "a156881f2d99ecd30cc7b9550d65765482cf04be7ec740b8ae64abb3ad8630a61619319c3d4abba4b1791bf774424a7f096cf35654524187cafd338f7c89523c68676a80c941ed40c7de045869fb00326df1eadb26b62eb2096318814ee9d080"
 
+# Certificate construction used by this rotating-leader network
+certificate_mode: "vrf"
+
 # Directory for storing finalized blocks and state
 directory: "/tmp/alto-follower-usa"
 

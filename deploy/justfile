@@ -15,6 +15,17 @@ indexer-graviton-binary: build-graviton-image prepare-docker-cache
 
 graviton-binaries: validator-graviton-binary indexer-graviton-binary
 
+build-graviton4-image:
+    docker buildx bake --progress plain -f deploy/docker-bake.hcl graviton4
+
+validator-graviton4-binary: build-graviton4-image prepare-docker-cache
+    docker run --rm {{source-mounts}} {{cache-env}} -e PACKAGE_NAME=alto-validator -e BINARY_NAME=validator -e OUTPUT_NAME=validator alto-validator-builder:graviton4-local
+
+indexer-graviton4-binary: build-graviton4-image prepare-docker-cache
+    docker run --rm {{source-mounts}} {{cache-env}} -e PACKAGE_NAME=alto-indexer -e BINARY_NAME=indexer -e OUTPUT_NAME=indexer alto-validator-builder:graviton4-local
+
+graviton4-binaries: validator-graviton4-binary indexer-graviton4-binary
+
 build-intel-image:
     docker buildx bake --progress plain -f deploy/docker-bake.hcl intel
 

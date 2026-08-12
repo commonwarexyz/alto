@@ -4,9 +4,10 @@ import { MODE } from './config';
 interface AboutModalProps {
     isOpen: boolean;
     onClose: () => void;
+    standardCertificates: boolean;
 }
 
-const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
+const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, standardCertificates }) => {
     // Add effect to handle link targets
     useEffect(() => {
         if (isOpen) {
@@ -68,7 +69,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         </p>
                         <p>
                             Validators enter a new view whenever they observe either <i>2f+1</i> votes for a block proposal or <i>2f+1</i> nullifies
-                            (to skip this view) AND some seed (a VRF used to select the next leader). Validators finalize a view whenever they
+                            (to skip this view){standardCertificates ? '.' : ' and a VRF seed used to select the next leader.'} Validators finalize a view whenever they
                             observe <i>2f+1</i> finalizes for a block proposal.
                         </p>
                         <p>
@@ -78,11 +79,13 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                             <li>
                                 <div className="status-indicator-wrapper">
                                     <div className="about-status-indicator" style={{ backgroundColor: "#0000eeff" }}></div>
-                                    <strong>Seeded</strong>
+                                    <strong>{standardCertificates ? 'Proposed' : 'Seeded'}</strong>
                                 </div>
-                                Some leader has been elected to propose a block.
+                                {standardCertificates
+                                    ? 'The stable round-robin leader has proposed a block.'
+                                    : 'Some leader has been elected to propose a block.'}
                                 {MODE === 'public' && ' The dot on the map (of the same color) is the region where the leader is located.'}
-                                {' '}A new leader is elected for each view.
+                                {!standardCertificates && ' A new leader is elected for each view.'}
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">

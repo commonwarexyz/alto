@@ -7,12 +7,14 @@ import init, {
 } from "./alto_types/alto_types.js";
 
 let publicKey: Uint8Array | undefined;
+let standard = false;
 const initialized = init();
 const worker = globalThis as unknown as DedicatedWorkerGlobalScope;
 
 worker.onmessage = async (event: MessageEvent) => {
   if (event.data.type === "initialize") {
     publicKey = event.data.publicKey;
+    standard = event.data.standard;
     return;
   }
   if (event.data.type !== "verify") {
@@ -31,10 +33,10 @@ worker.onmessage = async (event: MessageEvent) => {
       artifact = parse_seed(publicKey, payload);
       break;
     case 1:
-      artifact = parse_notarized(publicKey, payload);
+      artifact = parse_notarized(publicKey, payload, standard);
       break;
     case 2:
-      artifact = parse_finalized(publicKey, payload);
+      artifact = parse_finalized(publicKey, payload, standard);
       break;
   }
 

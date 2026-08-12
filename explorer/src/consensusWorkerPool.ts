@@ -38,6 +38,7 @@ export class ConsensusWorkerPool {
     private readonly onVerified: (result: VerifiedConsensusArtifact) => void,
     private readonly onError?: (event: ErrorEvent) => void,
     private readonly createWorker?: () => Worker,
+    private readonly standard = false,
   ) {
     this.availableWorkers = [];
     for (const worker of workers) {
@@ -67,7 +68,7 @@ export class ConsensusWorkerPool {
       this.dispatch();
     };
     worker.onerror = (event) => this.handleWorkerError(worker, event);
-    worker.postMessage({ type: "initialize", publicKey: this.publicKey });
+    worker.postMessage({ type: "initialize", publicKey: this.publicKey, standard: this.standard });
   }
 
   private handleWorkerError(worker: Worker, event: ErrorEvent) {

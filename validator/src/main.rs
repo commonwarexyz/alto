@@ -359,7 +359,12 @@ fn main() {
         // Create indexer
         let mut indexer = None;
         if let Some(indexer_url) = config.indexer.as_deref() {
-            indexer = Some(Client::new(indexer_url, *identity, strategy.clone()));
+            indexer = Some(Client::new_with_certificate_mode(
+                indexer_url,
+                *identity,
+                config.leader.certificate_mode(),
+                strategy.clone(),
+            ));
         }
 
         // Create engine

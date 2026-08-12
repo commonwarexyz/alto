@@ -1,3 +1,4 @@
+use alto_types::CertificateMode;
 use commonware_utils::{NZUsize, NZU32, NZU64};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -18,6 +19,7 @@ pub const DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(16_384)
 pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(4_096);
 const DEFAULT_STABLE_LEADER_DELAY_MS: NonZeroU64 = NZU64!(10);
 const DEFAULT_STABLE_LEADER_TERM_LENGTH: NonZeroU32 = NZU32!(1_000);
+const DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS: u64 = 48;
 
 fn default_backfiller_max_active() -> NonZeroUsize {
     DEFAULT_BACKFILLER_MAX_ACTIVE
@@ -39,6 +41,10 @@ fn default_network_buffer_pool_max_per_class() -> Option<NonZeroU32> {
     Some(DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS)
 }
 
+const fn default_stable_leader_optimistic_views() -> u64 {
+    DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS
+}
+
 /// Leader election policy for the consensus engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
@@ -49,6 +55,7 @@ pub enum Leader {
     Stable {
         delay_ms: NonZeroU64,
         term_length: NonZeroU32,
+        optimistic_views: u64,
     },
 }
 
@@ -66,6 +73,8 @@ impl<'de> Deserialize<'de> for Leader {
             Stable {
                 delay_ms: NonZeroU64,
                 term_length: NonZeroU32,
+                #[serde(default = "default_stable_leader_optimistic_views")]
+                optimistic_views: u64,
             },
         }
 
@@ -74,7 +83,8 @@ impl<'de> Deserialize<'de> for Leader {
             Config::Stable {
                 delay_ms,
                 term_length,
-            } if term_length.get() > 1 => Ok(Self::stable(delay_ms, term_length)),
+                optimistic_views,
+            } if term_length.get() > 1 => Ok(Self::stable(delay_ms, term_length, optimistic_views)),
             Config::Stable { .. } => Err(serde::de::Error::custom(
                 "stable leader term length must be greater than 1",
             )),
@@ -89,7 +99,11 @@ impl Leader {
     }
 
     /// Creates a stable leader configuration.
-    pub const fn stable(delay_ms: NonZeroU64, term_length: NonZeroU32) -> Self {
+    pub const fn stable(
+        delay_ms: NonZeroU64,
+        term_length: NonZeroU32,
+        optimistic_views: u64,
+    ) -> Self {
         assert!(
             term_length.get() > 1,
             "stable leader term length must be greater than 1"
@@ -97,6 +111,7 @@ impl Leader {
         Self::Stable {
             delay_ms,
             term_length,
+            optimistic_views,
         }
     }
 
@@ -106,6 +121,14 @@ impl Leader {
             Self::Rotating { delay_ms } | Self::Stable { delay_ms, .. } => delay_ms,
         }
     }
+
+    /// Threshold certificate construction required by this leader policy.
+    pub const fn certificate_mode(self) -> CertificateMode {
+        match self {
+            Self::Rotating { .. } => CertificateMode::Vrf,
+            Self::Stable { .. } => CertificateMode::Standard,
+        }
+    }
 }
 
 impl Default for Leader {
@@ -113,6 +136,7 @@ impl Default for Leader {
         Self::stable(
             DEFAULT_STABLE_LEADER_DELAY_MS,
             DEFAULT_STABLE_LEADER_TERM_LENGTH,
+            DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS,
         )
     }
 }
@@ -858,7 +882,7 @@ mod tests {
             poll_until_height(&context, required_container).await;
 
             // Check indexer uploads
-            assert!(indexer.seed_seen.load(std::sync::atomic::Ordering::Relaxed));
+            assert!(!indexer.seed_seen.load(std::sync::atomic::Ordering::Relaxed));
             assert!(indexer
                 .notarization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
