@@ -316,24 +316,21 @@ impl CertificateScheme for Scheme {
     {
         match &self.0 {
             Inner::Standard(scheme) => {
-                let mut rejected = BTreeSet::new();
-                let attestations = attestations
-                    .into_iter()
-                    .filter_map(|attestation| {
+                let (attestations, rejected) =
+                    strategy.map_partition_collect_vec(attestations.into_iter(), |attestation| {
                         let signer = attestation.signer;
-                        let Some(signature) =
-                            attestation.signature.get().and_then(standard_signature)
-                        else {
-                            rejected.insert(signer);
-                            return None;
-                        };
-                        Some(Attestation::<StandardScheme> {
-                            signer,
-                            signature: signature.into(),
-                        })
-                    })
-                    .collect::<Vec<_>>();
+                        let converted = attestation
+                            .signature
+                            .get()
+                            .and_then(standard_signature)
+                            .map(|signature| Attestation::<StandardScheme> {
+                                signer,
+                                signature: signature.into(),
+                            });
+                        (signer, converted)
+                    });
                 let verification = scheme.verify_attestations(rng, subject, attestations, strategy);
+                let mut rejected: BTreeSet<_> = rejected.into_iter().collect();
                 rejected.extend(verification.invalid);
                 Verification::new(
                     verification
@@ -437,8 +434,128 @@ mod tests {
         types::{Epoch, Round, View},
     };
     use commonware_cryptography::{certificate::mocks::Fixture, sha256, Digest as _};
-    use commonware_parallel::Sequential;
+    use commonware_parallel::{Manual, Sequential};
     use rand::{rngs::StdRng, SeedableRng};
+    use std::{
+        future::Future,
+        num::NonZeroUsize,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+    };
+
+    #[derive(Clone, Debug, Default)]
+    struct CountingStrategy {
+        partition_calls: Arc<AtomicUsize>,
+    }
+
+    impl CountingStrategy {
+        fn partition_calls(&self) -> usize {
+            self.partition_calls.load(Ordering::Relaxed)
+        }
+    }
+
+    impl Strategy for CountingStrategy {
+        fn manual(&self) -> Manual<Self> {
+            Manual::new(self.clone(), NonZeroUsize::MIN)
+        }
+
+        fn spawn<F, T>(&self, f: F) -> impl Future<Output = T> + Send + 'static
+        where
+            F: FnOnce(Self) -> T + Send + 'static,
+            T: Send + 'static,
+        {
+            let strategy = self.clone();
+            async move { f(strategy) }
+        }
+
+        fn run<R, SEQ, PAR>(&self, len: usize, serial: SEQ, parallel: PAR) -> R
+        where
+            R: Send,
+            SEQ: FnOnce() -> R + Send,
+            PAR: FnOnce() -> R + Send,
+        {
+            Sequential.run(len, serial, parallel)
+        }
+
+        fn try_run<R, E, SEQ, PAR>(&self, len: usize, serial: SEQ, parallel: PAR) -> Result<R, E>
+        where
+            R: Send,
+            E: Send,
+            SEQ: FnOnce() -> Result<R, E> + Send,
+            PAR: FnOnce() -> Result<R, E> + Send,
+        {
+            Sequential.try_run(len, serial, parallel)
+        }
+
+        fn fold_init<I, INIT, T, R, ID, F, RD>(
+            &self,
+            iter: I,
+            init: INIT,
+            identity: ID,
+            fold_op: F,
+            reduce_op: RD,
+        ) -> R
+        where
+            I: IntoIterator<IntoIter: Send, Item: Send> + Send,
+            INIT: Fn() -> T + Send + Sync,
+            T: Send,
+            R: Send,
+            ID: Fn() -> R + Send + Sync,
+            F: Fn(R, &mut T, I::Item) -> R + Send + Sync,
+            RD: Fn(R, R) -> R + Send + Sync,
+        {
+            Sequential.fold_init(iter, init, identity, fold_op, reduce_op)
+        }
+
+        fn try_fold<I, R, E, ID, F, RD>(
+            &self,
+            iter: I,
+            identity: ID,
+            fold_op: F,
+            reduce_op: RD,
+        ) -> Result<R, E>
+        where
+            I: IntoIterator<IntoIter: Send, Item: Send> + Send,
+            R: Send,
+            E: Send,
+            ID: Fn() -> R + Send + Sync,
+            F: Fn(R, I::Item) -> Result<R, E> + Send + Sync,
+            RD: Fn(R, R) -> R + Send + Sync,
+        {
+            Sequential.try_fold(iter, identity, fold_op, reduce_op)
+        }
+
+        fn map_partition_collect_vec<I, F, K, U>(&self, iter: I, map_op: F) -> (Vec<U>, Vec<K>)
+        where
+            I: IntoIterator<IntoIter: Send, Item: Send> + Send,
+            F: Fn(I::Item) -> (K, Option<U>) + Send + Sync,
+            K: Send,
+            U: Send,
+        {
+            self.partition_calls.fetch_add(1, Ordering::Relaxed);
+            Sequential.map_partition_collect_vec(iter, map_op)
+        }
+
+        fn join<A, B, RA, RB>(&self, a: A, b: B) -> (RA, RB)
+        where
+            A: FnOnce() -> RA + Send,
+            B: FnOnce() -> RB + Send,
+            RA: Send,
+            RB: Send,
+        {
+            Sequential.join(a, b)
+        }
+
+        fn sort_by<T, C>(&self, items: &mut [T], compare: C)
+        where
+            T: Send,
+            C: Fn(&T, &T) -> std::cmp::Ordering + Send + Sync,
+        {
+            Sequential.sort_by(items, compare);
+        }
+    }
 
     fn schemes(mode: CertificateMode, seed: u64) -> Vec<Scheme> {
         let mut rng = StdRng::seed_from_u64(seed);
@@ -534,6 +651,43 @@ mod tests {
                 &Sequential,
             ),
             vec![true, false]
+        );
+    }
+
+    #[test]
+    fn standard_threshold_batch_uses_strategy_for_adapter_decoding() {
+        let schemes = schemes(CertificateMode::Standard, 11);
+        let proposal = Proposal::new(
+            Round::new(Epoch::new(1), View::new(9)),
+            View::new(8),
+            sha256::Digest::EMPTY,
+        );
+        let attestations = schemes
+            .iter()
+            .map(|scheme| {
+                scheme
+                    .sign(Subject::Notarize {
+                        proposal: &proposal,
+                    })
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let strategy = CountingStrategy::default();
+
+        let verification = schemes[0].verify_attestations(
+            &mut StdRng::seed_from_u64(12),
+            Subject::Notarize {
+                proposal: &proposal,
+            },
+            attestations,
+            &strategy,
+        );
+
+        assert_eq!(verification.verified.len(), schemes.len());
+        assert!(verification.invalid.is_empty());
+        assert!(
+            strategy.partition_calls() >= 2,
+            "the adapter and standard verifier must both use the parallel strategy"
         );
     }
 
