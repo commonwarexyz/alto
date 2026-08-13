@@ -59,6 +59,7 @@ cargo run --locked --bin deploy -- generate \
     --worker-threads 8 \
     --network-buffer-pool-max-per-class 16384 \
     --log-level info \
+    --traces-sample-rate 0 \
     --mailbox-size 16384 \
     --deque-size 256 \
     --block-size 0 \
@@ -124,6 +125,7 @@ while IFS= read -r validator_config; do
     for expected_setting in \
         'worker_threads: 8' \
         'network_buffer_pool_max_per_class: 16384' \
+        'traces_sample_rate: 0.0' \
         'signature_threads: 16'; do
         if ! grep -qx "$expected_setting" "assets/${validator_config}"; then
             echo "validator config is missing '${expected_setting}': assets/${validator_config}" >&2

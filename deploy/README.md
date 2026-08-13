@@ -31,6 +31,9 @@ together. `deploy.sh` generates a new network identity and infrastructure for th
 and defaults to `0`. Validators reject only values whose encoded blocks exceed the authenticated
 transport capacity. All validators in a network must use the same value.
 
+`--traces-sample-rate` sets the fraction of traces exported by each validator and accepts values
+from `0` through `1`. It defaults to `0`, which disables trace export.
+
 Generated validator configs use:
 
 ```yaml
@@ -40,11 +43,12 @@ leader:
   term_length: 1000
   optimistic_views: 48
 block_size: 0
+traces_sample_rate: 0.0
 indexer: http://localhost:8080
 ```
 
 ```bash
-cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --leader-optimistic-views 48 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
+cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --leader-optimistic-views 48 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
 ```
 
 _If the command succeeds, you should see the following output:_
@@ -152,7 +156,7 @@ instance discards its NVMe data._
 ##### USA
 
 ```bash
-cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --leader-optimistic-views 48 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 75 --dashboard deploy/dashboard.json
+cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --leader-optimistic-views 48 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 75 --dashboard deploy/dashboard.json
 ```
 
 _This configuration consumes ~30MB of disk space per hour per validator (~13 views per second). With 75GB of storage allocated, validators will exhaust available storage in ~3 months._

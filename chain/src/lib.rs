@@ -17,6 +17,7 @@ pub const DEFAULT_BACKFILLER_RETRY_MS: u64 = 1_000;
 pub const DEFAULT_BLOCKING_THREADS: usize = 512;
 pub const DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(16_384);
 pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(4_096);
+const DEFAULT_TRACES_SAMPLE_RATE: f64 = 0.0;
 const DEFAULT_STABLE_LEADER_DELAY_MS: NonZeroU64 = NZU64!(10);
 const DEFAULT_STABLE_LEADER_TERM_LENGTH: NonZeroU32 = NZU32!(1_000);
 const DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS: u64 = 48;
@@ -39,6 +40,23 @@ fn default_storage_buffer_pool_max_per_class() -> Option<NonZeroU32> {
 
 fn default_network_buffer_pool_max_per_class() -> Option<NonZeroU32> {
     Some(DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS)
+}
+
+const fn default_traces_sample_rate() -> f64 {
+    DEFAULT_TRACES_SAMPLE_RATE
+}
+
+fn deserialize_traces_sample_rate<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let rate = f64::deserialize(deserializer)?;
+    if rate.is_finite() && (0.0..=1.0).contains(&rate) {
+        return Ok(rate);
+    }
+    Err(serde::de::Error::custom(
+        "traces sample rate must be between 0 and 1",
+    ))
 }
 
 const fn default_stable_leader_optimistic_views() -> u64 {
@@ -156,6 +174,12 @@ pub struct Config {
     #[serde(default)]
     pub network_buffer_pool_parallelism: Option<NonZeroUsize>,
     pub log_level: String,
+    #[serde(
+        default = "default_traces_sample_rate",
+        deserialize_with = "deserialize_traces_sample_rate"
+    )]
+    /// Fraction of traces exported to the configured collector; zero disables tracing.
+    pub traces_sample_rate: f64,
 
     pub local: bool,
     pub allowed_peers: Vec<String>,

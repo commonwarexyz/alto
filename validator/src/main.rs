@@ -45,12 +45,6 @@ const MARSHAL_CHANNEL: u64 = 4;
 const BASE_CHANNEL_QUOTA_PER_SECOND: u32 = 1_500;
 const VOTING_CHANNEL_QUOTA_PER_SECOND: u32 = 3_000;
 
-// Fraction of traces sampled and exported to the monitoring host's OTLP collector.
-// Export everything: partial sampling hides the rare events we care about (a leader
-// missing its deadline shows up a handful of times per hour, so a 10% sample is
-// likely to miss it entirely).
-const TRACES_SAMPLE_RATE: f64 = 1.0;
-
 const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 const CERTIFICATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NULLIFY_RETRY: Duration = Duration::from_secs(10);
@@ -189,11 +183,14 @@ fn main() {
                 .collect();
             config.indexer = Some(resolve_named_http_url(indexer_url, &hosts_by_name));
         }
-        let traces = hosts.as_ref().map(|hosts| tokio::tracing::Config {
-            endpoint: format!("http://{}:4318/v1/traces", hosts.monitoring.private),
-            name: public_key.to_string(),
-            rate: TRACES_SAMPLE_RATE,
-        });
+        let traces = hosts
+            .as_ref()
+            .filter(|_| config.traces_sample_rate > 0.0)
+            .map(|hosts| tokio::tracing::Config {
+                endpoint: format!("http://{}:4318/v1/traces", hosts.monitoring.private),
+                name: public_key.to_string(),
+                rate: config.traces_sample_rate,
+            });
         tokio::telemetry::init(
             context.child("telemetry"),
             tokio::telemetry::Logs {

@@ -77,6 +77,23 @@ fn block_size_arg() -> Arg {
         .value_parser(value_parser!(u32))
 }
 
+fn parse_traces_sample_rate(value: &str) -> Result<f64, String> {
+    let rate = value
+        .parse::<f64>()
+        .map_err(|_| "traces sample rate must be a number between 0 and 1".to_string())?;
+    if rate.is_finite() && (0.0..=1.0).contains(&rate) {
+        return Ok(rate);
+    }
+    Err("traces sample rate must be between 0 and 1".to_string())
+}
+
+fn traces_sample_rate_arg() -> Arg {
+    Arg::new("traces_sample_rate")
+        .long("traces-sample-rate")
+        .default_value("0")
+        .value_parser(parse_traces_sample_rate)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ConfiguredIndexer {
     url: String,
@@ -270,6 +287,7 @@ fn main() {
                         .required(true)
                         .value_parser(value_parser!(String)),
                 )
+                .arg(traces_sample_rate_arg())
                 .arg(
                     Arg::new("mailbox_size")
                         .long("mailbox-size")
@@ -414,6 +432,7 @@ fn main() {
                 .get_one::<NonZeroUsize>("network_buffer_pool_parallelism")
                 .copied();
             let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
+            let traces_sample_rate = *sub_matches.get_one::<f64>("traces_sample_rate").unwrap();
             let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
             let deque_size = *sub_matches.get_one::<usize>("deque_size").unwrap();
             let block_size = *sub_matches.get_one::<u32>("block_size").unwrap();
@@ -435,6 +454,7 @@ fn main() {
                     storage_buffer_pool_parallelism,
                     network_buffer_pool_parallelism,
                     log_level,
+                    traces_sample_rate,
                     mailbox_size,
                     deque_size,
                     block_size,
@@ -453,6 +473,7 @@ fn main() {
                     storage_buffer_pool_parallelism,
                     network_buffer_pool_parallelism,
                     log_level,
+                    traces_sample_rate,
                     mailbox_size,
                     deque_size,
                     block_size,
@@ -500,6 +521,7 @@ fn generate_local(
     storage_buffer_pool_parallelism: Option<NonZeroUsize>,
     network_buffer_pool_parallelism: Option<NonZeroUsize>,
     log_level: String,
+    traces_sample_rate: f64,
     mailbox_size: usize,
     deque_size: usize,
     block_size: u32,
@@ -579,6 +601,7 @@ fn generate_local(
             storage_buffer_pool_parallelism,
             network_buffer_pool_parallelism,
             log_level: log_level.clone(),
+            traces_sample_rate,
 
             local: true,
             allowed_peers: allowed_peers.clone(),
@@ -689,6 +712,7 @@ fn generate_remote(
     storage_buffer_pool_parallelism: Option<NonZeroUsize>,
     network_buffer_pool_parallelism: Option<NonZeroUsize>,
     log_level: String,
+    traces_sample_rate: f64,
     mailbox_size: usize,
     deque_size: usize,
     block_size: u32,
@@ -794,6 +818,7 @@ fn generate_remote(
             storage_buffer_pool_parallelism,
             network_buffer_pool_parallelism,
             log_level: log_level.clone(),
+            traces_sample_rate,
 
             local: false,
             allowed_peers: allowed_peers.clone(),
@@ -1088,7 +1113,7 @@ fn explorer_remote(dir: String, backend_url: String) {
 mod tests {
     use super::{
         block_size_arg, certificate_mode_name, leader_args, parse_indexers, parse_leader,
-        select_regional_peers, ConfiguredIndexer,
+        select_regional_peers, traces_sample_rate_arg, ConfiguredIndexer,
     };
     use alto_chain::Leader;
     use alto_types::CertificateMode;
@@ -1114,7 +1139,32 @@ mod tests {
     }
 
     #[test]
-    fn validator_config_defaults_block_size_to_zero() {
+    fn traces_sample_rate_accepts_only_fractions() {
+        let matches = Command::new("test")
+            .arg(traces_sample_rate_arg())
+            .try_get_matches_from(["test"])
+            .unwrap();
+        assert_eq!(*matches.get_one::<f64>("traces_sample_rate").unwrap(), 0.0);
+
+        let matches = Command::new("test")
+            .arg(traces_sample_rate_arg())
+            .try_get_matches_from(["test", "--traces-sample-rate", "0.0001"])
+            .unwrap();
+        assert_eq!(
+            *matches.get_one::<f64>("traces_sample_rate").unwrap(),
+            0.0001
+        );
+
+        for invalid in ["-0.1", "1.1", "NaN"] {
+            assert!(Command::new("test")
+                .arg(traces_sample_rate_arg())
+                .try_get_matches_from(["test", "--traces-sample-rate", invalid])
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn validator_config_defaults_optional_settings() {
         let yaml = r#"
 private_key: key
 share: share
@@ -1134,10 +1184,19 @@ signature_threads: 1
 
         let config: alto_chain::Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.block_size, 0);
+        assert_eq!(config.traces_sample_rate, 0.0);
 
-        let config: alto_chain::Config =
-            serde_yaml::from_str(&format!("{yaml}\nblock_size: 4096\n")).unwrap();
+        let config: alto_chain::Config = serde_yaml::from_str(&format!(
+            "{yaml}\nblock_size: 4096\ntraces_sample_rate: 0.0001\n"
+        ))
+        .unwrap();
         assert_eq!(config.block_size, 4096);
+        assert_eq!(config.traces_sample_rate, 0.0001);
+
+        assert!(serde_yaml::from_str::<alto_chain::Config>(&format!(
+            "{yaml}\ntraces_sample_rate: 1.1\n"
+        ))
+        .is_err());
     }
 
     #[test]
