@@ -52,11 +52,7 @@ impl Kind {
     }
 
     pub fn to_hex(&self) -> String {
-        match self {
-            Self::Seed => hex(&[0]),
-            Self::Notarization => hex(&[1]),
-            Self::Finalization => hex(&[2]),
-        }
+        hex(&[*self as u8])
     }
 }
 
@@ -156,5 +152,18 @@ mod tests {
 
         // Verify finalized
         assert!(finalized.verify(&schemes[0], &Sequential));
+    }
+
+    #[test]
+    fn test_kind_conversion() {
+        assert_eq!(Kind::from_u8(0), Some(Kind::Seed));
+        assert_eq!(Kind::from_u8(1), Some(Kind::Notarization));
+        assert_eq!(Kind::from_u8(2), Some(Kind::Finalization));
+        assert_eq!(Kind::from_u8(3), None);
+        assert_eq!(Kind::from_u8(255), None);
+
+        assert_eq!(Kind::Seed.to_hex(), "00");
+        assert_eq!(Kind::Notarization.to_hex(), "01");
+        assert_eq!(Kind::Finalization.to_hex(), "02");
     }
 }
