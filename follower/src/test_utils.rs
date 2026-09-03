@@ -17,7 +17,7 @@ use commonware_cryptography::{
     Digestible, Hasher, Sha256, Signer,
 };
 use commonware_parallel::Sequential;
-use commonware_utils::sync::Mutex;
+use commonware_utils::{non_empty, sync::Mutex};
 use rand::{rngs::StdRng, SeedableRng};
 use std::{future::Future, sync::Arc};
 use thiserror::Error;
@@ -142,9 +142,12 @@ impl TestFixture {
             .iter()
             .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
             .collect();
-        let finalization =
-            alto_types::Finalization::from_finalizes(&self.schemes[0], &finalizes, &Sequential)
-                .unwrap();
+        let finalization = alto_types::Finalization::from_finalizes(
+            &self.schemes[0],
+            non_empty![@&finalizes],
+            &Sequential,
+        )
+        .unwrap();
         Finalized::new(finalization, block)
     }
 
@@ -160,9 +163,12 @@ impl TestFixture {
             .iter()
             .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
             .collect();
-        let notarization =
-            alto_types::Notarization::from_notarizes(&self.schemes[0], &notarizes, &Sequential)
-                .unwrap();
+        let notarization = alto_types::Notarization::from_notarizes(
+            &self.schemes[0],
+            non_empty![@&notarizes],
+            &Sequential,
+        )
+        .unwrap();
         Notarized::new(notarization, block)
     }
 

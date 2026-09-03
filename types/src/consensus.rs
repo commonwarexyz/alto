@@ -1,5 +1,6 @@
 use commonware_codec::Read;
 use commonware_consensus::simplex::{
+    elector::{Random, RandomVersion},
     scheme::{
         bls12381_threshold::{standard, vrf},
         Scheme as SimplexScheme,
@@ -17,7 +18,7 @@ use commonware_cryptography::{
     },
     certificate::Verifier as CertificateVerifier,
     ed25519,
-    sha256::Digest,
+    sha256::{Digest, Sha256},
 };
 use commonware_utils::ordered::Set;
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,19 @@ pub type StandardScheme = standard::Scheme<PublicKey, MinSig>;
 
 /// Vote-and-seed threshold certificates used by rotating leaders.
 pub type VrfScheme = vrf::Scheme<PublicKey, MinSig>;
+
+/// Certificate-seeded leader election used with [VrfScheme].
+pub type RotatingElector = Random<Sha256>;
+
+/// Leader election configuration for rotating leaders.
+///
+/// The seed-to-leader mapping is consensus-critical: every validator and the explorer (which
+/// derives the leader of each view from the seed) must use this exact configuration.
+/// [RandomVersion::V1] hashes the seed signature before reduction and therefore produces a
+/// different schedule than the elector shipped before commonware v2026.9.0 (now
+/// [RandomVersion::V0]), so a rotating-leader network must be redeployed rather than upgraded in
+/// place.
+pub const ROTATING_ELECTOR: RotatingElector = Random::new(RandomVersion::V1);
 
 /// Certificate construction used by a consensus network.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -172,7 +186,15 @@ mod tests {
     };
     use commonware_cryptography::{sha256, Digest as _};
     use commonware_parallel::Sequential;
+    use commonware_utils::non_empty;
     use rand::{rngs::StdRng, SeedableRng};
+
+    #[test]
+    fn rotating_elector_is_pinned_to_v1() {
+        // The validator and the explorer WASM both derive leaders from this constant; changing
+        // the version changes the leader schedule of every rotating-leader network.
+        assert_eq!(format!("{ROTATING_ELECTOR:?}"), "V1");
+    }
 
     fn standard_schemes(seed: u64) -> Vec<StandardScheme> {
         let mut rng = StdRng::seed_from_u64(seed);
@@ -198,7 +220,7 @@ mod tests {
             .iter()
             .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
             .collect();
-        CNotarization::from_notarizes(&schemes[0], &votes, &Sequential).unwrap()
+        CNotarization::from_notarizes(&schemes[0], non_empty![@&votes], &Sequential).unwrap()
     }
 
     #[test]

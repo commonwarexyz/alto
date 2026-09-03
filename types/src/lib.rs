@@ -10,8 +10,9 @@ pub use block::{Block, Finalized, Notarized};
 
 mod consensus;
 pub use consensus::{
-    Activity, CertificateMode, Context, Finalization, Identity, Notarization, PublicKey, Scheme,
-    Seed, Seedable, Signature, StandardScheme, VrfScheme,
+    Activity, CertificateMode, Context, Finalization, Identity, Notarization, PublicKey,
+    RotatingElector, Scheme, Seed, Seedable, Signature, StandardScheme, VrfScheme,
+    ROTATING_ELECTOR,
 };
 
 pub mod wasm;
@@ -77,6 +78,7 @@ mod tests {
         Digest, Digestible, Hasher, Sha256, Signer,
     };
     use commonware_parallel::Sequential;
+    use commonware_utils::non_empty;
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
@@ -142,7 +144,8 @@ mod tests {
             .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
             .collect();
         let notarization =
-            Notarization::from_notarizes(&schemes[0], &notarizes, &Sequential).unwrap();
+            Notarization::from_notarizes(&schemes[0], non_empty![@&notarizes], &Sequential)
+                .unwrap();
         let notarized = Notarized::new(notarization, block.clone());
 
         // Serialize and deserialize
@@ -183,7 +186,8 @@ mod tests {
             .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
             .collect();
         let finalization =
-            Finalization::from_finalizes(&schemes[0], &finalizes, &Sequential).unwrap();
+            Finalization::from_finalizes(&schemes[0], non_empty![@&finalizes], &Sequential)
+                .unwrap();
         let finalized = Finalized::new(finalization, block.clone());
 
         // Serialize and deserialize

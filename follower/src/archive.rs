@@ -40,10 +40,14 @@ const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = page_size(PAGE_CACHE_PHYSICAL_PAGE_SI
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 
 // Prunable archive partitions.
+const PRUNABLE_FINALIZATIONS_BY_HEIGHT_METADATA_PARTITION: &str =
+    "follower-prunable-finalizations-by-height-metadata";
 const PRUNABLE_FINALIZATIONS_BY_HEIGHT_KEY_PARTITION: &str =
     "follower-prunable-finalizations-by-height-key";
 const PRUNABLE_FINALIZATIONS_BY_HEIGHT_VALUE_PARTITION: &str =
     "follower-prunable-finalizations-by-height-value";
+const PRUNABLE_FINALIZED_BLOCKS_METADATA_PARTITION: &str =
+    "follower-prunable-finalized-blocks-metadata";
 const PRUNABLE_FINALIZED_BLOCKS_KEY_PARTITION: &str = "follower-prunable-finalized-blocks-key";
 const PRUNABLE_FINALIZED_BLOCKS_VALUE_PARTITION: &str = "follower-prunable-finalized-blocks-value";
 
@@ -93,6 +97,7 @@ where
             context.child("finalizations_by_height"),
             prunable::Config {
                 translator: FourCap,
+                metadata_partition: PRUNABLE_FINALIZATIONS_BY_HEIGHT_METADATA_PARTITION.to_string(),
                 key_partition: PRUNABLE_FINALIZATIONS_BY_HEIGHT_KEY_PARTITION.to_string(),
                 key_page_cache: page_cache.clone(),
                 value_partition: PRUNABLE_FINALIZATIONS_BY_HEIGHT_VALUE_PARTITION.to_string(),
@@ -110,6 +115,7 @@ where
             context.child("finalized_blocks"),
             prunable::Config {
                 translator: FourCap,
+                metadata_partition: PRUNABLE_FINALIZED_BLOCKS_METADATA_PARTITION.to_string(),
                 key_partition: PRUNABLE_FINALIZED_BLOCKS_KEY_PARTITION.to_string(),
                 key_page_cache: page_cache.clone(),
                 value_partition: PRUNABLE_FINALIZED_BLOCKS_VALUE_PARTITION.to_string(),

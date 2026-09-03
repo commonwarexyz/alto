@@ -1,10 +1,9 @@
 use crate::{
     Block, Finalized, Identity, Notarized, Scheme, Seed, Signature, StandardScheme, VrfScheme,
-    EPOCH, NAMESPACE,
+    EPOCH, NAMESPACE, ROTATING_ELECTOR,
 };
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::{
-    simplex::elector::Random,
     types::{Round, View},
     Viewable,
 };
@@ -160,6 +159,8 @@ pub fn parse_block(bytes: Vec<u8>) -> JsValue {
     serde_wasm_bindgen::to_value(&block_js).unwrap_or(JsValue::NULL)
 }
 
+/// Returns the index of the leader elected by `seed`, i.e. the leader of the view after the
+/// seed's view.
 #[wasm_bindgen]
 pub fn leader_index(seed: JsValue, participants: usize) -> usize {
     let Ok(seed) = serde_wasm_bindgen::from_value::<SeedJs>(seed) else {
@@ -170,13 +171,13 @@ pub fn leader_index(seed: JsValue, participants: usize) -> usize {
         return 0;
     };
 
-    let round = Round::new(EPOCH, View::new(seed.view));
-    let seed = Seed::new(round, signature);
-
-    Random::select_leader::<MinSig>(
-        round,
-        u32::try_from(participants).expect("too many participants"),
-        (round.view().get() != 1).then_some(seed.signature),
-    )
-    .get() as usize
+    // The seed of view `v` selects the leader of view `v + 1`.
+    let elected = Round::new(EPOCH, View::new(seed.view.saturating_add(1)));
+    ROTATING_ELECTOR
+        .select_leader::<MinSig>(
+            elected,
+            u32::try_from(participants).expect("too many participants"),
+            Some(signature),
+        )
+        .get() as usize
 }

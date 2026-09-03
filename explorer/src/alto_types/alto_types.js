@@ -1,6 +1,8 @@
 /* @ts-self-types="./alto_types.d.ts" */
 
 /**
+ * Returns the index of the leader elected by `seed`, i.e. the leader of the view after the
+ * seed's view.
  * @param {any} seed
  * @param {number} participants
  * @returns {number}

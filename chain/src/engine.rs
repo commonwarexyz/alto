@@ -186,6 +186,10 @@ where
             context.child("finalizations_by_height"),
             prunable::Config {
                 translator: FourCap,
+                metadata_partition: format!(
+                    "{}-finalizations-by-height-metadata",
+                    cfg.partition_prefix
+                ),
                 key_partition: format!("{}-finalizations-by-height-key", cfg.partition_prefix),
                 key_page_cache: page_cache.clone(),
                 value_partition: format!("{}-finalizations-by-height-value", cfg.partition_prefix),
@@ -207,6 +211,7 @@ where
             context.child("finalized_blocks"),
             prunable::Config {
                 translator: FourCap,
+                metadata_partition: format!("{}-finalized-blocks-metadata", cfg.partition_prefix),
                 key_partition: format!("{}-finalized-blocks-key", cfg.partition_prefix),
                 key_page_cache: page_cache.clone(),
                 value_partition: format!("{}-finalized-blocks-value", cfg.partition_prefix),
@@ -269,6 +274,7 @@ where
                     codec_config: (),
                     page_cache: page_cache.clone(),
                     write_buffer: WRITE_BUFFER,
+                    replay_buffer: REPLAY_BUFFER,
                 },
             )
             .await
@@ -325,8 +331,11 @@ where
                 timeout_retry: cfg.nullify_retry,
                 fetch_timeout: cfg.fetch_timeout,
                 view_retention: cfg.activity_timeout,
-                skip_timeout: cfg.skip_timeout,
-                forwarding: simplex::ForwardingPolicy::Disabled,
+                skip: simplex::SkipPolicy::Enabled {
+                    timeout: cfg.skip_timeout,
+                    budget: simplex::SkipBudget::Participants,
+                },
+                forward: simplex::ForwardPolicy::Disabled,
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
                 blocker: cfg.blocker,
@@ -447,12 +456,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alto_types::{StandardScheme, VrfScheme, NAMESPACE};
+    use alto_types::{StandardScheme, VrfScheme, NAMESPACE, ROTATING_ELECTOR};
     use commonware_consensus::{
-        simplex::{
-            elector::Random,
-            scheme::bls12381_threshold::{standard, vrf},
-        },
+        simplex::scheme::bls12381_threshold::{standard, vrf},
         types::{Round, View},
     };
     use commonware_cryptography::{
@@ -468,7 +474,8 @@ mod tests {
             schemes: vrf_schemes,
             ..
         } = vrf::fixture::<MinSig, _>(&mut StdRng::seed_from_u64(0), NAMESPACE, 4);
-        let rotating = elector::Config::<VrfScheme>::build(Random, vrf_schemes[0].participants());
+        let rotating =
+            elector::Config::<VrfScheme>::build(ROTATING_ELECTOR, vrf_schemes[0].participants());
         assert_eq!(
             elector::Elector::terms(&rotating),
             elector::Terms::rotating()

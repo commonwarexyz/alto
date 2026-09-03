@@ -1,8 +1,8 @@
 use alto_chain::{engine, Config, Leader, Peers};
-use alto_types::{Scheme, StandardScheme, VrfScheme, EPOCH, NAMESPACE};
+use alto_types::{Scheme, StandardScheme, VrfScheme, EPOCH, NAMESPACE, ROTATING_ELECTOR};
 use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt, EncodeSize};
-use commonware_consensus::{marshal, simplex::elector::Random, types::ViewDelta};
+use commonware_consensus::{marshal, types::ViewDelta};
 use commonware_cryptography::{
     bls12381::primitives::{
         group,
@@ -157,7 +157,7 @@ fn main() {
         .with_tcp_nodelay(Some(true))
         .with_worker_threads(config.worker_threads)
         .with_max_blocking_threads(config.blocking_threads)
-        .with_storage_directory(PathBuf::from(config.directory))
+        .with_storage_directory(PathBuf::from(&config.directory))
         .with_storage_buffer_pool_config(storage_buffer_pool_cfg)
         .with_network_buffer_pool_config(network_buffer_pool_cfg)
         .with_catch_panics(false);
@@ -183,13 +183,14 @@ fn main() {
                 .collect();
             config.indexer = Some(resolve_named_http_url(indexer_url, &hosts_by_name));
         }
+        let traces_sample_rate = config.traces_sample_probability();
         let traces = hosts
             .as_ref()
-            .filter(|_| config.traces_sample_rate > 0.0)
+            .filter(|_| !traces_sample_rate.is_zero())
             .map(|hosts| tokio::tracing::Config {
                 endpoint: format!("http://{}:4318/v1/traces", hosts.monitoring.private),
                 name: public_key.to_string(),
-                rate: config.traces_sample_rate,
+                rate: traces_sample_rate,
             });
         tokio::telemetry::init(
             context.child("telemetry"),
@@ -357,7 +358,6 @@ fn main() {
             peer_provider: oracle.clone(),
             blocker: oracle.clone(),
             mailbox_size: NZUsize!(config.mailbox_size),
-            initial: Duration::from_secs(1),
             timeout: MARSHAL_RESOLVER_TIMEOUT,
             fetch_retry_timeout: Duration::from_millis(100),
             priority_requests: false,
@@ -426,7 +426,7 @@ fn main() {
                 delay_ms
             ),
             Leader::Rotating { delay_ms } => {
-                start_consensus!(VrfScheme, Random, delay_ms)
+                start_consensus!(VrfScheme, ROTATING_ELECTOR, delay_ms)
             }
         };
 

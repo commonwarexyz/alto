@@ -42,7 +42,7 @@ pub struct Consumer<
     uploads: SharedState,
     writer: queue::Writer<E, Entry>,
     reader: queue::Reader<E, Entry>,
-    active: Pool<Completion>,
+    active: Pool<'static, Completion>,
     max_active: NonZeroUsize,
     retry: Duration,
 }
