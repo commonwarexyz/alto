@@ -20,7 +20,7 @@
 //!
 //! # Usage
 //!
-//! _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement). Use `--certificate-mode standard` for a stable-leader network; the default is `vrf`._
+//! _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement). Use `--certificate-mode standard` for a stable-leader network; the default matches the default indexer's network (see `DEFAULT_CERTIFICATE_MODE`)._
 //!
 //! ## Get the latest seed
 //!
@@ -67,7 +67,7 @@
 //! ## Get the block with a specific digest
 //!
 //! ```bash
-//! inspector -- get block 0x65016ff40e824e21fffe903953c07b6d604dbcf39f681c62e7b3ed57ab1d1994
+//! inspector get block 0x65016ff40e824e21fffe903953c07b6d604dbcf39f681c62e7b3ed57ab1d1994
 //! ```
 //!
 //! ## Listen for consensus events
@@ -99,6 +99,8 @@ mod utils;
 
 const DEFAULT_INDEXER: &str = "https://global.alto.exoware.xyz";
 const DEFAULT_IDENTITY: &str = "83a93d74819bc17b3f53258216b54ecba1a13e1257a0514241bdd79c7757b7c3921451021e7a592d12296076ef58a8b600179a2d006e8d73c337f2f3578a245c286f4af8921e4e4fca0b3375842c81cccd2b4ce7e875a5591fdded49c93a905c";
+/// Certificate construction of the network at [DEFAULT_INDEXER] (`standard` or `vrf`).
+const DEFAULT_CERTIFICATE_MODE: &str = "vrf";
 
 #[tokio::main]
 async fn main() {
@@ -116,7 +118,7 @@ async fn main() {
             Arg::new("certificate_mode")
                 .long("certificate-mode")
                 .value_parser(["standard", "vrf"])
-                .default_value("vrf")
+                .default_value(DEFAULT_CERTIFICATE_MODE)
                 .global(true)
                 .help("Threshold certificate construction used by the network"),
         )

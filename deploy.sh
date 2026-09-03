@@ -143,7 +143,7 @@ fi
 
 npm --prefix explorer ci
 CI=true npm --prefix explorer test -- --watchAll=false --runInBand
-env "${explorer_build_env[@]}" GENERATE_SOURCEMAP=false npm --prefix explorer run build
+env ${explorer_build_env[@]+"${explorer_build_env[@]}"} GENERATE_SOURCEMAP=false npm --prefix explorer run build
 if [ ! -f explorer/build/index.html ]; then
     echo "explorer build did not create explorer/build/index.html" >&2
     exit 1

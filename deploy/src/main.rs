@@ -202,6 +202,25 @@ fn select_regional_peers(
     (selected, assigned)
 }
 
+/// Parses the explorer backend URL, which the explorer stores without a scheme and prefixes with
+/// `http(s)://` or `ws(s)://` itself.
+fn parse_backend_url(value: &str) -> Result<String, String> {
+    if value.contains("://") {
+        return Err(format!(
+            "backend URL must be a host[:port] without a scheme (for example, {})",
+            value
+                .split_once("://")
+                .map(|(_, rest)| rest)
+                .unwrap_or(value)
+        ));
+    }
+    let trimmed = value.trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err("backend URL must not be empty".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
 fn parse_leader(matches: &ArgMatches) -> Result<Leader, &'static str> {
     let delay_ms = *matches.get_one::<NonZeroU64>("leader_delay_ms").unwrap();
     match matches.get_one::<String>("leader_mode").unwrap().as_str() {
@@ -398,7 +417,8 @@ fn main() {
                     Arg::new("backend-url")
                         .long("backend-url")
                         .required(true)
-                        .value_parser(value_parser!(String)),
+                        .help("Indexer host[:port] without a scheme (the explorer picks http/ws or https/wss by mode)")
+                        .value_parser(parse_backend_url),
                 )
                 .subcommand(Command::new("local").about("Generate explorer config for local deployment"))
                 .subcommand(Command::new("remote").about("Generate explorer config for remote deployment")),
@@ -533,10 +553,9 @@ fn generate_local(
     let start_port = *sub_matches.get_one::<u16>("start_port").unwrap();
     let configured_indexers = parse_indexers(sub_matches.get_one::<String>("indexers"));
 
-    // Construct output path
-    let raw_current_dir = std::env::current_dir().unwrap();
-    let current_dir = raw_current_dir.to_str().unwrap();
-    let output = format!("{current_dir}/{output}");
+    // Construct output path (an absolute `--output` is used as-is)
+    let current_dir = std::env::current_dir().unwrap();
+    let output = current_dir.join(output).to_str().unwrap().to_string();
     let storage_output = format!("{output}/storage");
 
     // Check if output directory exists
@@ -749,10 +768,9 @@ fn generate_remote(
         });
     }
 
-    // Construct output path
-    let raw_current_dir = std::env::current_dir().unwrap();
-    let current_dir = raw_current_dir.to_str().unwrap();
-    let output = format!("{current_dir}/{output}");
+    // Construct output path (absolute `--output` and `--dashboard` paths are used as-is)
+    let current_dir = std::env::current_dir().unwrap();
+    let output = current_dir.join(output).to_str().unwrap().to_string();
 
     // Check if output directory exists
     if fs::metadata(&output).is_ok() {
@@ -961,7 +979,7 @@ fn generate_remote(
     // Write configuration files
     fs::create_dir_all(&output).unwrap();
     fs::copy(
-        format!("{current_dir}/{dashboard}"),
+        current_dir.join(&dashboard),
         format!("{output}/{DASHBOARD_FILE}"),
     )
     .unwrap();
@@ -1065,17 +1083,24 @@ fn explorer_remote(dir: String, backend_url: String) {
         let (coords, city) = get_aws_location(region).expect("unknown region");
         participants.insert(
             public_key,
-            format!("    [[{}, {}], \"{}\"]", coords[0], coords[1], city),
+            (
+                format!("    \"{}\"", instance.name),
+                format!("    [[{}, {}], \"{}\"]", coords[0], coords[1], city),
+            ),
         );
     }
 
-    // Order by public key
+    // Order by public key (PARTICIPANTS and LOCATIONS must share one order so the explorer can map
+    // a block's leader to a location, which is the only leader signal in standard mode)
+    let mut keys = Vec::new();
     let mut locations = Vec::new();
-    for (_, location) in participants {
+    for (_, (key, location)) in participants {
+        keys.push(key);
         locations.push(location);
     }
 
     // Generate config.ts
+    let participants_str = keys.join(",\n");
     let locations_str = locations.join(",\n");
     let first_instance = validator_instances.first().expect("no validators found");
     let peer_config_path = format!("{}/{}", dir, first_instance.config);
@@ -1096,10 +1121,12 @@ fn explorer_remote(dir: String, backend_url: String) {
         "export const BACKEND_URL = \"{}\";\n\
         export const PUBLIC_KEY_HEX = \"{}\";\n\
         export const CERTIFICATE_MODE = \"{}\" as const;\n\
+        export const PARTICIPANTS: string[] = [\n{}\n];\n\
         export const LOCATIONS: [[number, number], string][] = [\n{}\n];",
         backend_url,
         hex(&identity.encode()),
         certificate_mode,
+        participants_str,
         locations_str
     );
 
@@ -1217,6 +1244,20 @@ signature_threads: 1
             ])
             .unwrap();
         assert_eq!(parse_leader(&matches).unwrap(), Leader::rotating(NZU64!(7)));
+    }
+
+    #[test]
+    fn backend_url_rejects_schemes() {
+        assert_eq!(
+            super::parse_backend_url("localhost:8080").unwrap(),
+            "localhost:8080"
+        );
+        assert_eq!(
+            super::parse_backend_url("global.alto.example.com/").unwrap(),
+            "global.alto.example.com"
+        );
+        assert!(super::parse_backend_url("http://localhost:8080").is_err());
+        assert!(super::parse_backend_url("").is_err());
     }
 
     #[test]

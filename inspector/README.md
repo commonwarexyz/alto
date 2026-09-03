@@ -76,7 +76,7 @@ inspector get block 10..20
 ### Get the block with a specific digest
 
 ```bash
-inspector -- get block 0x65016ff40e824e21fffe903953c07b6d604dbcf39f681c62e7b3ed57ab1d1994
+inspector get block 0x65016ff40e824e21fffe903953c07b6d604dbcf39f681c62e7b3ed57ab1d1994
 ```
 
 ### Listen for consensus events
