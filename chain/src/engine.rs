@@ -186,8 +186,11 @@ where
             context.child("finalizations_by_height"),
             prunable::Config {
                 translator: FourCap,
+                // Distinct from the `{prefix}-finalizations-by-height-metadata` partition the
+                // immutable archive used before the switch to prunable archives, so a data
+                // directory written by an older validator is ignored rather than misread.
                 metadata_partition: format!(
-                    "{}-finalizations-by-height-metadata",
+                    "{}-prunable-finalizations-by-height-metadata",
                     cfg.partition_prefix
                 ),
                 key_partition: format!("{}-finalizations-by-height-key", cfg.partition_prefix),
@@ -211,7 +214,10 @@ where
             context.child("finalized_blocks"),
             prunable::Config {
                 translator: FourCap,
-                metadata_partition: format!("{}-finalized-blocks-metadata", cfg.partition_prefix),
+                metadata_partition: format!(
+                    "{}-prunable-finalized-blocks-metadata",
+                    cfg.partition_prefix
+                ),
                 key_partition: format!("{}-finalized-blocks-key", cfg.partition_prefix),
                 key_page_cache: page_cache.clone(),
                 value_partition: format!("{}-finalized-blocks-value", cfg.partition_prefix),
