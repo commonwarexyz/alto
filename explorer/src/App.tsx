@@ -901,7 +901,7 @@ const App: React.FC = () => {
           <div className="map-container">
             <MapContainer key={selectedCluster} center={center} zoom={1} style={{ height: "100%", width: "100%" }} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false} dragging={false}>
               <TileLayer
-                url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
+                url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png?key=cb1_29si_1_944f50395a982fb974c926e1"
                 attribution='&copy; OSM | &copy; CARTO</a>'
               />
               {mappedView?.location !== undefined && (
