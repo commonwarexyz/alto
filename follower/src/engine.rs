@@ -65,7 +65,7 @@ fn genesis() -> Block {
 /// trusted source and a [Resolver] to backfill missing
 /// blocks.
 #[allow(clippy::type_complexity)]
-pub struct Engine<E, T>
+pub struct Engine<E, T, C>
 where
     E: BufferPooler
         + commonware_runtime::Clock
@@ -76,23 +76,24 @@ where
         + Storage
         + Metrics,
     T: Strategy,
+    C: Scheme,
 {
     context: ContextCell<E>,
     marshal: MarshalActor<
         E,
         Standard<Block>,
-        ConstantProvider<Scheme, commonware_consensus::types::Epoch>,
-        Certificates<E>,
+        ConstantProvider<C, commonware_consensus::types::Epoch>,
+        Certificates<E, C>,
         Blocks<E>,
         FixedEpocher,
         T,
     >,
     pruning_depth: Option<u64>,
-    marshal_mailbox: MarshalMailbox<Scheme, Standard<Block>>,
+    marshal_mailbox: MarshalMailbox<C, Standard<Block>>,
     mailbox_size: NonZeroUsize,
 }
 
-impl<E, T> Engine<E, T>
+impl<E, T, C> Engine<E, T, C>
 where
     E: BufferPooler
         + commonware_runtime::Clock
@@ -103,20 +104,17 @@ where
         + Storage
         + Metrics,
     T: Strategy,
+    C: Scheme,
 {
     /// Create a new [Engine].
     pub async fn new(
         mut context: E,
-        scheme: Scheme,
+        scheme: C,
         mailbox_size: NonZeroUsize,
         max_repair: NonZero<usize>,
         strategy: T,
         pruning_depth: Option<u64>,
-    ) -> (
-        Self,
-        MarshalMailbox<Scheme, Standard<Block>>,
-        Option<Height>,
-    ) {
+    ) -> (Self, MarshalMailbox<C, Standard<Block>>, Option<Height>) {
         // Initialize the finalized certificate and block archives. Uses
         // prunable archives when pruning is enabled, immutable otherwise.
         let (finalizations_by_height, finalized_blocks, page_cache) =
@@ -203,7 +201,7 @@ mod tests {
 
     async fn start_engine_with_handler(
         context: commonware_runtime::deterministic::Context,
-        scheme: Scheme,
+        scheme: alto_types::VrfScheme,
     ) -> handler::Handler<Digest> {
         let (engine, _, _) = Engine::new(
             context.child("engine"),

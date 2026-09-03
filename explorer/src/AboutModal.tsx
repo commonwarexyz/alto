@@ -1,12 +1,16 @@
 import React, { useEffect } from 'react';
 import { MODE } from './config';
+import { getLeaderIndicator, getTimelineIdentifier } from './timelineIdentifier';
 
 interface AboutModalProps {
     isOpen: boolean;
     onClose: () => void;
+    standardCertificates: boolean;
 }
 
-const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
+const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, standardCertificates }) => {
+    const timelineIdentifier = getTimelineIdentifier(standardCertificates);
+    const leaderIndicator = getLeaderIndicator(standardCertificates);
     // Add effect to handle link targets
     useEffect(() => {
         if (isOpen) {
@@ -68,7 +72,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         </p>
                         <p>
                             Validators enter a new view whenever they observe either <i>2f+1</i> votes for a block proposal or <i>2f+1</i> nullifies
-                            (to skip this view) AND some seed (a VRF used to select the next leader). Validators finalize a view whenever they
+                            (to skip this view){standardCertificates ? '.' : ' and a VRF seed used to select the next leader.'} Validators finalize a view whenever they
                             observe <i>2f+1</i> finalizes for a block proposal.
                         </p>
                         <p>
@@ -77,12 +81,14 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                         <ul className="status-list">
                             <li>
                                 <div className="status-indicator-wrapper">
-                                    <div className="about-status-indicator" style={{ backgroundColor: "#0000eeff" }}></div>
-                                    <strong>Seeded</strong>
+                                    <div className="about-status-indicator" style={{ backgroundColor: leaderIndicator.color }}></div>
+                                    <strong>{leaderIndicator.label}</strong>
                                 </div>
-                                Some leader has been elected to propose a block.
+                                {standardCertificates
+                                    ? 'The stable round-robin leader has proposed a block.'
+                                    : 'Some leader has been elected to propose a block.'}
                                 {MODE === 'public' && ' The dot on the map (of the same color) is the region where the leader is located.'}
-                                {' '}A new leader is elected for each view.
+                                {!standardCertificates && ' A new leader is elected for each view.'}
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">
@@ -100,6 +106,9 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                                 The block <i>b</i> in view <i>v</i> has received <i>2f+1</i> finalizes. The block is now immutable.
                             </li>
                         </ul>
+                        <p>
+                            The short <span style={{ color: timelineIdentifier.color }}>{timelineIdentifier.label.toLowerCase()}</span> beneath each view number identifies {standardCertificates ? 'the block proposed in that view' : 'the seed used for leader election'}.
+                        </p>
                         <p>
                             You can read more about the design of <i>simplex</i> <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/simplex/index.html">here</a>.
                         </p>

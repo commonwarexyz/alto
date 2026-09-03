@@ -30,10 +30,12 @@ cargo install alto-indexer
 ### Start the indexer
 
 ```bash
-indexer --port 8080 --identity <hex-encoded BLS12-381 public key>
+indexer --port 8080 --identity <hex-encoded BLS12-381 public key> --certificate-mode <standard|vrf>
 ```
 
-The identity is the threshold public key of the consensus network. It is used to verify incoming consensus artifacts.
+The identity is the threshold public key of the consensus network. It is used to verify incoming
+consensus artifacts. Use `standard` for a stable-leader network and `vrf` for a rotating-leader
+network.
 
 ## API Endpoints
 

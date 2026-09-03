@@ -1,6 +1,5 @@
-use alto_chain::{engine, Config, Peers};
-use alto_client::Client;
-use alto_types::{EPOCH, NAMESPACE};
+use alto_chain::{engine, Config, Leader, Peers};
+use alto_types::{Scheme, StandardScheme, VrfScheme, EPOCH, NAMESPACE, ROTATING_ELECTOR};
 use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt, EncodeSize};
 use commonware_consensus::{marshal, types::ViewDelta};
@@ -46,12 +45,6 @@ const MARSHAL_CHANNEL: u64 = 4;
 const BASE_CHANNEL_QUOTA_PER_SECOND: u32 = 1_500;
 const VOTING_CHANNEL_QUOTA_PER_SECOND: u32 = 3_000;
 
-// Fraction of traces sampled and exported to the monitoring host's OTLP collector.
-// Export everything: partial sampling hides the rare events we care about (a leader
-// missing its deadline shows up a handful of times per hour, so a 10% sample is
-// likely to miss it entirely).
-const TRACES_SAMPLE_RATE: f64 = 1.0;
-
 const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 const CERTIFICATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NULLIFY_RETRY: Duration = Duration::from_secs(10);
@@ -81,6 +74,32 @@ fn configured_max_message_size(block_size: u32) -> u32 {
         .expect("block size exceeds authenticated transport maximum")
 }
 
+fn resolve_named_http_url(url: &str, hosts: &HashMap<String, IpAddr>) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    if !matches!(scheme, "http" | "https") {
+        return url.to_string();
+    }
+
+    let (authority, suffix) = match rest.split_once('/') {
+        Some((authority, suffix)) => (authority, format!("/{suffix}")),
+        None => (rest, String::new()),
+    };
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (authority, None),
+    };
+    let Some(ip) = hosts.get(host) else {
+        return url.to_string();
+    };
+
+    match port {
+        Some(port) => format!("{scheme}://{ip}:{port}{suffix}"),
+        None => format!("{scheme}://{ip}{suffix}"),
+    }
+}
+
 fn main() {
     // Parse arguments
     let matches = Command::new("validator")
@@ -101,7 +120,8 @@ fn main() {
     // Load config
     let config_file = matches.get_one::<String>("config").unwrap();
     let config_file = std::fs::read_to_string(config_file).expect("Could not read config file");
-    let config: Config = serde_yaml::from_str(&config_file).expect("Could not parse config file");
+    let mut config: Config =
+        serde_yaml::from_str(&config_file).expect("Could not parse config file");
     let max_message_size = configured_max_message_size(config.block_size);
     let key = from_hex(&config.private_key).expect("Could not parse private key");
     let signer = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
@@ -139,7 +159,7 @@ fn main() {
         .with_tcp_nodelay(Some(true))
         .with_worker_threads(config.worker_threads)
         .with_max_blocking_threads(config.blocking_threads)
-        .with_storage_directory(PathBuf::from(config.directory))
+        .with_storage_directory(PathBuf::from(&config.directory))
         .with_storage_buffer_pool_config(storage_buffer_pool_cfg)
         .with_network_buffer_pool_config(network_buffer_pool_cfg)
         .with_catch_panics(false);
@@ -157,11 +177,23 @@ fn main() {
                 std::fs::read_to_string(hosts_file).expect("Could not read hosts file");
             serde_yaml::from_str::<Hosts>(&hosts_file).expect("Could not parse hosts file")
         });
-        let traces = hosts.as_ref().map(|hosts| tokio::tracing::Config {
-            endpoint: format!("http://{}:4318/v1/traces", hosts.monitoring.private),
-            name: public_key.to_string(),
-            rate: TRACES_SAMPLE_RATE,
-        });
+        if let (Some(hosts), Some(indexer_url)) = (hosts.as_ref(), config.indexer.as_deref()) {
+            let hosts_by_name = hosts
+                .hosts
+                .iter()
+                .map(|host| (host.name.clone(), host.ip))
+                .collect();
+            config.indexer = Some(resolve_named_http_url(indexer_url, &hosts_by_name));
+        }
+        let traces_sample_rate = config.traces_sample_probability();
+        let traces = hosts
+            .as_ref()
+            .filter(|_| !traces_sample_rate.is_zero())
+            .map(|hosts| tokio::tracing::Config {
+                endpoint: format!("http://{}:4318/v1/traces", hosts.monitoring.private),
+                name: public_key.to_string(),
+                rate: traces_sample_rate,
+            });
         tokio::telemetry::init(
             context.child("telemetry"),
             tokio::telemetry::Logs {
@@ -178,13 +210,21 @@ fn main() {
 
         // Load peers
         let (ip, peers, bootstrappers) = if let Some(hosts) = hosts {
-            let peers: HashMap<PublicKey, IpAddr> = hosts
+            let hosts_by_name: HashMap<String, IpAddr> = hosts
                 .hosts
                 .into_iter()
+                .map(|host| (host.name, host.ip))
+                .collect();
+            let peers: HashMap<PublicKey, IpAddr> = config
+                .allowed_peers
+                .iter()
                 .map(|peer| {
-                    let key = from_hex(&peer.name).expect("Could not parse peer key");
+                    let ip = hosts_by_name
+                        .get(peer)
+                        .expect("Could not find peer in hosts file");
+                    let key = from_hex(peer).expect("Could not parse peer key");
                     let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
-                    (key, peer.ip)
+                    (key, *ip)
                 })
                 .collect();
 
@@ -241,7 +281,7 @@ fn main() {
             &(NZU32!(peers_u32), ModeVersion::v0()),
         )
         .expect("polynomial is invalid");
-        let identity = polynomial.public();
+        let identity = *polynomial.public();
         info!(
             ?public_key,
             ?identity,
@@ -315,49 +355,11 @@ fn main() {
 
         let strategy = Rayon::new(NZUsize!(config.signature_threads)).unwrap();
 
-        // Create indexer
-        let mut indexer = None;
-        if let Some(indexer_url) = config.indexer.as_deref() {
-            indexer = Some(Client::new(indexer_url, *identity, strategy.clone()));
-        }
-
-        // Create engine
-        let engine_cfg = engine::Config {
-            blocker: oracle.clone(),
-            provider: oracle.clone(),
-            partition_prefix: "engine".to_string(),
-            blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
-            finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
-            me: public_key.clone(),
-            participants,
-            mailbox_size: config.mailbox_size,
-            deque_size: config.deque_size,
-            block_size: config.block_size,
-            leader: config.leader,
-            leader_timeout: LEADER_TIMEOUT,
-            certification_timeout: CERTIFICATION_TIMEOUT,
-            nullify_retry: NULLIFY_RETRY,
-            activity_timeout: ACTIVITY_TIMEOUT,
-            skip_timeout: SKIP_TIMEOUT,
-            fetch_timeout: FETCH_TIMEOUT,
-            max_fetch_count: MAX_FETCH_COUNT,
-            max_fetch_size: MAX_FETCH_SIZE,
-            fetch_rate_per_peer: resolver_limit,
-            backfiller_max_active: config.backfiller_max_active,
-            backfiller_retry: Duration::from_millis(config.backfiller_retry_ms),
-            indexer,
-            polynomial,
-            share,
-            strategy,
-        };
-        let engine = engine::Engine::new(context.child("engine"), engine_cfg).await;
-
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),
             peer_provider: oracle.clone(),
-            blocker: oracle,
+            blocker: oracle.clone(),
             mailbox_size: NZUsize!(config.mailbox_size),
-            initial: Duration::from_secs(1),
             timeout: MARSHAL_RESOLVER_TIMEOUT,
             fetch_retry_timeout: Duration::from_millis(100),
             priority_requests: false,
@@ -369,8 +371,68 @@ fn main() {
             marshal,
         );
 
-        // Start engine
-        let engine = engine.start(pending, recovered, resolver, broadcaster, marshal_resolver);
+        macro_rules! start_consensus {
+            ($scheme:ty, $elector:expr, $delay_ms:expr) => {{
+                let scheme =
+                    <$scheme as Scheme>::signer(NAMESPACE, participants, polynomial, share)
+                        .expect("failed to create consensus scheme");
+                let indexer = config.indexer.as_deref().map(|indexer_url| {
+                    alto_client::ClientBuilder::<_, $scheme>::new_with_scheme(
+                        indexer_url,
+                        <$scheme as Scheme>::certificate_verifier(NAMESPACE, identity),
+                        strategy.clone(),
+                    )
+                    .build()
+                });
+                let engine_cfg = engine::Config {
+                    blocker: oracle.clone(),
+                    provider: oracle.clone(),
+                    partition_prefix: "engine".to_string(),
+                    blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
+                    finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
+                    me: public_key.clone(),
+                    scheme,
+                    elector: $elector,
+                    mailbox_size: config.mailbox_size,
+                    deque_size: config.deque_size,
+                    block_size: config.block_size,
+                    proposal_delay_ms: $delay_ms,
+                    leader_timeout: LEADER_TIMEOUT,
+                    certification_timeout: CERTIFICATION_TIMEOUT,
+                    nullify_retry: NULLIFY_RETRY,
+                    activity_timeout: ACTIVITY_TIMEOUT,
+                    skip_timeout: SKIP_TIMEOUT,
+                    fetch_timeout: FETCH_TIMEOUT,
+                    max_fetch_count: MAX_FETCH_COUNT,
+                    max_fetch_size: MAX_FETCH_SIZE,
+                    fetch_rate_per_peer: resolver_limit,
+                    backfiller_max_active: config.backfiller_max_active,
+                    backfiller_retry: Duration::from_millis(config.backfiller_retry_ms),
+                    indexer,
+                    strategy,
+                };
+                engine::Engine::new(context.child("engine"), engine_cfg)
+                    .await
+                    .start(pending, recovered, resolver, broadcaster, marshal_resolver)
+            }};
+        }
+
+        // A validator owns one concrete certificate format for its process lifetime. Every
+        // persistent and wire-facing component is constructed inside the selected branch.
+        let engine = match config.leader {
+            Leader::Stable {
+                delay_ms,
+                term_length,
+                optimistic_views,
+            } => start_consensus!(
+                StandardScheme,
+                engine::stable_elector(term_length, optimistic_views),
+                delay_ms
+            ),
+            Leader::Rotating { delay_ms } => {
+                start_consensus!(VrfScheme, ROTATING_ELECTOR, delay_ms)
+            }
+        };
 
         // Wait for any task to error
         if let Err(e) = try_join_all(vec![p2p, engine]).await {
@@ -396,5 +458,22 @@ mod tests {
     #[should_panic(expected = "block size exceeds authenticated transport maximum")]
     fn max_message_size_rejects_unsupported_block_size() {
         configured_max_message_size(u32::MAX);
+    }
+
+    #[test]
+    fn named_http_url_resolves_deployed_indexer() {
+        let hosts = HashMap::from([(
+            "indexer".to_string(),
+            "203.0.113.7".parse::<IpAddr>().unwrap(),
+        )]);
+
+        assert_eq!(
+            resolve_named_http_url("http://indexer:8080/consensus", &hosts),
+            "http://203.0.113.7:8080/consensus"
+        );
+        assert_eq!(
+            resolve_named_http_url("https://external.example.com", &hosts),
+            "https://external.example.com"
+        );
     }
 }

@@ -1,5 +1,6 @@
 use crate::Source;
 use alto_client::{consensus::Payload, IndexQuery, Query};
+use alto_types::Scheme;
 use bytes::Bytes;
 use commonware_codec::Encode;
 use commonware_consensus::{
@@ -9,7 +10,7 @@ use commonware_consensus::{
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
 use commonware_resolver::opaque;
 use commonware_runtime::{Clock, Metrics, Spawner};
-use std::{future::Future, num::NonZeroUsize, time::Duration};
+use std::{future::Future, marker::PhantomData, num::NonZeroUsize, time::Duration};
 use tracing::{debug, warn};
 
 type Key = handler::Key<Digest>;
@@ -17,7 +18,7 @@ type Subscriber = handler::Annotation;
 pub type Resolver = opaque::Resolver<Key, Subscriber, PublicKey>;
 
 /// Start the follower resolver and marshal handler backed by `client`.
-pub fn init<E, C>(
+pub fn init<E, C, CS>(
     context: E,
     client: C,
     mailbox_size: NonZeroUsize,
@@ -25,12 +26,13 @@ pub fn init<E, C>(
 ) -> (handler::Receiver<Digest>, Resolver)
 where
     E: Clock + Spawner + Metrics,
-    C: Source,
+    C: Source<CS>,
+    CS: Scheme,
 {
     let (handler_rx, handler) = handler::init(context.child("handler"), mailbox_size);
     let resolver = opaque::init::<_, _, _, PublicKey>(
         context.child("resolver"),
-        Fetcher::new(client),
+        Fetcher::<C, CS>::new(client),
         handler,
         mailbox_size,
         fetch_retry_timeout,
@@ -40,17 +42,18 @@ where
 
 /// Fetches and encodes marshal resolver payloads from an Alto source client.
 #[derive(Clone)]
-struct Fetcher<C>(C);
+struct Fetcher<C, CS>(C, PhantomData<CS>);
 
-impl<C> Fetcher<C> {
+impl<C, CS> Fetcher<C, CS> {
     const fn new(client: C) -> Self {
-        Self(client)
+        Self(client, PhantomData)
     }
 }
 
-impl<C> opaque::Fetcher for Fetcher<C>
+impl<C, CS> opaque::Fetcher for Fetcher<C, CS>
 where
-    C: Source,
+    C: Source<CS>,
+    CS: Scheme,
 {
     type Key = Key;
     type Value = Bytes;
@@ -71,9 +74,10 @@ where
     }
 }
 
-impl<C> Fetcher<C>
+impl<C, CS> Fetcher<C, CS>
 where
-    C: Source,
+    C: Source<CS>,
+    CS: Scheme,
 {
     /// Fetch and encode a block response by digest.
     async fn fetch_block_by_digest(digest: Digest, client: C) -> Option<Bytes> {
@@ -141,6 +145,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{MockError, MockSource, TestFixture};
     use alto_client::Query;
+    use alto_types::VrfScheme;
     use commonware_cryptography::{ed25519::PrivateKey, Digestible, Signer};
     use commonware_macros::test_traced;
     use commonware_resolver::{Consumer, Delivery, Resolver as _, TargetedResolver as _};
@@ -230,40 +235,41 @@ mod tests {
         }
     }
 
-    impl Source for BlockingSource {
+    impl Source<VrfScheme> for BlockingSource {
         type Error = MockError;
 
         async fn health(&self) -> Result<(), Self::Error> {
             Ok(())
         }
 
-        async fn block(&self, _query: Query) -> Result<Payload, Self::Error> {
+        async fn block(&self, _query: Query) -> Result<Payload<VrfScheme>, Self::Error> {
             if let Some(sender) = self.started.lock().take() {
                 let _ = sender.send(());
             }
             let _drop_signal = DropSignal(self.dropped.clone());
-            std::future::pending::<Result<Payload, Self::Error>>().await
+            std::future::pending::<Result<Payload<VrfScheme>, Self::Error>>().await
         }
 
         async fn notarized(
             &self,
             _query: IndexQuery,
-        ) -> Result<alto_types::Notarized, Self::Error> {
+        ) -> Result<alto_types::Notarized<VrfScheme>, Self::Error> {
             Err(MockError("notarized not supported".to_string()))
         }
 
         async fn finalized(
             &self,
             _query: IndexQuery,
-        ) -> Result<alto_types::Finalized, Self::Error> {
+        ) -> Result<alto_types::Finalized<VrfScheme>, Self::Error> {
             Err(MockError("finalized not supported".to_string()))
         }
 
         async fn listen(
             &self,
         ) -> Result<
-            impl futures::Stream<Item = Result<alto_client::consensus::Message, Self::Error>>
-                + Send
+            impl futures::Stream<
+                    Item = Result<alto_client::consensus::Message<VrfScheme>, Self::Error>,
+                > + Send
                 + Unpin,
             Self::Error,
         > {
@@ -271,14 +277,14 @@ mod tests {
         }
     }
 
-    fn start_resolver<C: Source>(
+    fn start_resolver<C: Source<VrfScheme>>(
         context: deterministic::Context,
         source: C,
         consumer: TestConsumer,
     ) -> Resolver {
         opaque::init::<_, _, _, PublicKey>(
             context,
-            Fetcher::new(source),
+            Fetcher::<C, VrfScheme>::new(source),
             consumer,
             NZUsize!(16),
             DEFAULT_FETCH_RETRY_TIMEOUT,

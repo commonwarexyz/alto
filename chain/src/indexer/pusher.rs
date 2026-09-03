@@ -18,14 +18,14 @@ use tracing::{debug, warn};
 /// block in shared state, and uploads the certificate-bearing object. The
 /// shared state lets the backfiller reuse blocks and back off
 /// when the live path is already handling a digest.
-pub(crate) struct Pusher<E: Spawner + Metrics, C: Client> {
+pub(crate) struct Pusher<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> {
     context: Arc<E>,
     client: C,
-    marshal: MarshalMailbox<Scheme, Standard<Block>>,
+    marshal: MarshalMailbox<CS, Standard<Block>>,
     uploads: SharedState,
 }
 
-impl<E: Spawner + Metrics, C: Client> Clone for Pusher<E, C> {
+impl<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> Clone for Pusher<E, C, CS> {
     fn clone(&self) -> Self {
         Self {
             context: self.context.clone(),
@@ -36,12 +36,12 @@ impl<E: Spawner + Metrics, C: Client> Clone for Pusher<E, C> {
     }
 }
 
-impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
+impl<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> Pusher<E, C, CS> {
     /// Create a new [Pusher].
     pub(crate) fn new(
         context: E,
         client: C,
-        marshal: MarshalMailbox<Scheme, Standard<Block>>,
+        marshal: MarshalMailbox<CS, Standard<Block>>,
         uploads: SharedState,
     ) -> Self {
         Self {
@@ -91,7 +91,7 @@ impl Drop for CertificateUploadGuard {
     }
 }
 
-impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
+impl<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> Pusher<E, C, CS> {
     fn spawn_seed_upload(&self, label: &'static str, seed: Seed, view: View) {
         self.context.child(label).spawn({
             let client = self.client.clone();
@@ -145,14 +145,16 @@ impl<E: Spawner + Metrics, C: Client> Pusher<E, C> {
     }
 }
 
-impl<E: Spawner + Metrics, C: Client> Reporter for Pusher<E, C> {
-    type Activity = Activity;
+impl<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> Reporter for Pusher<E, C, CS> {
+    type Activity = Activity<CS>;
 
     fn report(&mut self, activity: Self::Activity) -> Feedback {
         match activity {
             Activity::Notarization(notarization) => {
                 let view = notarization.view();
-                self.spawn_seed_upload("notarized_seed", notarization.seed(), view);
+                if let Some(seed) = notarization.seed() {
+                    self.spawn_seed_upload("notarized_seed", seed, view);
+                }
                 self.spawn_certificate_upload(
                     "notarized_block",
                     view,
@@ -167,7 +169,9 @@ impl<E: Spawner + Metrics, C: Client> Reporter for Pusher<E, C> {
             }
             Activity::Finalization(finalization) => {
                 let view = finalization.view();
-                self.spawn_seed_upload("finalized_seed", finalization.seed(), view);
+                if let Some(seed) = finalization.seed() {
+                    self.spawn_seed_upload("finalized_seed", seed, view);
+                }
                 self.spawn_certificate_upload(
                     "finalized_block",
                     view,

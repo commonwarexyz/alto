@@ -15,8 +15,10 @@
   },
   "scripts": {
     "start": "react-scripts start",
+    "test": "react-scripts test",
     "build:wasm": "cd ../types && wasm-pack build --target web --out-dir ../explorer/src/alto_types --out-name alto_types",
-    "build": "npm run build:wasm && react-scripts build",
+    "test:wasm": "node scripts/check-wasm.mjs",
+    "build": "npm run build:wasm && npm run test:wasm && react-scripts build",
     "build:react": "react-scripts build"
   },
   "eslintConfig": {

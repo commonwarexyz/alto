@@ -1,4 +1,5 @@
-use commonware_utils::{NZUsize, NZU32, NZU64};
+use alto_types::CertificateMode;
+use commonware_utils::{NZUsize, Probability, NZU32, NZU64};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -16,8 +17,10 @@ pub const DEFAULT_BACKFILLER_RETRY_MS: u64 = 1_000;
 pub const DEFAULT_BLOCKING_THREADS: usize = 512;
 pub const DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(16_384);
 pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(4_096);
+const DEFAULT_TRACES_SAMPLE_RATE: f64 = 0.0;
 const DEFAULT_STABLE_LEADER_DELAY_MS: NonZeroU64 = NZU64!(10);
 const DEFAULT_STABLE_LEADER_TERM_LENGTH: NonZeroU32 = NZU32!(1_000);
+const DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS: u64 = 48;
 
 fn default_backfiller_max_active() -> NonZeroUsize {
     DEFAULT_BACKFILLER_MAX_ACTIVE
@@ -39,6 +42,27 @@ fn default_network_buffer_pool_max_per_class() -> Option<NonZeroU32> {
     Some(DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS)
 }
 
+const fn default_traces_sample_rate() -> f64 {
+    DEFAULT_TRACES_SAMPLE_RATE
+}
+
+fn deserialize_traces_sample_rate<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let rate = f64::deserialize(deserializer)?;
+    if rate.is_finite() && (0.0..=1.0).contains(&rate) {
+        return Ok(rate);
+    }
+    Err(serde::de::Error::custom(
+        "traces sample rate must be between 0 and 1",
+    ))
+}
+
+const fn default_stable_leader_optimistic_views() -> u64 {
+    DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS
+}
+
 /// Leader election policy for the consensus engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
@@ -49,6 +73,7 @@ pub enum Leader {
     Stable {
         delay_ms: NonZeroU64,
         term_length: NonZeroU32,
+        optimistic_views: u64,
     },
 }
 
@@ -66,6 +91,8 @@ impl<'de> Deserialize<'de> for Leader {
             Stable {
                 delay_ms: NonZeroU64,
                 term_length: NonZeroU32,
+                #[serde(default = "default_stable_leader_optimistic_views")]
+                optimistic_views: u64,
             },
         }
 
@@ -74,7 +101,8 @@ impl<'de> Deserialize<'de> for Leader {
             Config::Stable {
                 delay_ms,
                 term_length,
-            } if term_length.get() > 1 => Ok(Self::stable(delay_ms, term_length)),
+                optimistic_views,
+            } if term_length.get() > 1 => Ok(Self::stable(delay_ms, term_length, optimistic_views)),
             Config::Stable { .. } => Err(serde::de::Error::custom(
                 "stable leader term length must be greater than 1",
             )),
@@ -89,7 +117,11 @@ impl Leader {
     }
 
     /// Creates a stable leader configuration.
-    pub const fn stable(delay_ms: NonZeroU64, term_length: NonZeroU32) -> Self {
+    pub const fn stable(
+        delay_ms: NonZeroU64,
+        term_length: NonZeroU32,
+        optimistic_views: u64,
+    ) -> Self {
         assert!(
             term_length.get() > 1,
             "stable leader term length must be greater than 1"
@@ -97,13 +129,15 @@ impl Leader {
         Self::Stable {
             delay_ms,
             term_length,
+            optimistic_views,
         }
     }
 
-    /// Minimum timestamp increase between proposals.
-    pub(crate) const fn delay_ms(self) -> NonZeroU64 {
+    /// Threshold certificate construction required by this leader policy.
+    pub const fn certificate_mode(self) -> CertificateMode {
         match self {
-            Self::Rotating { delay_ms } | Self::Stable { delay_ms, .. } => delay_ms,
+            Self::Rotating { .. } => CertificateMode::Vrf,
+            Self::Stable { .. } => CertificateMode::Standard,
         }
     }
 }
@@ -113,6 +147,7 @@ impl Default for Leader {
         Self::stable(
             DEFAULT_STABLE_LEADER_DELAY_MS,
             DEFAULT_STABLE_LEADER_TERM_LENGTH,
+            DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS,
         )
     }
 }
@@ -139,6 +174,12 @@ pub struct Config {
     #[serde(default)]
     pub network_buffer_pool_parallelism: Option<NonZeroUsize>,
     pub log_level: String,
+    #[serde(
+        default = "default_traces_sample_rate",
+        deserialize_with = "deserialize_traces_sample_rate"
+    )]
+    /// Fraction of traces exported to the configured collector; zero disables tracing.
+    pub traces_sample_rate: f64,
 
     pub local: bool,
     pub allowed_peers: Vec<String>,
@@ -163,6 +204,25 @@ pub struct Config {
     pub indexer: Option<String>,
 }
 
+impl Config {
+    /// Fraction of traces exported to the configured collector as a [Probability].
+    ///
+    /// `traces_sample_rate` is validated to `[0, 1]` when deserialized. The float is converted
+    /// through a parts-per-billion ratio because [Probability::from_f64] only accepts values that
+    /// are exact multiples of `2^-64` (rejecting common rates such as `0.0001`). A non-zero rate
+    /// never rounds down to zero, so any positive rate keeps tracing enabled.
+    pub fn traces_sample_probability(&self) -> Probability {
+        const PARTS_PER_BILLION: u64 = 1_000_000_000;
+        let rate = self.traces_sample_rate;
+        let mut numerator = (rate * PARTS_PER_BILLION as f64).round() as u64;
+        if rate > 0.0 {
+            numerator = numerator.max(1);
+        }
+        Probability::new(numerator.min(PARTS_PER_BILLION), PARTS_PER_BILLION)
+            .expect("traces sample rate must be between 0 and 1")
+    }
+}
+
 /// A list of peers provided when a validator is run locally.
 ///
 /// When run remotely, [`commonware_deployer::aws::Hosts`](https://docs.rs/commonware-deployer/latest/commonware_deployer/aws/struct.Hosts.html) is used instead.
@@ -176,10 +236,13 @@ mod tests {
     use super::*;
     use alto_types::NAMESPACE;
     use commonware_consensus::{
-        marshal, simplex::scheme::bls12381_threshold::vrf as bls12381_threshold, types::ViewDelta,
+        marshal, simplex::scheme::bls12381_threshold::standard as bls12381_threshold,
+        types::ViewDelta,
     };
     use commonware_cryptography::{
-        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519::PublicKey,
+        bls12381::primitives::variant::MinSig,
+        certificate::{mocks::Fixture, Scheme as _},
+        ed25519::PublicKey,
         Digestible, Signer,
     };
     use commonware_macros::{select, test_traced};
@@ -192,8 +255,8 @@ mod tests {
         deterministic::{self, Runner},
         Clock, Metrics, Runner as _, Spawner, Supervisor as _,
     };
-    use commonware_utils::{channel::oneshot, ordered::Set, NZUsize, NZU32};
-    use engine::{Config, Engine};
+    use commonware_utils::{channel::oneshot, ordered::Set, probability, NZUsize, NZU32};
+    use engine::Engine;
     use governor::Quota;
     use indexer::mocks;
     use rand::{rngs::StdRng, RngExt, SeedableRng};
@@ -417,20 +480,28 @@ mod tests {
 
         let public_key = signer.public_key();
         let uid = format!("validator_{public_key}");
-        let config: Config<_, _, mocks::Client, _> = engine::Config {
+        assert_eq!(scheme.participants(), &participants);
+        let Leader::Stable {
+            delay_ms,
+            term_length,
+            optimistic_views,
+        } = cfg.leader
+        else {
+            panic!("standard test scheme requires stable leadership");
+        };
+        let config = engine::Config {
             blocker: oracle.control(public_key.clone()),
             provider: oracle.manager(),
             partition_prefix: uid.clone(),
             blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
             finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
             me: signer.public_key(),
-            polynomial: scheme.polynomial().clone(),
-            share: scheme.share().cloned().unwrap(),
-            participants,
+            scheme: scheme.clone(),
+            elector: engine::stable_elector(term_length, optimistic_views),
             mailbox_size: 1024,
             deque_size: 10,
             block_size: 0,
-            leader: cfg.leader,
+            proposal_delay_ms: delay_ms,
             leader_timeout: cfg.leader_timeout,
             certification_timeout: cfg.certification_timeout,
             nullify_retry: timeout_retry,
@@ -452,7 +523,6 @@ mod tests {
             peer_provider: oracle.manager(),
             blocker: oracle.control(public_key.clone()),
             mailbox_size: NZUsize!(1024),
-            initial: Duration::from_secs(1),
             timeout: Duration::from_secs(2),
             fetch_retry_timeout: Duration::from_millis(100),
             priority_requests: false,
@@ -467,7 +537,52 @@ mod tests {
         engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
     }
 
-    async fn poll_until_height(context: &deterministic::Context, required: u64) {
+    #[test]
+    fn traces_sample_probability_preserves_configured_rate() {
+        let config = |traces_sample_rate: f64| Config {
+            private_key: String::new(),
+            share: String::new(),
+            polynomial: String::new(),
+            port: 0,
+            metrics_port: 0,
+            directory: String::new(),
+            worker_threads: 1,
+            blocking_threads: 1,
+            storage_buffer_pool_max_per_class: None,
+            network_buffer_pool_max_per_class: None,
+            storage_buffer_pool_parallelism: None,
+            network_buffer_pool_parallelism: None,
+            log_level: String::new(),
+            traces_sample_rate,
+            local: true,
+            allowed_peers: Vec::new(),
+            bootstrappers: Vec::new(),
+            mailbox_size: 1,
+            deque_size: 1,
+            block_size: 0,
+            signature_threads: 1,
+            leader: Leader::default(),
+            backfiller_max_active: DEFAULT_BACKFILLER_MAX_ACTIVE,
+            backfiller_retry_ms: DEFAULT_BACKFILLER_RETRY_MS,
+            indexer: None,
+        };
+
+        assert!(config(0.0).traces_sample_probability().is_zero());
+        assert!(config(1.0).traces_sample_probability().is_one());
+        // Rates that are not exact multiples of 2^-64 (rejected by `Probability::from_f64`) must
+        // still convert.
+        assert!(Probability::from_f64(0.0001).is_none());
+        let rate = config(0.0001).traces_sample_probability().as_f64();
+        assert!((rate - 0.0001).abs() < 1e-12, "{rate}");
+        // Positive rates below the ratio's resolution still keep tracing enabled.
+        assert!(!config(1e-12).traces_sample_probability().is_zero());
+    }
+
+    async fn poll_until_height(
+        context: &deterministic::Context,
+        oracle: &Oracle<PublicKey, deterministic::Context>,
+        required: u64,
+    ) {
         loop {
             let metrics = context.encode();
             let mut success = false;
@@ -475,10 +590,6 @@ mod tests {
                 let Some((metric, _, value)) = validator_metric_sample(line) else {
                     continue;
                 };
-                if metric.ends_with("_peers_blocked") {
-                    let value = value.parse::<u64>().unwrap();
-                    assert_eq!(value, 0);
-                }
                 if metric.ends_with("_marshal_processed_height") {
                     let value = value.parse::<u64>().unwrap();
                     if value >= required {
@@ -487,6 +598,11 @@ mod tests {
                     }
                 }
             }
+
+            // No validator should ever block a peer (checked after the height scan so the
+            // final iteration is covered too).
+            let blocked = oracle.blocked().await.expect("network closed");
+            assert!(blocked.is_empty(), "peers blocked: {blocked:?}");
             if success {
                 break;
             }
@@ -534,7 +650,7 @@ mod tests {
                 .await;
             }
 
-            poll_until_height(&context, required).await;
+            poll_until_height(&context, &oracle, required).await;
             context.auditor().state()
         })
     }
@@ -544,7 +660,7 @@ mod tests {
         let link = Link {
             latency: Duration::from_millis(10),
             jitter: Duration::from_millis(1),
-            success_rate: 1.0,
+            success_rate: probability!(1.0),
         };
         for seed in 0..5 {
             let state = all_online(5, seed, link.clone(), 25);
@@ -557,7 +673,7 @@ mod tests {
         let link = Link {
             latency: Duration::from_millis(200),
             jitter: Duration::from_millis(150),
-            success_rate: 0.75,
+            success_rate: probability!(0.75),
         };
         for seed in 0..5 {
             let state = all_online(5, seed, link.clone(), 25);
@@ -570,7 +686,7 @@ mod tests {
         let link = Link {
             latency: Duration::from_millis(80),
             jitter: Duration::from_millis(10),
-            success_rate: 0.98,
+            success_rate: probability!(0.98),
         };
         all_online(10, 0, link.clone(), 1000);
     }
@@ -606,7 +722,7 @@ mod tests {
             let link = Link {
                 latency: Duration::from_millis(10),
                 jitter: Duration::from_millis(1),
-                success_rate: 1.0,
+                success_rate: probability!(1.0),
             };
             link_validators(
                 &mut oracle,
@@ -633,7 +749,7 @@ mod tests {
                 .await;
             }
 
-            poll_until_height(&context, initial_container_required).await;
+            poll_until_height(&context, &oracle, initial_container_required).await;
 
             // Link first peer
             link_validators(
@@ -656,7 +772,7 @@ mod tests {
             )
             .await;
 
-            poll_until_height(&context, final_container_required).await;
+            poll_until_height(&context, &oracle, final_container_required).await;
         });
     }
 
@@ -704,7 +820,7 @@ mod tests {
                 let link = Link {
                     latency: Duration::from_millis(10),
                     jitter: Duration::from_millis(1),
-                    success_rate: 1.0,
+                    success_rate: probability!(1.0),
                 };
                 link_validators(&mut oracle, &participants, link, None).await;
 
@@ -730,6 +846,7 @@ mod tests {
                     .await;
                 }
 
+                let poller_oracle = oracle.clone();
                 let poller = context.child("metrics").spawn(move |context| async move {
                     loop {
                         let metrics = context.encode();
@@ -741,12 +858,6 @@ mod tests {
                                 continue;
                             };
 
-                            // If ends with peers_blocked, ensure it is zero
-                            if metric.ends_with("_peers_blocked") {
-                                let value = value.parse::<u64>().unwrap();
-                                assert_eq!(value, 0);
-                            }
-
                             // If ends with contiguous_height, ensure it is at least required_container
                             if metric.ends_with("_marshal_processed_height") {
                                 let value = value.parse::<u64>().unwrap();
@@ -756,6 +867,11 @@ mod tests {
                                 }
                             }
                         }
+
+                        // No validator should ever block a peer (checked after the height scan
+                        // so the final iteration is covered too).
+                        let blocked = poller_oracle.blocked().await.expect("network closed");
+                        assert!(blocked.is_empty(), "peers blocked: {blocked:?}");
                         if success {
                             break;
                         }
@@ -838,7 +954,7 @@ mod tests {
             let link = Link {
                 latency: Duration::from_millis(10),
                 jitter: Duration::from_millis(1),
-                success_rate: 1.0,
+                success_rate: probability!(1.0),
             };
             link_validators(&mut oracle, &participants, link, None).await;
 
@@ -861,17 +977,18 @@ mod tests {
                 .await;
             }
 
-            poll_until_height(&context, required_container).await;
+            poll_until_height(&context, &oracle, required_container).await;
 
             // Check indexer uploads
-            assert!(indexer.seed_seen.load(std::sync::atomic::Ordering::Relaxed));
+            assert!(!indexer.seed_seen.load(std::sync::atomic::Ordering::Relaxed));
             assert!(indexer
                 .notarization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
             assert!(indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
-            let genesis_digest = application::Application::genesis().digest();
+            let genesis_digest =
+                application::Application::<alto_types::StandardScheme>::genesis().digest();
             let started_digests = indexer.block_upload_started_digests.lock().clone();
             let expected_genesis_uploads = n as usize;
             assert_eq!(
@@ -919,7 +1036,7 @@ mod tests {
             let link = Link {
                 latency: Duration::from_millis(10),
                 jitter: Duration::from_millis(1),
-                success_rate: 1.0,
+                success_rate: probability!(1.0),
             };
             link_validators(&mut oracle, &participants, link, None).await;
 
@@ -942,7 +1059,7 @@ mod tests {
                 .await;
             }
 
-            poll_until_height(&context, required_container).await;
+            poll_until_height(&context, &oracle, required_container).await;
 
             // The mock rejects certified uploads, so both cert paths should
             // remain unsuccessful throughout the run.
@@ -1001,7 +1118,7 @@ mod tests {
             let link = Link {
                 latency: Duration::from_millis(10),
                 jitter: Duration::from_millis(1),
-                success_rate: 1.0,
+                success_rate: probability!(1.0),
             };
             link_validators(&mut oracle, &participants, link, None).await;
 
@@ -1056,7 +1173,8 @@ mod tests {
                 queue_outstanding(&metrics) > 0,
                 "expected finalized queue work while certificate uploads were blocked",
             );
-            let genesis_digest = application::Application::genesis().digest();
+            let genesis_digest =
+                application::Application::<alto_types::StandardScheme>::genesis().digest();
             let expected_genesis_uploads = n as usize;
             let started_digests = indexer.block_upload_started_digests.lock().clone();
             assert_eq!(
@@ -1129,7 +1247,7 @@ mod tests {
             let link = Link {
                 latency: Duration::from_millis(10),
                 jitter: Duration::from_millis(1),
-                success_rate: 1.0,
+                success_rate: probability!(1.0),
             };
             link_validators(&mut oracle, &participants, link, None).await;
 
@@ -1310,7 +1428,7 @@ mod tests {
                 let link = Link {
                     latency: Duration::from_millis(10),
                     jitter: Duration::from_millis(1),
-                    success_rate: 1.0,
+                    success_rate: probability!(1.0),
                 };
                 link_validators(&mut oracle, &participants, link, None).await;
 

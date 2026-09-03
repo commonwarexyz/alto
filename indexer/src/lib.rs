@@ -21,25 +21,36 @@ use std::{
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 
-#[derive(Default)]
-pub struct State {
+pub struct State<C: Scheme> {
     seeds: BTreeMap<View, Seed>,
-    notarizations: BTreeMap<View, Notarized>,
-    finalizations: BTreeMap<View, Finalized>,
+    notarizations: BTreeMap<View, Notarized<C>>,
+    finalizations: BTreeMap<View, Finalized<C>>,
     finalized_height_to_view: BTreeMap<u64, View>,
     blocks_by_digest: BTreeMap<Digest, Block>,
 }
 
+impl<C: Scheme> Default for State<C> {
+    fn default() -> Self {
+        Self {
+            seeds: BTreeMap::new(),
+            notarizations: BTreeMap::new(),
+            finalizations: BTreeMap::new(),
+            finalized_height_to_view: BTreeMap::new(),
+            blocks_by_digest: BTreeMap::new(),
+        }
+    }
+}
+
 #[derive(Clone)]
-pub struct Indexer<S: Strategy> {
-    scheme: Scheme,
-    state: Arc<RwLock<State>>,
+pub struct Indexer<C: Scheme, S: Strategy> {
+    scheme: C,
+    state: Arc<RwLock<State<C>>>,
     consensus_tx: broadcast::Sender<Vec<u8>>,
     strategy: S,
 }
 
-impl<S: Strategy> Indexer<S> {
-    pub fn new(scheme: Scheme, strategy: S) -> Self {
+impl<C: Scheme, S: Strategy> Indexer<C, S> {
+    pub fn new(scheme: C, strategy: S) -> Self {
         let (consensus_tx, _) = broadcast::channel(1024);
         let state = Arc::new(RwLock::new(State::default()));
 
@@ -53,7 +64,7 @@ impl<S: Strategy> Indexer<S> {
 
     pub fn submit_seed(&self, seed: Seed) -> Result<(), &'static str> {
         // Verify signature with identity
-        if !seed.verify(&self.scheme) {
+        if !self.scheme.verify_seed(&seed) {
             return Err("Invalid seed signature");
         }
 
@@ -82,7 +93,7 @@ impl<S: Strategy> Indexer<S> {
         }
     }
 
-    pub fn submit_notarization(&self, notarized: Notarized) -> Result<(), &'static str> {
+    pub fn submit_notarization(&self, notarized: Notarized<C>) -> Result<(), &'static str> {
         // Verify signature with identity
         if !notarized.verify(&self.scheme, &self.strategy) {
             return Err("Invalid notarization signature");
@@ -113,7 +124,7 @@ impl<S: Strategy> Indexer<S> {
         Ok(())
     }
 
-    pub fn get_notarization(&self, query: &str) -> Option<Notarized> {
+    pub fn get_notarization(&self, query: &str) -> Option<Notarized<C>> {
         let state = self.state.read().unwrap();
         if query == LATEST {
             state.notarizations.last_key_value().map(|(_, n)| n.clone())
@@ -125,7 +136,7 @@ impl<S: Strategy> Indexer<S> {
         }
     }
 
-    pub fn submit_finalization(&self, finalized: Finalized) -> Result<(), &'static str> {
+    pub fn submit_finalization(&self, finalized: Finalized<C>) -> Result<(), &'static str> {
         // Verify signature with identity
         if !finalized.verify(&self.scheme, &self.strategy) {
             return Err("Invalid finalization signature");
@@ -159,7 +170,7 @@ impl<S: Strategy> Indexer<S> {
         Ok(())
     }
 
-    pub fn get_finalization(&self, query: &str) -> Option<Finalized> {
+    pub fn get_finalization(&self, query: &str) -> Option<Finalized<C>> {
         let state = self.state.read().unwrap();
         if query == LATEST {
             state.finalizations.last_key_value().map(|(_, f)| f.clone())
@@ -171,7 +182,7 @@ impl<S: Strategy> Indexer<S> {
         }
     }
 
-    pub fn get_block(&self, query: &str) -> Option<BlockResult> {
+    pub fn get_block(&self, query: &str) -> Option<BlockResult<C>> {
         let state = self.state.read().unwrap();
 
         if query == LATEST {
@@ -217,17 +228,17 @@ impl<S: Strategy> Indexer<S> {
 }
 
 #[allow(clippy::large_enum_variant)]
-pub enum BlockResult {
+pub enum BlockResult<C: Scheme> {
     Block(Block),
-    Finalized(Finalized),
+    Finalized(Finalized<C>),
 }
 
-pub struct Api<S: Strategy> {
-    indexer: Arc<Indexer<S>>,
+pub struct Api<C: Scheme, S: Strategy> {
+    indexer: Arc<Indexer<C, S>>,
 }
 
-impl<S: Strategy> Api<S> {
-    pub fn new(indexer: Arc<Indexer<S>>) -> Self {
+impl<C: Scheme, S: Strategy> Api<C, S> {
+    pub fn new(indexer: Arc<Indexer<C, S>>) -> Self {
         Self { indexer }
     }
 
@@ -252,8 +263,8 @@ async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
 
-async fn seed_upload<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn seed_upload<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
     match Seed::decode(&mut body.as_ref()) {
@@ -265,8 +276,8 @@ async fn seed_upload<S: Strategy>(
     }
 }
 
-async fn seed_get<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn seed_get<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
     match indexer.get_seed(&query) {
@@ -275,11 +286,11 @@ async fn seed_get<S: Strategy>(
     }
 }
 
-async fn notarization_upload<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn notarization_upload<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
-    match Notarized::decode(&mut body.as_ref()) {
+    match Notarized::<C>::decode(&mut body.as_ref()) {
         Ok(notarized) => match indexer.submit_notarization(notarized) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
@@ -288,8 +299,8 @@ async fn notarization_upload<S: Strategy>(
     }
 }
 
-async fn notarization_get<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn notarization_get<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
     match indexer.get_notarization(&query) {
@@ -298,11 +309,11 @@ async fn notarization_get<S: Strategy>(
     }
 }
 
-async fn finalization_upload<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn finalization_upload<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
-    match Finalized::decode(&mut body.as_ref()) {
+    match Finalized::<C>::decode(&mut body.as_ref()) {
         Ok(finalized) => match indexer.submit_finalization(finalized) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
@@ -311,8 +322,8 @@ async fn finalization_upload<S: Strategy>(
     }
 }
 
-async fn finalization_get<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn finalization_get<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
     match indexer.get_finalization(&query) {
@@ -321,8 +332,8 @@ async fn finalization_get<S: Strategy>(
     }
 }
 
-async fn block_upload<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn block_upload<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
     match Block::decode(&mut body.as_ref()) {
@@ -334,8 +345,8 @@ async fn block_upload<S: Strategy>(
     }
 }
 
-async fn block_get<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn block_get<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
     match indexer.get_block(&query) {
@@ -349,16 +360,16 @@ async fn block_get<S: Strategy>(
     }
 }
 
-async fn consensus_ws<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn consensus_ws<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_consensus_ws(socket, indexer))
 }
 
-async fn handle_consensus_ws<S: Strategy>(
+async fn handle_consensus_ws<C: Scheme, S: Strategy>(
     socket: axum::extract::ws::WebSocket,
-    indexer: Arc<Indexer<S>>,
+    indexer: Arc<Indexer<C, S>>,
 ) {
     let (mut sender, _receiver) = socket.split();
     let mut consensus = indexer.consensus_subscriber();
@@ -378,10 +389,10 @@ async fn handle_consensus_ws<S: Strategy>(
 mod tests {
     use super::*;
     use alto_client::{Client, ClientBuilder, IndexQuery, Query};
-    use alto_types::{Context, Identity, Seedable, EPOCH, NAMESPACE};
+    use alto_types::{Context, Identity, Seedable, StandardScheme, VrfScheme, EPOCH, NAMESPACE};
     use commonware_consensus::{
         simplex::{
-            scheme::bls12381_threshold::vrf as bls12381_threshold,
+            scheme::bls12381_threshold::{standard, vrf as bls12381_threshold},
             types::{Finalization, Finalize, Notarization, Notarize, Proposal},
         },
         types::{Height, Round, View},
@@ -392,6 +403,7 @@ mod tests {
         Digest, Digestible, Hasher, Sha256, Signer,
     };
     use commonware_parallel::Sequential;
+    use commonware_utils::non_empty;
     use futures::StreamExt;
     use rand::{rngs::StdRng, SeedableRng};
     use rcgen::{generate_simple_self_signed, CertifiedKey, KeyPair};
@@ -403,17 +415,14 @@ mod tests {
 
     /// Test context containing common setup for indexer tests.
     struct TestContext {
-        schemes: Vec<Scheme>,
+        schemes: Vec<VrfScheme>,
         client: Client<Sequential>,
     }
 
     impl TestContext {
         /// Create a new test context with a running server and client.
         async fn new() -> Self {
-            let mut rng = StdRng::seed_from_u64(0);
-            let Fixture { schemes, .. } =
-                bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-            let identity = *schemes[0].polynomial().public();
+            let (schemes, identity) = fixture(0);
 
             let (addr, _) = start_server(schemes[0].clone(), Sequential).await;
             let client = Client::new(&format!("http://{addr}"), identity, Sequential);
@@ -451,48 +460,48 @@ mod tests {
         fn seed(&self) -> Seed {
             let block = self.test_block();
             let proposal = self.proposal(&block);
-            create_notarization(&self.schemes, proposal).seed()
+            create_notarization(&self.schemes, proposal).seed().unwrap()
         }
 
         /// Create a notarized block.
-        fn notarized(&self) -> Notarized {
+        fn notarized(&self) -> Notarized<VrfScheme> {
             let block = self.test_block();
             let proposal = self.proposal(&block);
             Notarized::new(create_notarization(&self.schemes, proposal), block)
         }
 
         /// Create a finalized block.
-        fn finalized(&self) -> Finalized {
+        fn finalized(&self) -> Finalized<VrfScheme> {
             let block = self.test_block();
             let proposal = self.proposal(&block);
             Finalized::new(create_finalization(&self.schemes, proposal), block)
         }
     }
 
-    fn create_notarization(
-        schemes: &[Scheme],
+    fn create_notarization<C: Scheme>(
+        schemes: &[C],
         proposal: Proposal<sha256::Digest>,
-    ) -> alto_types::Notarization {
+    ) -> alto_types::Notarization<C> {
         let notarizes: Vec<_> = schemes
             .iter()
             .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
             .collect();
-        Notarization::from_notarizes(&schemes[0], &notarizes, &Sequential).unwrap()
+        Notarization::from_notarizes(&schemes[0], non_empty![@&notarizes], &Sequential).unwrap()
     }
 
-    fn create_finalization(
-        schemes: &[Scheme],
+    fn create_finalization<C: Scheme>(
+        schemes: &[C],
         proposal: Proposal<sha256::Digest>,
-    ) -> alto_types::Finalization {
+    ) -> alto_types::Finalization<C> {
         let finalizes: Vec<_> = schemes
             .iter()
             .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
             .collect();
-        Finalization::from_finalizes(&schemes[0], &finalizes, &Sequential).unwrap()
+        Finalization::from_finalizes(&schemes[0], non_empty![@&finalizes], &Sequential).unwrap()
     }
 
-    async fn start_server(
-        scheme: Scheme,
+    async fn start_server<C: Scheme>(
+        scheme: C,
         strategy: impl Strategy,
     ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
         let indexer = Arc::new(Indexer::new(scheme, strategy));
@@ -509,7 +518,7 @@ mod tests {
         (addr, handle)
     }
 
-    async fn wait_for_ready(client: &Client<Sequential>) {
+    async fn wait_for_ready<C: Scheme>(client: &Client<Sequential, C>) {
         loop {
             if client.health().await.is_ok() {
                 return;
@@ -518,11 +527,11 @@ mod tests {
         }
     }
 
-    fn fixture(seed: u64) -> (Vec<Scheme>, Identity) {
+    fn fixture(seed: u64) -> (Vec<VrfScheme>, Identity) {
         let mut rng = StdRng::seed_from_u64(seed);
         let Fixture { schemes, .. } =
             bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-        let identity = *schemes[0].polynomial().public();
+        let identity = *schemes[0].identity();
         (schemes, identity)
     }
 
@@ -574,6 +583,66 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(retrieved.proof.view().get(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_standard_certificate_operations() {
+        let mut rng = StdRng::seed_from_u64(2);
+        let Fixture { schemes, .. } = standard::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
+        let identity = *schemes[0].identity();
+        let (addr, _handle) = start_server(schemes[0].clone(), Sequential).await;
+        let client = Client::<Sequential, StandardScheme>::new_standard(
+            &format!("http://{addr}"),
+            identity,
+            Sequential,
+        );
+        wait_for_ready(&client).await;
+
+        let context = Context {
+            round: Round::new(EPOCH, View::new(1)),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::new(0), sha256::Digest::EMPTY),
+        };
+        let block = Block::new(
+            context,
+            Sha256::hash(&[b"genesis"]),
+            Height::new(1),
+            1000,
+            Bytes::new(),
+        );
+        let proposal = Proposal::new(
+            Round::new(EPOCH, View::new(1)),
+            View::new(0),
+            block.digest(),
+        );
+        let notarized = Notarized::new(
+            create_notarization(&schemes, proposal.clone()),
+            block.clone(),
+        );
+        let finalized = Finalized::new(create_finalization(&schemes, proposal), block);
+
+        client.notarized_upload(notarized).await.unwrap();
+        client.finalized_upload(finalized).await.unwrap();
+        assert_eq!(
+            client
+                .notarized_get(IndexQuery::Latest)
+                .await
+                .unwrap()
+                .proof
+                .view()
+                .get(),
+            1
+        );
+        assert_eq!(
+            client
+                .finalized_get(IndexQuery::Latest)
+                .await
+                .unwrap()
+                .proof
+                .view()
+                .get(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -691,7 +760,7 @@ mod tests {
             View::new(0),
             block.digest(),
         );
-        let seed = create_notarization(&schemes1, proposal).seed();
+        let seed = create_notarization(&schemes1, proposal).seed().unwrap();
 
         // Server accepts it (signed by schemes1, which server uses)
         client.seed_upload(seed).await.unwrap();
@@ -711,7 +780,9 @@ mod tests {
         // Create a seed with wrong schemes
         let block = ctx.test_block();
         let proposal = ctx.proposal(&block);
-        let bad_seed = create_notarization(&wrong_schemes, proposal).seed();
+        let bad_seed = create_notarization(&wrong_schemes, proposal)
+            .seed()
+            .unwrap();
 
         // Server rejects it (signature doesn't match server's identity)
         let result = ctx.client.seed_upload(bad_seed).await;
@@ -724,7 +795,7 @@ mod tests {
     }
 
     async fn start_tls_server(
-        scheme: Scheme,
+        scheme: VrfScheme,
         cert_key: &CertifiedKey<KeyPair>,
         strategy: impl Strategy,
     ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
@@ -792,10 +863,7 @@ mod tests {
     async fn test_tls_https_connection() {
         let cert_key = generate_self_signed_cert();
 
-        let mut rng = StdRng::seed_from_u64(0);
-        let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-        let identity = *schemes[0].polynomial().public();
+        let (schemes, identity) = fixture(0);
 
         let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key, Sequential).await;
         let client = create_tls_client(addr, identity, &cert_key);
@@ -819,7 +887,7 @@ mod tests {
             View::new(0),
             block.digest(),
         );
-        let seed = create_notarization(&schemes, proposal).seed();
+        let seed = create_notarization(&schemes, proposal).seed().unwrap();
 
         // Test HTTPS POST
         client.seed_upload(seed.clone()).await.unwrap();
@@ -835,10 +903,7 @@ mod tests {
     async fn test_tls_websocket_connection() {
         let cert_key = generate_self_signed_cert();
 
-        let mut rng = StdRng::seed_from_u64(0);
-        let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-        let identity = *schemes[0].polynomial().public();
+        let (schemes, identity) = fixture(0);
 
         let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key, Sequential).await;
         let client = create_tls_client(addr, identity, &cert_key);
@@ -862,7 +927,7 @@ mod tests {
             View::new(0),
             block.digest(),
         );
-        let seed = create_notarization(&schemes, proposal).seed();
+        let seed = create_notarization(&schemes, proposal).seed().unwrap();
 
         // Connect to WebSocket over TLS
         let mut stream = client.listen().await.unwrap();

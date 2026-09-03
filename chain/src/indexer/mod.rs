@@ -1,7 +1,7 @@
 //! Indexer upload integration for the chain engine.
 //!
 //! The indexer integration has two cooperating upload paths:
-//! - the live path, where `Pusher` uploads seeds and certificate-bearing
+//! - the live path, where `Pusher` uploads available seeds and certificate-bearing
 //!   objects as consensus activity happens;
 //! - the backfiller path, where `Producer` persists finalized block digests and
 //!   `Consumer` retries block uploads from the backfill queue across
@@ -32,7 +32,7 @@ use backfiller::{SharedState, State};
 pub(crate) use pusher::Pusher;
 
 /// Trait for interacting with an indexer backend.
-pub trait Client: Clone + Send + Sync + 'static {
+pub trait Client<C: Scheme>: Clone + Send + Sync + 'static {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Upload a seed to the indexer.
@@ -41,20 +41,20 @@ pub trait Client: Clone + Send + Sync + 'static {
     /// Upload a notarization to the indexer.
     fn notarized_upload(
         &self,
-        notarized: Notarized,
+        notarized: Notarized<C>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Upload a finalization to the indexer.
     fn finalized_upload(
         &self,
-        finalized: Finalized,
+        finalized: Finalized<C>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Upload a block (without certificate) to the indexer.
     fn block_upload(&self, block: Block) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
-impl<S: Strategy> Client for alto_client::Client<S> {
+impl<S: Strategy, C: Scheme> Client<C> for alto_client::Client<S, C> {
     type Error = alto_client::Error;
 
     fn seed_upload(&self, seed: Seed) -> impl Future<Output = Result<(), Self::Error>> + Send {
@@ -63,14 +63,14 @@ impl<S: Strategy> Client for alto_client::Client<S> {
 
     fn notarized_upload(
         &self,
-        notarized: Notarized,
+        notarized: Notarized<C>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.notarized_upload(notarized)
     }
 
     fn finalized_upload(
         &self,
-        finalized: Finalized,
+        finalized: Finalized<C>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.finalized_upload(finalized)
     }
@@ -88,17 +88,26 @@ impl<S: Strategy> Client for alto_client::Client<S> {
 /// - a producer for the application's finalized block stream;
 /// - a pusher for consensus activity;
 /// - a consumer for the background retry task.
-pub(crate) struct Indexer<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> {
+pub(crate) struct Indexer<
+    E: Spawner + Clock + Storage + Metrics + BufferPooler,
+    C: Client<CS>,
+    CS: Scheme,
+> {
     producer: Producer,
-    pusher: Pusher<E, C>,
-    consumer: Consumer<E, C>,
+    pusher: Pusher<E, C, CS>,
+    consumer: Consumer<E, C, CS>,
 }
 
-impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Indexer<E, C> {
+impl<E, C, CS> Indexer<E, C, CS>
+where
+    E: Spawner + Clock + Storage + Metrics + BufferPooler,
+    C: Client<CS>,
+    CS: Scheme,
+{
     pub(crate) async fn new(
         context: E,
         client: C,
-        marshal: MarshalMailbox<Scheme, Standard<Block>>,
+        marshal: MarshalMailbox<CS, Standard<Block>>,
         backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
         mailbox_size: NonZeroUsize,
         backfiller_max_active: NonZeroUsize,
@@ -136,7 +145,7 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Indexer<E
     }
 
     /// Consumes the runtime and returns the actor handles it constructed.
-    pub(crate) fn split(self) -> (Producer, Pusher<E, C>, Consumer<E, C>) {
+    pub(crate) fn split(self) -> (Producer, Pusher<E, C, CS>, Consumer<E, C, CS>) {
         let Self {
             producer,
             pusher,

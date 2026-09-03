@@ -70,19 +70,19 @@ impl Reporter for Mailbox {
 }
 
 /// A simple application that tracks just tracks the rate of block processing.
-pub(crate) struct Application<E: Clock + Spawner + Metrics> {
+pub(crate) struct Application<E: Clock + Spawner + Metrics, C: Scheme> {
     context: ContextCell<E>,
     receiver: mailbox::Receiver<Message>,
     throughput: Throughput,
     tip: Option<Height>,
-    mailbox: MarshalMailbox<Scheme, Standard<Block>>,
+    mailbox: MarshalMailbox<C, Standard<Block>>,
     pruning_depth: Option<u64>,
 }
 
-impl<E: Clock + Spawner + Metrics> Application<E> {
+impl<E: Clock + Spawner + Metrics, C: Scheme> Application<E, C> {
     pub(crate) fn new(
         context: E,
-        mailbox: MarshalMailbox<Scheme, Standard<Block>>,
+        mailbox: MarshalMailbox<C, Standard<Block>>,
         mailbox_size: NonZeroUsize,
         pruning_depth: Option<u64>,
     ) -> (Self, Mailbox) {

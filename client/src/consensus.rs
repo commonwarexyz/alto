@@ -1,5 +1,5 @@
 use crate::{Client, Error, IndexQuery, Query};
-use alto_types::{Block, Finalized, Kind, Notarized, Seed};
+use alto_types::{Block, Finalized, Kind, Notarized, Scheme, Seed};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::Viewable;
 use commonware_cryptography::Digestible;
@@ -43,18 +43,18 @@ fn listen_path(base: String) -> String {
     format!("{base}/consensus/ws")
 }
 
-pub enum Payload {
-    Finalized(Box<Finalized>),
+pub enum Payload<C: Scheme> {
+    Finalized(Box<Finalized<C>>),
     Block(Box<Block>),
 }
 
-pub enum Message {
+pub enum Message<C: Scheme> {
     Seed(Seed),
-    Notarization(Notarized),
-    Finalization(Finalized),
+    Notarization(Notarized<C>),
+    Finalization(Finalized<C>),
 }
 
-impl<S: Strategy> Client<S> {
+impl<S: Strategy, C: Scheme> Client<S, C> {
     pub async fn seed_upload(&self, seed: Seed) -> Result<(), Error> {
         let result = self
             .http_client
@@ -82,7 +82,7 @@ impl<S: Strategy> Client<S> {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let seed = Seed::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if self.verify && !seed.verify(&self.certificate_verifier) {
+        if self.verify && !self.certificate_verifier.verify_seed(&seed) {
             return Err(Error::InvalidSignature);
         }
 
@@ -98,7 +98,7 @@ impl<S: Strategy> Client<S> {
         Ok(seed)
     }
 
-    pub async fn notarized_upload(&self, notarized: Notarized) -> Result<(), Error> {
+    pub async fn notarized_upload(&self, notarized: Notarized<C>) -> Result<(), Error> {
         let result = self
             .http_client
             .post(notarization_upload_path(self.uri.clone()))
@@ -112,7 +112,7 @@ impl<S: Strategy> Client<S> {
         Ok(())
     }
 
-    pub async fn notarized_get(&self, query: IndexQuery) -> Result<Notarized, Error> {
+    pub async fn notarized_get(&self, query: IndexQuery) -> Result<Notarized<C>, Error> {
         // Get the notarization
         let result = self
             .http_client
@@ -124,7 +124,7 @@ impl<S: Strategy> Client<S> {
             return Err(Error::Failed(result.status()));
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let notarized = Notarized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+        let notarized = Notarized::<C>::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
         if self.verify && !notarized.verify(&self.certificate_verifier, &self.strategy) {
             return Err(Error::InvalidSignature);
         }
@@ -141,7 +141,7 @@ impl<S: Strategy> Client<S> {
         Ok(notarized)
     }
 
-    pub async fn finalized_upload(&self, finalized: Finalized) -> Result<(), Error> {
+    pub async fn finalized_upload(&self, finalized: Finalized<C>) -> Result<(), Error> {
         let result = self
             .http_client
             .post(finalization_upload_path(self.uri.clone()))
@@ -155,7 +155,7 @@ impl<S: Strategy> Client<S> {
         Ok(())
     }
 
-    pub async fn finalized_get(&self, query: IndexQuery) -> Result<Finalized, Error> {
+    pub async fn finalized_get(&self, query: IndexQuery) -> Result<Finalized<C>, Error> {
         // Get the finalization
         let result = self
             .http_client
@@ -167,7 +167,7 @@ impl<S: Strategy> Client<S> {
             return Err(Error::Failed(result.status()));
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let finalized = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+        let finalized = Finalized::<C>::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
         if self.verify && !finalized.verify(&self.certificate_verifier, &self.strategy) {
             return Err(Error::InvalidSignature);
         }
@@ -199,7 +199,7 @@ impl<S: Strategy> Client<S> {
         Ok(())
     }
 
-    pub async fn block_get(&self, query: Query) -> Result<Payload, Error> {
+    pub async fn block_get(&self, query: Query) -> Result<Payload<C>, Error> {
         // Get the block
         let result = self
             .http_client
@@ -215,14 +215,14 @@ impl<S: Strategy> Client<S> {
         // Verify the block matches the query
         let result = match query {
             Query::Latest => {
-                let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+                let result = Finalized::<C>::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
                 if self.verify && !result.verify(&self.certificate_verifier, &self.strategy) {
                     return Err(Error::InvalidSignature);
                 }
                 Payload::Finalized(Box::new(result))
             }
             Query::Index(index) => {
-                let result = Finalized::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+                let result = Finalized::<C>::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
                 if self.verify && !result.verify(&self.certificate_verifier, &self.strategy) {
                     return Err(Error::InvalidSignature);
                 }
@@ -242,7 +242,7 @@ impl<S: Strategy> Client<S> {
         Ok(result)
     }
 
-    pub async fn listen(&self) -> Result<impl Stream<Item = Result<Message, Error>>, Error> {
+    pub async fn listen(&self) -> Result<impl Stream<Item = Result<Message<C>, Error>>, Error> {
         // Connect to the websocket endpoint
         let (stream, _) = connect_async_tls_with_config(
             listen_path(self.ws_uri.clone()),
@@ -278,7 +278,7 @@ impl<S: Strategy> Client<S> {
                                     let result = Seed::decode(data);
                                     match result {
                                         Ok(seed) => {
-                                            if verify && !seed.verify(&certificate_verifier) {
+                                            if verify && !certificate_verifier.verify_seed(&seed) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;
@@ -292,7 +292,7 @@ impl<S: Strategy> Client<S> {
                                     }
                                 }
                                 Kind::Notarization => {
-                                    let result = Notarized::decode(data);
+                                    let result = Notarized::<C>::decode(data);
                                     match result {
                                         Ok(notarized) => {
                                             if verify
@@ -314,7 +314,7 @@ impl<S: Strategy> Client<S> {
                                     }
                                 }
                                 Kind::Finalization => {
-                                    let result = Finalized::decode(data);
+                                    let result = Finalized::<C>::decode(data);
                                     match result {
                                         Ok(finalized) => {
                                             if verify

@@ -27,6 +27,10 @@ cargo install alto-inspector
 
 _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
 
+_Use `--certificate-mode standard` when inspecting a stable-leader network. The default is `vrf`
+for compatibility with existing rotating-leader networks; stable networks do not publish seed
+artifacts._
+
 ### Get the latest seed
 
 ```bash
@@ -72,7 +76,7 @@ inspector get block 10..20
 ### Get the block with a specific digest
 
 ```bash
-inspector -- get block 0x65016ff40e824e21fffe903953c07b6d604dbcf39f681c62e7b3ed57ab1d1994
+inspector get block 0x65016ff40e824e21fffe903953c07b6d604dbcf39f681c62e7b3ed57ab1d1994
 ```
 
 ### Listen for consensus events

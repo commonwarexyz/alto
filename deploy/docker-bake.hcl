@@ -20,11 +20,19 @@ target "graviton" {
     TARGET_TRIPLE = "aarch64-unknown-linux-gnu"
     TARGET_CARGO_NAME = "AARCH64_UNKNOWN_LINUX_GNU"
     TARGET_CC_NAME = "aarch64_unknown_linux_gnu"
-    TARGET_CPU = "neoverse-v1"
+    TARGET_CPU = "neoverse-512tvb"
     TARGET_LINKER = "aarch64-linux-gnu-gcc"
     TARGET_CXX = "aarch64-linux-gnu-g++"
     TARGET_AR = "aarch64-linux-gnu-ar"
     TARGET_STRIP = "aarch64-linux-gnu-strip"
+  }
+}
+
+target "graviton4" {
+  inherits = ["graviton"]
+  tags = ["alto-validator-builder:graviton4-${DEFAULT_TAG}"]
+  args = {
+    TARGET_CPU = "neoverse-v2"
   }
 }
 

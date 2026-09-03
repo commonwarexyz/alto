@@ -32,20 +32,20 @@ pub enum Error {
 /// This is the sole signature verification point for the WebSocket streaming
 /// path. The [Source] (client) is constructed without verification to avoid
 /// redundant checks.
-pub struct Feeder<E: Clock, C: Source> {
+pub struct Feeder<E: Clock, C: Source<CS>, CS: Scheme> {
     context: ContextCell<E>,
     client: C,
-    scheme: Scheme,
-    marshal_mailbox: MarshalMailbox<Scheme, Standard<Block>>,
+    scheme: CS,
+    marshal_mailbox: MarshalMailbox<CS, Standard<Block>>,
 }
 
-impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
+impl<E: Clock + Spawner, C: Source<CS>, CS: Scheme> Feeder<E, C, CS> {
     /// Create a new [Feeder].
     pub fn new(
         context: E,
         client: C,
-        scheme: Scheme,
-        marshal_mailbox: MarshalMailbox<Scheme, Standard<Block>>,
+        scheme: CS,
+        marshal_mailbox: MarshalMailbox<CS, Standard<Block>>,
     ) -> Self {
         Self {
             context: ContextCell::new(context),
@@ -99,7 +99,7 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
     /// Seed messages are ignored. Notarization and finalization messages
     /// have their threshold signatures verified before being reported to
     /// marshal along with their associated blocks.
-    async fn handle_message(&mut self, message: Message) -> Result<(), Error> {
+    async fn handle_message(&mut self, message: Message<CS>) -> Result<(), Error> {
         match message {
             Message::Seed(seed) => {
                 trace!(view = seed.view().get(), "received seed");

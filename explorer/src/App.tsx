@@ -2,10 +2,26 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { DivIcon, LatLng } from "leaflet";
 import "leaflet/dist/leaflet.css";
-import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
-import { getClusterConfig, getClusters, Cluster, DEFAULT_CLUSTER, MODE } from "./config";
+import init, { leader_index } from "./alto_types/alto_types.js";
+import {
+  getClusterConfig,
+  getClusters,
+  getHttpBackendUrl,
+  getWebSocketBackendUrl,
+  Cluster,
+  DEFAULT_CLUSTER,
+  MODE,
+} from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, ViewData } from "./types";
 import { hexToUint8Array, hexUint8Array } from "./utils";
+import { resolveLeaderLocation } from "./leaderLocation";
+import {
+  ConsensusWorkerPool,
+  consensusWorkerCount,
+  VerifiedConsensusArtifact,
+} from "./consensusWorkerPool";
+import { scaleTimelineWidth } from "./timeline";
+import { getLeaderIndicator, getTimelineIdentifier } from "./timelineIdentifier";
 import "./App.css";
 import AboutModal from './AboutModal';
 import './AboutModal.css';
@@ -36,23 +52,23 @@ const getInitialCluster = (): Cluster => {
   return DEFAULT_CLUSTER;
 };
 
-const SCALE_DURATION = 500; // 500ms
 const TIMEOUT_DURATION = 5000; // 5s
 const HEALTH_CHECK_INTERVAL = 60000; // Check health every minute
+const VIEW_RENDER_INTERVAL = 100;
+const MAX_TRACKED_VIEWS = 128;
+const MAX_RENDERED_VIEWS = 50;
+
+const retainNewestViews = (views: ViewData[]): ViewData[] => {
+  const sorted = [...views].sort((a, b) => b.view - a.view);
+  for (const discarded of sorted.slice(MAX_TRACKED_VIEWS)) {
+    if (discarded.timeoutId) {
+      clearTimeout(discarded.timeoutId);
+    }
+  }
+  return sorted.slice(0, MAX_TRACKED_VIEWS);
+};
 
 const center = new LatLng(0, 0);
-const markerIcon = new DivIcon({
-  className: "custom-div-icon",
-  html: `<div style="
-        background-color: #0000eeff;
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        "></div>`,
-  iconSize: [12, 12],
-  iconAnchor: [6, 6],
-});
-
 // ASCII Logo animation logic
 const initializeLogoAnimations = () => {
   const horizontalSymbols = [" ", "*", "+", "-", "~"];
@@ -89,11 +105,34 @@ const App: React.FC = () => {
   const [selectedCluster, setSelectedCluster] = useState<Cluster>(getInitialCluster());
   const clusterConfig = useMemo(() => getClusterConfig(selectedCluster), [selectedCluster]);
   const allConfigs = useMemo(() => getClusters(), []);
-  const { BACKEND_URL, PUBLIC_KEY_HEX, LOCATIONS } = clusterConfig;
+  const { BACKEND_URL, PUBLIC_KEY_HEX, LOCATIONS, PARTICIPANTS } = clusterConfig;
+  const standardCertificates = clusterConfig.CERTIFICATE_MODE === 'standard';
+  const leaderIndicator = getLeaderIndicator(standardCertificates);
+  const timelineIdentifier = getTimelineIdentifier(standardCertificates);
+  const markerIcon = useMemo(() => new DivIcon({
+    className: "custom-div-icon",
+    html: `<div style="
+          background-color: ${leaderIndicator.color};
+          width: 16px;
+          height: 16px;
+          border-radius: 50%;
+          "></div>`,
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+  }), [leaderIndicator.color]);
   const PUBLIC_KEY = useMemo(() => hexToUint8Array(PUBLIC_KEY_HEX), [PUBLIC_KEY_HEX]);
 
   const [views, setViews] = useState<ViewData[]>([]);
-  const [lastObservedView, setLastObservedView] = useState<number | null>(null);
+  const mappedView = useMemo(
+    () => views.reduce<ViewData | undefined>((latest, view) => {
+      if (view.location === undefined || (latest && latest.view >= view.view)) {
+        return latest;
+      }
+      return view;
+    }, undefined),
+    [views],
+  );
+  const lastObservedViewRef = useRef<number | null>(null);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
   const [isKeyInfoModalOpen, setIsKeyInfoModalOpen] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
@@ -106,6 +145,8 @@ const App: React.FC = () => {
   const adjustTime = useClockSkew();
   const currentTimeRef = useRef(adjustTime(Date.now()));
   const wsRef = useRef<WebSocket | null>(null);
+  const verifierPoolRef = useRef<ConsensusWorkerPool | null>(null);
+  const verifiedQueueRef = useRef<VerifiedConsensusArtifact[]>([]);
 
   // Manage WebSocket lifecycle
   const handleSeedRef = useRef<typeof handleSeed>(null!);
@@ -161,7 +202,8 @@ const App: React.FC = () => {
   // Reset state when the cluster changes
   useEffect(() => {
     setViews([]);
-    setLastObservedView(null);
+    lastObservedViewRef.current = null;
+    verifiedQueueRef.current = [];
     setErrorMessage("");
     setShowError(false);
   }, [selectedCluster]);
@@ -169,8 +211,7 @@ const App: React.FC = () => {
   // Health check function
   const checkHealth = useCallback(async () => {
     try {
-      const protocol = MODE === 'local' ? 'http' : 'https';
-      const response = await fetch(`${protocol}://${BACKEND_URL}/health`, {
+      const response = await fetch(`${getHttpBackendUrl(BACKEND_URL)}/health`, {
         method: "GET",
         headers: {
           "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -241,12 +282,26 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const handleSeed = useCallback((seed: SeedJs) => {
+  const resolveSeedLocation = useCallback((seed: SeedJs) => {
+    if (MODE !== 'public' || PARTICIPANTS?.length || LOCATIONS.length === 0) {
+      return { location: undefined, locationName: undefined };
+    }
+
+    const locationIndex = leader_index(seed, LOCATIONS.length);
+    return {
+      location: LOCATIONS[locationIndex][0],
+      locationName: LOCATIONS[locationIndex][1],
+    };
+  }, [LOCATIONS, PARTICIPANTS]);
+
+  const handleSeed = useCallback((seed: SeedJs, receivedAt: number) => {
     const view = seed.view + 1; // Next view is determined by seed - 1
+    const observedAt = adjustTime(receivedAt);
 
     setViews((prevViews) => {
       // Create a copy of the current views that we'll modify
       let newViews = [...prevViews];
+      const lastObservedView = lastObservedViewRef.current;
 
       // If we haven't observed any views yet, or if the new view is greater than the last observed view + 1,
       // handle potentially missed views
@@ -279,7 +334,7 @@ const App: React.FC = () => {
               location: undefined,
               locationName: undefined,
               status: "unknown",
-              startTime: adjustTime(Date.now()),
+              startTime: observedAt,
               timeoutId: timeoutId
             });
           }
@@ -294,16 +349,13 @@ const App: React.FC = () => {
         // the location and signature information without changing timing
         const existingStatus = newViews[existingIndex].status;
         if (existingStatus === "finalized" || existingStatus === "notarized") {
-          // Only update location if in public mode
-          const locationIndex = MODE === 'public' ? leader_index(seed, LOCATIONS.length) : -1;
-          const location = locationIndex >= 0 ? LOCATIONS[locationIndex][0] : undefined;
-          const locationName = locationIndex >= 0 ? LOCATIONS[locationIndex][1] : undefined;
+          const { location, locationName } = resolveSeedLocation(seed);
 
           // Only update location and signature info, preserve all timing and status
           newViews[existingIndex] = {
             ...newViews[existingIndex],
-            location,
-            locationName,
+            location: location ?? newViews[existingIndex].location,
+            locationName: locationName ?? newViews[existingIndex].locationName,
             signature: seed.signature,
           };
 
@@ -322,15 +374,13 @@ const App: React.FC = () => {
       }
 
       // Create the new view data
-      const locationIndex = MODE === 'public' ? leader_index(seed, LOCATIONS.length) : -1;
-      const location = locationIndex >= 0 ? LOCATIONS[locationIndex][0] : undefined;
-      const locationName = locationIndex >= 0 ? LOCATIONS[locationIndex][1] : undefined;
+      const { location, locationName } = resolveSeedLocation(seed);
       const newView: ViewData = {
         view,
         location,
         locationName,
         status: "growing",
-        startTime: adjustTime(Date.now()),
+        startTime: observedAt,
         signature: seed.signature,
       };
 
@@ -368,27 +418,21 @@ const App: React.FC = () => {
 
       // Update the last observed view if this is a new maximum
       if (lastObservedView === null || view > lastObservedView) {
-        setLastObservedView(view);
+        lastObservedViewRef.current = view;
       }
 
-      // Limit the number of views to 50
-      if (newViews.length > 50) {
-        // Clean up any timeouts for views we're about to remove
-        for (let i = 50; i < newViews.length; i++) {
-          if (newViews[i].timeoutId) {
-            clearTimeout(newViews[i].timeoutId);
-          }
-        }
-        newViews = newViews.slice(0, 50);
-      }
-
-      return newViews;
+      return retainNewestViews(newViews);
     });
-  }, [lastObservedView, adjustTime, LOCATIONS]);
+  }, [adjustTime, resolveSeedLocation]);
 
-  const handleNotarization = useCallback((notarized: NotarizedJs) => {
+  const handleNotarization = useCallback((notarized: NotarizedJs, receivedAt: number) => {
     const view = notarized.proof.view;
+    const leaderLocation = resolveLeaderLocation(notarized.block?.leader, PARTICIPANTS, LOCATIONS);
     setViews((prevViews) => {
+      const lastObservedView = lastObservedViewRef.current;
+      if (lastObservedView === null || view > lastObservedView) {
+        lastObservedViewRef.current = view;
+      }
       const index = prevViews.findIndex((v) => v.view === view);
 
       // If the view exists and is already finalized, ignore this notarization completely
@@ -396,7 +440,7 @@ const App: React.FC = () => {
         return prevViews; // No changes needed, preserve finalized state
       }
       let newViews = [...prevViews];
-      const currentTime = adjustTime(Date.now());
+      const currentTime = adjustTime(receivedAt);
 
       // Calculate a reasonable start time using the block timestamp if available
       let calculatedStartTime = currentTime;
@@ -432,6 +476,7 @@ const App: React.FC = () => {
           block: viewData.block || notarized.block, // Don't overwrite existing block data
           timeoutId: undefined,
           actualNotarizationLatency,
+          ...leaderLocation,
         };
 
         newViews = [
@@ -450,8 +495,8 @@ const App: React.FC = () => {
         }
         newViews = [{
           view,
-          location: undefined,
-          locationName: undefined,
+          location: leaderLocation?.location,
+          locationName: leaderLocation?.locationName,
           status: "notarized",
           startTime: calculatedStartTime,
           notarizationTime: currentTime,
@@ -460,27 +505,21 @@ const App: React.FC = () => {
         }, ...prevViews];
       }
 
-      // Limit the number of views to 50
-      if (newViews.length > 50) {
-        // Clean up any timeouts for views we're about to remove
-        for (let i = 50; i < newViews.length; i++) {
-          if (newViews[i].timeoutId) {
-            clearTimeout(newViews[i].timeoutId);
-          }
-        }
-        newViews = newViews.slice(0, 50);
-      }
-
-      return newViews;
+      return retainNewestViews(newViews);
     });
-  }, [adjustTime]);
+  }, [adjustTime, LOCATIONS, PARTICIPANTS]);
 
-  const handleFinalization = useCallback((finalized: FinalizedJs) => {
+  const handleFinalization = useCallback((finalized: FinalizedJs, receivedAt: number) => {
     const view = finalized.proof.view;
+    const leaderLocation = resolveLeaderLocation(finalized.block?.leader, PARTICIPANTS, LOCATIONS);
     setViews((prevViews) => {
+      const lastObservedView = lastObservedViewRef.current;
+      if (lastObservedView === null || view > lastObservedView) {
+        lastObservedViewRef.current = view;
+      }
       const index = prevViews.findIndex((v) => v.view === view);
       let newViews = [...prevViews];
-      const currentTime = adjustTime(Date.now());
+      const currentTime = adjustTime(receivedAt);
 
       // Calculate a reasonable start time using the block timestamp if available
       let calculatedStartTime = currentTime;
@@ -523,6 +562,7 @@ const App: React.FC = () => {
           timeoutId: undefined,
           actualNotarizationLatency: viewData.actualNotarizationLatency,
           actualFinalizationLatency,
+          ...leaderLocation,
         };
 
         newViews = [
@@ -541,8 +581,8 @@ const App: React.FC = () => {
         }
         newViews = [{
           view,
-          location: undefined,
-          locationName: undefined,
+          location: leaderLocation?.location,
+          locationName: leaderLocation?.locationName,
           status: "finalized",
           startTime: calculatedStartTime,
           // No notarization time observed yet
@@ -552,28 +592,35 @@ const App: React.FC = () => {
         }, ...prevViews];
       }
 
-      // Limit the number of views to 50
-      if (newViews.length > 50) {
-        // Clean up any timeouts for views we're about to remove
-        for (let i = 50; i < newViews.length; i++) {
-          if (newViews[i].timeoutId) {
-            clearTimeout(newViews[i].timeoutId);
-          }
-        }
-        newViews = newViews.slice(0, 50);
-      }
-
-      return newViews;
+      return retainNewestViews(newViews);
     });
-  }, [adjustTime]);
+  }, [adjustTime, LOCATIONS, PARTICIPANTS]);
 
-  // Update current time every 50ms to force re-render for growing bars
+  // Merge every verified artifact while limiting React rendering work.
   useEffect(() => {
     const interval = setInterval(() => {
       currentTimeRef.current = adjustTime(Date.now());
-      // Force re-render without relying on state updates
-      setViews(views => [...views]);
-    }, 50);
+      const verified = verifiedQueueRef.current.splice(0);
+      for (const { kind, artifact, receivedAt } of verified) {
+        if (!artifact) {
+          continue;
+        }
+        switch (kind) {
+          case 0:
+            handleSeedRef.current(artifact as SeedJs, receivedAt);
+            break;
+          case 1:
+            handleNotarizedRef.current(artifact as NotarizedJs, receivedAt);
+            break;
+          case 2:
+            handleFinalizedRef.current(artifact as FinalizedJs, receivedAt);
+            break;
+        }
+      }
+      if (verified.length === 0) {
+        setViews(views => [...views]);
+      }
+    }, VIEW_RENDER_INTERVAL);
     return () => clearInterval(interval);
   }, [adjustTime]);
 
@@ -613,8 +660,12 @@ const App: React.FC = () => {
     // Skip if already initialized to prevent duplicate connections during development mode's double-invocation
     if (isInitializedRef.current) return;
     isInitializedRef.current = true;
+    let cancelled = false;
 
     const connectWebSocket = () => {
+      if (cancelled) {
+        return;
+      }
       // Clear any existing reconnection timers
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
@@ -634,12 +685,15 @@ const App: React.FC = () => {
 
       // Create new WebSocket connection
       const wsCreationTime = Date.now();
-      const protocol = MODE === 'local' ? 'ws' : 'wss';
-      const ws = new WebSocket(`${protocol}://${BACKEND_URL}/consensus/ws`);
+      const ws = new WebSocket(`${getWebSocketBackendUrl(BACKEND_URL)}/consensus/ws`);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
       ws.onopen = () => {
+        if (cancelled) {
+          ws.close(1000, "Component unmounted");
+          return;
+        }
         console.log(`WebSocket connected: ${BACKEND_URL}`);
         setErrorMessage("");
         setShowError(false);
@@ -648,20 +702,8 @@ const App: React.FC = () => {
       ws.onmessage = (event) => {
         const data = new Uint8Array(event.data);
         const kind = data[0];
-        const payload = data.slice(1);
-        switch (kind) {
-          case 0: // Seed
-            const seed = parse_seed(PUBLIC_KEY, payload);
-            if (seed) handleSeedRef.current(seed);
-            break;
-          case 1: // Notarization
-            const notarized = parse_notarized(PUBLIC_KEY, payload);
-            if (notarized) handleNotarizedRef.current(notarized);
-            break;
-          case 2: // Finalization
-            const finalized = parse_finalized(PUBLIC_KEY, payload);
-            if (finalized) handleFinalizedRef.current(finalized);
-            break;
+        if (kind <= 2) {
+          verifierPoolRef.current?.verify(kind, data.slice(1), Date.now());
         }
       };
 
@@ -670,6 +712,9 @@ const App: React.FC = () => {
       };
 
       ws.onclose = (event) => {
+        if (cancelled) {
+          return;
+        }
         console.error(`WebSocket closed with code: ${event.code}`);
 
         // Check for potential rate limiting (code 1006 is "Abnormal Closure")
@@ -692,7 +737,9 @@ const App: React.FC = () => {
         if (wsRef.current === ws) {
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectTimeoutRef.current = null;
-            connectWebSocket();
+            if (!cancelled) {
+              connectWebSocket();
+            }
           }, 11000);
         }
       };
@@ -700,18 +747,60 @@ const App: React.FC = () => {
 
     const setup = async () => {
       await init();
+      if (cancelled) {
+        return;
+      }
+      const createWorker = () => new Worker(new URL("./consensusWorker.ts", import.meta.url));
+      const workers: Worker[] = [];
+      try {
+        for (let index = 0; index < consensusWorkerCount(navigator.hardwareConcurrency || 4); index++) {
+          workers.push(createWorker());
+        }
+      } catch (error) {
+        workers.forEach((worker) => worker.terminate());
+        throw error;
+      }
+      if (cancelled) {
+        workers.forEach((worker) => worker.terminate());
+        return;
+      }
+      verifierPoolRef.current = new ConsensusWorkerPool(
+        workers,
+        PUBLIC_KEY,
+        (verified) => verifiedQueueRef.current.push(verified),
+        () => {
+          setErrorMessage("A consensus verifier stopped unexpectedly. Refresh to reconnect.");
+          setShowError(true);
+        },
+        createWorker,
+        standardCertificates,
+      );
       connectWebSocket();
     };
 
-    setup();
+    setup().catch((error) => {
+      if (cancelled) {
+        return;
+      }
+      console.error("Unable to initialize consensus verifiers:", error);
+      isInitializedRef.current = false;
+      setErrorMessage("Consensus verification could not start. Refresh to retry.");
+      setShowError(true);
+    });
 
     // Cleanup function when component unmounts
     return () => {
+      cancelled = true;
+      isInitializedRef.current = false;
       // Clear any reconnection timers
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
+
+      verifierPoolRef.current?.terminate();
+      verifierPoolRef.current = null;
+      verifiedQueueRef.current = [];
 
       // Close and clean up the websocket
       if (wsRef.current) {
@@ -724,7 +813,7 @@ const App: React.FC = () => {
         }
       }
     };
-  }, [isLoading, isInMaintenance, BACKEND_URL, PUBLIC_KEY]);
+  }, [isLoading, isInMaintenance, BACKEND_URL, PUBLIC_KEY, standardCertificates]);
 
   // Loading state - show nothing until we get the result of the health check
   if (isLoading) {
@@ -815,22 +904,22 @@ const App: React.FC = () => {
                 url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
                 attribution='&copy; OSM | &copy; CARTO</a>'
               />
-              {views.length > 0 && views[0].location !== undefined && (
+              {mappedView?.location !== undefined && (
                 <Marker
-                  key={views[0].view}
-                  position={views[0].location}
+                  key={mappedView.view}
+                  position={mappedView.location}
                   icon={markerIcon}
                 >
                   <Popup>
                     <div>
-                      <strong>View: {views[0].view}</strong><br />
-                      Location: {views[0].locationName}<br />
-                      Status: {views[0].status}<br />
-                      {views[0].block && (
-                        <>Block Height: {views[0].block.height}<br /></>
+                      <strong>View: {mappedView.view}</strong><br />
+                      Location: {mappedView.locationName}<br />
+                      Status: {mappedView.status}<br />
+                      {mappedView.block && (
+                        <>Block Height: {mappedView.block.height}<br /></>
                       )}
-                      {views[0].startTime && (
-                        <>Start Time: {new Date(views[0].startTime).toLocaleTimeString()}<br /></>
+                      {mappedView.startTime && (
+                        <>Start Time: {new Date(mappedView.startTime).toLocaleTimeString()}<br /></>
                       )}
                     </div>
                   </Popup>
@@ -854,19 +943,21 @@ const App: React.FC = () => {
           <div className="bars-header">
             <h2 className="bars-title">Timeline</h2>
             <div className="legend-container">
-              <LegendItem color={"#0000eeff"} label="Seeded" />
+              <LegendItem color={leaderIndicator.color} label={leaderIndicator.label} />
               <LegendItem color={"#000"} label="Locked" />
               <LegendItem color={"#228B22ff"} label="Finalized" />
+              <LegendItem color={timelineIdentifier.color} label={timelineIdentifier.label} textMarker />
             </div>
           </div>
 
           <div className="bars-list">
-            {views.slice(0, 50).map((viewData) => (
+            {views.slice(0, MAX_RENDERED_VIEWS).map((viewData) => (
               <Bar
                 key={viewData.view}
                 viewData={viewData}
                 currentTime={currentTimeRef.current}
                 isMobile={isMobile}
+                standardCertificates={standardCertificates}
               />
             ))}
           </div>
@@ -885,6 +976,7 @@ const App: React.FC = () => {
       <AboutModal
         isOpen={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
+        standardCertificates={standardCertificates}
       />
       <KeyInfoModal
         isOpen={isKeyInfoModalOpen}
@@ -903,12 +995,17 @@ const App: React.FC = () => {
 interface LegendItemProps {
   color: string;
   label: string;
+  textMarker?: boolean;
 }
 
-const LegendItem: React.FC<LegendItemProps> = ({ color, label }) => {
+const LegendItem: React.FC<LegendItemProps> = ({ color, label, textMarker = false }) => {
   return (
     <div className="legend-item">
-      <div className="legend-color" style={{ backgroundColor: color }}></div>
+      {textMarker ? (
+        <span className="legend-text-marker" style={{ color }}>abc</span>
+      ) : (
+        <div className="legend-color" style={{ backgroundColor: color }}></div>
+      )}
       <span className="legend-label">{label}</span>
     </div>
   );
@@ -918,13 +1015,15 @@ interface BarProps {
   viewData: ViewData;
   currentTime: number;
   isMobile: boolean;
+  standardCertificates: boolean;
   maxContainerWidth?: number;
 }
 
 // Replace the existing Bar component with this updated version
 
-const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
+const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, standardCertificates }) => {
   const { view, status, startTime, notarizationTime, finalizationTime, signature, block, actualNotarizationLatency, actualFinalizationLatency } = viewData;
+  const timelineIdentifier = getTimelineIdentifier(standardCertificates, signature, block?.digest);
   const [measuredWidth, setMeasuredWidth] = useState(isMobile ? 200 : 500); // Reasonable default
   const barContainerRef = useRef<HTMLDivElement>(null);
 
@@ -1010,38 +1109,32 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     }
   }
 
-  // Now calculate bar widths based on the actual latency values
-  const calculateScaledWidth = (latency: number) => {
-    // Apply scaling factor to keep bars within reasonable size
-    return Math.min(latency / SCALE_DURATION, 1) * measuredWidth;
-  };
-
   // Calculate the widths for different bar segments
   if (status === "growing" || status === "unknown") {
-    totalWidth = calculateScaledWidth(growingLatency);
+    totalWidth = scaleTimelineWidth(growingLatency, measuredWidth);
     // Ensure growing bars are visible but don't exceed available width
     totalWidth = Math.min(Math.max(totalWidth, growingLatency > 50 ? minSegmentWidth : 0), measuredWidth);
   } else if (status === "notarized") {
-    totalWidth = calculateScaledWidth(notarizedLatency);
+    totalWidth = scaleTimelineWidth(notarizedLatency, measuredWidth);
     // Ensure notarized bars meet minimum width
     totalWidth = Math.max(totalWidth, minBarWidth);
   } else if (status === "finalized") {
     if (notarizationTime) {
       // Calculate notarized segment width
-      notarizedWidth = calculateScaledWidth(notarizedLatency);
+      notarizedWidth = scaleTimelineWidth(notarizedLatency, measuredWidth);
       notarizedWidth = Math.max(notarizedWidth, minSegmentWidth);
 
       // Calculate finalized segment width (difference between finalization and notarization)
       const finalizationDelta = finalizedLatency - notarizedLatency;
       if (finalizationDelta > 0) {
-        finalizedWidth = calculateScaledWidth(finalizationDelta);
+        finalizedWidth = scaleTimelineWidth(finalizationDelta, measuredWidth);
         finalizedWidth = Math.max(finalizedWidth, minSegmentWidth / 2);
       }
 
       totalWidth = notarizedWidth + finalizedWidth;
     } else {
       // Without notarization time, use the entire bar for finalization
-      totalWidth = calculateScaledWidth(finalizedLatency);
+      totalWidth = scaleTimelineWidth(finalizedLatency, measuredWidth);
       totalWidth = Math.max(totalWidth, minBarWidth);
     }
   } else if (status === "timed_out") {
@@ -1108,8 +1201,12 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     <div className="bar-row">
       <div className="view-info" style={{ width: `${viewInfoWidth}px` }}>
         <div className="view-number">{view}</div>
-        <div className="view-signature">
-          {signature ? hexUint8Array(signature) : ""}
+        <div
+          className="view-identifier"
+          style={{ color: timelineIdentifier.color }}
+          title={timelineIdentifier.fullValue ? `${timelineIdentifier.label}: ${timelineIdentifier.fullValue}` : undefined}
+        >
+          {timelineIdentifier.value}
         </div>
       </div>
 
@@ -1154,7 +1251,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
           {/* Finalized state with notarization */}
           {status === "finalized" && !renderFinalizedWithoutNotarization && (
             <>
-              {/* Base segment (seed to notarization) */}
+              {/* Base segment (proposal or seed to notarization) */}
               <div
                 className="bar-segment growing"
                 style={{ width: `${notarizedWidth}px` }}

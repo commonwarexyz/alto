@@ -13,6 +13,7 @@ use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
 use rand::Rng;
 use std::{
+    marker::PhantomData,
     num::NonZeroU64,
     time::{Duration, SystemTime},
 };
@@ -29,13 +30,14 @@ const MAX_BLOCK_TIMESTAMP_MS: u64 = 7_258_118_400_000;
 const MAX_FUTURE_SKEW_MS: u64 = 1_000;
 
 #[derive(Clone)]
-pub struct Application {
+pub struct Application<S: Scheme> {
     backfiller: Option<indexer::Producer>,
     delay_ms: NonZeroU64,
     block_size: u32,
+    _scheme: PhantomData<S>,
 }
 
-impl Application {
+impl<S: Scheme> Application<S> {
     pub fn genesis() -> Block {
         let genesis_context = Context {
             round: Round::new(EPOCH, View::zero()),
@@ -56,6 +58,7 @@ impl Application {
             backfiller: None,
             delay_ms,
             block_size: 0,
+            _scheme: PhantomData,
         }
     }
 
@@ -70,11 +73,12 @@ impl Application {
     }
 }
 
-impl<E> ConsensusApplication<E> for Application
+impl<E, S> ConsensusApplication<E> for Application<S>
 where
     E: Rng + Spawner + Metrics + Clock + Storage,
+    S: Scheme,
 {
-    type SigningScheme = Scheme;
+    type SigningScheme = S;
     type Context = Context;
     type Block = Block;
     type Input = ();
@@ -156,7 +160,7 @@ where
     }
 }
 
-impl Reporter for Application {
+impl<S: Scheme> Reporter for Application<S> {
     type Activity = Update<Block>;
 
     fn report(&mut self, activity: Self::Activity) -> Feedback {
@@ -183,6 +187,7 @@ impl Reporter for Application {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alto_types::VrfScheme;
     use commonware_consensus::marshal::ancestry;
     use commonware_runtime::{deterministic, Runner as _, Supervisor as _};
     use commonware_utils::NZU64;
@@ -198,7 +203,7 @@ mod tests {
 
     async fn verify_block(
         context: deterministic::Context,
-        application: &mut Application,
+        application: &mut Application<VrfScheme>,
         block: &Block,
         parent: &Block,
     ) -> bool {
@@ -208,7 +213,7 @@ mod tests {
 
     async fn propose_child(
         context: deterministic::Context,
-        application: &mut Application,
+        application: &mut Application<VrfScheme>,
         child_context: Context,
         parent: &Block,
     ) -> Block {

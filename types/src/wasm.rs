@@ -1,7 +1,9 @@
-use crate::{Block, Finalized, Identity, Notarized, Scheme, Seed, Signature, EPOCH, NAMESPACE};
+use crate::{
+    Block, Finalized, Identity, Notarized, Scheme, Seed, Signature, StandardScheme, VrfScheme,
+    EPOCH, NAMESPACE, ROTATING_ELECTOR,
+};
 use commonware_codec::{DecodeExt, Encode};
 use commonware_consensus::{
-    simplex::elector::Random,
     types::{Round, View},
     Viewable,
 };
@@ -26,6 +28,7 @@ pub struct ProofJs {
 
 #[derive(Serialize)]
 pub struct BlockJs {
+    pub leader: Vec<u8>,
     pub parent: Vec<u8>,
     pub height: u64,
     pub timestamp: u64,
@@ -47,7 +50,7 @@ pub struct FinalizedJs {
 #[wasm_bindgen]
 pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity);
+    let certificate_verifier = VrfScheme::certificate_verifier(NAMESPACE, identity);
 
     let Ok(seed) = Seed::decode(bytes.as_ref()) else {
         return JsValue::NULL;
@@ -63,17 +66,25 @@ pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 }
 
 #[wasm_bindgen]
-pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
+pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity);
+    if standard {
+        parse_notarized_with::<StandardScheme>(identity, bytes)
+    } else {
+        parse_notarized_with::<VrfScheme>(identity, bytes)
+    }
+}
 
-    let Ok(notarized) = Notarized::decode(bytes.as_ref()) else {
+fn parse_notarized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValue {
+    let certificate_verifier = S::certificate_verifier(NAMESPACE, identity);
+
+    let Ok(notarized) = Notarized::<S>::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
     if !notarized.verify(&certificate_verifier, &Sequential) {
         return JsValue::NULL;
     }
-    let Some(certificate) = notarized.proof.certificate.get() else {
+    let Some(signature) = S::vote_signature(&notarized.proof.certificate) else {
         return JsValue::NULL;
     };
     let notarized_js = NotarizedJs {
@@ -81,9 +92,10 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
             view: notarized.proof.view().get(),
             parent: notarized.proof.proposal.parent.get(),
             payload: notarized.proof.proposal.payload.to_vec(),
-            signature: certificate.vote_signature.encode().to_vec(),
+            signature: signature.encode().to_vec(),
         },
         block: BlockJs {
+            leader: notarized.block.context.leader.encode().to_vec(),
             parent: notarized.block.parent.to_vec(),
             height: notarized.block.height.get(),
             timestamp: notarized.block.timestamp,
@@ -94,16 +106,24 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 }
 
 #[wasm_bindgen]
-pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
+pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, identity);
-    let Ok(finalized) = Finalized::decode(bytes.as_ref()) else {
+    if standard {
+        parse_finalized_with::<StandardScheme>(identity, bytes)
+    } else {
+        parse_finalized_with::<VrfScheme>(identity, bytes)
+    }
+}
+
+fn parse_finalized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValue {
+    let certificate_verifier = S::certificate_verifier(NAMESPACE, identity);
+    let Ok(finalized) = Finalized::<S>::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
     if !finalized.verify(&certificate_verifier, &Sequential) {
         return JsValue::NULL;
     }
-    let Some(certificate) = finalized.proof.certificate.get() else {
+    let Some(signature) = S::vote_signature(&finalized.proof.certificate) else {
         return JsValue::NULL;
     };
     let finalized_js = FinalizedJs {
@@ -111,9 +131,10 @@ pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
             view: finalized.proof.view().get(),
             parent: finalized.proof.proposal.parent.get(),
             payload: finalized.proof.proposal.payload.to_vec(),
-            signature: certificate.vote_signature.encode().to_vec(),
+            signature: signature.encode().to_vec(),
         },
         block: BlockJs {
+            leader: finalized.block.context.leader.encode().to_vec(),
             parent: finalized.block.parent.to_vec(),
             height: finalized.block.height.get(),
             timestamp: finalized.block.timestamp,
@@ -129,6 +150,7 @@ pub fn parse_block(bytes: Vec<u8>) -> JsValue {
         return JsValue::NULL;
     };
     let block_js = BlockJs {
+        leader: block.context.leader.encode().to_vec(),
         parent: block.parent.to_vec(),
         height: block.height.get(),
         timestamp: block.timestamp,
@@ -137,6 +159,8 @@ pub fn parse_block(bytes: Vec<u8>) -> JsValue {
     serde_wasm_bindgen::to_value(&block_js).unwrap_or(JsValue::NULL)
 }
 
+/// Returns the index of the leader elected by `seed`, i.e. the leader of the view after the
+/// seed's view.
 #[wasm_bindgen]
 pub fn leader_index(seed: JsValue, participants: usize) -> usize {
     let Ok(seed) = serde_wasm_bindgen::from_value::<SeedJs>(seed) else {
@@ -147,13 +171,13 @@ pub fn leader_index(seed: JsValue, participants: usize) -> usize {
         return 0;
     };
 
-    let round = Round::new(EPOCH, View::new(seed.view));
-    let seed = Seed::new(round, signature);
-
-    Random::select_leader::<MinSig>(
-        round,
-        u32::try_from(participants).expect("too many participants"),
-        (round.view().get() != 1).then_some(seed.signature),
-    )
-    .get() as usize
+    // The seed of view `v` selects the leader of view `v + 1`.
+    let elected = Round::new(EPOCH, View::new(seed.view.saturating_add(1)));
+    ROTATING_ELECTOR
+        .select_leader::<MinSig>(
+            elected,
+            u32::try_from(participants).expect("too many participants"),
+            Some(signature),
+        )
+        .get() as usize
 }

@@ -3,8 +3,8 @@ use alto_chain::{
     DEFAULT_BLOCKING_THREADS, DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS,
     DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS,
 };
-use alto_types::NAMESPACE;
-use clap::{value_parser, Arg, ArgMatches, Command};
+use alto_types::{CertificateMode, NAMESPACE};
+use clap::{value_parser, Arg, ArgAction, ArgMatches, Command};
 use commonware_codec::{Decode, DecodeExt, Encode};
 use commonware_consensus::simplex::scheme::bls12381_threshold::vrf as bls12381_threshold;
 use commonware_cryptography::{
@@ -22,7 +22,7 @@ use commonware_math::algebra::Random;
 use commonware_utils::{sys_rng, NZU32};
 use rand::seq::IteratorRandom;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::{NonZeroU32, NonZeroU64, NonZeroUsize},
@@ -34,11 +34,22 @@ use uuid::Uuid;
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 const BINARY_NAME: &str = "validator";
+const INDEXER_BINARY_NAME: &str = "indexer";
+const INDEXER_HOST: &str = "indexer";
+const INDEXER_CONFIG_FILE: &str = "indexer.yaml";
+const INDEXER_PORT: u16 = 8080;
 const PORT: u16 = 4545;
 const STORAGE_CLASS: &str = "gp3";
 const DASHBOARD_FILE: &str = "dashboard.json";
 
-fn leader_args() -> [Arg; 3] {
+const fn certificate_mode_name(mode: CertificateMode) -> &'static str {
+    match mode {
+        CertificateMode::Standard => "standard",
+        CertificateMode::Vrf => "vrf",
+    }
+}
+
+fn leader_args() -> [Arg; 4] {
     [
         Arg::new("leader_mode")
             .long("leader-mode")
@@ -52,6 +63,10 @@ fn leader_args() -> [Arg; 3] {
             .long("leader-term-length")
             .required_if_eq("leader_mode", "stable")
             .value_parser(value_parser!(u32).range(2..)),
+        Arg::new("leader_optimistic_views")
+            .long("leader-optimistic-views")
+            .required_if_eq("leader_mode", "stable")
+            .value_parser(value_parser!(u64)),
     ]
 }
 
@@ -62,10 +77,43 @@ fn block_size_arg() -> Arg {
         .value_parser(value_parser!(u32))
 }
 
+fn parse_traces_sample_rate(value: &str) -> Result<f64, String> {
+    let rate = value
+        .parse::<f64>()
+        .map_err(|_| "traces sample rate must be a number between 0 and 1".to_string())?;
+    if rate.is_finite() && (0.0..=1.0).contains(&rate) {
+        return Ok(rate);
+    }
+    Err("traces sample rate must be between 0 and 1".to_string())
+}
+
+fn traces_sample_rate_arg() -> Arg {
+    Arg::new("traces_sample_rate")
+        .long("traces-sample-rate")
+        .default_value("0")
+        .value_parser(parse_traces_sample_rate)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ConfiguredIndexer {
     url: String,
     count: usize,
+}
+
+#[derive(serde::Serialize)]
+struct DeployedIndexerConfig {
+    port: u16,
+    identity: String,
+    certificate_mode: CertificateMode,
+    explorer: DeployedExplorerConfig,
+}
+
+#[derive(serde::Serialize)]
+struct DeployedExplorerConfig {
+    name: String,
+    description: String,
+    participants: Vec<String>,
+    locations: Vec<([f64; 2], String)>,
 }
 
 fn local_indexer_port(url: &str) -> Option<u16> {
@@ -116,6 +164,63 @@ fn parse_indexers(specs: Option<&String>) -> Vec<ConfiguredIndexer> {
         .collect()
 }
 
+fn select_regional_peers(
+    regions: &[String],
+    count: usize,
+) -> (Vec<usize>, BTreeMap<String, usize>) {
+    assert!(
+        count <= regions.len(),
+        "indexer count exceeds number of peers"
+    );
+
+    let mut region_to_peers: BTreeMap<String, VecDeque<usize>> = BTreeMap::new();
+    for (index, region) in regions.iter().enumerate() {
+        region_to_peers
+            .entry(region.clone())
+            .or_default()
+            .push_back(index);
+    }
+
+    let mut selected = Vec::with_capacity(count);
+    let mut assigned = BTreeMap::new();
+    while selected.len() < count {
+        let mut progressed = false;
+        for (region, peers) in &mut region_to_peers {
+            let Some(peer) = peers.pop_front() else {
+                continue;
+            };
+            selected.push(peer);
+            *assigned.entry(region.clone()).or_insert(0) += 1;
+            progressed = true;
+            if selected.len() == count {
+                break;
+            }
+        }
+        assert!(progressed, "indexer count exceeds number of peers");
+    }
+
+    (selected, assigned)
+}
+
+/// Parses the explorer backend URL, which the explorer stores without a scheme and prefixes with
+/// `http(s)://` or `ws(s)://` itself.
+fn parse_backend_url(value: &str) -> Result<String, String> {
+    if value.contains("://") {
+        return Err(format!(
+            "backend URL must be a host[:port] without a scheme (for example, {})",
+            value
+                .split_once("://")
+                .map(|(_, rest)| rest)
+                .unwrap_or(value)
+        ));
+    }
+    let trimmed = value.trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err("backend URL must not be empty".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
 fn parse_leader(matches: &ArgMatches) -> Result<Leader, &'static str> {
     let delay_ms = *matches.get_one::<NonZeroU64>("leader_delay_ms").unwrap();
     match matches.get_one::<String>("leader_mode").unwrap().as_str() {
@@ -123,11 +228,15 @@ fn parse_leader(matches: &ArgMatches) -> Result<Leader, &'static str> {
             if matches.get_one::<u32>("leader_term_length").is_some() {
                 return Err("rotating leader mode does not accept --leader-term-length");
             }
+            if matches.get_one::<u64>("leader_optimistic_views").is_some() {
+                return Err("rotating leader mode does not accept --leader-optimistic-views");
+            }
             Ok(Leader::rotating(delay_ms))
         }
         "stable" => Ok(Leader::stable(
             delay_ms,
             NonZeroU32::new(*matches.get_one::<u32>("leader_term_length").unwrap()).unwrap(),
+            *matches.get_one::<u64>("leader_optimistic_views").unwrap(),
         )),
         _ => unreachable!("clap validates leader mode"),
     }
@@ -197,6 +306,7 @@ fn main() {
                         .required(true)
                         .value_parser(value_parser!(String)),
                 )
+                .arg(traces_sample_rate_arg())
                 .arg(
                     Arg::new("mailbox_size")
                         .long("mailbox-size")
@@ -278,6 +388,15 @@ fn main() {
                                 .value_parser(value_parser!(String)),
                         )
                         .arg(
+                            Arg::new("indexer")
+                                .long("indexer")
+                                .action(ArgAction::SetTrue)
+                                .conflicts_with("indexers")
+                                .help(
+                                    "Deploy an indexer and configure one validator per region to upload to it",
+                                ),
+                        )
+                        .arg(
                             Arg::new("indexers")
                                 .long("indexers")
                                 .required(false)
@@ -298,7 +417,8 @@ fn main() {
                     Arg::new("backend-url")
                         .long("backend-url")
                         .required(true)
-                        .value_parser(value_parser!(String)),
+                        .help("Indexer host[:port] without a scheme (the explorer picks http/ws or https/wss by mode)")
+                        .value_parser(parse_backend_url),
                 )
                 .subcommand(Command::new("local").about("Generate explorer config for local deployment"))
                 .subcommand(Command::new("remote").about("Generate explorer config for remote deployment")),
@@ -332,6 +452,7 @@ fn main() {
                 .get_one::<NonZeroUsize>("network_buffer_pool_parallelism")
                 .copied();
             let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
+            let traces_sample_rate = *sub_matches.get_one::<f64>("traces_sample_rate").unwrap();
             let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
             let deque_size = *sub_matches.get_one::<usize>("deque_size").unwrap();
             let block_size = *sub_matches.get_one::<u32>("block_size").unwrap();
@@ -353,6 +474,7 @@ fn main() {
                     storage_buffer_pool_parallelism,
                     network_buffer_pool_parallelism,
                     log_level,
+                    traces_sample_rate,
                     mailbox_size,
                     deque_size,
                     block_size,
@@ -371,6 +493,7 @@ fn main() {
                     storage_buffer_pool_parallelism,
                     network_buffer_pool_parallelism,
                     log_level,
+                    traces_sample_rate,
                     mailbox_size,
                     deque_size,
                     block_size,
@@ -418,6 +541,7 @@ fn generate_local(
     storage_buffer_pool_parallelism: Option<NonZeroUsize>,
     network_buffer_pool_parallelism: Option<NonZeroUsize>,
     log_level: String,
+    traces_sample_rate: f64,
     mailbox_size: usize,
     deque_size: usize,
     block_size: u32,
@@ -429,10 +553,9 @@ fn generate_local(
     let start_port = *sub_matches.get_one::<u16>("start_port").unwrap();
     let configured_indexers = parse_indexers(sub_matches.get_one::<String>("indexers"));
 
-    // Construct output path
-    let raw_current_dir = std::env::current_dir().unwrap();
-    let current_dir = raw_current_dir.to_str().unwrap();
-    let output = format!("{current_dir}/{output}");
+    // Construct output path (an absolute `--output` is used as-is)
+    let current_dir = std::env::current_dir().unwrap();
+    let output = current_dir.join(output).to_str().unwrap().to_string();
     let storage_output = format!("{output}/storage");
 
     // Check if output directory exists
@@ -497,6 +620,7 @@ fn generate_local(
             storage_buffer_pool_parallelism,
             network_buffer_pool_parallelism,
             log_level: log_level.clone(),
+            traces_sample_rate,
 
             local: true,
             allowed_peers: allowed_peers.clone(),
@@ -563,8 +687,10 @@ fn generate_local(
         println!("To start local indexers, run:");
         for url in &configured_local_indexers {
             if let Some(port) = local_indexer_port(url) {
-                let command =
-                    format!("cargo run --bin indexer -- --port {port} --identity {identity}");
+                let certificate_mode = certificate_mode_name(leader.certificate_mode());
+                let command = format!(
+                    "cargo run --bin indexer -- --port {port} --identity {identity} --certificate-mode {certificate_mode}"
+                );
                 println!("{url}: {command}");
             }
         }
@@ -605,6 +731,7 @@ fn generate_remote(
     storage_buffer_pool_parallelism: Option<NonZeroUsize>,
     network_buffer_pool_parallelism: Option<NonZeroUsize>,
     log_level: String,
+    traces_sample_rate: f64,
     mailbox_size: usize,
     deque_size: usize,
     block_size: u32,
@@ -631,12 +758,19 @@ fn generate_remote(
         .get_one::<i32>("monitoring_storage_size")
         .unwrap();
     let dashboard = sub_matches.get_one::<String>("dashboard").unwrap().clone();
-    let configured_indexers = parse_indexers(sub_matches.get_one::<String>("indexers"));
+    let deploy_indexer = sub_matches.get_flag("indexer");
+    let mut configured_indexers = parse_indexers(sub_matches.get_one::<String>("indexers"));
+    if deploy_indexer {
+        let region_count = regions.iter().collect::<BTreeSet<_>>().len();
+        configured_indexers.push(ConfiguredIndexer {
+            url: format!("http://{INDEXER_HOST}:{INDEXER_PORT}"),
+            count: region_count,
+        });
+    }
 
-    // Construct output path
-    let raw_current_dir = std::env::current_dir().unwrap();
-    let current_dir = raw_current_dir.to_str().unwrap();
-    let output = format!("{current_dir}/{output}");
+    // Construct output path (absolute `--output` and `--dashboard` paths are used as-is)
+    let current_dir = std::env::current_dir().unwrap();
+    let output = current_dir.join(output).to_str().unwrap().to_string();
 
     // Check if output directory exists
     if fs::metadata(&output).is_ok() {
@@ -702,6 +836,7 @@ fn generate_remote(
             storage_buffer_pool_parallelism,
             network_buffer_pool_parallelism,
             log_level: log_level.clone(),
+            traces_sample_rate,
 
             local: false,
             allowed_peers: allowed_peers.clone(),
@@ -745,46 +880,12 @@ fn generate_remote(
             .iter()
             .map(|indexer| indexer.count)
             .sum();
-        assert!(
-            total_indexer_count <= peer_configs.len(),
-            "indexer count exceeds number of peers"
-        );
-
-        // Group peers by region
-        let mut region_to_peers: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-        for (idx, instance) in instance_configs.iter().enumerate() {
-            region_to_peers
-                .entry(instance.region.clone())
-                .or_default()
-                .push(idx);
-        }
-
-        // Sort peers within each region for deterministic selection
-        for peers in region_to_peers.values_mut() {
-            peers.sort();
-        }
-
-        // Get sorted list of regions for consistent iteration
-        let region_list: Vec<String> = region_to_peers.keys().cloned().collect();
-
-        // Select peers for indexers in a round-robin fashion across regions
-        let mut selected_indices = Vec::new();
-        let mut region_index = 0;
-        let mut assigned_regions: BTreeMap<&String, usize> = BTreeMap::new();
-        while selected_indices.len() < total_indexer_count && !region_to_peers.is_empty() {
-            let region = &region_list[region_index % region_list.len()];
-            if let Some(peers) = region_to_peers.get_mut(region) {
-                if !peers.is_empty() {
-                    let peer_idx = peers.remove(0);
-                    selected_indices.push(peer_idx);
-                    if peers.is_empty() {
-                        region_to_peers.remove(region);
-                    }
-                    *assigned_regions.entry(region).or_insert(0) += 1;
-                }
-            }
-            region_index += 1;
-        }
+        let peer_regions = instance_configs
+            .iter()
+            .map(|instance| instance.region.clone())
+            .collect::<Vec<_>>();
+        let (selected_indices, assigned_regions) =
+            select_regional_peers(&peer_regions, total_indexer_count);
 
         // Update selected peer configs
         let indexer_assignments = configured_indexers
@@ -797,7 +898,70 @@ fn generate_remote(
         info!(assignments = ?assigned_regions, "configured indexers");
     }
 
+    let deployed_indexer_config = deploy_indexer.then(|| {
+        let (participants, locations) = instance_configs
+            .iter()
+            .map(|instance| {
+                (
+                    instance.name.clone(),
+                    get_aws_location(&instance.region)
+                        .unwrap_or_else(|| panic!("unknown AWS region: {}", instance.region)),
+                )
+            })
+            .unzip();
+        let unique_regions = regions.iter().fold(Vec::new(), |mut unique, region| {
+            if !unique.contains(region) {
+                unique.push(region.clone());
+            }
+            unique
+        });
+
+        DeployedIndexerConfig {
+            port: INDEXER_PORT,
+            identity: hex(&identity.encode()),
+            certificate_mode: leader.certificate_mode(),
+            explorer: DeployedExplorerConfig {
+                name: "Live Global Cluster".to_string(),
+                description: format!(
+                    "A live cluster of <strong>{peers} validators</strong> running {instance_type} nodes on AWS in <strong>{} regions</strong> ({}).",
+                    unique_regions.len(),
+                    unique_regions.join(", ")
+                ),
+                participants,
+                locations,
+            },
+        }
+    });
+
+    if deploy_indexer {
+        instance_configs.push(aws::InstanceConfig {
+            name: INDEXER_HOST.to_string(),
+            region: regions[0].clone(),
+            availability_zone_group: None,
+            instance_type: instance_type.clone(),
+            storage_size,
+            storage_class: STORAGE_CLASS.to_string(),
+            storage_iops: None,
+            storage_throughput: None,
+            binary: INDEXER_BINARY_NAME.to_string(),
+            config: INDEXER_CONFIG_FILE.to_string(),
+            profiling: false,
+        });
+    }
+
     // Generate root config file
+    let mut ports = vec![aws::PortConfig {
+        protocol: "tcp".to_string(),
+        port: PORT,
+        cidr: "0.0.0.0/0".to_string(),
+    }];
+    if deploy_indexer {
+        ports.push(aws::PortConfig {
+            protocol: "tcp".to_string(),
+            port: INDEXER_PORT,
+            cidr: "0.0.0.0/0".to_string(),
+        });
+    }
     let config = aws::Config {
         tag,
         instances: instance_configs,
@@ -809,20 +973,25 @@ fn generate_remote(
             storage_throughput: None,
             dashboard: DASHBOARD_FILE.to_string(),
         },
-        ports: vec![aws::PortConfig {
-            protocol: "tcp".to_string(),
-            port: PORT,
-            cidr: "0.0.0.0/0".to_string(),
-        }],
+        ports,
     };
 
     // Write configuration files
     fs::create_dir_all(&output).unwrap();
     fs::copy(
-        format!("{current_dir}/{dashboard}"),
+        current_dir.join(&dashboard),
         format!("{output}/{DASHBOARD_FILE}"),
     )
     .unwrap();
+    if let Some(indexer_config) = deployed_indexer_config {
+        let path = format!("{output}/{INDEXER_CONFIG_FILE}");
+        let file = fs::File::create(&path).unwrap();
+        serde_yaml::to_writer(file, &indexer_config).unwrap();
+        info!(
+            path = INDEXER_CONFIG_FILE,
+            "wrote indexer configuration file"
+        );
+    }
     for (peer_config_file, peer_config) in peer_configs {
         let path = format!("{output}/{peer_config_file}");
         let file = fs::File::create(&path).unwrap();
@@ -868,6 +1037,7 @@ fn explorer_local(dir: String, backend_url: String) {
         fs::read_to_string(&peer_config_path).expect("failed to read peer config");
     let peer_config: Config =
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
+    let certificate_mode = certificate_mode_name(peer_config.leader.certificate_mode());
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
     let polynomial = Sharing::<MinSig>::decode_cfg(
@@ -881,9 +1051,11 @@ fn explorer_local(dir: String, backend_url: String) {
     let config_ts = format!(
         "export const BACKEND_URL = \"{}\";\n\
         export const PUBLIC_KEY_HEX = \"{}\";\n\
+        export const CERTIFICATE_MODE = \"{}\" as const;\n\
         export const LOCATIONS: [[number, number], string][] = [];",
         backend_url,
         hex(&identity.encode()),
+        certificate_mode,
     );
 
     // Write config.ts
@@ -898,32 +1070,45 @@ fn explorer_remote(dir: String, backend_url: String) {
     let config_content = fs::read_to_string(&config_path).expect("failed to read config.yaml");
     let config: aws::Config =
         serde_yaml::from_str(&config_content).expect("failed to parse config.yaml");
+    let validator_instances = config
+        .instances
+        .iter()
+        .filter(|instance| instance.binary == BINARY_NAME)
+        .collect::<Vec<_>>();
     let mut participants = BTreeMap::new();
-    for instance in &config.instances {
+    for instance in &validator_instances {
         let region = &instance.region;
         let public_key = from_hex(&instance.name).expect("invalid public key");
         let public_key = PublicKey::decode(public_key.as_ref()).expect("invalid public key");
         let (coords, city) = get_aws_location(region).expect("unknown region");
         participants.insert(
             public_key,
-            format!("    [[{}, {}], \"{}\"]", coords[0], coords[1], city),
+            (
+                format!("    \"{}\"", instance.name),
+                format!("    [[{}, {}], \"{}\"]", coords[0], coords[1], city),
+            ),
         );
     }
 
-    // Order by public key
+    // Order by public key (PARTICIPANTS and LOCATIONS must share one order so the explorer can map
+    // a block's leader to a location, which is the only leader signal in standard mode)
+    let mut keys = Vec::new();
     let mut locations = Vec::new();
-    for (_, location) in participants {
+    for (_, (key, location)) in participants {
+        keys.push(key);
         locations.push(location);
     }
 
     // Generate config.ts
+    let participants_str = keys.join(",\n");
     let locations_str = locations.join(",\n");
-    let first_instance = &config.instances[0];
+    let first_instance = validator_instances.first().expect("no validators found");
     let peer_config_path = format!("{}/{}", dir, first_instance.config);
     let peer_config_content =
         fs::read_to_string(&peer_config_path).expect("failed to read peer config");
     let peer_config: Config =
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
+    let certificate_mode = certificate_mode_name(peer_config.leader.certificate_mode());
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
     let polynomial = Sharing::<MinSig>::decode_cfg(
@@ -935,9 +1120,13 @@ fn explorer_remote(dir: String, backend_url: String) {
     let config_ts = format!(
         "export const BACKEND_URL = \"{}\";\n\
         export const PUBLIC_KEY_HEX = \"{}\";\n\
+        export const CERTIFICATE_MODE = \"{}\" as const;\n\
+        export const PARTICIPANTS: string[] = [\n{}\n];\n\
         export const LOCATIONS: [[number, number], string][] = [\n{}\n];",
         backend_url,
         hex(&identity.encode()),
+        certificate_mode,
+        participants_str,
         locations_str
     );
 
@@ -949,8 +1138,12 @@ fn explorer_remote(dir: String, backend_url: String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{block_size_arg, leader_args, parse_indexers, parse_leader, ConfiguredIndexer};
+    use super::{
+        block_size_arg, certificate_mode_name, leader_args, parse_indexers, parse_leader,
+        select_regional_peers, traces_sample_rate_arg, ConfiguredIndexer,
+    };
     use alto_chain::Leader;
+    use alto_types::CertificateMode;
     use clap::Command;
     use commonware_utils::{NZU32, NZU64};
 
@@ -973,7 +1166,32 @@ mod tests {
     }
 
     #[test]
-    fn validator_config_defaults_block_size_to_zero() {
+    fn traces_sample_rate_accepts_only_fractions() {
+        let matches = Command::new("test")
+            .arg(traces_sample_rate_arg())
+            .try_get_matches_from(["test"])
+            .unwrap();
+        assert_eq!(*matches.get_one::<f64>("traces_sample_rate").unwrap(), 0.0);
+
+        let matches = Command::new("test")
+            .arg(traces_sample_rate_arg())
+            .try_get_matches_from(["test", "--traces-sample-rate", "0.0001"])
+            .unwrap();
+        assert_eq!(
+            *matches.get_one::<f64>("traces_sample_rate").unwrap(),
+            0.0001
+        );
+
+        for invalid in ["-0.1", "1.1", "NaN"] {
+            assert!(Command::new("test")
+                .arg(traces_sample_rate_arg())
+                .try_get_matches_from(["test", "--traces-sample-rate", invalid])
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn validator_config_defaults_optional_settings() {
         let yaml = r#"
 private_key: key
 share: share
@@ -993,10 +1211,19 @@ signature_threads: 1
 
         let config: alto_chain::Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.block_size, 0);
+        assert_eq!(config.traces_sample_rate, 0.0);
 
-        let config: alto_chain::Config =
-            serde_yaml::from_str(&format!("{yaml}\nblock_size: 4096\n")).unwrap();
+        let config: alto_chain::Config = serde_yaml::from_str(&format!(
+            "{yaml}\nblock_size: 4096\ntraces_sample_rate: 0.0001\n"
+        ))
+        .unwrap();
         assert_eq!(config.block_size, 4096);
+        assert_eq!(config.traces_sample_rate, 0.0001);
+
+        assert!(serde_yaml::from_str::<alto_chain::Config>(&format!(
+            "{yaml}\ntraces_sample_rate: 1.1\n"
+        ))
+        .is_err());
     }
 
     #[test]
@@ -1020,6 +1247,26 @@ signature_threads: 1
     }
 
     #[test]
+    fn backend_url_rejects_schemes() {
+        assert_eq!(
+            super::parse_backend_url("localhost:8080").unwrap(),
+            "localhost:8080"
+        );
+        assert_eq!(
+            super::parse_backend_url("global.alto.example.com/").unwrap(),
+            "global.alto.example.com"
+        );
+        assert!(super::parse_backend_url("http://localhost:8080").is_err());
+        assert!(super::parse_backend_url("").is_err());
+    }
+
+    #[test]
+    fn certificate_mode_names_match_leader_modes() {
+        assert_eq!(certificate_mode_name(CertificateMode::Standard), "standard");
+        assert_eq!(certificate_mode_name(CertificateMode::Vrf), "vrf");
+    }
+
+    #[test]
     fn parse_stable_leader() {
         let matches = Command::new("test")
             .args(leader_args())
@@ -1031,16 +1278,18 @@ signature_threads: 1
                 "10",
                 "--leader-term-length",
                 "1000",
+                "--leader-optimistic-views",
+                "48",
             ])
             .unwrap();
         assert_eq!(
             parse_leader(&matches).unwrap(),
-            Leader::stable(NZU64!(10), NZU32!(1_000))
+            Leader::stable(NZU64!(10), NZU32!(1_000), 48)
         );
     }
 
     #[test]
-    fn stable_leader_requires_delay_and_term_length() {
+    fn stable_leader_requires_all_settings() {
         let result = Command::new("test")
             .args(leader_args())
             .try_get_matches_from(["test", "--leader-mode", "stable"]);
@@ -1055,7 +1304,22 @@ signature_threads: 1
                 "--leader-delay-ms",
                 "10",
                 "--leader-term-length",
+                "1000",
+            ]);
+        assert!(result.is_err());
+
+        let result = Command::new("test")
+            .args(leader_args())
+            .try_get_matches_from([
+                "test",
+                "--leader-mode",
+                "stable",
+                "--leader-delay-ms",
+                "10",
+                "--leader-term-length",
                 "1",
+                "--leader-optimistic-views",
+                "48",
             ]);
         assert!(result.is_err());
     }
@@ -1075,17 +1339,37 @@ signature_threads: 1
             ])
             .unwrap();
         assert!(parse_leader(&matches).is_err());
+
+        let matches = Command::new("test")
+            .args(leader_args())
+            .try_get_matches_from([
+                "test",
+                "--leader-mode",
+                "rotating",
+                "--leader-delay-ms",
+                "10",
+                "--leader-optimistic-views",
+                "48",
+            ])
+            .unwrap();
+        assert!(parse_leader(&matches).is_err());
     }
 
     #[test]
     fn leader_config_round_trips() {
         for leader in [
             Leader::rotating(NZU64!(7)),
-            Leader::stable(NZU64!(10), NZU32!(1_000)),
+            Leader::stable(NZU64!(10), NZU32!(1_000), 48),
         ] {
             let encoded = serde_yaml::to_string(&leader).unwrap();
             assert_eq!(serde_yaml::from_str::<Leader>(&encoded).unwrap(), leader);
         }
+
+        assert_eq!(
+            serde_yaml::from_str::<Leader>("mode: stable\ndelay_ms: 10\nterm_length: 1000\n")
+                .unwrap(),
+            Leader::stable(NZU64!(10), NZU32!(1_000), 48)
+        );
     }
 
     #[test]
@@ -1123,5 +1407,25 @@ signature_threads: 1
     #[test]
     fn parse_indexers_allows_empty_configuration() {
         assert!(parse_indexers(None).is_empty());
+    }
+
+    #[test]
+    fn regional_selection_uses_each_region_before_repeating() {
+        let regions = [
+            "us-west-1",
+            "us-east-1",
+            "eu-west-1",
+            "us-west-1",
+            "us-east-1",
+            "eu-west-1",
+        ]
+        .map(str::to_string);
+
+        let (selected, assigned) = select_regional_peers(&regions, 3);
+        assert_eq!(selected, vec![2, 1, 0]);
+        assert_eq!(
+            assigned.values().copied().collect::<Vec<_>>(),
+            vec![1, 1, 1]
+        );
     }
 }

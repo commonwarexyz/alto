@@ -1,5 +1,6 @@
 export const BACKEND_URL = "global.alto.exoware.xyz";
 export const PUBLIC_KEY_HEX = "83a93d74819bc17b3f53258216b54ecba1a13e1257a0514241bdd79c7757b7c3921451021e7a592d12296076ef58a8b600179a2d006e8d73c337f2f3578a245c286f4af8921e4e4fca0b3375842c81cccd2b4ce7e875a5591fdded49c93a905c";
+export const CERTIFICATE_MODE = "vrf" as const;
 export const LOCATIONS: [[number, number], string][] = [
     [[37.7749, -122.4194], "San Francisco"],
     [[38.8339, -77.3074], "Ashburn"],

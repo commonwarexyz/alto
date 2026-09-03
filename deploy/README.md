@@ -15,11 +15,36 @@ _To configure local indexer upload, add `--indexers '<url>:<count>[;<url>:<count
 Leader election is selected for every generated validator with `--leader-mode`, and
 `--leader-delay-ms` sets the minimum proposal interval. Use `--leader-mode rotating` for a new
 VRF-derived leader each view. Stable mode keeps one round-robin leader for each term and also
-requires `--leader-term-length` to set the number of views in each term.
+requires `--leader-term-length` to set the number of views in each term and
+`--leader-optimistic-views` to cap proposal issuance and vote admission ahead of directly
+notarized ancestry. Values above the term length add no window. Stable mode uses native standard
+threshold crypto with one signature per vote and certificate. Rotating mode carries an additional
+VRF seed signature used to select the next leader. Rotating mode takes only `--leader-delay-ms`:
+`--leader-term-length` and `--leader-optimistic-views` are rejected.
+
+Every component that verifies certificates must be told which construction the network uses. The
+generator derives it from the leader mode (`standard` for stable, `vrf` for rotating) and writes it
+into the emitted indexer command, `indexer.yaml`, and the explorer configuration. Follower configs
+take it as `certificate_mode`, and the inspector as `--certificate-mode`.
+
+Changing an existing network from VRF or wrapper-framed standard certificates to native standard
+certificates is not a rolling upgrade: the untagged wire and persistent certificate layouts have
+different fixed sizes. Start with newly generated network configuration and empty validator and
+follower certificate state, then switch every validator, indexer, follower, and browser verifier
+together. `deploy.sh` generates a new network identity and infrastructure for this purpose.
+
+Stable-leader networks are timing-sensitive on a single machine: a validator that times out once
+withholds its finalize votes for the rest of the term, and a handful of local validators cannot
+absorb that. In our runs, `--leader-delay-ms 10` produced repeated term skips and finalization
+stalls of ten seconds or more with four or five local validators, while `--leader-delay-ms 100`
+ran smoothly. Use a larger delay (or rotating mode) for local experiments.
 
 `--block-size` is a `u32` setting for the number of random bytes appended to each proposed block
 and defaults to `0`. Validators reject only values whose encoded blocks exceed the authenticated
 transport capacity. All validators in a network must use the same value.
+
+`--traces-sample-rate` sets the fraction of traces exported by each validator and accepts values
+from `0` through `1`. It defaults to `0`, which disables trace export.
 
 Generated validator configs use:
 
@@ -28,26 +53,44 @@ leader:
   mode: stable
   delay_ms: 10
   term_length: 1000
+  optimistic_views: 48
 block_size: 0
+traces_sample_rate: 0.0
 indexer: http://localhost:8080
 ```
 
+Rotating-leader configs carry only the delay:
+
+```yaml
+leader:
+  mode: rotating
+  delay_ms: 10
+```
+
 ```bash
-cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
+cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --leader-optimistic-views 48 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
 ```
 
-_If the command succeeds, you should see the following output:_
+For a rotating-leader network, drop the two stable-only flags:
+
+```bash
+cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode rotating --leader-delay-ms 10 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
+```
+
+The emitted indexer command then ends in `--certificate-mode vrf` instead of `--certificate-mode standard`.
+
+_If the stable command succeeds, you should see the following output:_
 
 ```
-2025-12-23T13:41:54.034863Z  INFO setup: generated network key identity=8b2c34e0356beb83874317f8f04fb211e4d3ed34640631a36ff191cb3fcd9768403b8749824b41ff770a92e40885174b15516db966816870ba9619a64b4d5b79ea7b4a73240710169ecc44da0951cdd60e2db65544cba5647f81ab19ca50cf4e
-2025-12-23T13:41:54.037106Z  INFO setup: wrote peer configuration file path="04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37.yaml"
-2025-12-23T13:41:54.037417Z  INFO setup: wrote peer configuration file path="0b2412d7eb2238b319920504f19b28447c7dbb3c58059c97d22cc0d27ea31e81.yaml"
-2025-12-23T13:41:54.037690Z  INFO setup: wrote peer configuration file path="71943989f39d485eb8a1f7c8f9909673caaa658d12a586c93f37575dae44438f.yaml"
-2025-12-23T13:41:54.037966Z  INFO setup: wrote peer configuration file path="c58244243f263ebc975640d5bb4e43e8e78e4b41361e4e7984cd8b027480558a.yaml"
-2025-12-23T13:41:54.038228Z  INFO setup: wrote peer configuration file path="f26a6d4f52c4d595b6cb659b643968b0e1fc9931b460c6407be10cebe4eeff2d.yaml"
-2025-12-23T13:41:54.038232Z  INFO setup: setup complete bootstrappers=["71943989f39d485eb8a1f7c8f9909673caaa658d12a586c93f37575dae44438f"]
+2025-12-23T13:41:54.034863Z  INFO deploy: generated network key identity=8b2c34e0356beb83874317f8f04fb211e4d3ed34640631a36ff191cb3fcd9768403b8749824b41ff770a92e40885174b15516db966816870ba9619a64b4d5b79ea7b4a73240710169ecc44da0951cdd60e2db65544cba5647f81ab19ca50cf4e
+2025-12-23T13:41:54.037106Z  INFO deploy: wrote peer configuration file path="04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37.yaml"
+2025-12-23T13:41:54.037417Z  INFO deploy: wrote peer configuration file path="0b2412d7eb2238b319920504f19b28447c7dbb3c58059c97d22cc0d27ea31e81.yaml"
+2025-12-23T13:41:54.037690Z  INFO deploy: wrote peer configuration file path="71943989f39d485eb8a1f7c8f9909673caaa658d12a586c93f37575dae44438f.yaml"
+2025-12-23T13:41:54.037966Z  INFO deploy: wrote peer configuration file path="c58244243f263ebc975640d5bb4e43e8e78e4b41361e4e7984cd8b027480558a.yaml"
+2025-12-23T13:41:54.038228Z  INFO deploy: wrote peer configuration file path="f26a6d4f52c4d595b6cb659b643968b0e1fc9931b460c6407be10cebe4eeff2d.yaml"
+2025-12-23T13:41:54.038232Z  INFO deploy: setup complete bootstrappers=["71943989f39d485eb8a1f7c8f9909673caaa658d12a586c93f37575dae44438f"]
 To start local indexers, run:
-http://localhost:8080: cargo run --bin indexer -- --port 8080 --identity 8b2c34e0356beb83874317f8f04fb211e4d3ed34640631a36ff191cb3fcd9768403b8749824b41ff770a92e40885174b15516db966816870ba9619a64b4d5b79ea7b4a73240710169ecc44da0951cdd60e2db65544cba5647f81ab19ca50cf4e
+http://localhost:8080: cargo run --bin indexer -- --port 8080 --identity 8b2c34e0356beb83874317f8f04fb211e4d3ed34640631a36ff191cb3fcd9768403b8749824b41ff770a92e40885174b15516db966816870ba9619a64b4d5b79ea7b4a73240710169ecc44da0951cdd60e2db65544cba5647f81ab19ca50cf4e --certificate-mode standard
 To start validators, run:
 04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37.yaml
 0b2412d7eb2238b319920504f19b28447c7dbb3c58059c97d22cc0d27ea31e81: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/0b2412d7eb2238b319920504f19b28447c7dbb3c58059c97d22cc0d27ea31e81.yaml
@@ -76,8 +119,15 @@ _It is necessary to start at least one bootstrapper for any other peers to conne
 
 #### [Optional] Configure Explorer
 
+The indexer already serves the explorer at `http://localhost:8080` with the network identity and
+certificate mode injected, so nothing else is needed to browse a local network. To run the explorer
+from source instead, generate its configuration (pass the indexer as `host:port` without a scheme)
+and copy it over `explorer/src/local_config.ts`:
+
 ```bash
-cargo run --bin deploy -- explorer --dir test --backend-url <backend URL> local
+cargo run --bin deploy -- explorer --dir test --backend-url localhost:8080 local
+cp test/config.ts explorer/src/local_config.ts
+cd explorer && REACT_APP_MODE=local npm start
 ```
 
 #### Debugging
@@ -94,7 +144,7 @@ _MacOS defaults to 256 open files, which is too low for the default settings (wh
 
 ### Remote
 
-_To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/install), [Docker with Buildx](https://docs.docker.com/build/buildx/install/), and [just](https://just.systems/man/en/packages.html)._
+_To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/install), [Node.js with npm](https://nodejs.org/), [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/), [Docker with Buildx](https://docs.docker.com/build/buildx/install/), [just](https://just.systems/man/en/packages.html), and the `file` utility. On macOS, the explorer's WebAssembly build also needs Homebrew LLVM (`brew install llvm`). `deploy.sh` checks for all of these before doing anything._
 
 #### Install `commonware-deployer`
 
@@ -104,7 +154,12 @@ cargo install commonware-deployer --features aws
 
 #### Create Artifacts
 
-_To configure remote indexer upload, add `--indexers '<url>:<count>[;<url>:<count>...]'` to the `generate remote` command. For example, `https://idx-a.example.com:2;https://idx-b.example.com:1`. Indexers are selected in round-robin fashion across regions._
+Pass `--indexer` to deploy Alto's indexer alongside the validators. The generator configures one
+validator in each region to upload to `http://indexer:8080`. The indexer also serves the explorer
+from port 8080, so its public URL can be opened directly from a laptop. To use indexers managed
+outside this deployment instead, pass `--indexers '<url>:<count>[;<url>:<count>...]'`; for example,
+`https://idx-a.example.com:2;https://idx-b.example.com:1`. Uploaders are selected round-robin
+across regions.
 
 Each selected validator config will contain:
 
@@ -112,88 +167,146 @@ Each selected validator config will contain:
 indexer: https://your-indexer.example.com
 ```
 
-##### Global
+##### Global (scripted)
 
 ```bash
-cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --output assets remote --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,eu-north-1,ap-south-1,sa-east-1,eu-central-1,ap-northeast-2,ap-southeast-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 25 --dashboard deploy/dashboard.json
+./deploy.sh
 ```
 
-_This configuration consumes ~10MB of disk space per hour per validator (~5 views per second). With 25GB of storage allocated, validators will exhaust available storage in ~3 months._
+`deploy.sh` runs the whole remote flow for the Global cluster: it generates the artifacts, checks
+them, builds the explorer and the Graviton binaries, runs `deployer aws create`, and prints the
+explorer URL. Do not repeat the manual "Build Deployment Binaries" and "Deploy Cluster" steps below
+after it (a second `create` fails because the deployment tag already exists); those sections
+describe the manual flow used for the USA cluster.
+
+It deploys 50 validators on 16-core `c7gd.4xlarge` Graviton 3 instances with 8 Tokio workers and
+16 signature threads, a 5ms proposal target, and 100,000-view stable-leader terms. It builds the
+explorer into an indexer on the same instance type, deploys with concurrency 50, and prints the
+explorer URL when deployment completes. Validators retain the full finalized history in immutable
+archives. Validator and indexer binaries use the cross-generation Graviton recipe targeting
+`neoverse-512tvb`, AWS's recommended compiler target for Graviton 3.
+
+The runtime and signature pools deliberately oversubscribe the 16 single-threaded cores. Treat
+8/16 as a deployment tuning point and compare CPU saturation and network backlog before reusing it
+for another workload.
+
+_C7gd provides a 950GB ephemeral NVMe instance store, which the deployer mounts at `/home/ubuntu`
+for validator data. The 25GB storage setting sizes the gp3 root volume; terminating or replacing an
+instance discards its NVMe data._
 
 ##### USA
 
 ```bash
-cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 75 --dashboard deploy/dashboard.json
+cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --leader-optimistic-views 48 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 75 --dashboard deploy/dashboard.json
 ```
 
 _This configuration consumes ~30MB of disk space per hour per validator (~13 views per second). With 75GB of storage allocated, validators will exhaust available storage in ~3 months._
 
 #### [Optional] Configure Explorer
 
+An indexer deployed with `--indexer` serves the explorer with the network identity, certificate
+mode, participants, and locations injected, so a separately hosted explorer is only needed for a
+public deployment such as `alto.commonware.xyz`. For that, generate the cluster configuration
+(pass the public indexer as `host[:port]` without a scheme) and copy `PUBLIC_KEY_HEX`,
+`CERTIFICATE_MODE`, `PARTICIPANTS`, and `LOCATIONS` into `explorer/src/global_config.ts` or
+`explorer/src/usa_config.ts`. `PARTICIPANTS` lists the validator public keys in the same order as
+`LOCATIONS`; a stable-leader network has no seeds, so the explorer needs it to place each block's
+leader on the map:
+
 ```bash
-cargo run --bin deploy -- explorer --dir assets --backend-url <backend URL> remote
+cargo run --bin deploy -- explorer --dir assets --backend-url <indexer host> remote
 ```
 
-#### [Optional] Update Public Key
+#### [Optional] Update Network Identity and Certificate Mode
 
-After redeploying a cluster, update the identity (BLS12-381 threshold public key) across example configs and the inspector default:
+After redeploying a cluster, every verifier outside the deployment must follow the new network:
+the identity (BLS12-381 threshold public key, printed by the generator and stored in
+`assets/indexer.yaml`) and the certificate mode (`standard` for `--leader-mode stable`, `vrf` for
+`--leader-mode rotating`). A follower, inspector, or explorer left on the old mode rejects every
+certificate of the new network. Update the example configs and the inspector defaults:
 
 ```bash
 # Global cluster:
-OLD_KEY=$(sed -nE 's/^identity: "(.*)"$/\1/p' follower/examples/global.yml)
 NEW_KEY="<new-key-hex>"
-sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/global.yml
+NEW_MODE="standard"
+sed -i '' -E "s/^identity: \".*\"$/identity: \"$NEW_KEY\"/" follower/examples/global.yml
+sed -i '' -E "s/^certificate_mode: \".*\"$/certificate_mode: \"$NEW_MODE\"/" follower/examples/global.yml
 sed -i '' -E "s|^const DEFAULT_IDENTITY: &str = \".*\";|const DEFAULT_IDENTITY: &str = \"$NEW_KEY\";|" inspector/src/main.rs
+sed -i '' -E "s|^const DEFAULT_CERTIFICATE_MODE: &str = \".*\";|const DEFAULT_CERTIFICATE_MODE: &str = \"$NEW_MODE\";|" inspector/src/main.rs
 
 # USA cluster:
-OLD_KEY=$(sed -nE 's/^identity: "(.*)"$/\1/p' follower/examples/usa.yml)
 NEW_KEY="<new-key-hex>"
-sed -i '' "s/$OLD_KEY/$NEW_KEY/g" follower/examples/usa.yml
+NEW_MODE="standard"
+sed -i '' -E "s/^identity: \".*\"$/identity: \"$NEW_KEY\"/" follower/examples/usa.yml
+sed -i '' -E "s/^certificate_mode: \".*\"$/certificate_mode: \"$NEW_MODE\"/" follower/examples/usa.yml
 ```
 
-#### Build Validator Binary
+Then update `explorer/src/global_config.ts` or `explorer/src/usa_config.ts` as described above and
+redeploy the hosted explorer together with the cluster. Its WebAssembly derives each view's leader
+from the seed with the same elector version as the validators, so an explorer built from a
+different commit than the validators shows the wrong leaders.
 
+#### Build Deployment Binaries
+
+Run every `just` recipe from the repository root (the root `justfile` imports `deploy/justfile`).
 The build platform is an explicit recipe:
 
 | Recipe | Output architecture | CPU target | Example instances |
 | --- | --- | --- | --- |
-| `just validator-graviton-binary` | ARM64 | `neoverse-v1` | Graviton 3/4 (`c7g`, `c8g`) |
+| `just validator-graviton-binary` | ARM64 | `neoverse-512tvb` | Graviton 3/4/5 (`c7g`, `c8g`, `c9g`) |
+| `just indexer-graviton-binary` | ARM64 | `neoverse-512tvb` | Graviton 3/4/5 (`c7g`, `c8g`, `c9g`) |
+| `just validator-graviton4-binary` | ARM64 | `neoverse-v2` | Graviton 4 (`c8g`, `m8g`, `r8g`, `i8g`) |
+| `just indexer-graviton4-binary` | ARM64 | `neoverse-v2` | Graviton 4 (`c8g`, `m8g`, `r8g`, `i8g`) |
 | `just validator-intel-binary` | x86-64 | `emeraldrapids` | Intel I7i |
+| `just indexer-intel-binary` | x86-64 | `emeraldrapids` | Intel I7i |
 
 ##### Intel I7i
 
 ```bash
-just validator-intel-binary
+just intel-binaries
 ```
 
 _The Intel binary is compiled with `target-cpu=emeraldrapids`._
 
-The builder runs on the local Docker architecture and cross-compiles the validator, so no
+The builder runs on the local Docker architecture and cross-compiles the binaries, so no
 `--platform` argument is needed on an ARM64 development machine.
 
-##### Graviton
+##### Graviton 3/4/5 Compatibility
 
 ```bash
-just validator-graviton-binary
+just graviton-binaries
 ```
 
-_The Graviton binary is compiled with `target-cpu=neoverse-v1`._
+_The cross-generation Graviton binary is compiled with `target-cpu=neoverse-512tvb`._
 
-Both recipes write `assets/validator` and `assets/validator-debug`. Run the recipe matching the
-deployment's instance type last.
+##### Graviton 4
+
+```bash
+just graviton4-binaries
+```
+
+_The Graviton 4 binary is compiled with `target-cpu=neoverse-v2`, exposing the Armv9 and SVE2
+features available on Graviton 4 to LLVM. Do not run this binary on earlier Graviton generations._
+
+The grouped recipes write `assets/validator`, `assets/indexer`, and their debug-symbol variants.
+Run the recipe matching the deployment's instance type last.
 
 ###### Local Compilation
 
-_Before running this command, ensure you change any `version` dependencies you'd like to compile locally to `path` dependencies in `Cargo.toml`._
+To build against a local checkout of the monorepo, change the `commonware-*` dependencies in
+`Cargo.toml` from `git`/`rev` entries to `path = "/monorepo/<crate>"` entries and run `cargo build`
+once on the host so `Cargo.lock` matches (the builder compiles with `--locked`). Then run the
+builder with the monorepo mounted, once per binary:
 
 ```bash
 just build-intel-image
 docker run --rm -v "${PWD}:/alto" -v "${PWD}/../monorepo:/monorepo" alto-validator-builder:intel-local
+docker run --rm -v "${PWD}:/alto" -v "${PWD}/../monorepo:/monorepo" -e PACKAGE_NAME=alto-indexer -e BINARY_NAME=indexer -e OUTPUT_NAME=indexer alto-validator-builder:intel-local
 ```
 
-_Emitted binary `validator` is placed in `assets/`._
+Emitted binaries are placed in `assets/`.
 
-#### Deploy Validator Binary
+#### Deploy Cluster
 
 ```bash
 cd assets
@@ -206,7 +319,8 @@ _If your deployer machine has limited bandwidth, use `--concurrency <concurrency
 
 Visit `http://<monitoring-ip>:3000/d/chain`
 
-_This dashboard is only accessible from the IP used to deploy the infrastructure._
+_This dashboard is only accessible from the IP used to deploy the infrastructure. When an indexer
+is deployed, its Prometheus target shows as down: the indexer exposes no metrics endpoint._
 
 #### [Optional] Update Validator Binary
 
@@ -216,8 +330,11 @@ _This dashboard is only accessible from the IP used to deploy the infrastructure
 # Intel I7i
 just validator-intel-binary
 
-# Graviton
+# Graviton 3/4/5 compatibility
 just validator-graviton-binary
+
+# Graviton 4
+just validator-graviton4-binary
 ```
 
 ##### Restart Validator Binary on EC2 Instances
@@ -225,6 +342,10 @@ just validator-graviton-binary
 ```bash
 deployer aws update --config config.yaml
 ```
+
+_`deployer aws update` replaces and restarts the binary on every instance in `config.yaml`,
+including an indexer deployed with `--indexer` (its in-memory history is reset), and also pushes a
+rebuilt `assets/indexer` if present._
 
 #### [Optional] Profile Validator
 

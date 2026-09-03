@@ -1,9 +1,8 @@
 use crate::{
     application::Application,
     indexer::{self, Client},
-    Leader,
 };
-use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH, NAMESPACE};
+use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
     marshal::{
@@ -14,15 +13,14 @@ use commonware_consensus::{
     },
     simplex::{
         self,
-        elector::{self, Random, RandomElector, RoundRobin, RoundRobinElector},
+        elector::{self, RoundRobin},
         Engine as Consensus,
     },
-    types::{Epoch, FixedEpocher, Participant, Round, TermLength, ViewDelta},
+    types::{Epoch, FixedEpocher, TermLength, ViewDelta},
     Reporters,
 };
 use commonware_cryptography::{
-    bls12381::primitives::{group, sharing::Sharing, variant::MinSig},
-    certificate::{ConstantProvider, Verifier as CertificateVerifier},
+    certificate::ConstantProvider,
     ed25519::PublicKey,
     sha256::{Digest, Sha256},
     Digestible as _,
@@ -35,7 +33,7 @@ use commonware_runtime::{
     spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
 };
 use commonware_storage::{archive::immutable, queue};
-use commonware_utils::{ordered::Set, NZUsize, NZU64};
+use commonware_utils::{NZUsize, NZU64};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use governor::Quota;
@@ -47,8 +45,8 @@ use std::{
 use tracing::{error, info, warn};
 
 /// Reporter type for [simplex::Engine].
-type Reporter<E, C> =
-    Reporters<Activity, Option<indexer::Pusher<E, C>>, MarshalMailbox<Scheme, Standard<Block>>>;
+type Reporter<E, C, CS> =
+    Reporters<Activity<CS>, Option<indexer::Pusher<E, C, CS>>, MarshalMailbox<CS, Standard<Block>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -68,67 +66,27 @@ const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
 const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(16);
 const STABLE_LEADER_STALL_TIMEOUT: Duration = Duration::from_secs(12);
-const STABLE_LEADER_OPTIMISTIC_VIEWS: ViewDelta = ViewDelta::new(100);
 
-/// Adapts the serialized leader policy to Simplex's statically typed elector configuration.
-#[derive(Clone, Default)]
-struct ElectorConfig(Leader);
+/// Round-robin leader election used with native standard certificates.
+pub type StableElector = RoundRobin<Sha256>;
 
-impl elector::Config<Scheme> for ElectorConfig {
-    type Elector = ConfiguredElector;
-
-    fn build(self, participants: &Set<PublicKey>) -> Self::Elector {
-        match self.0 {
-            Leader::Rotating { .. } => {
-                ConfiguredElector::Rotating(elector::Config::<Scheme>::build(Random, participants))
-            }
-            Leader::Stable { term_length, .. } => {
-                ConfiguredElector::Stable(elector::Config::<Scheme>::build(
-                    RoundRobin::<Sha256>::default().with_term(
-                        TermLength::new(term_length),
-                        STABLE_LEADER_STALL_TIMEOUT,
-                        STABLE_LEADER_OPTIMISTIC_VIEWS,
-                    ),
-                    participants,
-                ))
-            }
-        }
-    }
-}
-
-/// Holds the initialized runtime choice behind the single elector type required by Simplex.
-#[derive(Clone)]
-enum ConfiguredElector {
-    Rotating(RandomElector<Scheme>),
-    Stable(RoundRobinElector<Scheme>),
-}
-
-impl elector::Elector<Scheme> for ConfiguredElector {
-    fn terms(&self) -> elector::Terms {
-        match self {
-            Self::Rotating(elector) => elector::Elector::terms(elector),
-            Self::Stable(elector) => elector::Elector::terms(elector),
-        }
-    }
-
-    fn elect(
-        &self,
-        round: Round,
-        certificate: Option<&<Scheme as CertificateVerifier>::Certificate>,
-    ) -> Participant {
-        match self {
-            Self::Rotating(elector) => elector::Elector::elect(elector, round, certificate),
-            Self::Stable(elector) => elector::Elector::elect(elector, round, certificate),
-        }
-    }
+/// Builds stable leader election with a bounded optimistic view window.
+pub fn stable_elector(term_length: NonZero<u32>, optimistic_views: u64) -> StableElector {
+    RoundRobin::default().with_term(
+        TermLength::new(term_length),
+        STABLE_LEADER_STALL_TIMEOUT,
+        ViewDelta::new(optimistic_views),
+    )
 }
 
 /// Configuration for the [Engine].
 pub struct Config<
     B: Blocker<PublicKey = PublicKey>,
     P: Provider<PublicKey = PublicKey>,
-    C: Client,
+    C: Client<CS>,
     S: Strategy,
+    CS: Scheme,
+    L: elector::Config<CS>,
 > {
     pub blocker: B,
     pub provider: P,
@@ -136,13 +94,12 @@ pub struct Config<
     pub blocks_freezer_table_initial_size: u32,
     pub finalized_freezer_table_initial_size: u32,
     pub me: PublicKey,
-    pub polynomial: Sharing<MinSig>,
-    pub share: group::Share,
-    pub participants: Set<PublicKey>,
+    pub scheme: CS,
+    pub elector: L,
     pub mailbox_size: usize,
     pub deque_size: usize,
     pub block_size: u32,
-    pub leader: Leader,
+    pub proposal_delay_ms: NonZero<u64>,
 
     pub leader_timeout: Duration,
     pub certification_timeout: Duration,
@@ -161,17 +118,19 @@ pub struct Config<
     pub indexer: Option<C>,
 }
 
-type Marshaled<E> = Deferred<E, Scheme, Application, Block, FixedEpocher>;
+type Marshaled<E, CS> = Deferred<E, CS, Application<CS>, Block, FixedEpocher>;
 
 /// The engine that drives the [Application].
 #[allow(clippy::type_complexity)]
-pub struct Engine<E, B, P, S, C>
+pub struct Engine<E, B, P, S, C, CS, L>
 where
     E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     P: Provider<PublicKey = PublicKey>,
     S: Strategy,
-    C: Client,
+    C: Client<CS>,
+    CS: Scheme,
+    L: elector::Config<CS>,
 {
     context: ContextCell<E>,
 
@@ -180,43 +139,35 @@ where
     marshal: MarshalActor<
         E,
         Standard<Block>,
-        ConstantProvider<Scheme, Epoch>,
-        immutable::Archive<E, Digest, Finalization>,
+        ConstantProvider<CS, Epoch>,
+        immutable::Archive<E, Digest, Finalization<CS>>,
         immutable::Archive<E, Digest, Block>,
         FixedEpocher,
         S,
     >,
-    marshaled: Marshaled<E>,
+    marshaled: Marshaled<E, CS>,
 
-    consensus: Consensus<
-        E,
-        Scheme,
-        ElectorConfig,
-        B,
-        Digest,
-        Marshaled<E>,
-        Marshaled<E>,
-        Reporter<E, C>,
-        S,
-    >,
+    consensus:
+        Consensus<E, CS, L, B, Digest, Marshaled<E, CS>, Marshaled<E, CS>, Reporter<E, C, CS>, S>,
 
-    consumer: Option<indexer::Consumer<E, C>>,
+    consumer: Option<indexer::Consumer<E, C, CS>>,
 }
 
-impl<E, B, P, S, C> Engine<E, B, P, S, C>
+impl<E, B, P, S, C, CS, L> Engine<E, B, P, S, C, CS, L>
 where
     E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     P: Provider<PublicKey = PublicKey>,
     S: Strategy,
-    C: Client,
+    C: Client<CS>,
+    CS: Scheme,
+    L: elector::Config<CS>,
 {
     /// Create a new [Engine].
-    pub async fn new(context: E, cfg: Config<B, P, C, S>) -> Self {
+    pub async fn new(context: E, cfg: Config<B, P, C, S, CS, L>) -> Self {
         let mailbox_size =
             NonZeroUsize::new(cfg.mailbox_size).expect("mailbox size must be non-zero");
-        let proposal_delay_ms = cfg.leader.delay_ms();
-        let elector = ElectorConfig(cfg.leader);
+        let proposal_delay_ms = cfg.proposal_delay_ms;
 
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
@@ -234,7 +185,8 @@ where
         // Create the page cache
         let page_cache = CacheRef::from_pooler(&context, PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
 
-        // Initialize finalizations by height
+        // Validators retain all finalized history, so both archives are immutable: they never
+        // prune and keep their key index on disk rather than in memory.
         let start = Instant::now();
         let finalizations_by_height = immutable::Archive::init(
             context.child("finalizations_by_height"),
@@ -269,7 +221,7 @@ where
                 ),
                 ordinal_write_buffer: WRITE_BUFFER,
                 items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
-                codec_config: Scheme::certificate_codec_config_unbounded(),
+                codec_config: CS::certificate_codec_config_unbounded(),
                 replay_buffer: REPLAY_BUFFER,
             },
         )
@@ -315,11 +267,10 @@ where
         info!(elapsed = ?start.elapsed(), "restored finalized blocks archive");
 
         // Create marshal
-        let scheme = Scheme::signer(NAMESPACE, cfg.participants, cfg.polynomial, cfg.share)
-            .expect("failed to create scheme");
+        let scheme = cfg.scheme;
         let provider = ConstantProvider::new(scheme.clone());
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-        let genesis = Application::genesis();
+        let genesis = Application::<CS>::genesis();
         let genesis_digest = genesis.digest();
         let (marshal, marshal_mailbox, _) = MarshalActor::init(
             context.child("marshal"),
@@ -362,6 +313,7 @@ where
                     codec_config: (),
                     page_cache: page_cache.clone(),
                     write_buffer: WRITE_BUFFER,
+                    replay_buffer: REPLAY_BUFFER,
                 },
             )
             .await
@@ -390,7 +342,7 @@ where
         };
 
         // Create the application
-        let marshaled = Marshaled::new(
+        let marshaled = Marshaled::<E, CS>::new(
             context.child("marshaled"),
             app,
             marshal_mailbox.clone(),
@@ -398,7 +350,7 @@ where
         );
 
         // Create the reporter.
-        let reporter: Reporter<E, C> = (pusher, marshal_mailbox.clone()).into();
+        let reporter: Reporter<E, C, CS> = (pusher, marshal_mailbox.clone()).into();
 
         // Create the consensus engine
         let consensus = Consensus::new(
@@ -418,13 +370,16 @@ where
                 timeout_retry: cfg.nullify_retry,
                 fetch_timeout: cfg.fetch_timeout,
                 view_retention: cfg.activity_timeout,
-                skip_timeout: cfg.skip_timeout,
-                forwarding: simplex::ForwardingPolicy::Disabled,
+                skip: simplex::SkipPolicy::Enabled {
+                    timeout: cfg.skip_timeout,
+                    budget: simplex::SkipBudget::Participants,
+                },
+                forward: simplex::ForwardPolicy::Disabled,
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,
                 blocker: cfg.blocker,
                 page_cache,
-                elector,
+                elector: cfg.elector,
                 strategy: cfg.strategy,
             },
         );
@@ -540,64 +495,44 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alto_types::{StandardScheme, VrfScheme, NAMESPACE, ROTATING_ELECTOR};
     use commonware_consensus::{
-        simplex::{scheme::bls12381_threshold::vrf, types::Subject},
-        types::View,
+        simplex::scheme::bls12381_threshold::{standard, vrf},
+        types::{Round, View},
     };
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig,
         certificate::{mocks::Fixture, Scheme as _},
-        sha256::Digest as Sha256Digest,
     };
-    use commonware_parallel::Sequential;
-    use commonware_utils::{Faults, N3f1, NZU32, NZU64};
+    use commonware_utils::NZU32;
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
-    fn configured_elector_preserves_rotating_and_stable_terms() {
-        let Fixture { schemes, .. } =
-            vrf::fixture::<MinSig, _>(&mut StdRng::seed_from_u64(0), NAMESPACE, 4);
-        let participants = schemes[0].participants();
-
-        let rotating_config = Leader::rotating(NZU64!(7));
-        assert_eq!(rotating_config.delay_ms(), NZU64!(7));
-        assert_eq!(Leader::default(), Leader::stable(NZU64!(10), NZU32!(1_000)));
-
+    fn electors_are_specialized_for_their_certificate_schemes() {
+        let Fixture {
+            schemes: vrf_schemes,
+            ..
+        } = vrf::fixture::<MinSig, _>(&mut StdRng::seed_from_u64(0), NAMESPACE, 4);
         let rotating =
-            elector::Config::<Scheme>::build(ElectorConfig(rotating_config), participants);
+            elector::Config::<VrfScheme>::build(ROTATING_ELECTOR, vrf_schemes[0].participants());
         assert_eq!(
             elector::Elector::terms(&rotating),
             elector::Terms::rotating()
         );
-        let random = elector::Config::<Scheme>::build(Random, participants);
-        let certificate_round = Round::new(EPOCH, View::new(1));
-        let attestations: Vec<_> = schemes
-            .iter()
-            .take(N3f1::quorum(schemes.len()) as usize)
-            .map(|scheme| {
-                scheme
-                    .sign::<Sha256Digest>(Subject::Nullify {
-                        round: certificate_round,
-                    })
-                    .unwrap()
-            })
-            .collect();
-        let certificate = schemes[0].assemble(attestations, &Sequential).unwrap();
-        let next_round = Round::new(EPOCH, View::new(2));
-        assert_eq!(
-            elector::Elector::elect(&rotating, next_round, Some(&certificate)),
-            elector::Elector::elect(&random, next_round, Some(&certificate)),
-        );
 
         let term_length = NZU32!(9);
-        let stable = elector::Config::<Scheme>::build(
-            ElectorConfig(Leader::stable(NZU64!(10), term_length)),
-            participants,
+        let Fixture {
+            schemes: standard_schemes,
+            ..
+        } = standard::fixture::<MinSig, _>(&mut StdRng::seed_from_u64(1), NAMESPACE, 4);
+        let stable = elector::Config::<StandardScheme>::build(
+            stable_elector(term_length, 37),
+            standard_schemes[0].participants(),
         );
         let terms = elector::Elector::terms(&stable);
         assert_eq!(terms.length(), TermLength::new(term_length));
         assert_eq!(terms.stall_timeout(), Some(STABLE_LEADER_STALL_TIMEOUT));
-        assert_eq!(terms.optimistic_views(), STABLE_LEADER_OPTIMISTIC_VIEWS);
+        assert_eq!(terms.optimistic_views(), ViewDelta::new(37));
 
         let first = elector::Elector::elect(&stable, Round::new(EPOCH, View::new(1)), None);
         let last = elector::Elector::elect(

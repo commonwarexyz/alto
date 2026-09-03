@@ -30,24 +30,33 @@ enum Completion {
     Skipped { position: u64, height: u64 },
 }
 
-pub struct Consumer<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> {
+pub struct Consumer<
+    E: Spawner + Clock + Storage + Metrics + BufferPooler,
+    C: Client<CS>,
+    CS: Scheme,
+> {
     context: ContextCell<E>,
     client: C,
-    marshal: MarshalMailbox<Scheme, Standard<Block>>,
+    marshal: MarshalMailbox<CS, Standard<Block>>,
     upload_results: status::Counter,
     uploads: SharedState,
     writer: queue::Writer<E, Entry>,
     reader: queue::Reader<E, Entry>,
-    active: Pool<Completion>,
+    active: Pool<'static, Completion>,
     max_active: NonZeroUsize,
     retry: Duration,
 }
 
-impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Consumer<E, C> {
+impl<E, C, CS> Consumer<E, C, CS>
+where
+    E: Spawner + Clock + Storage + Metrics + BufferPooler,
+    C: Client<CS>,
+    CS: Scheme,
+{
     pub fn new(
         context: E,
         client: C,
-        marshal: MarshalMailbox<Scheme, Standard<Block>>,
+        marshal: MarshalMailbox<CS, Standard<Block>>,
         uploads: SharedState,
         backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
         max_active: NonZeroUsize,
@@ -218,7 +227,7 @@ impl<E: Spawner + Clock + Storage + Metrics + BufferPooler, C: Client> Consumer<
 
     async fn wait_for_uploadable_block(
         context: &E,
-        marshal: &MarshalMailbox<Scheme, Standard<Block>>,
+        marshal: &MarshalMailbox<CS, Standard<Block>>,
         uploads: &SharedState,
         digest: Digest,
         retry: Duration,

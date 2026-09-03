@@ -42,6 +42,9 @@ ENV PATH="/root/.cargo/bin:${PATH}" \
     TARGET_CXX="${TARGET_CXX}" \
     TARGET_AR="${TARGET_AR}" \
     TARGET_STRIP="${TARGET_STRIP}" \
+    PACKAGE_NAME="alto-validator" \
+    BINARY_NAME="validator" \
+    OUTPUT_NAME="validator" \
     CARGO_PROFILE_RELEASE_DEBUG=true
 
 RUN rustup target add ${TARGET_TRIPLE}
@@ -49,4 +52,4 @@ RUN rustup target add ${TARGET_TRIPLE}
 WORKDIR /alto
 
 ENTRYPOINT ["/bin/bash", "-c"]
-CMD ["set -euo pipefail && export CARGO_TARGET_${TARGET_CARGO_NAME}_LINKER=${TARGET_LINKER} && export CARGO_TARGET_${TARGET_CARGO_NAME}_RUSTFLAGS=\"-C target-cpu=${TARGET_CPU}\" && export CC_${TARGET_CC_NAME}=${TARGET_LINKER} && export CXX_${TARGET_CC_NAME}=${TARGET_CXX} && export AR_${TARGET_CC_NAME}=${TARGET_AR} && mkdir -p assets && cargo build --locked --release --package alto-validator --bin validator --target ${TARGET_TRIPLE} && cp target/${TARGET_TRIPLE}/release/validator assets/validator-debug && ${TARGET_STRIP} -o assets/validator assets/validator-debug"]
+CMD ["set -euo pipefail && export CARGO_TARGET_${TARGET_CARGO_NAME}_LINKER=${TARGET_LINKER} && export CARGO_TARGET_${TARGET_CARGO_NAME}_RUSTFLAGS=\"-C target-cpu=${TARGET_CPU}\" && export CC_${TARGET_CC_NAME}=${TARGET_LINKER} && export CXX_${TARGET_CC_NAME}=${TARGET_CXX} && export AR_${TARGET_CC_NAME}=${TARGET_AR} && mkdir -p assets && cargo build --locked --release --package ${PACKAGE_NAME} --bin ${BINARY_NAME} --target ${TARGET_TRIPLE} && cp target/${TARGET_TRIPLE}/release/${BINARY_NAME} assets/${OUTPUT_NAME}-debug && ${TARGET_STRIP} -o assets/${OUTPUT_NAME} assets/${OUTPUT_NAME}-debug"]
