@@ -55,6 +55,8 @@ const MARSHAL_RESOLVER_TIMEOUT: Duration = Duration::from_secs(10);
 const BASE_MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
 const MAX_FETCH_COUNT: usize = 16;
 const MAX_FETCH_SIZE: usize = 512 * 1024;
+const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
+const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
 fn configured_max_message_size(block_size: u32) -> u32 {
     // Block data contributes its bytes and the codec's variable-length prefix to each message.
@@ -386,6 +388,8 @@ fn main() {
                     blocker: oracle.clone(),
                     provider: oracle.clone(),
                     partition_prefix: "engine".to_string(),
+                    blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
+                    finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
                     me: public_key.clone(),
                     scheme,
                     elector: $elector,

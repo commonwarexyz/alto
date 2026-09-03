@@ -2970,7 +2970,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "builder",
-                    "expr": "engine_marshal_finalizations_by_height_freezer_resizes_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
+                    "expr": "engine_finalizations_by_height_freezer_resizes_total{deployer_name=~\"$Validator\", deployer_region=~\"$Region\"}",
                     "fullMetaSearch": false,
                     "hide": false,
                     "includeNullMetadata": true,

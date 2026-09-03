@@ -32,7 +32,7 @@ use commonware_runtime::{
     buffer::paged::{page_size, CacheRef},
     spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
 };
-use commonware_storage::{archive::prunable, queue, translator::FourCap};
+use commonware_storage::{archive::immutable, queue};
 use commonware_utils::{NZUsize, NZU64};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
@@ -53,7 +53,11 @@ type Reporter<E, C, CS> =
 const SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER: u64 = 10;
 const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
 const QUEUE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(128);
-const ARCHIVE_COMPRESSION: Option<u8> = Some(3);
+const IMMUTABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(262_144);
+const FREEZER_TABLE_RESIZE_FREQUENCY: u8 = 4;
+const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // 3MB
+const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
+const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
 const PAGE_CACHE_PHYSICAL_PAGE_SIZE: u32 = 4_096;
@@ -87,6 +91,8 @@ pub struct Config<
     pub blocker: B,
     pub provider: P,
     pub partition_prefix: String,
+    pub blocks_freezer_table_initial_size: u32,
+    pub finalized_freezer_table_initial_size: u32,
     pub me: PublicKey,
     pub scheme: CS,
     pub elector: L,
@@ -134,8 +140,8 @@ where
         E,
         Standard<Block>,
         ConstantProvider<CS, Epoch>,
-        prunable::Archive<FourCap, E, Digest, Finalization<CS>>,
-        prunable::Archive<FourCap, E, Digest, Block>,
+        immutable::Archive<E, Digest, Finalization<CS>>,
+        immutable::Archive<E, Digest, Block>,
         FixedEpocher,
         S,
     >,
@@ -179,28 +185,43 @@ where
         // Create the page cache
         let page_cache = CacheRef::from_pooler(&context, PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
 
-        // Validators retain all finalized history. These archives use the prunable write path,
-        // but Alto never sends Marshal a request to prune them.
+        // Validators retain all finalized history, so both archives are immutable: they never
+        // prune and keep their key index on disk rather than in memory.
         let start = Instant::now();
-        let finalizations_by_height = prunable::Archive::init(
+        let finalizations_by_height = immutable::Archive::init(
             context.child("finalizations_by_height"),
-            prunable::Config {
-                translator: FourCap,
-                // Distinct from the `{prefix}-finalizations-by-height-metadata` partition the
-                // immutable archive used before the switch to prunable archives, so a data
-                // directory written by an older validator is ignored rather than misread.
+            immutable::Config {
                 metadata_partition: format!(
-                    "{}-prunable-finalizations-by-height-metadata",
+                    "{}-finalizations-by-height-metadata",
                     cfg.partition_prefix
                 ),
-                key_partition: format!("{}-finalizations-by-height-key", cfg.partition_prefix),
-                key_page_cache: page_cache.clone(),
-                value_partition: format!("{}-finalizations-by-height-value", cfg.partition_prefix),
-                compression: ARCHIVE_COMPRESSION,
+                freezer_table_partition: format!(
+                    "{}-finalizations-by-height-freezer-table",
+                    cfg.partition_prefix
+                ),
+                freezer_table_initial_size: cfg.finalized_freezer_table_initial_size,
+                freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
+                freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
+                freezer_key_partition: format!(
+                    "{}-finalizations-by-height-freezer-key-journal",
+                    cfg.partition_prefix
+                ),
+                freezer_key_page_cache: page_cache.clone(),
+                freezer_key_write_buffer: WRITE_BUFFER,
+                freezer_value_partition: format!(
+                    "{}-finalizations-by-height-freezer-value-journal",
+                    cfg.partition_prefix
+                ),
+                freezer_value_write_buffer: WRITE_BUFFER,
+                freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
+                freezer_value_compression: FREEZER_JOURNAL_COMPRESSION,
+                ordinal_partition: format!(
+                    "{}-finalizations-by-height-ordinal",
+                    cfg.partition_prefix
+                ),
+                ordinal_write_buffer: WRITE_BUFFER,
+                items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
                 codec_config: CS::certificate_codec_config_unbounded(),
-                items_per_section: PRUNABLE_ITEMS_PER_SECTION,
-                key_write_buffer: WRITE_BUFFER,
-                value_write_buffer: WRITE_BUFFER,
                 replay_buffer: REPLAY_BUFFER,
             },
         )
@@ -210,22 +231,34 @@ where
 
         // Initialize finalized blocks
         let start = Instant::now();
-        let finalized_blocks = prunable::Archive::init(
+        let finalized_blocks = immutable::Archive::init(
             context.child("finalized_blocks"),
-            prunable::Config {
-                translator: FourCap,
-                metadata_partition: format!(
-                    "{}-prunable-finalized-blocks-metadata",
+            immutable::Config {
+                metadata_partition: format!("{}-finalized_blocks-metadata", cfg.partition_prefix),
+                freezer_table_partition: format!(
+                    "{}-finalized_blocks-freezer-table",
                     cfg.partition_prefix
                 ),
-                key_partition: format!("{}-finalized-blocks-key", cfg.partition_prefix),
-                key_page_cache: page_cache.clone(),
-                value_partition: format!("{}-finalized-blocks-value", cfg.partition_prefix),
-                compression: ARCHIVE_COMPRESSION,
+                freezer_table_initial_size: cfg.blocks_freezer_table_initial_size,
+                freezer_table_resize_frequency: FREEZER_TABLE_RESIZE_FREQUENCY,
+                freezer_table_resize_chunk_size: FREEZER_TABLE_RESIZE_CHUNK_SIZE,
+                freezer_key_partition: format!(
+                    "{}-finalized-blocks-freezer-key-journal",
+                    cfg.partition_prefix
+                ),
+                freezer_key_page_cache: page_cache.clone(),
+                freezer_key_write_buffer: WRITE_BUFFER,
+                freezer_value_partition: format!(
+                    "{}-finalized-blocks-freezer-value-journal",
+                    cfg.partition_prefix
+                ),
+                freezer_value_write_buffer: WRITE_BUFFER,
+                freezer_value_target_size: FREEZER_JOURNAL_TARGET_SIZE,
+                freezer_value_compression: FREEZER_JOURNAL_COMPRESSION,
+                ordinal_partition: format!("{}-finalized-blocks-ordinal", cfg.partition_prefix),
+                ordinal_write_buffer: WRITE_BUFFER,
+                items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
                 codec_config: (),
-                items_per_section: PRUNABLE_ITEMS_PER_SECTION,
-                key_write_buffer: WRITE_BUFFER,
-                value_write_buffer: WRITE_BUFFER,
                 replay_buffer: REPLAY_BUFFER,
             },
         )

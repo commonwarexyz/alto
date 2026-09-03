@@ -141,8 +141,8 @@ indexer: https://your-indexer.example.com
 This deploys 50 validators on 16-core `c7gd.4xlarge` Graviton 3 instances with 8 Tokio workers and
 16 signature threads, a 5ms proposal target, and 100,000-view stable-leader terms. It builds the
 explorer into an indexer on the same instance type, deploys with concurrency 50, and prints the
-explorer URL when deployment completes. Validators use prunable finalized archives but retain the
-full history. Validator and indexer binaries use the cross-generation Graviton recipe targeting
+explorer URL when deployment completes. Validators retain the full finalized history in immutable
+archives. Validator and indexer binaries use the cross-generation Graviton recipe targeting
 `neoverse-512tvb`, AWS's recommended compiler target for Graviton 3.
 
 The runtime and signature pools deliberately oversubscribe the 16 single-threaded cores. Treat
