@@ -2,7 +2,7 @@ use crate::{
     Block, Finalized, Identity, Notarized, Scheme, Seed, Signature, StandardScheme, VrfScheme,
     EPOCH, NAMESPACE, ROTATING_ELECTOR,
 };
-use commonware_codec::{DecodeExt, Encode};
+use commonware_codec::{Decode, DecodeExt, Encode};
 use commonware_consensus::{
     types::{Round, View},
     Viewable,
@@ -78,7 +78,9 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsV
 fn parse_notarized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValue {
     let certificate_verifier = S::certificate_verifier(NAMESPACE, identity);
 
-    let Ok(notarized) = Notarized::<S>::decode(bytes.as_ref()) else {
+    let Ok(notarized) =
+        Notarized::<S>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
+    else {
         return JsValue::NULL;
     };
     if !notarized.verify(&certificate_verifier, &Sequential) {
@@ -117,7 +119,9 @@ pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsV
 
 fn parse_finalized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValue {
     let certificate_verifier = S::certificate_verifier(NAMESPACE, identity);
-    let Ok(finalized) = Finalized::<S>::decode(bytes.as_ref()) else {
+    let Ok(finalized) =
+        Finalized::<S>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
+    else {
         return JsValue::NULL;
     };
     if !finalized.verify(&certificate_verifier, &Sequential) {
@@ -146,7 +150,7 @@ fn parse_finalized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValu
 
 #[wasm_bindgen]
 pub fn parse_block(bytes: Vec<u8>) -> JsValue {
-    let Ok(block) = Block::decode(bytes.as_ref()) else {
+    let Ok(block) = Block::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config()) else {
         return JsValue::NULL;
     };
     let block_js = BlockJs {

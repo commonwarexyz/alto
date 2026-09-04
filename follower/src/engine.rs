@@ -138,7 +138,7 @@ where
                 replay_buffer: REPLAY_BUFFER,
                 key_write_buffer: WRITE_BUFFER,
                 value_write_buffer: WRITE_BUFFER,
-                block_codec_config: (),
+                block_codec_config: Block::unbounded_codec_config(),
                 max_repair,
                 max_pending_acks: MAX_PENDING_ACKS,
                 page_cache,

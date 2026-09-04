@@ -1,7 +1,7 @@
 use alto_chain::{
     Config, Leader, Peers, DEFAULT_BACKFILLER_MAX_ACTIVE, DEFAULT_BACKFILLER_RETRY_MS,
     DEFAULT_BLOCKING_THREADS, DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS,
-    DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS,
+    DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS, LEADER_TIMEOUT,
 };
 use alto_types::{CertificateMode, NAMESPACE};
 use clap::{value_parser, Arg, ArgAction, ArgMatches, Command};
@@ -55,10 +55,11 @@ fn leader_args() -> [Arg; 4] {
             .long("leader-mode")
             .required(true)
             .value_parser(["rotating", "stable"]),
+        // Validators refuse to start with a proposal delay at or above their leader timeout.
         Arg::new("leader_delay_ms")
             .long("leader-delay-ms")
             .required(true)
-            .value_parser(value_parser!(NonZeroU64)),
+            .value_parser(value_parser!(u64).range(1..LEADER_TIMEOUT.as_millis() as u64)),
         Arg::new("leader_term_length")
             .long("leader-term-length")
             .required_if_eq("leader_mode", "stable")
@@ -105,6 +106,7 @@ struct DeployedIndexerConfig {
     port: u16,
     identity: String,
     certificate_mode: CertificateMode,
+    block_size: u32,
     explorer: DeployedExplorerConfig,
 }
 
@@ -222,7 +224,8 @@ fn parse_backend_url(value: &str) -> Result<String, String> {
 }
 
 fn parse_leader(matches: &ArgMatches) -> Result<Leader, &'static str> {
-    let delay_ms = *matches.get_one::<NonZeroU64>("leader_delay_ms").unwrap();
+    let delay_ms = NonZeroU64::new(*matches.get_one::<u64>("leader_delay_ms").unwrap())
+        .expect("clap bounds the leader delay");
     match matches.get_one::<String>("leader_mode").unwrap().as_str() {
         "rotating" => {
             if matches.get_one::<u32>("leader_term_length").is_some() {
@@ -689,7 +692,7 @@ fn generate_local(
             if let Some(port) = local_indexer_port(url) {
                 let certificate_mode = certificate_mode_name(leader.certificate_mode());
                 let command = format!(
-                    "cargo run --bin indexer -- --port {port} --identity {identity} --certificate-mode {certificate_mode}"
+                    "cargo run --bin indexer -- --port {port} --identity {identity} --certificate-mode {certificate_mode} --block-size {block_size}"
                 );
                 println!("{url}: {command}");
             }
@@ -920,6 +923,7 @@ fn generate_remote(
             port: INDEXER_PORT,
             identity: hex(&identity.encode()),
             certificate_mode: leader.certificate_mode(),
+            block_size,
             explorer: DeployedExplorerConfig {
                 name: "Live Global Cluster".to_string(),
                 description: format!(
@@ -1209,6 +1213,12 @@ deque_size: 1
 signature_threads: 1
 "#;
 
+        // The leader policy selects the certificate construction, so it is never defaulted.
+        assert!(serde_yaml::from_str::<alto_chain::Config>(yaml).is_err());
+        let yaml = &format!(
+            "{yaml}\nleader:\n  mode: stable\n  delay_ms: 10\n  term_length: 1000\n  optimistic_views: 48\n"
+        );
+
         let config: alto_chain::Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.block_size, 0);
         assert_eq!(config.traces_sample_rate, 0.0);
@@ -1244,6 +1254,32 @@ signature_threads: 1
             ])
             .unwrap();
         assert_eq!(parse_leader(&matches).unwrap(), Leader::rotating(NZU64!(7)));
+    }
+
+    #[test]
+    fn leader_delay_must_stay_below_leader_timeout() {
+        for delay in ["0", "1000", "5000"] {
+            assert!(Command::new("test")
+                .args(leader_args())
+                .try_get_matches_from([
+                    "test",
+                    "--leader-mode",
+                    "rotating",
+                    "--leader-delay-ms",
+                    delay
+                ])
+                .is_err());
+        }
+        assert!(Command::new("test")
+            .args(leader_args())
+            .try_get_matches_from([
+                "test",
+                "--leader-mode",
+                "rotating",
+                "--leader-delay-ms",
+                "999"
+            ])
+            .is_ok());
     }
 
     #[test]

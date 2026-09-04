@@ -5,6 +5,7 @@ use std::{
     collections::HashMap,
     net::SocketAddr,
     num::{NonZeroU32, NonZeroU64, NonZeroUsize},
+    time::Duration,
 };
 
 pub mod application;
@@ -17,6 +18,9 @@ pub const DEFAULT_BACKFILLER_RETRY_MS: u64 = 1_000;
 pub const DEFAULT_BLOCKING_THREADS: usize = 512;
 pub const DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(16_384);
 pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(4_096);
+/// How long validators wait for a leader's proposal before nullifying the view. The configured
+/// proposal delay must stay below this or a leader could never propose in time.
+pub const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 const DEFAULT_TRACES_SAMPLE_RATE: f64 = 0.0;
 const DEFAULT_STABLE_LEADER_DELAY_MS: NonZeroU64 = NZU64!(10);
 const DEFAULT_STABLE_LEADER_TERM_LENGTH: NonZeroU32 = NZU32!(1_000);
@@ -192,7 +196,8 @@ pub struct Config {
 
     pub signature_threads: usize,
 
-    #[serde(default)]
+    /// Leader election policy. Required: it selects the certificate construction, so every
+    /// validator must state it explicitly rather than fall back to a default.
     pub leader: Leader,
 
     #[serde(default = "default_backfiller_max_active")]
@@ -424,6 +429,7 @@ mod tests {
         leader: Leader,
         leader_timeout: Duration,
         certification_timeout: Duration,
+        block_size: u32,
         backfiller_max_active: NonZeroUsize,
         backfiller_retry: Duration,
         indexer: Option<mocks::Client>,
@@ -435,6 +441,7 @@ mod tests {
                 leader: Leader::default(),
                 leader_timeout: Duration::from_secs(1),
                 certification_timeout: Duration::from_secs(2),
+                block_size: 0,
                 backfiller_max_active: DEFAULT_BACKFILLER_MAX_ACTIVE,
                 backfiller_retry: Duration::from_millis(DEFAULT_BACKFILLER_RETRY_MS),
                 indexer: None,
@@ -500,7 +507,7 @@ mod tests {
             elector: engine::stable_elector(term_length, optimistic_views),
             mailbox_size: 1024,
             deque_size: 10,
-            block_size: 0,
+            block_size: cfg.block_size,
             proposal_delay_ms: delay_ms,
             leader_timeout: cfg.leader_timeout,
             certification_timeout: cfg.certification_timeout,
@@ -827,9 +834,12 @@ mod tests {
                 // This test restarts validators every 250..1_000ms of simulated time.
                 // Keep recovery timeouts below that window so a recovered view can
                 // either certify or timeout/nullify before the next forced shutdown.
+                // A non-zero payload also exercises the block codec bound across restarts (the
+                // stored genesis block has an empty payload and must still decode).
                 let cfg = ValidatorConfig {
                     leader_timeout: Duration::from_millis(250),
                     certification_timeout: Duration::from_millis(500),
+                    block_size: 64,
                     ..Default::default()
                 };
                 for (signer, scheme) in private_keys.iter().zip(schemes.iter()) {

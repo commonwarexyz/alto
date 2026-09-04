@@ -168,6 +168,12 @@ where
         let mailbox_size =
             NonZeroUsize::new(cfg.mailbox_size).expect("mailbox size must be non-zero");
         let proposal_delay_ms = cfg.proposal_delay_ms;
+        // A leader waits out the proposal delay before building on its parent, so a delay that
+        // reaches the leader timeout would make every view time out before it is proposed.
+        assert!(
+            Duration::from_millis(proposal_delay_ms.get()) < cfg.leader_timeout,
+            "proposal delay must be shorter than the leader timeout"
+        );
 
         // Create the buffer
         let (buffer, buffer_mailbox) = buffered::Engine::new(
@@ -177,7 +183,7 @@ where
                 mailbox_size,
                 deque_size: cfg.deque_size,
                 priority: true,
-                codec_config: (),
+                codec_config: Block::codec_config(cfg.block_size),
                 peer_provider: cfg.provider,
             },
         );
@@ -258,7 +264,7 @@ where
                 ordinal_partition: format!("{}-finalized-blocks-ordinal", cfg.partition_prefix),
                 ordinal_write_buffer: WRITE_BUFFER,
                 items_per_section: IMMUTABLE_ITEMS_PER_SECTION,
-                codec_config: (),
+                codec_config: Block::codec_config(cfg.block_size),
                 replay_buffer: REPLAY_BUFFER,
             },
         )
@@ -291,7 +297,7 @@ where
                 replay_buffer: REPLAY_BUFFER,
                 key_write_buffer: WRITE_BUFFER,
                 value_write_buffer: WRITE_BUFFER,
-                block_codec_config: (),
+                block_codec_config: Block::codec_config(cfg.block_size),
                 max_repair: MAX_REPAIR,
                 max_pending_acks: MAX_PENDING_ACKS,
                 page_cache: page_cache.clone(),

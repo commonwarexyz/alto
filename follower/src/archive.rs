@@ -120,7 +120,7 @@ where
                 key_page_cache: page_cache.clone(),
                 value_partition: PRUNABLE_FINALIZED_BLOCKS_VALUE_PARTITION.to_string(),
                 compression: FINALIZED_COMPRESSION,
-                codec_config: (),
+                codec_config: Block::unbounded_codec_config(),
                 items_per_section: PRUNABLE_ITEMS_PER_SECTION,
                 key_write_buffer: WRITE_BUFFER,
                 value_write_buffer: WRITE_BUFFER,
@@ -182,7 +182,7 @@ where
                 freezer_value_write_buffer: WRITE_BUFFER,
                 ordinal_write_buffer: WRITE_BUFFER,
                 replay_buffer: REPLAY_BUFFER,
-                codec_config: (),
+                codec_config: Block::unbounded_codec_config(),
             },
         )
         .await

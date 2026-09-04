@@ -294,52 +294,65 @@ const App: React.FC = () => {
     };
   }, [LOCATIONS, PARTICIPANTS]);
 
+  // Record `view` as observed and return the previous maximum. This runs in the handler body, not
+  // inside a `setViews` updater: React StrictMode invokes updaters twice, so an updater that mutated
+  // the ref would see its own update on the second pass and skip the gap fill.
+  const observeView = useCallback((view: number): number | null => {
+    const lastObservedView = lastObservedViewRef.current;
+    if (lastObservedView === null || view > lastObservedView) {
+      lastObservedViewRef.current = view;
+    }
+    return lastObservedView;
+  }, []);
+
+  // Insert placeholders for views skipped between `lastObservedView` and `view`. Seeds trigger
+  // this in VRF mode; in standard mode there are no seeds, so notarizations and finalizations must
+  // do it themselves or nullified views would silently vanish from the timeline.
+  const fillMissedViews = useCallback((
+    newViews: ViewData[],
+    lastObservedView: number | null,
+    view: number,
+    observedAt: number,
+  ) => {
+    if (lastObservedView === null || view <= lastObservedView + 1) {
+      return;
+    }
+    // Never backfill more than the timeline can show.
+    const startViewIndex = Math.max(lastObservedView + 1, view - MAX_TRACKED_VIEWS);
+    for (let missedView = startViewIndex; missedView < view; missedView++) {
+      if (newViews.findIndex((v) => v.view === missedView) !== -1) {
+        continue;
+      }
+      const timeoutId = setTimeout(() => {
+        setViews((currentViews) =>
+          currentViews.map((v) =>
+            v.view === missedView && v.status === "unknown"
+              ? { ...v, status: "timed_out", timeoutId: undefined }
+              : v,
+          ),
+        );
+      }, TIMEOUT_DURATION);
+      newViews.unshift({
+        view: missedView,
+        location: undefined,
+        locationName: undefined,
+        status: "unknown",
+        startTime: observedAt,
+        timeoutId,
+      });
+    }
+  }, []);
+
   const handleSeed = useCallback((seed: SeedJs, receivedAt: number) => {
     const view = seed.view + 1; // Next view is determined by seed - 1
     const observedAt = adjustTime(receivedAt);
+    const lastObservedView = observeView(view);
 
     setViews((prevViews) => {
       // Create a copy of the current views that we'll modify
       let newViews = [...prevViews];
-      const lastObservedView = lastObservedViewRef.current;
 
-      // If we haven't observed any views yet, or if the new view is greater than the last observed view + 1,
-      // handle potentially missed views
-      if (lastObservedView === null || view > lastObservedView + 1) {
-        const startViewIndex = lastObservedView !== null ? lastObservedView + 1 : view;
-
-        // Add any missed views as skipped/timed out
-        for (let missedView = startViewIndex; missedView < view; missedView++) {
-          // Check if this view already exists
-          const existingIndex = newViews.findIndex(v => v.view === missedView);
-
-          if (existingIndex === -1) {
-            // Set a timeout for unknown views
-            const timeoutId = setTimeout(() => {
-              setViews((currentViews) => {
-                return currentViews.map((v) => {
-                  // Only time out this specific view if it's still in unknown state
-                  if (v.view === missedView && v.status === "unknown") {
-                    return { ...v, status: "timed_out", timeoutId: undefined };
-                  }
-                  return v;
-                });
-              });
-            }, TIMEOUT_DURATION);
-
-
-            // Only add if it doesn't already exist
-            newViews.unshift({
-              view: missedView,
-              location: undefined,
-              locationName: undefined,
-              status: "unknown",
-              startTime: observedAt,
-              timeoutId: timeoutId
-            });
-          }
-        }
-      }
+      fillMissedViews(newViews, lastObservedView, view, observedAt);
 
       // Check if this view already exists
       const existingIndex = newViews.findIndex(v => v.view === view);
@@ -416,31 +429,25 @@ const App: React.FC = () => {
         newViews.unshift(viewWithTimeout);
       }
 
-      // Update the last observed view if this is a new maximum
-      if (lastObservedView === null || view > lastObservedView) {
-        lastObservedViewRef.current = view;
-      }
-
       return retainNewestViews(newViews);
     });
-  }, [adjustTime, resolveSeedLocation]);
+  }, [adjustTime, resolveSeedLocation, observeView, fillMissedViews]);
 
   const handleNotarization = useCallback((notarized: NotarizedJs, receivedAt: number) => {
     const view = notarized.proof.view;
     const leaderLocation = resolveLeaderLocation(notarized.block?.leader, PARTICIPANTS, LOCATIONS);
+    const currentTime = adjustTime(receivedAt);
+    const lastObservedView = observeView(view);
     setViews((prevViews) => {
-      const lastObservedView = lastObservedViewRef.current;
-      if (lastObservedView === null || view > lastObservedView) {
-        lastObservedViewRef.current = view;
-      }
-      const index = prevViews.findIndex((v) => v.view === view);
-
       // If the view exists and is already finalized, ignore this notarization completely
-      if (index !== -1 && prevViews[index].status === "finalized") {
+      const existing = prevViews.find((v) => v.view === view);
+      if (existing && existing.status === "finalized") {
         return prevViews; // No changes needed, preserve finalized state
       }
-      let newViews = [...prevViews];
-      const currentTime = adjustTime(receivedAt);
+      const newViews = [...prevViews];
+      fillMissedViews(newViews, lastObservedView, view, currentTime);
+      // Placeholders are inserted at the front, so locate the view after filling.
+      const index = newViews.findIndex((v) => v.view === view);
 
       // Calculate a reasonable start time using the block timestamp if available
       let calculatedStartTime = currentTime;
@@ -451,7 +458,7 @@ const App: React.FC = () => {
       }
 
       if (index !== -1) {
-        const viewData = prevViews[index];
+        const viewData = newViews[index];
         // Clear timeout if it exists
         if (viewData.timeoutId) {
           clearTimeout(viewData.timeoutId);
@@ -467,7 +474,7 @@ const App: React.FC = () => {
         }
 
         // Update the view with notarization data
-        const updatedView: ViewData = {
+        newViews[index] = {
           ...viewData,
           status: "notarized", // We already checked it's not finalized
           notarizationTime: currentTime,
@@ -478,12 +485,6 @@ const App: React.FC = () => {
           actualNotarizationLatency,
           ...leaderLocation,
         };
-
-        newViews = [
-          ...prevViews.slice(0, index),
-          updatedView,
-          ...prevViews.slice(index + 1),
-        ];
       } else {
         // If view doesn't exist, create it with block timestamp as start time
         let actualNotarizationLatency: number | undefined = undefined;
@@ -493,7 +494,7 @@ const App: React.FC = () => {
             actualNotarizationLatency = currentTime - blockTime;
           }
         }
-        newViews = [{
+        newViews.unshift({
           view,
           location: leaderLocation?.location,
           locationName: leaderLocation?.locationName,
@@ -502,24 +503,28 @@ const App: React.FC = () => {
           notarizationTime: currentTime,
           block: notarized.block,
           actualNotarizationLatency,
-        }, ...prevViews];
+        });
       }
 
       return retainNewestViews(newViews);
     });
-  }, [adjustTime, LOCATIONS, PARTICIPANTS]);
+  }, [adjustTime, LOCATIONS, PARTICIPANTS, observeView, fillMissedViews]);
 
   const handleFinalization = useCallback((finalized: FinalizedJs, receivedAt: number) => {
     const view = finalized.proof.view;
     const leaderLocation = resolveLeaderLocation(finalized.block?.leader, PARTICIPANTS, LOCATIONS);
+    const currentTime = adjustTime(receivedAt);
+    const lastObservedView = observeView(view);
     setViews((prevViews) => {
-      const lastObservedView = lastObservedViewRef.current;
-      if (lastObservedView === null || view > lastObservedView) {
-        lastObservedViewRef.current = view;
+      // If already finalized, don't update
+      const existing = prevViews.find((v) => v.view === view);
+      if (existing && existing.status === "finalized") {
+        return prevViews;
       }
-      const index = prevViews.findIndex((v) => v.view === view);
-      let newViews = [...prevViews];
-      const currentTime = adjustTime(receivedAt);
+      const newViews = [...prevViews];
+      fillMissedViews(newViews, lastObservedView, view, currentTime);
+      // Placeholders are inserted at the front, so locate the view after filling.
+      const index = newViews.findIndex((v) => v.view === view);
 
       // Calculate a reasonable start time using the block timestamp if available
       let calculatedStartTime = currentTime;
@@ -530,7 +535,7 @@ const App: React.FC = () => {
       }
 
       if (index !== -1) {
-        const viewData = prevViews[index];
+        const viewData = newViews[index];
         // Clear timeout if it exists
         if (viewData.timeoutId) {
           clearTimeout(viewData.timeoutId);
@@ -545,13 +550,8 @@ const App: React.FC = () => {
           }
         }
 
-        // If already finalized, don't update
-        if (viewData.status === "finalized") {
-          return prevViews;
-        }
-
         // Use existing data if available, without fabricating missing data
-        const updatedView: ViewData = {
+        newViews[index] = {
           ...viewData,
           status: "finalized",
           finalizationTime: currentTime,
@@ -564,12 +564,6 @@ const App: React.FC = () => {
           actualFinalizationLatency,
           ...leaderLocation,
         };
-
-        newViews = [
-          ...prevViews.slice(0, index),
-          updatedView,
-          ...prevViews.slice(index + 1),
-        ];
       } else {
         // If view doesn't exist, create it with just the data we have
         let actualFinalizationLatency: number | undefined = undefined;
@@ -579,7 +573,7 @@ const App: React.FC = () => {
             actualFinalizationLatency = currentTime - blockTime;
           }
         }
-        newViews = [{
+        newViews.unshift({
           view,
           location: leaderLocation?.location,
           locationName: leaderLocation?.locationName,
@@ -589,19 +583,25 @@ const App: React.FC = () => {
           finalizationTime: currentTime,
           block: finalized.block,
           actualFinalizationLatency,
-        }, ...prevViews];
+        });
       }
 
       return retainNewestViews(newViews);
     });
-  }, [adjustTime, LOCATIONS, PARTICIPANTS]);
+  }, [adjustTime, LOCATIONS, PARTICIPANTS, observeView, fillMissedViews]);
 
   // Merge every verified artifact while limiting React rendering work.
   useEffect(() => {
     const interval = setInterval(() => {
       currentTimeRef.current = adjustTime(Date.now());
       const verified = verifiedQueueRef.current.splice(0);
-      for (const { kind, artifact, receivedAt } of verified) {
+      for (const { kind, artifact, receivedAt, skipped } of verified) {
+        if (skipped) {
+          // Verification fell behind and artifacts were shed. The views they covered were never
+          // observed, so forget the last observed view rather than backfilling them as timeouts.
+          lastObservedViewRef.current = null;
+          continue;
+        }
         if (!artifact) {
           continue;
         }

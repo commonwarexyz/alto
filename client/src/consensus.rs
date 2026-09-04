@@ -1,6 +1,6 @@
 use crate::{Client, Error, IndexQuery, Query};
 use alto_types::{Block, Finalized, Kind, Notarized, Scheme, Seed};
-use commonware_codec::{DecodeExt, Encode};
+use commonware_codec::{Decode, DecodeExt, Encode};
 use commonware_consensus::Viewable;
 use commonware_cryptography::Digestible;
 use commonware_parallel::Strategy;
@@ -124,7 +124,9 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
             return Err(Error::Failed(result.status()));
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let notarized = Notarized::<C>::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+        let notarized =
+            Notarized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
+                .map_err(Error::InvalidData)?;
         if self.verify && !notarized.verify(&self.certificate_verifier, &self.strategy) {
             return Err(Error::InvalidSignature);
         }
@@ -167,7 +169,9 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
             return Err(Error::Failed(result.status()));
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let finalized = Finalized::<C>::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+        let finalized =
+            Finalized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
+                .map_err(Error::InvalidData)?;
         if self.verify && !finalized.verify(&self.certificate_verifier, &self.strategy) {
             return Err(Error::InvalidSignature);
         }
@@ -215,14 +219,18 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
         // Verify the block matches the query
         let result = match query {
             Query::Latest => {
-                let result = Finalized::<C>::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+                let result =
+                    Finalized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
+                        .map_err(Error::InvalidData)?;
                 if self.verify && !result.verify(&self.certificate_verifier, &self.strategy) {
                     return Err(Error::InvalidSignature);
                 }
                 Payload::Finalized(Box::new(result))
             }
             Query::Index(index) => {
-                let result = Finalized::<C>::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+                let result =
+                    Finalized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
+                        .map_err(Error::InvalidData)?;
                 if self.verify && !result.verify(&self.certificate_verifier, &self.strategy) {
                     return Err(Error::InvalidSignature);
                 }
@@ -232,7 +240,8 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
                 Payload::Finalized(Box::new(result))
             }
             Query::Digest(digest) => {
-                let result = Block::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+                let result = Block::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
+                    .map_err(Error::InvalidData)?;
                 if result.digest() != digest {
                     return Err(Error::UnexpectedResponse);
                 }
@@ -292,7 +301,10 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
                                     }
                                 }
                                 Kind::Notarization => {
-                                    let result = Notarized::<C>::decode(data);
+                                    let result = Notarized::<C>::decode_cfg(
+                                        data,
+                                        &Block::unbounded_codec_config(),
+                                    );
                                     match result {
                                         Ok(notarized) => {
                                             if verify
@@ -314,7 +326,10 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
                                     }
                                 }
                                 Kind::Finalization => {
-                                    let result = Finalized::<C>::decode(data);
+                                    let result = Finalized::<C>::decode_cfg(
+                                        data,
+                                        &Block::unbounded_codec_config(),
+                                    );
                                     match result {
                                         Ok(finalized) => {
                                             if verify

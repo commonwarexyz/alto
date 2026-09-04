@@ -2,24 +2,37 @@ use alto_client::LATEST;
 use alto_types::{Block, Finalized, Kind, Notarized, Scheme, Seed};
 use axum::{
     body::Bytes,
-    extract::{ws::WebSocketUpgrade, Path, State as AxumState},
+    extract::{ws::WebSocketUpgrade, DefaultBodyLimit, Path, State as AxumState},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
     Router,
 };
-use commonware_codec::{DecodeExt, Encode, EncodeSize, FixedSize, Write};
+use commonware_codec::{Decode, DecodeExt, Encode, EncodeSize, FixedSize, RangeCfg, Write};
 use commonware_consensus::{types::View, Viewable};
 use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_formatting::from_hex;
 use commonware_parallel::Strategy;
 use futures::{SinkExt, StreamExt};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
+    num::NonZeroUsize,
     sync::{Arc, RwLock},
 };
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
+
+/// Bytes of certificate, block header, and framing an upload may carry beyond the block payload.
+pub const UPLOAD_OVERHEAD: usize = 1024 * 1024;
+
+/// Largest block payload accepted when the network's block size is unknown.
+pub const DEFAULT_MAX_BLOCK_SIZE: usize = 4 * 1024 * 1024;
+
+/// Number of recent views retained by default (older artifacts are dropped from memory).
+pub const DEFAULT_MAX_VIEWS: NonZeroUsize = NonZeroUsize::new(200_000).unwrap();
+
+/// Capacity of the consensus broadcast channel feeding WebSocket subscribers.
+const CONSENSUS_CHANNEL_CAPACITY: usize = 1024;
 
 pub struct State<C: Scheme> {
     seeds: BTreeMap<View, Seed>,
@@ -27,6 +40,9 @@ pub struct State<C: Scheme> {
     finalizations: BTreeMap<View, Finalized<C>>,
     finalized_height_to_view: BTreeMap<u64, View>,
     blocks_by_digest: BTreeMap<Digest, Block>,
+    /// Blocks keyed by their view so eviction drops the oldest views first, however late a
+    /// historical block is uploaded.
+    block_order: BTreeSet<(View, Digest)>,
 }
 
 impl<C: Scheme> Default for State<C> {
@@ -37,6 +53,48 @@ impl<C: Scheme> Default for State<C> {
             finalizations: BTreeMap::new(),
             finalized_height_to_view: BTreeMap::new(),
             blocks_by_digest: BTreeMap::new(),
+            block_order: BTreeSet::new(),
+        }
+    }
+}
+
+impl<C: Scheme> State<C> {
+    fn store_block(&mut self, block: Block) {
+        let digest = block.digest();
+        let view = block.context.round.view();
+        if self.blocks_by_digest.insert(digest, block).is_none() {
+            self.block_order.insert((view, digest));
+        }
+    }
+
+    /// Restore a certified block that was evicted while its certificate is still retained. The
+    /// held certificate already bound `digest`, so a matching upload needs no re-verification.
+    fn restore_block(&mut self, digest: Digest, block: &Block) {
+        if !self.blocks_by_digest.contains_key(&digest) {
+            self.store_block(block.clone());
+        }
+    }
+
+    /// Drop everything older than the most recent `max_views` views so memory stays bounded.
+    fn prune(&mut self, max_views: usize) {
+        while self.seeds.len() > max_views {
+            self.seeds.pop_first();
+        }
+        while self.notarizations.len() > max_views {
+            self.notarizations.pop_first();
+        }
+        while self.finalizations.len() > max_views {
+            if let Some((_, finalized)) = self.finalizations.pop_first() {
+                self.finalized_height_to_view
+                    .remove(&finalized.block.height.get());
+            }
+        }
+        // A view can contribute a notarized and a distinct finalized block, so keep twice as many
+        // blocks as views before evicting (lowest view first).
+        while self.block_order.len() > max_views.saturating_mul(2) {
+            if let Some((_, digest)) = self.block_order.pop_first() {
+                self.blocks_by_digest.remove(&digest);
+            }
         }
     }
 }
@@ -45,13 +103,16 @@ impl<C: Scheme> Default for State<C> {
 pub struct Indexer<C: Scheme, S: Strategy> {
     scheme: C,
     state: Arc<RwLock<State<C>>>,
-    consensus_tx: broadcast::Sender<Vec<u8>>,
+    consensus_tx: broadcast::Sender<Bytes>,
     strategy: S,
+    block_codec_config: RangeCfg<usize>,
+    max_upload_size: usize,
+    max_views: usize,
 }
 
 impl<C: Scheme, S: Strategy> Indexer<C, S> {
     pub fn new(scheme: C, strategy: S) -> Self {
-        let (consensus_tx, _) = broadcast::channel(1024);
+        let (consensus_tx, _) = broadcast::channel(CONSENSUS_CHANNEL_CAPACITY);
         let state = Arc::new(RwLock::new(State::default()));
 
         Self {
@@ -59,10 +120,43 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
             state,
             consensus_tx,
             strategy,
+            block_codec_config: Block::unbounded_codec_config(),
+            max_upload_size: UPLOAD_OVERHEAD + DEFAULT_MAX_BLOCK_SIZE,
+            max_views: DEFAULT_MAX_VIEWS.get(),
         }
     }
 
+    /// Reject blocks whose payload exceeds the network's `block_size` and size the upload limit
+    /// accordingly.
+    pub fn with_block_size(mut self, block_size: u32) -> Self {
+        self.block_codec_config = Block::codec_config(block_size);
+        self.max_upload_size = UPLOAD_OVERHEAD
+            + usize::try_from(block_size).expect("block size is unsupported on this platform");
+        self
+    }
+
+    /// Retain only the most recent `max_views` views in memory.
+    pub fn with_max_views(mut self, max_views: NonZeroUsize) -> Self {
+        self.max_views = max_views.get();
+        self
+    }
+
+    /// Codec configuration used to decode uploaded blocks.
+    pub fn block_codec_config(&self) -> &RangeCfg<usize> {
+        &self.block_codec_config
+    }
+
+    /// Largest request body accepted by the upload endpoints.
+    pub fn max_upload_size(&self) -> usize {
+        self.max_upload_size
+    }
+
     pub fn submit_seed(&self, seed: Seed) -> Result<(), &'static str> {
+        // Skip the signature check for a view we already hold (many validators upload each seed)
+        if self.state.read().unwrap().seeds.contains_key(&seed.view()) {
+            return Ok(());
+        }
+
         // Verify signature with identity
         if !self.scheme.verify_seed(&seed) {
             return Err("Invalid seed signature");
@@ -72,12 +166,13 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         if state.seeds.insert(seed.view(), seed.clone()).is_some() {
             return Ok(()); // Already exists
         }
+        state.prune(self.max_views);
 
         // Broadcast seed
         let mut data = vec![0u8; u8::SIZE + seed.encode_size()];
         data[0] = Kind::Seed as u8;
         seed.write(&mut data[1..].as_mut());
-        let _ = self.consensus_tx.send(data);
+        let _ = self.consensus_tx.send(data.into());
         Ok(())
     }
 
@@ -94,6 +189,26 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
     }
 
     pub fn submit_notarization(&self, notarized: Notarized<C>) -> Result<(), &'static str> {
+        // Skip the signature check for a view we already hold (many validators upload each
+        // certificate)
+        let view = notarized.proof.view();
+        let held = self
+            .state
+            .read()
+            .unwrap()
+            .notarizations
+            .get(&view)
+            .map(|held| held.block.digest());
+        if let Some(digest) = held {
+            if digest == notarized.block.digest() {
+                self.state
+                    .write()
+                    .unwrap()
+                    .restore_block(digest, &notarized.block);
+            }
+            return Ok(());
+        }
+
         // Verify signature with identity
         if !notarized.verify(&self.scheme, &self.strategy) {
             return Err("Invalid notarization signature");
@@ -102,12 +217,9 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         let mut state = self.state.write().unwrap();
 
         // Store block by digest
-        state
-            .blocks_by_digest
-            .insert(notarized.block.digest(), notarized.block.clone());
+        state.store_block(notarized.block.clone());
 
         // Store notarization
-        let view = notarized.proof.view();
         if state
             .notarizations
             .insert(view, notarized.clone())
@@ -115,12 +227,13 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         {
             return Ok(()); // Already exists
         }
+        state.prune(self.max_views);
 
         // Broadcast notarization
         let mut data = vec![0u8; u8::SIZE + notarized.encode_size()];
         data[0] = Kind::Notarization as u8;
         notarized.write(&mut data[1..].as_mut());
-        let _ = self.consensus_tx.send(data);
+        let _ = self.consensus_tx.send(data.into());
         Ok(())
     }
 
@@ -137,6 +250,26 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
     }
 
     pub fn submit_finalization(&self, finalized: Finalized<C>) -> Result<(), &'static str> {
+        // Skip the signature check for a view we already hold (many validators upload each
+        // certificate)
+        let view = finalized.proof.view();
+        let held = self
+            .state
+            .read()
+            .unwrap()
+            .finalizations
+            .get(&view)
+            .map(|held| held.block.digest());
+        if let Some(digest) = held {
+            if digest == finalized.block.digest() {
+                self.state
+                    .write()
+                    .unwrap()
+                    .restore_block(digest, &finalized.block);
+            }
+            return Ok(());
+        }
+
         // Verify signature with identity
         if !finalized.verify(&self.scheme, &self.strategy) {
             return Err("Invalid finalization signature");
@@ -145,12 +278,9 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         let mut state = self.state.write().unwrap();
 
         // Store block by digest
-        state
-            .blocks_by_digest
-            .insert(finalized.block.digest(), finalized.block.clone());
+        state.store_block(finalized.block.clone());
 
         // Store finalization
-        let view = finalized.proof.view();
         if state
             .finalizations
             .insert(view, finalized.clone())
@@ -161,12 +291,13 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         state
             .finalized_height_to_view
             .insert(finalized.block.height.get(), view);
+        state.prune(self.max_views);
 
         // Broadcast finalization
         let mut data = vec![0u8; u8::SIZE + finalized.encode_size()];
         data[0] = Kind::Finalization as u8;
         finalized.write(&mut data[1..].as_mut());
-        let _ = self.consensus_tx.send(data);
+        let _ = self.consensus_tx.send(data.into());
         Ok(())
     }
 
@@ -219,10 +350,11 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
     pub fn submit_block(&self, block: Block) {
         // Store block by digest (no guarantee this is part of the canonical chain)
         let mut state = self.state.write().unwrap();
-        state.blocks_by_digest.insert(block.digest(), block);
+        state.store_block(block);
+        state.prune(self.max_views);
     }
 
-    pub fn consensus_subscriber(&self) -> broadcast::Receiver<Vec<u8>> {
+    pub fn consensus_subscriber(&self) -> broadcast::Receiver<Bytes> {
         self.consensus_tx.subscribe()
     }
 }
@@ -243,6 +375,7 @@ impl<C: Scheme, S: Strategy> Api<C, S> {
     }
 
     pub fn router(self) -> Router {
+        let max_upload_size = self.indexer.max_upload_size();
         Router::new()
             .route("/health", get(health_check))
             .route("/seed", post(seed_upload))
@@ -254,6 +387,7 @@ impl<C: Scheme, S: Strategy> Api<C, S> {
             .route("/block", post(block_upload))
             .route("/block/{query}", get(block_get))
             .route("/consensus/ws", get(consensus_ws))
+            .layer(DefaultBodyLimit::max(max_upload_size))
             .layer(CorsLayer::permissive())
             .with_state(self.indexer)
     }
@@ -290,7 +424,7 @@ async fn notarization_upload<C: Scheme, S: Strategy>(
     AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
-    match Notarized::<C>::decode(&mut body.as_ref()) {
+    match Notarized::<C>::decode_cfg(body.as_ref(), indexer.block_codec_config()) {
         Ok(notarized) => match indexer.submit_notarization(notarized) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
@@ -313,7 +447,7 @@ async fn finalization_upload<C: Scheme, S: Strategy>(
     AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
-    match Finalized::<C>::decode(&mut body.as_ref()) {
+    match Finalized::<C>::decode_cfg(body.as_ref(), indexer.block_codec_config()) {
         Ok(finalized) => match indexer.submit_finalization(finalized) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
@@ -336,7 +470,7 @@ async fn block_upload<C: Scheme, S: Strategy>(
     AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
-    match Block::decode(&mut body.as_ref()) {
+    match Block::decode_cfg(body.as_ref(), indexer.block_codec_config()) {
         Ok(block) => {
             indexer.submit_block(block);
             StatusCode::OK
@@ -374,9 +508,19 @@ async fn handle_consensus_ws<C: Scheme, S: Strategy>(
     let (mut sender, _receiver) = socket.split();
     let mut consensus = indexer.consensus_subscriber();
 
-    while let Ok(data) = consensus.recv().await {
+    loop {
+        let data = match consensus.recv().await {
+            Ok(data) => data,
+            // A slow subscriber missed some artifacts; keep streaming from the current position
+            // rather than dropping the connection.
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                tracing::debug!(skipped, "consensus subscriber lagged");
+                continue;
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
+        };
         if sender
-            .send(axum::extract::ws::Message::Binary(data.into()))
+            .send(axum::extract::ws::Message::Binary(data))
             .await
             .is_err()
         {
@@ -476,6 +620,165 @@ mod tests {
             let proposal = self.proposal(&block);
             Finalized::new(create_finalization(&self.schemes, proposal), block)
         }
+    }
+
+    /// Build a finalized block at `view` (height == view) so retention tests get distinct entries.
+    fn finalized_at(schemes: &[VrfScheme], view: u64) -> Finalized<VrfScheme> {
+        let context = Context {
+            round: Round::new(EPOCH, View::new(view)),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::new(view - 1), sha256::Digest::EMPTY),
+        };
+        let block = Block::new(
+            context,
+            Sha256::hash(&[format!("parent-{view}").as_bytes()]),
+            Height::new(view),
+            view * 1_000,
+            Bytes::new(),
+        );
+        let proposal = Proposal::new(
+            Round::new(EPOCH, View::new(view)),
+            View::new(view - 1),
+            block.digest(),
+        );
+        Finalized::new(create_finalization(schemes, proposal), block)
+    }
+
+    fn index_query(index: u64) -> String {
+        commonware_formatting::hex(&index.encode())
+    }
+
+    #[test]
+    fn retains_only_the_most_recent_views() {
+        let (schemes, _) = fixture(0);
+        let indexer = Indexer::new(schemes[0].clone(), Sequential)
+            .with_max_views(NonZeroUsize::new(2).unwrap());
+        let finalized: Vec<_> = (1..=6).map(|view| finalized_at(&schemes, view)).collect();
+        for f in &finalized {
+            indexer.submit_finalization(f.clone()).unwrap();
+        }
+
+        // Only the newest two views (and their height index) survive.
+        assert!(indexer.get_finalization(&index_query(4)).is_none());
+        assert!(indexer.get_finalization(&index_query(5)).is_some());
+        assert!(indexer.get_finalization(&index_query(6)).is_some());
+        assert!(matches!(
+            indexer.get_finalization(LATEST),
+            Some(f) if f.proof.view() == View::new(6)
+        ));
+        assert!(indexer.get_block(&index_query(4)).is_none());
+        assert!(indexer.get_block(&index_query(6)).is_some());
+
+        // Blocks keep twice the view budget before eviction.
+        let digest_query =
+            |f: &Finalized<VrfScheme>| commonware_formatting::hex(&f.block.digest().encode());
+        assert!(indexer.get_block(&digest_query(&finalized[1])).is_none());
+        assert!(indexer.get_block(&digest_query(&finalized[2])).is_some());
+
+        // Re-uploading a pruned view is re-verified and inserted, then immediately pruned again
+        // rather than resurrected ahead of newer state.
+        indexer.submit_finalization(finalized[0].clone()).unwrap();
+        assert!(indexer.get_finalization(&index_query(1)).is_none());
+        assert!(indexer.get_block(&digest_query(&finalized[0])).is_none());
+    }
+
+    #[test]
+    fn late_historical_blocks_do_not_evict_recent_ones() {
+        let (schemes, _) = fixture(0);
+        let indexer = Indexer::new(schemes[0].clone(), Sequential)
+            .with_max_views(NonZeroUsize::new(2).unwrap());
+        let digest_query =
+            |f: &Finalized<VrfScheme>| commonware_formatting::hex(&f.block.digest().encode());
+
+        // Retain views 10 and 11 (and their blocks).
+        let recent: Vec<_> = (10..12).map(|view| finalized_at(&schemes, view)).collect();
+        for finalized in &recent {
+            indexer.submit_finalization(finalized.clone()).unwrap();
+        }
+
+        // A burst of historical blocks (a validator catching up) must not push out the blocks that
+        // retained certificates still reference.
+        for view in 1..9 {
+            indexer.submit_block(finalized_at(&schemes, view).block);
+        }
+        for finalized in &recent {
+            assert!(indexer.get_block(&digest_query(finalized)).is_some());
+        }
+        assert!(indexer
+            .get_block(&digest_query(&finalized_at(&schemes, 1)))
+            .is_none());
+
+        // Should a certified block ever be evicted, the next upload of its (already verified)
+        // certificate restores it without re-verification.
+        {
+            let mut state = indexer.state.write().unwrap();
+            let digest = recent[1].block.digest();
+            state.blocks_by_digest.remove(&digest);
+            state.block_order.remove(&(recent[1].proof.view(), digest));
+        }
+        assert!(indexer.get_block(&digest_query(&recent[1])).is_none());
+        indexer.submit_finalization(recent[1].clone()).unwrap();
+        assert!(indexer.get_block(&digest_query(&recent[1])).is_some());
+    }
+
+    #[test]
+    fn block_size_bounds_uploads() {
+        let (schemes, _) = fixture(0);
+        let finalized = finalized_at(&schemes, 1);
+        let encoded = finalized.encode();
+
+        let unbounded = Indexer::new(schemes[0].clone(), Sequential);
+        assert!(Finalized::<VrfScheme>::decode_cfg(
+            encoded.clone(),
+            unbounded.block_codec_config()
+        )
+        .is_ok());
+        assert_eq!(
+            unbounded.max_upload_size(),
+            UPLOAD_OVERHEAD + DEFAULT_MAX_BLOCK_SIZE
+        );
+
+        let exact = Indexer::new(schemes[0].clone(), Sequential).with_block_size(0);
+        assert!(
+            Finalized::<VrfScheme>::decode_cfg(encoded.clone(), exact.block_codec_config()).is_ok()
+        );
+        assert_eq!(exact.max_upload_size(), UPLOAD_OVERHEAD);
+
+        // A block larger than the configured size fails to decode, before any verification.
+        let oversized = {
+            let context = Context {
+                round: Round::new(EPOCH, View::new(1)),
+                leader: ed25519::PrivateKey::from_seed(0).public_key(),
+                parent: (View::new(0), sha256::Digest::EMPTY),
+            };
+            let block = Block::new(
+                context,
+                Sha256::hash(&[b"parent"]),
+                Height::new(1),
+                1_000,
+                Bytes::from_static(&[1, 2]),
+            );
+            let proposal = Proposal::new(
+                Round::new(EPOCH, View::new(1)),
+                View::new(0),
+                block.digest(),
+            );
+            Finalized::new(create_finalization(&schemes, proposal), block)
+        };
+        let bounded = Indexer::new(schemes[0].clone(), Sequential).with_block_size(1);
+        assert!(Finalized::<VrfScheme>::decode_cfg(
+            oversized.encode(),
+            bounded.block_codec_config()
+        )
+        .is_err());
+        assert!(Finalized::<VrfScheme>::decode_cfg(
+            oversized.encode(),
+            Indexer::new(schemes[0].clone(), Sequential)
+                .with_block_size(2)
+                .block_codec_config()
+        )
+        .is_ok());
+        assert_eq!(bounded.max_upload_size(), UPLOAD_OVERHEAD + 1);
     }
 
     fn create_notarization<C: Scheme>(

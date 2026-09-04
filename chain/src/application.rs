@@ -11,7 +11,7 @@ use commonware_cryptography::{ed25519, sha256, Digest as _, Digestible, Hasher, 
 use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
-use rand::Rng;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::{
     marker::PhantomData,
     num::NonZeroU64,
@@ -110,11 +110,15 @@ where
             "proposed timestamp exceeded maximum",
         );
 
-        // Each proposal carries a fresh opaque payload of the configured size.
+        // Each proposal carries a fresh opaque payload of the configured size. The payload only
+        // needs to be incompressible, so seed a userspace generator once per proposal instead of
+        // drawing every byte from the operating system on the proposal hot path.
         let block_size = usize::try_from(self.block_size)
             .expect("configured block size is unsupported on this platform");
         let mut data = vec![0; block_size];
-        runtime_context.fill_bytes(&mut data);
+        if block_size > 0 {
+            StdRng::from_rng(&mut runtime_context).fill_bytes(&mut data);
+        }
 
         Some(Block::new(
             context,

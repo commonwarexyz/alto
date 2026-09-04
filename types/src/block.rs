@@ -69,6 +69,25 @@ impl Block {
             digest,
         }
     }
+
+    /// Codec configuration that rejects blocks whose payload exceeds `block_size` bytes.
+    ///
+    /// Validators decode every block they receive with this configuration so an oversized payload
+    /// is rejected before it is cached or verified. Smaller payloads (such as the empty genesis
+    /// block) still decode; the exact-size consensus rule is enforced when a block is verified.
+    pub fn codec_config(block_size: u32) -> RangeCfg<usize> {
+        let block_size =
+            usize::try_from(block_size).expect("block size is unsupported on this platform");
+        RangeCfg::from(..=block_size)
+    }
+
+    /// Codec configuration that accepts any payload size.
+    ///
+    /// For consumers that do not know the network's block size and instead trust the certificate
+    /// that accompanies a block.
+    pub fn unbounded_codec_config() -> RangeCfg<usize> {
+        RangeCfg::from(..)
+    }
 }
 
 impl Write for Block {
@@ -90,14 +109,15 @@ impl Write for Block {
 }
 
 impl Read for Block {
-    type Cfg = ();
+    /// Accepted payload sizes (see [Block::codec_config]).
+    type Cfg = RangeCfg<usize>;
 
-    fn read_cfg(reader: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
+    fn read_cfg(reader: &mut impl Buf, cfg: &Self::Cfg) -> Result<Self, Error> {
         let context = Context::read(reader)?;
         let parent = Digest::read(reader)?;
         let height = Height::read(reader)?;
         let timestamp = UInt::read(reader)?.0;
-        let data = Bytes::read_cfg(reader, &RangeCfg::from(..))?;
+        let data = Bytes::read_cfg(reader, cfg)?;
 
         let digest = Self::compute_digest(&context, &parent, height, timestamp, &data);
         Ok(Self {
@@ -174,11 +194,12 @@ impl<S: Scheme> Write for Notarized<S> {
 }
 
 impl<S: Scheme> Read for Notarized<S> {
-    type Cfg = ();
+    /// Accepted block payload sizes (see [Block::codec_config]).
+    type Cfg = RangeCfg<usize>;
 
-    fn read_cfg(buf: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
+    fn read_cfg(buf: &mut impl Buf, cfg: &Self::Cfg) -> Result<Self, Error> {
         let proof = Notarization::<S>::read(buf)?;
-        let block = Block::read(buf)?;
+        let block = Block::read_cfg(buf, cfg)?;
 
         // Ensure the proof is for the block
         if proof.proposal.payload != block.digest() {
@@ -238,11 +259,12 @@ impl<S: Scheme> Write for Finalized<S> {
 }
 
 impl<S: Scheme> Read for Finalized<S> {
-    type Cfg = ();
+    /// Accepted block payload sizes (see [Block::codec_config]).
+    type Cfg = RangeCfg<usize>;
 
-    fn read_cfg(buf: &mut impl Buf, _: &Self::Cfg) -> Result<Self, Error> {
+    fn read_cfg(buf: &mut impl Buf, cfg: &Self::Cfg) -> Result<Self, Error> {
         let proof = Finalization::<S>::read(buf)?;
-        let block = Block::read(buf)?;
+        let block = Block::read_cfg(buf, cfg)?;
 
         // Ensure the proof is for the block
         if proof.proposal.payload != block.digest() {

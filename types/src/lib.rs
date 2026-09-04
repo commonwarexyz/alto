@@ -65,7 +65,7 @@ impl Kind {
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use commonware_codec::{DecodeExt, Encode, EncodeSize, ReadExt};
+    use commonware_codec::{Decode, Encode, EncodeSize, Read};
     use commonware_consensus::{
         simplex::{
             scheme::bls12381_threshold::vrf as bls12381_threshold,
@@ -99,13 +99,34 @@ mod tests {
         );
         assert_eq!(block.encode_inline_size(), block.encode_size() - data.len());
         assert_ne!(block.digest(), empty.digest());
-        assert_eq!(Block::decode(block.encode()).unwrap(), block);
+        assert_eq!(
+            Block::decode_cfg(block.encode(), &Block::unbounded_codec_config()).unwrap(),
+            block
+        );
+        assert_eq!(
+            Block::decode_cfg(block.encode(), &Block::codec_config(1024 * 1024 + 1)).unwrap(),
+            block
+        );
+        // Validators reject payloads larger than the configured block size before caching them;
+        // smaller payloads (e.g. the empty genesis block) still decode.
+        assert!(Block::decode_cfg(block.encode(), &Block::codec_config(1024 * 1024)).is_err());
+        assert_eq!(
+            Block::decode_cfg(empty.encode(), &Block::codec_config(1024)).unwrap(),
+            empty
+        );
+        assert_eq!(
+            Block::decode_cfg(empty.encode(), &Block::codec_config(0)).unwrap(),
+            empty
+        );
 
         let mut encoded = block.encode().to_vec();
         let suffix = [1, 2, 3, 4];
         encoded.extend_from_slice(&suffix);
         let mut reader = encoded.as_slice();
-        assert_eq!(Block::read(&mut reader).unwrap(), block);
+        assert_eq!(
+            Block::read_cfg(&mut reader, &Block::unbounded_codec_config()).unwrap(),
+            block
+        );
         assert_eq!(reader, suffix);
     }
 
@@ -150,7 +171,8 @@ mod tests {
 
         // Serialize and deserialize
         let encoded = notarized.encode();
-        let decoded = Notarized::decode(encoded).expect("failed to decode notarized");
+        let decoded = Notarized::decode_cfg(encoded, &Block::unbounded_codec_config())
+            .expect("failed to decode notarized");
         assert_eq!(notarized, decoded);
 
         // Verify notarized
@@ -192,7 +214,8 @@ mod tests {
 
         // Serialize and deserialize
         let encoded = finalized.encode();
-        let decoded = Finalized::decode(encoded).expect("failed to decode finalized");
+        let decoded = Finalized::decode_cfg(encoded, &Block::unbounded_codec_config())
+            .expect("failed to decode finalized");
         assert_eq!(finalized, decoded);
 
         // Verify finalized

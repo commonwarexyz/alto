@@ -1,4 +1,4 @@
-use alto_indexer::{Api, Indexer};
+use alto_indexer::{Api, Indexer, DEFAULT_MAX_VIEWS};
 use alto_types::{CertificateMode, Identity, Scheme, StandardScheme, VrfScheme, NAMESPACE};
 use axum::{
     body::{Body, Bytes},
@@ -12,7 +12,7 @@ use commonware_codec::DecodeExt;
 use commonware_formatting::from_hex;
 use commonware_parallel::Sequential;
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, sync::Arc};
+use std::{num::NonZeroUsize, path::PathBuf, sync::Arc};
 use tracing::info;
 
 include!(concat!(env!("OUT_DIR"), "/explorer_assets.rs"));
@@ -43,6 +43,16 @@ struct Args {
     )]
     certificate_mode: Option<String>,
 
+    /// Payload size of the network's blocks in bytes; uploads carrying a larger payload are
+    /// rejected and the request body limit is derived from it. Without it, blocks of any size up
+    /// to a fixed limit are accepted.
+    #[clap(long, conflicts_with = "config")]
+    block_size: Option<u32>,
+
+    /// Number of recent views to retain in memory.
+    #[clap(long, default_value_t = DEFAULT_MAX_VIEWS)]
+    max_views: NonZeroUsize,
+
     /// Path to the deployer-generated hosts file.
     #[clap(long, requires = "config", conflicts_with = "identity")]
     hosts: Option<PathBuf>,
@@ -57,6 +67,10 @@ struct DeployerConfig {
     port: u16,
     identity: String,
     certificate_mode: CertificateMode,
+    block_size: u32,
+    /// Overrides `--max-views` for a deployed indexer, whose command line is fixed by the deployer.
+    #[serde(default)]
+    max_views: Option<NonZeroUsize>,
     explorer: Option<ExplorerConfig>,
 }
 
@@ -73,6 +87,8 @@ struct Settings {
     port: u16,
     identity: String,
     certificate_mode: CertificateMode,
+    block_size: Option<u32>,
+    max_views: NonZeroUsize,
     explorer: ExplorerConfig,
     explorer_mode: &'static str,
 }
@@ -118,6 +134,8 @@ fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
             port: config.port,
             identity: config.identity,
             certificate_mode: config.certificate_mode,
+            block_size: Some(config.block_size),
+            max_views: config.max_views.unwrap_or(args.max_views),
             explorer: config.explorer.unwrap_or_else(local_explorer_config),
             explorer_mode,
         });
@@ -134,6 +152,8 @@ fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
             None => unreachable!("clap requires --certificate-mode in direct mode"),
             Some(_) => unreachable!("clap validates certificate mode"),
         },
+        block_size: args.block_size,
+        max_views: args.max_views,
         explorer: local_explorer_config(),
         explorer_mode: "local",
     })
@@ -226,7 +246,12 @@ async fn serve<C: Scheme>(
     explorer_script: ExplorerScript,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let certificate_verifier = C::certificate_verifier(NAMESPACE, identity);
-    let indexer = Arc::new(Indexer::new(certificate_verifier, Sequential));
+    let mut indexer =
+        Indexer::new(certificate_verifier, Sequential).with_max_views(settings.max_views);
+    if let Some(block_size) = settings.block_size {
+        indexer = indexer.with_block_size(block_size);
+    }
+    let indexer = Arc::new(indexer);
     let app = Api::new(indexer)
         .router()
         .route("/runtime-config.js", get(runtime_explorer_config))
@@ -239,6 +264,8 @@ async fn serve<C: Scheme>(
     info!(
         ?identity,
         ?addr,
+        block_size = ?settings.block_size,
+        max_views = settings.max_views,
         explorer = !EXPLORER_ASSETS.is_empty(),
         "started indexer"
     );
@@ -250,6 +277,7 @@ async fn serve<C: Scheme>(
 #[cfg(test)]
 mod tests {
     use super::{explorer_script, Args, CertificateMode, ExplorerConfig, Settings};
+    use alto_indexer::DEFAULT_MAX_VIEWS;
     use clap::Parser;
 
     #[test]
@@ -272,6 +300,38 @@ mod tests {
         .is_ok());
         assert!(Args::try_parse_from(["indexer", "--identity", "abcd"]).is_err());
         assert!(Args::try_parse_from(["indexer"]).is_err());
+        assert!(Args::try_parse_from([
+            "indexer",
+            "--identity",
+            "abcd",
+            "--certificate-mode",
+            "vrf",
+            "--block-size",
+            "4096",
+            "--max-views",
+            "10",
+        ])
+        .is_ok());
+        assert!(Args::try_parse_from([
+            "indexer",
+            "--hosts",
+            "hosts.yaml",
+            "--config",
+            "config.yaml",
+            "--block-size",
+            "1",
+        ])
+        .is_err());
+        assert!(Args::try_parse_from([
+            "indexer",
+            "--identity",
+            "abcd",
+            "--certificate-mode",
+            "vrf",
+            "--max-views",
+            "0",
+        ])
+        .is_err());
     }
 
     #[test]
@@ -280,6 +340,8 @@ mod tests {
             port: 8080,
             identity: "abcd".to_string(),
             certificate_mode: CertificateMode::Standard,
+            block_size: Some(0),
+            max_views: DEFAULT_MAX_VIEWS,
             explorer: ExplorerConfig {
                 name: "Live Cluster".to_string(),
                 description: "description".to_string(),

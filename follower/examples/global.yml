@@ -39,8 +39,9 @@ max_repair: 512
 fetch_retry_timeout_ms: 5000
 
 # Start from the tip of the finalized chain on first run
-# Set to false to start from genesis (requires backfilling all historical blocks)
-tip: false
+# Set to false to start from genesis (requires backfilling all historical blocks, which the
+# indexer only retains for its most recent `max_views` views)
+tip: true
 
 # Number of finalized blocks to retain before pruning
 # Omit or set to null to keep all blocks (no pruning)

@@ -1,11 +1,15 @@
-source-mounts := "-v ${PWD}:/alto -v ${PWD}/.docker-cache/cargo:/cargo-home -v ${PWD}/.docker-cache/target:/alto/target"
+# Repository root, so every recipe works from any directory (this file is imported by the root
+# justfile but can also be selected directly from deploy/).
+root := source_directory() / ".."
+source-mounts := "-v '" + root + ":/alto' -v '" + root + "/.docker-cache/cargo:/cargo-home' -v '" + root + "/.docker-cache/target:/alto/target'"
 cache-env := "-e CARGO_HOME=/cargo-home"
+bake := "docker buildx bake --progress plain -f '" + root + "/deploy/docker-bake.hcl' --set '*.context=" + root + "'"
 
 prepare-docker-cache:
-    mkdir -p .docker-cache/cargo .docker-cache/target
+    mkdir -p '{{root}}/.docker-cache/cargo' '{{root}}/.docker-cache/target'
 
 build-graviton-image:
-    docker buildx bake --progress plain -f deploy/docker-bake.hcl graviton
+    {{bake}} graviton
 
 validator-graviton-binary: build-graviton-image prepare-docker-cache
     docker run --rm {{source-mounts}} {{cache-env}} -e PACKAGE_NAME=alto-validator -e BINARY_NAME=validator -e OUTPUT_NAME=validator alto-validator-builder:graviton-local
@@ -16,7 +20,7 @@ indexer-graviton-binary: build-graviton-image prepare-docker-cache
 graviton-binaries: validator-graviton-binary indexer-graviton-binary
 
 build-graviton4-image:
-    docker buildx bake --progress plain -f deploy/docker-bake.hcl graviton4
+    {{bake}} graviton4
 
 validator-graviton4-binary: build-graviton4-image prepare-docker-cache
     docker run --rm {{source-mounts}} {{cache-env}} -e PACKAGE_NAME=alto-validator -e BINARY_NAME=validator -e OUTPUT_NAME=validator alto-validator-builder:graviton4-local
@@ -27,7 +31,7 @@ indexer-graviton4-binary: build-graviton4-image prepare-docker-cache
 graviton4-binaries: validator-graviton4-binary indexer-graviton4-binary
 
 build-intel-image:
-    docker buildx bake --progress plain -f deploy/docker-bake.hcl intel
+    {{bake}} intel
 
 validator-intel-binary: build-intel-image prepare-docker-cache
     docker run --rm {{source-mounts}} {{cache-env}} -e PACKAGE_NAME=alto-validator -e BINARY_NAME=validator -e OUTPUT_NAME=validator alto-validator-builder:intel-local

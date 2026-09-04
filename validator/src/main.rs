@@ -1,4 +1,4 @@
-use alto_chain::{engine, Config, Leader, Peers};
+use alto_chain::{engine, Config, Leader, Peers, LEADER_TIMEOUT};
 use alto_types::{Scheme, StandardScheme, VrfScheme, EPOCH, NAMESPACE, ROTATING_ELECTOR};
 use clap::{Arg, Command};
 use commonware_codec::{Decode, DecodeExt, EncodeSize};
@@ -45,7 +45,6 @@ const MARSHAL_CHANNEL: u64 = 4;
 const BASE_CHANNEL_QUOTA_PER_SECOND: u32 = 1_500;
 const VOTING_CHANNEL_QUOTA_PER_SECOND: u32 = 3_000;
 
-const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 const CERTIFICATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NULLIFY_RETRY: Duration = Duration::from_secs(10);
 const ACTIVITY_TIMEOUT: ViewDelta = ViewDelta::new(256);

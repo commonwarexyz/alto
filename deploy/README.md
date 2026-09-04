@@ -20,7 +20,9 @@ requires `--leader-term-length` to set the number of views in each term and
 notarized ancestry. Values above the term length add no window. Stable mode uses native standard
 threshold crypto with one signature per vote and certificate. Rotating mode carries an additional
 VRF seed signature used to select the next leader. Rotating mode takes only `--leader-delay-ms`:
-`--leader-term-length` and `--leader-optimistic-views` are rejected.
+`--leader-term-length` and `--leader-optimistic-views` are rejected. `--leader-delay-ms` must stay
+below the validators' 1 s leader timeout; the generator rejects larger values because every
+validator would refuse to start.
 
 Every component that verifies certificates must be told which construction the network uses. The
 generator derives it from the leader mode (`standard` for stable, `vrf` for rotating) and writes it
@@ -41,7 +43,13 @@ ran smoothly. Use a larger delay (or rotating mode) for local experiments.
 
 `--block-size` is a `u32` setting for the number of random bytes appended to each proposed block
 and defaults to `0`. Validators reject only values whose encoded blocks exceed the authenticated
-transport capacity. All validators in a network must use the same value.
+transport capacity. All validators in a network must use the same value: every validator drops
+incoming blocks whose payload exceeds the configured size before caching or verifying them.
+
+Validators and followers must start from an empty `directory`. The storage page layout changed in
+this release, so a data directory written by an earlier binary cannot be reopened; a node upgraded
+in place fails to restore its archives instead of silently reading stale data. The indexer keeps
+its state in memory and simply restarts empty.
 
 `--traces-sample-rate` sets the fraction of traces exported by each validator and accepts values
 from `0` through `1`. It defaults to `0`, which disables trace export.
@@ -77,7 +85,12 @@ For a rotating-leader network, drop the two stable-only flags:
 cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode rotating --leader-delay-ms 10 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
 ```
 
-The emitted indexer command then ends in `--certificate-mode vrf` instead of `--certificate-mode standard`.
+The emitted indexer command then uses `--certificate-mode vrf` instead of `--certificate-mode standard`.
+It also passes the network's `--block-size`, which the indexer uses to reject larger blocks and to
+bound upload request bodies; a deployed indexer reads the same value from `indexer.yaml`. An
+indexer retains only the most recent `--max-views` views in memory (200,000 by default); a deployed
+indexer can override this with `max_views` in `indexer.yaml`. Followers backfilling from genesis
+must therefore start while the indexer still holds the history they need.
 
 _If the stable command succeeds, you should see the following output:_
 
@@ -90,7 +103,7 @@ _If the stable command succeeds, you should see the following output:_
 2025-12-23T13:41:54.038228Z  INFO deploy: wrote peer configuration file path="f26a6d4f52c4d595b6cb659b643968b0e1fc9931b460c6407be10cebe4eeff2d.yaml"
 2025-12-23T13:41:54.038232Z  INFO deploy: setup complete bootstrappers=["71943989f39d485eb8a1f7c8f9909673caaa658d12a586c93f37575dae44438f"]
 To start local indexers, run:
-http://localhost:8080: cargo run --bin indexer -- --port 8080 --identity 8b2c34e0356beb83874317f8f04fb211e4d3ed34640631a36ff191cb3fcd9768403b8749824b41ff770a92e40885174b15516db966816870ba9619a64b4d5b79ea7b4a73240710169ecc44da0951cdd60e2db65544cba5647f81ab19ca50cf4e --certificate-mode standard
+http://localhost:8080: cargo run --bin indexer -- --port 8080 --identity 8b2c34e0356beb83874317f8f04fb211e4d3ed34640631a36ff191cb3fcd9768403b8749824b41ff770a92e40885174b15516db966816870ba9619a64b4d5b79ea7b4a73240710169ecc44da0951cdd60e2db65544cba5647f81ab19ca50cf4e --certificate-mode standard --block-size 0
 To start validators, run:
 04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/04dc128c6fc22cb93a9eb785c48d4251346eb7b387cd2a66599cc59a3ce47a37.yaml
 0b2412d7eb2238b319920504f19b28447c7dbb3c58059c97d22cc0d27ea31e81: cargo run --bin validator -- --peers=<your-path>/test/peers.yaml --config=<your-path>/test/0b2412d7eb2238b319920504f19b28447c7dbb3c58059c97d22cc0d27ea31e81.yaml
@@ -294,7 +307,7 @@ Run the recipe matching the deployment's instance type last.
 ###### Local Compilation
 
 To build against a local checkout of the monorepo, change the `commonware-*` dependencies in
-`Cargo.toml` from `git`/`rev` entries to `path = "/monorepo/<crate>"` entries and run `cargo build`
+`Cargo.toml` from version entries to `path = "/monorepo/<crate>"` entries and run `cargo build`
 once on the host so `Cargo.lock` matches (the builder compiles with `--locked`). Then run the
 builder with the monorepo mounted, once per binary:
 

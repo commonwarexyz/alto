@@ -47,11 +47,15 @@ const MaintenancePage: React.FC = () => {
     useEffect(() => {
         let cancelled = false;
         let fallback: ReturnType<typeof setTimeout> | null = null;
-        const fontsReady = document.fonts
+        // `fonts.load` rejects when a face fails to download; treat that like "ready" so the
+        // box is still revealed (in the fallback font) rather than staying hidden.
+        const fontsReady: Promise<unknown> = document.fonts
             ? Promise.all([
                 document.fonts.load('bold 32px Inconsolata'),
-                document.fonts.load('18px Inconsolata'),
-            ]).then(() => document.fonts.ready)
+                document.fonts.load('bold 18px Inconsolata'),
+            ])
+                .then(() => document.fonts.ready)
+                .catch(() => undefined)
             : Promise.resolve();
         const timeout = new Promise<void>((resolve) => {
             fallback = setTimeout(resolve, 1500);
@@ -221,24 +225,15 @@ const MaintenancePage: React.FC = () => {
     useEffect(() => {
         const handleResize = () => {
             if (containerRef.current && logoRef.current) {
-                const containerWidth = containerRef.current.clientWidth;
-                const containerHeight = containerRef.current.clientHeight;
-                const logoWidth = logoRef.current.clientWidth;
-                const logoHeight = logoRef.current.clientHeight;
-
-                // Keep logo within bounds after resize
-                let newX = positionRef.current.x;
-                let newY = positionRef.current.y;
-
-                if (newX + logoWidth > containerWidth) {
-                    newX = containerWidth - logoWidth;
-                }
-
-                if (newY + logoHeight > containerHeight) {
-                    newY = containerHeight - logoHeight;
-                }
-
-                positionRef.current = { x: newX, y: newY };
+                // The box changes size across the responsive breakpoint, so refresh the cached
+                // dimensions and clamp with the same measurements the animation loop uses.
+                measureLogo();
+                const maxX = Math.max(0, containerRef.current.clientWidth - logoDimensionsRef.current.width);
+                const maxY = Math.max(0, containerRef.current.clientHeight - logoDimensionsRef.current.height);
+                positionRef.current = {
+                    x: Math.min(positionRef.current.x, maxX),
+                    y: Math.min(positionRef.current.y, maxY),
+                };
                 applyPosition();
             }
         };

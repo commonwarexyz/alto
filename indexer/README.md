@@ -30,12 +30,18 @@ cargo install alto-indexer
 ### Start the indexer
 
 ```bash
-indexer --port 8080 --identity <hex-encoded BLS12-381 public key> --certificate-mode <standard|vrf>
+indexer --port 8080 --identity <hex-encoded BLS12-381 public key> --certificate-mode <standard|vrf> [--block-size <bytes>] [--max-views <count>]
 ```
 
 The identity is the threshold public key of the consensus network. It is used to verify incoming
 consensus artifacts. Use `standard` for a stable-leader network and `vrf` for a rotating-leader
 network.
+
+`--block-size` is the payload size of the network's blocks. When set, uploads carrying a larger block
+are rejected and the request body limit is derived from it; without it, blocks up to a fixed limit
+are accepted. `--max-views` (default 200,000) bounds how many recent views are kept in
+memory; older seeds, certificates, and blocks are dropped, so a follower that must backfill from
+genesis needs an indexer retaining the whole history.
 
 ## API Endpoints
 

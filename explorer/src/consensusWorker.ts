@@ -21,26 +21,33 @@ worker.onmessage = async (event: MessageEvent) => {
     return;
   }
 
-  await initialized;
-  if (!publicKey) {
-    throw new Error("consensus verifier was not initialized");
-  }
-
   const { sequence, kind, payload, receivedAt } = event.data;
+
+  // Always answer: the pool releases results strictly in sequence order, so a job that never
+  // replies (a failed wasm load, a wasm panic, a missing key) would block every later artifact.
   let artifact = null;
-  switch (kind) {
-    case 0:
-      artifact = parse_seed(publicKey, payload);
-      break;
-    case 1:
-      artifact = parse_notarized(publicKey, payload, standard);
-      break;
-    case 2:
-      artifact = parse_finalized(publicKey, payload, standard);
-      break;
+  let error: string | undefined;
+  try {
+    await initialized;
+    if (!publicKey) {
+      throw new Error("consensus verifier was not initialized");
+    }
+    switch (kind) {
+      case 0:
+        artifact = parse_seed(publicKey, payload);
+        break;
+      case 1:
+        artifact = parse_notarized(publicKey, payload, standard);
+        break;
+      case 2:
+        artifact = parse_finalized(publicKey, payload, standard);
+        break;
+    }
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
   }
 
-  worker.postMessage({ sequence, kind, artifact, receivedAt });
+  worker.postMessage({ sequence, kind, artifact, receivedAt, error });
 };
 
 export {};
