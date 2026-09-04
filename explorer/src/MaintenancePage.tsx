@@ -1,18 +1,18 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import './MaintenancePage.css';
 
 const MaintenancePage: React.FC = () => {
     const containerRef = useRef<HTMLDivElement>(null);
     const logoRef = useRef<HTMLDivElement>(null);
-    const positionRef = useRef({ x: 50, y: 50 });
+    const positionRef = useRef({ x: 0, y: 0 });
     const directionRef = useRef({ x: 1, y: 1 });
-    const [color, setColor] = useState('#0000ee');
     const currentColorRef = useRef('#0000ee');
     const animationFrameRef = useRef<number | null>(null);
+    const lastFrameRef = useRef<number | null>(null);
     const initializedRef = useRef(false);
 
-    // Speed in pixels per frame
-    const speed = 0.5;
+    // Speed in CSS pixels per second (independent of the display's refresh rate)
+    const speed = 30;
 
     // Use a ref to store the logo's natural dimensions
     const logoDimensionsRef = useRef({ width: 0, height: 0 });
@@ -20,6 +20,15 @@ const MaintenancePage: React.FC = () => {
     // Handle click on the logo
     const handleLogoClick = () => {
         window.open("https://x.com/commonwarexyz", "_blank", "noopener,noreferrer");
+    };
+
+    // Position the logo with a transform rather than left/top: transforms are composited without
+    // re-running layout and keep sub-pixel positions instead of snapping to whole pixels.
+    const applyPosition = () => {
+        if (logoRef.current) {
+            const { x, y } = positionRef.current;
+            logoRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+        }
     };
 
     // Cache the logo's rendered size so the animation loop does not have to re-measure it.
@@ -31,35 +40,72 @@ const MaintenancePage: React.FC = () => {
         logoDimensionsRef.current = { width: rect.width, height: rect.height };
     };
 
-    // Place the logo at a random starting position before the first paint. A layout effect runs
-    // after layout but before the browser draws, so the logo is never shown anywhere else first.
-    useLayoutEffect(() => {
-        if (initializedRef.current || !containerRef.current || !logoRef.current) {
-            return;
-        }
-        measureLogo();
-        const containerWidth = containerRef.current.clientWidth;
-        const containerHeight = containerRef.current.clientHeight;
-        const { width: logoWidth, height: logoHeight } = logoDimensionsRef.current;
-        positionRef.current = {
-            x: Math.random() * Math.max(0, containerWidth - logoWidth),
-            y: Math.random() * Math.max(0, containerHeight - logoHeight),
-        };
-        logoRef.current.style.left = `${positionRef.current.x}px`;
-        logoRef.current.style.top = `${positionRef.current.y}px`;
-        initializedRef.current = true;
-    }, []);
-
-    // The logo's size can change once web fonts finish loading; refresh the cached size then.
+    // Show the logo only once the web fonts it uses have loaded. The page renders nothing while the
+    // health check runs, so this box is the first text to use Inconsolata: without waiting, it is
+    // laid out in the fallback font and then reflows (changing the box size) when the font arrives.
+    // A fallback timer keeps the page usable if the fonts never load.
     useEffect(() => {
         let cancelled = false;
-        document.fonts?.ready.then(() => {
-            if (!cancelled) {
-                measureLogo();
-            }
+        let fallback: ReturnType<typeof setTimeout> | null = null;
+        const fontsReady = document.fonts
+            ? Promise.all([
+                document.fonts.load('bold 32px Inconsolata'),
+                document.fonts.load('18px Inconsolata'),
+            ]).then(() => document.fonts.ready)
+            : Promise.resolve();
+        const timeout = new Promise<void>((resolve) => {
+            fallback = setTimeout(resolve, 1500);
         });
+
+        Promise.race([fontsReady, timeout]).then(() => {
+            if (cancelled || initializedRef.current || !containerRef.current || !logoRef.current) {
+                return;
+            }
+            measureLogo();
+            const containerWidth = containerRef.current.clientWidth;
+            const containerHeight = containerRef.current.clientHeight;
+            const { width: logoWidth, height: logoHeight } = logoDimensionsRef.current;
+            positionRef.current = {
+                x: Math.random() * Math.max(0, containerWidth - logoWidth),
+                y: Math.random() * Math.max(0, containerHeight - logoHeight),
+            };
+            applyPosition();
+            logoRef.current.style.color = currentColorRef.current;
+            logoRef.current.style.borderColor = currentColorRef.current;
+            logoRef.current.style.visibility = 'visible';
+            initializedRef.current = true;
+        });
+
         return () => {
             cancelled = true;
+            if (fallback !== null) {
+                clearTimeout(fallback);
+            }
+        };
+    }, []);
+
+    // If a font finishes loading later (e.g. the fallback timer fired first), refresh the cached
+    // logo size and keep the logo inside the container.
+    useEffect(() => {
+        if (!document.fonts) {
+            return;
+        }
+        const onFontsLoaded = () => {
+            if (!containerRef.current || !logoRef.current) {
+                return;
+            }
+            measureLogo();
+            const maxX = Math.max(0, containerRef.current.clientWidth - logoDimensionsRef.current.width);
+            const maxY = Math.max(0, containerRef.current.clientHeight - logoDimensionsRef.current.height);
+            positionRef.current = {
+                x: Math.min(positionRef.current.x, maxX),
+                y: Math.min(positionRef.current.y, maxY),
+            };
+            applyPosition();
+        };
+        document.fonts.addEventListener('loadingdone', onFontsLoaded);
+        return () => {
+            document.fonts.removeEventListener('loadingdone', onFontsLoaded);
         };
     }, []);
 
@@ -76,19 +122,29 @@ const MaintenancePage: React.FC = () => {
             return filteredColors[Math.floor(Math.random() * filteredColors.length)];
         };
 
-        // Update color function that ensures the color always changes
+        // Update color function that ensures the color always changes (applied directly to the
+        // element so a bounce does not trigger a React re-render mid-animation)
         const updateColor = () => {
             const newColor = getRandomColor();
             currentColorRef.current = newColor;
-            setColor(newColor);
+            if (logoRef.current) {
+                logoRef.current.style.color = newColor;
+                logoRef.current.style.borderColor = newColor;
+            }
         };
 
         // Animation function that doesn't depend on React state for positioning
-        const animate = () => {
+        const animate = (timestamp: number) => {
             if (!initializedRef.current || !containerRef.current || !logoRef.current) {
                 animationFrameRef.current = requestAnimationFrame(animate);
                 return;
             }
+
+            // Advance by elapsed time so motion is smooth at any refresh rate; cap the step so a
+            // background tab does not teleport the logo when it becomes visible again.
+            const elapsed = lastFrameRef.current === null ? 0 : timestamp - lastFrameRef.current;
+            lastFrameRef.current = timestamp;
+            const step = speed * Math.min(elapsed, 100) / 1000;
 
             const containerWidth = containerRef.current.clientWidth;
             const containerHeight = containerRef.current.clientHeight;
@@ -98,8 +154,8 @@ const MaintenancePage: React.FC = () => {
             const logoHeight = logoDimensionsRef.current.height;
 
             // Update position based on current direction
-            let newX = positionRef.current.x + speed * directionRef.current.x;
-            let newY = positionRef.current.y + speed * directionRef.current.y;
+            let newX = positionRef.current.x + step * directionRef.current.x;
+            let newY = positionRef.current.y + step * directionRef.current.y;
             let colorChanged = false;
 
             // Handle horizontal boundaries with a small buffer
@@ -142,12 +198,9 @@ const MaintenancePage: React.FC = () => {
                 }
             }
 
-            // Update position reference
+            // Update position reference and apply it directly to the DOM element
             positionRef.current = { x: newX, y: newY };
-
-            // Apply the position directly to the DOM element
-            logoRef.current.style.left = `${newX}px`;
-            logoRef.current.style.top = `${newY}px`;
+            applyPosition();
 
             // Continue animation
             animationFrameRef.current = requestAnimationFrame(animate);
@@ -186,8 +239,7 @@ const MaintenancePage: React.FC = () => {
                 }
 
                 positionRef.current = { x: newX, y: newY };
-                logoRef.current.style.left = `${newX}px`;
-                logoRef.current.style.top = `${newY}px`;
+                applyPosition();
             }
         };
 
@@ -202,10 +254,6 @@ const MaintenancePage: React.FC = () => {
             <div
                 className="dvd-logo"
                 ref={logoRef}
-                style={{
-                    color: color,
-                    borderColor: color
-                }}
                 onClick={handleLogoClick}
             >
                 <div className="logo-content">
