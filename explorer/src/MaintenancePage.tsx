@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import './MaintenancePage.css';
 
 const MaintenancePage: React.FC = () => {
@@ -22,65 +22,45 @@ const MaintenancePage: React.FC = () => {
         window.open("https://x.com/commonwarexyz", "_blank", "noopener,noreferrer");
     };
 
-    // Measure logo once after initial render
-    useEffect(() => {
-        const measureLogo = () => {
-            if (logoRef.current && containerRef.current) {
-                // Get the natural dimensions of the logo
-                const rect = logoRef.current.getBoundingClientRect();
-                logoDimensionsRef.current = {
-                    width: rect.width,
-                    height: rect.height
-                };
+    // Cache the logo's rendered size so the animation loop does not have to re-measure it.
+    const measureLogo = () => {
+        if (!logoRef.current) {
+            return;
+        }
+        const rect = logoRef.current.getBoundingClientRect();
+        logoDimensionsRef.current = { width: rect.width, height: rect.height };
+    };
 
-                console.log("Measured logo: ", logoDimensionsRef.current);
-            }
-        };
-
-        // Measure immediately and after a short delay to ensure accuracy
+    // Place the logo at a random starting position before the first paint. A layout effect runs
+    // after layout but before the browser draws, so the logo is never shown anywhere else first.
+    useLayoutEffect(() => {
+        if (initializedRef.current || !containerRef.current || !logoRef.current) {
+            return;
+        }
         measureLogo();
-        const timer = setTimeout(measureLogo, 200);
-
-        return () => clearTimeout(timer);
+        const containerWidth = containerRef.current.clientWidth;
+        const containerHeight = containerRef.current.clientHeight;
+        const { width: logoWidth, height: logoHeight } = logoDimensionsRef.current;
+        positionRef.current = {
+            x: Math.random() * Math.max(0, containerWidth - logoWidth),
+            y: Math.random() * Math.max(0, containerHeight - logoHeight),
+        };
+        logoRef.current.style.left = `${positionRef.current.x}px`;
+        logoRef.current.style.top = `${positionRef.current.y}px`;
+        initializedRef.current = true;
     }, []);
 
+    // The logo's size can change once web fonts finish loading; refresh the cached size then.
     useEffect(() => {
-        // Wait a short time to ensure logo has been properly measured
-        const initTimeout = setTimeout(() => {
-            if (!initializedRef.current && containerRef.current && logoRef.current) {
-                const containerWidth = containerRef.current.clientWidth;
-                const containerHeight = containerRef.current.clientHeight;
-
-                // Make sure we have measured the logo
-                if (logoDimensionsRef.current.width === 0) {
-                    const rect = logoRef.current.getBoundingClientRect();
-                    logoDimensionsRef.current = {
-                        width: rect.width,
-                        height: rect.height
-                    };
-                }
-
-                const logoWidth = logoDimensionsRef.current.width;
-                const logoHeight = logoDimensionsRef.current.height;
-
-                console.log("Container size: ", containerWidth, containerHeight);
-                console.log("Logo size: ", logoWidth, logoHeight);
-
-                // Set initial position
-                positionRef.current = {
-                    x: Math.random() * (containerWidth - logoWidth),
-                    y: Math.random() * (containerHeight - logoHeight)
-                };
-
-                initializedRef.current = true;
-
-                // Force a re-render to show initial position
-                logoRef.current.style.left = `${positionRef.current.x}px`;
-                logoRef.current.style.top = `${positionRef.current.y}px`;
+        let cancelled = false;
+        document.fonts?.ready.then(() => {
+            if (!cancelled) {
+                measureLogo();
             }
-        }, 100); // Short delay to ensure measurements
-
-        return () => clearTimeout(initTimeout);
+        });
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     useEffect(() => {
@@ -105,7 +85,7 @@ const MaintenancePage: React.FC = () => {
 
         // Animation function that doesn't depend on React state for positioning
         const animate = () => {
-            if (!containerRef.current || !logoRef.current) {
+            if (!initializedRef.current || !containerRef.current || !logoRef.current) {
                 animationFrameRef.current = requestAnimationFrame(animate);
                 return;
             }
