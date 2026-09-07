@@ -6,7 +6,7 @@ export interface LeaderLocation {
 }
 
 export const resolveLeaderLocation = (
-  leader: Uint8Array,
+  leader: ArrayLike<number>,
   participants: string[] | undefined,
   locations: [[number, number], string][],
 ): LeaderLocation | undefined => {

@@ -1,21 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Cluster, ClusterConfig, MODE } from './config';
-
-// ViewData interface (no changes)
-export interface ViewData {
-    view: number;
-    location?: [number, number];
-    locationName?: string;
-    status: "growing" | "notarized" | "finalized" | "timed_out" | "unknown";
-    startTime: number;
-    notarizationTime?: number;
-    finalizationTime?: number;
-    signature?: Uint8Array;
-    block?: any; // BlockJs
-    timeoutId?: any; // NodeJS.Timeout
-    actualNotarizationLatency?: number;
-    actualFinalizationLatency?: number;
-}
+import { BlockJs, ViewData } from './types';
 
 interface StatsSectionProps {
     views: ViewData[];
@@ -181,7 +166,8 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onC
         .filter((time): time is number => time !== null);
 
     const viewsWithBlocks = views
-        .filter(view => view.block && view.block.height && view.block.timestamp)
+        .filter((view): view is ViewData & { block: BlockJs } =>
+            !!(view.block && view.block.height && view.block.timestamp))
         .sort((a, b) => a.block.height - b.block.height);
 
     const blockTimes: number[] = [];

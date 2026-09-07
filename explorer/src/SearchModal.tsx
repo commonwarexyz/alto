@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './SearchModal.css';
 import { ClusterConfig, getHttpBackendUrl } from './config';
-import { FinalizedJs, NotarizedJs, BlockJs, SearchType, SearchResult } from './types';
+import { SearchType, SearchResult } from './types';
 import { hexToUint8Array, hexUint8Array, formatAge } from './utils';
 import init, { parse_seed, parse_notarized, parse_finalized, parse_block } from "./alto_types/alto_types.js";
 
@@ -142,7 +142,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
         }
     };
 
-    const fetchSingleItem = async (query: string | number): Promise<SearchResult> => {
+    const fetchSingleItem = async (query: string | number): Promise<SearchResult | null> => {
         if (!wasmInitialized) {
             throw new Error("Search functionality is still initializing. Please try again in a moment.");
         }
@@ -151,89 +151,50 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
         const baseUrl = getHttpBackendUrl(BACKEND_URL);
         const PUBLIC_KEY = hexToUint8Array(PUBLIC_KEY_HEX);
 
-        let endpoint = '';
-        switch (searchType) {
-            case 'block':
-                endpoint = `/block/${typeof query === 'number' ? numberToU64Hex(query) : query}`;
-                break;
-            case 'notarization':
-                endpoint = `/notarization/${typeof query === 'number' ? numberToU64Hex(query) : query}`;
-                break;
-            case 'finalization':
-                endpoint = `/finalization/${typeof query === 'number' ? numberToU64Hex(query) : query}`;
-                break;
-            case 'seed':
-                endpoint = `/seed/${typeof query === 'number' ? numberToU64Hex(query) : query}`;
-                break;
+        const endpoint = `/${searchType}/${typeof query === 'number' ? numberToU64Hex(query) : query}`;
+        const response = await fetch(`${baseUrl}${endpoint}`);
+        if (!response.ok) {
+            if (response.status === 404) {
+                return null;
+            }
+            throw new Error(`Server returned ${response.status}: ${response.statusText}`);
         }
 
+        const data = new Uint8Array(await response.arrayBuffer());
+        let result: SearchResult | null;
         try {
-            const response = await fetch(`${baseUrl}${endpoint}`);
-            if (!response.ok) {
-                if (response.status === 404) {
-                    return null;
-                }
-                throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+            switch (searchType) {
+                case 'seed':
+                    result = parse_seed(PUBLIC_KEY, data);
+                    break;
+                case 'notarization':
+                    result = parse_notarized(PUBLIC_KEY, data, standardCertificates);
+                    break;
+                case 'finalization':
+                    result = parse_finalized(PUBLIC_KEY, data, standardCertificates);
+                    break;
+                case 'block':
+                    result = query === 'latest' || typeof query === 'number'
+                        ? parse_finalized(PUBLIC_KEY, data, standardCertificates)
+                        : parse_block(data);
+                    break;
             }
-
-            const arrayBuffer = await response.arrayBuffer();
-            const data = new Uint8Array(arrayBuffer);
-
-            try {
-                if (searchType === 'seed') {
-                    const result = parse_seed(PUBLIC_KEY, data);
-                    if (!result) throw new Error("Failed to parse seed data");
-                    return result;
-                } else if (searchType === 'notarization') {
-                    const result = parse_notarized(PUBLIC_KEY, data, standardCertificates);
-                    if (!result) throw new Error("Failed to parse notarization data");
-                    return result;
-                } else if (searchType === 'finalization') {
-                    const result = parse_finalized(PUBLIC_KEY, data, standardCertificates);
-                    if (!result) throw new Error("Failed to parse finalization data");
-                    return result;
-                } else if (searchType === 'block') {
-                    if (query === 'latest' || typeof query === 'number') {
-                        const result = parse_finalized(PUBLIC_KEY, data, standardCertificates);
-                        if (!result) throw new Error("Failed to parse block data");
-                        return result;
-                    } else {
-                        const result = parse_block(data);
-                        if (!result) throw new Error("Failed to parse block data by digest");
-                        return result;
-                    }
-                }
-            } catch (parseError) {
-                console.error(`Error parsing ${searchType} data:`, parseError);
-                const errorMessage = parseError instanceof Error ? parseError.message : String(parseError);
-                throw new Error(`Failed to parse ${searchType} data: ${errorMessage}`);
-            }
-
-            console.warn(`Unexpected data format for ${searchType}, returning raw data`);
-            return data as any;
-        } catch (error) {
-            console.error(`Error fetching ${searchType}:`, error);
-            throw error;
+        } catch (parseError) {
+            const errorMessage = parseError instanceof Error ? parseError.message : String(parseError);
+            throw new Error(`Failed to parse ${searchType} data: ${errorMessage}`);
         }
+        if (!result) throw new Error(`Failed to parse ${searchType} data`);
+        return result;
     };
 
     const renderSearchResult = (item: SearchResultWithLatency, index: number) => {
         const { result, latency } = item;
-        if (!result) return null;
-
-        let formattedResult: Record<string, any> = {};
+        let formattedResult: Record<string, string | number>;
         let resultType;
 
-        if ('view' in result && 'signature' in result && !('proof' in result)) {
-            resultType = 'Seed';
-            formattedResult = {
-                view: result.view,
-                signature: hexUint8Array(result.signature as Uint8Array, 64)
-            };
-        } else if ('proof' in result && 'block' in result) {
+        if ('block' in result) {
             resultType = (lastSearchType === 'finalization' || lastSearchType === 'block') ? 'Finalization' : 'Notarization';
-            const dataObj = result as (NotarizedJs | FinalizedJs);
-            const block = dataObj.block;
+            const block = result.block;
             const now = Date.now();
             const age = now - Number(block.timestamp);
 
@@ -241,16 +202,13 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
                 height: block.height,
                 parent: hexUint8Array(block.parent, 64),
                 timestamp: `${new Date(Number(block.timestamp)).toLocaleString()} (${formatAge(age)})`,
-                view: dataObj.proof.view,
-                digest: hexUint8Array(block.digest as Uint8Array, 64),
+                view: result.view,
+                digest: hexUint8Array(block.digest, 64),
+                signature: hexUint8Array(result.signature, 64),
             };
-
-            if (dataObj.proof.signature) {
-                formattedResult.signature = hexUint8Array(dataObj.proof.signature, 64);
-            }
-        } else if ('height' in result && 'timestamp' in result && 'digest' in result) {
+        } else if ('height' in result) {
             resultType = 'Block';
-            const block = result as BlockJs;
+            const block = result;
             const now = Date.now();
             const age = now - Number(block.timestamp);
 
@@ -260,18 +218,14 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
                 timestamp: `${new Date(Number(block.timestamp)).toLocaleString()} (${formatAge(age)})`,
             };
         } else {
-            resultType = 'Unknown';
+            resultType = 'Seed';
             formattedResult = {
-                raw: JSON.stringify(result, (key, value) => {
-                    if (value && value.constructor === Uint8Array) {
-                        return hexUint8Array(value as Uint8Array, 64);
-                    }
-                    return value;
-                }, 2)
+                view: result.view,
+                signature: hexUint8Array(result.signature, 64)
             };
         }
 
-        const getValueClass = (key: string, value: any) => {
+        const getValueClass = (key: string) => {
             const baseClass = "search-result-value";
             if (key === 'height') return `${baseClass} view`;
             if (key === 'view') return `${baseClass} view`;
@@ -291,7 +245,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
                     {Object.entries(formattedResult).map(([key, value]) => (
                         <div key={key} className="search-result-field">
                             <span className="search-result-key">{key}:</span>
-                            <span className={getValueClass(key, value)}>{String(value)}</span>
+                            <span className={getValueClass(key)}>{String(value)}</span>
                         </div>
                     ))}
                     <span className="latency">Response Latency: {latency}ms</span>

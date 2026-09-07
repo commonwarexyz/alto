@@ -1,6 +1,6 @@
-import type { FinalizedJs, NotarizedJs, SeedJs } from "./types";
+import type { CertifiedBlockJs, SeedJs } from "./types";
 
-export type ConsensusArtifact = SeedJs | NotarizedJs | FinalizedJs;
+export type ConsensusArtifact = SeedJs | CertifiedBlockJs;
 
 export interface VerifiedConsensusArtifact {
   kind: number;

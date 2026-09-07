@@ -71,14 +71,13 @@ struct DeployerConfig {
     /// Overrides `--max-views` for a deployed indexer, whose command line is fixed by the deployer.
     #[serde(default)]
     max_views: Option<NonZeroUsize>,
-    explorer: Option<ExplorerConfig>,
+    explorer: ExplorerConfig,
 }
 
 #[derive(Deserialize)]
 struct ExplorerConfig {
     name: String,
     description: String,
-    #[serde(default)]
     participants: Vec<String>,
     locations: Vec<([f64; 2], String)>,
 }
@@ -109,19 +108,14 @@ fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
     if let Some(config) = args.config {
         let config = std::fs::read_to_string(config)?;
         let config: DeployerConfig = serde_yaml::from_str(&config)?;
-        let explorer_mode = if config.explorer.is_some() {
-            "public"
-        } else {
-            "local"
-        };
         return Ok(Settings {
             port: config.port,
             identity: config.identity,
             certificate_mode: config.certificate_mode,
             block_size: Some(config.block_size),
             max_views: config.max_views.unwrap_or(args.max_views),
-            explorer: config.explorer.unwrap_or_else(local_explorer_config),
-            explorer_mode,
+            explorer: config.explorer,
+            explorer_mode: "public",
         });
     }
 

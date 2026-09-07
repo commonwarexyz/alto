@@ -12,7 +12,7 @@ import {
   Cluster,
   MODE,
 } from "./config";
-import { SeedJs, NotarizedJs, FinalizedJs, ViewData } from "./types";
+import { SeedJs, CertifiedBlockJs, ViewData } from "./types";
 import { hexToUint8Array, hexUint8Array } from "./utils";
 import { resolveLeaderLocation } from "./leaderLocation";
 import {
@@ -408,10 +408,15 @@ const App: React.FC = () => {
     });
   }, [adjustTime, resolveSeedLocation, observeView, fillMissedViews]);
 
-  const handleNotarization = useCallback((notarized: NotarizedJs, receivedAt: number) => {
-    const view = notarized.proof.view;
+  const handleNotarization = useCallback((notarized: CertifiedBlockJs, receivedAt: number) => {
+    const view = notarized.view;
     const leaderLocation = resolveLeaderLocation(notarized.block.leader, PARTICIPANTS, LOCATIONS);
     const currentTime = adjustTime(receivedAt);
+    const blockTime = notarized.block.timestamp;
+    const calculatedStartTime = blockTime || currentTime;
+    const actualNotarizationLatency = blockTime > 0 && blockTime < currentTime
+      ? currentTime - blockTime
+      : undefined;
     const lastObservedView = observeView(view);
     setViews((prevViews) => {
       // If the view exists and is already finalized, ignore this notarization completely
@@ -424,28 +429,11 @@ const App: React.FC = () => {
       // Placeholders are inserted at the front, so locate the view after filling.
       const index = newViews.findIndex((v) => v.view === view);
 
-      // Calculate a reasonable start time using the block timestamp if available
-      let calculatedStartTime = currentTime;
-      if (notarized.block && notarized.block.timestamp) {
-        // The block timestamp is in milliseconds since epoch
-        const blockTime = Number(notarized.block.timestamp);
-        calculatedStartTime = blockTime;
-      }
-
       if (index !== -1) {
         const viewData = newViews[index];
         // Clear timeout if it exists
         if (viewData.timeoutId) {
           clearTimeout(viewData.timeoutId);
-        }
-
-        // Calculate actual notarization latency when we receive the notarization message
-        let actualNotarizationLatency: number | undefined = undefined;
-        if (notarized.block && notarized.block.timestamp) {
-          const blockTime = Number(notarized.block.timestamp);
-          if (blockTime > 0 && blockTime < currentTime) {
-            actualNotarizationLatency = currentTime - blockTime;
-          }
         }
 
         // Update the view with notarization data
@@ -462,13 +450,6 @@ const App: React.FC = () => {
         };
       } else {
         // If view doesn't exist, create it with block timestamp as start time
-        let actualNotarizationLatency: number | undefined = undefined;
-        if (notarized.block && notarized.block.timestamp) {
-          const blockTime = Number(notarized.block.timestamp);
-          if (blockTime > 0 && blockTime < currentTime) {
-            actualNotarizationLatency = currentTime - blockTime;
-          }
-        }
         newViews.unshift({
           view,
           location: leaderLocation?.location,
@@ -485,10 +466,15 @@ const App: React.FC = () => {
     });
   }, [adjustTime, LOCATIONS, PARTICIPANTS, observeView, fillMissedViews]);
 
-  const handleFinalization = useCallback((finalized: FinalizedJs, receivedAt: number) => {
-    const view = finalized.proof.view;
+  const handleFinalization = useCallback((finalized: CertifiedBlockJs, receivedAt: number) => {
+    const view = finalized.view;
     const leaderLocation = resolveLeaderLocation(finalized.block.leader, PARTICIPANTS, LOCATIONS);
     const currentTime = adjustTime(receivedAt);
+    const blockTime = finalized.block.timestamp;
+    const calculatedStartTime = blockTime || currentTime;
+    const actualFinalizationLatency = blockTime > 0 && blockTime < currentTime
+      ? currentTime - blockTime
+      : undefined;
     const lastObservedView = observeView(view);
     setViews((prevViews) => {
       // If already finalized, don't update
@@ -501,28 +487,11 @@ const App: React.FC = () => {
       // Placeholders are inserted at the front, so locate the view after filling.
       const index = newViews.findIndex((v) => v.view === view);
 
-      // Calculate a reasonable start time using the block timestamp if available
-      let calculatedStartTime = currentTime;
-      if (finalized.block && finalized.block.timestamp) {
-        // The block timestamp is in milliseconds since epoch
-        const blockTime = Number(finalized.block.timestamp);
-        calculatedStartTime = blockTime;
-      }
-
       if (index !== -1) {
         const viewData = newViews[index];
         // Clear timeout if it exists
         if (viewData.timeoutId) {
           clearTimeout(viewData.timeoutId);
-        }
-
-        // Calculate actual finalization latency when we receive the finalization message
-        let actualFinalizationLatency: number | undefined = undefined;
-        if (finalized.block && finalized.block.timestamp) {
-          const blockTime = Number(finalized.block.timestamp);
-          if (blockTime > 0 && blockTime < currentTime) {
-            actualFinalizationLatency = currentTime - blockTime;
-          }
         }
 
         // Use existing data if available, without fabricating missing data
@@ -535,19 +504,11 @@ const App: React.FC = () => {
           startTime: viewData.startTime || calculatedStartTime,
           block: finalized.block,
           timeoutId: undefined,
-          actualNotarizationLatency: viewData.actualNotarizationLatency,
           actualFinalizationLatency,
           ...leaderLocation,
         };
       } else {
         // If view doesn't exist, create it with just the data we have
-        let actualFinalizationLatency: number | undefined = undefined;
-        if (finalized.block && finalized.block.timestamp) {
-          const blockTime = Number(finalized.block.timestamp);
-          if (blockTime > 0 && blockTime < currentTime) {
-            actualFinalizationLatency = currentTime - blockTime;
-          }
-        }
         newViews.unshift({
           view,
           location: leaderLocation?.location,
@@ -584,10 +545,10 @@ const App: React.FC = () => {
             handleSeedRef.current(artifact as SeedJs, receivedAt);
             break;
           case 1:
-            handleNotarizedRef.current(artifact as NotarizedJs, receivedAt);
+            handleNotarizedRef.current(artifact as CertifiedBlockJs, receivedAt);
             break;
           case 2:
-            handleFinalizedRef.current(artifact as FinalizedJs, receivedAt);
+            handleFinalizedRef.current(artifact as CertifiedBlockJs, receivedAt);
             break;
         }
       }
@@ -971,7 +932,6 @@ interface BarProps {
   currentTime: number;
   isMobile: boolean;
   standardCertificates: boolean;
-  maxContainerWidth?: number;
 }
 
 // Replace the existing Bar component with this updated version

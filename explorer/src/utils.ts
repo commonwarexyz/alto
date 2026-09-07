@@ -28,12 +28,12 @@ export function hexToUint8Array(hex: string): Uint8Array {
 }
 
 /**
- * Converts a Uint8Array to a hex string (keeping up to len).
- * @param arr - The Uint8Array to convert
+ * Converts bytes to a hex string (keeping up to len).
+ * @param arr - The bytes to convert
  * @param len - Max number of characters to keep (default: 8)
- * @returns A representation of the Uint8Array as a hex string.
+ * @returns A representation of the bytes as a hex string.
  */
-export function hexUint8Array(arr: Uint8Array | undefined, len: number = 8): string {
+export function hexUint8Array(arr: ArrayLike<number> | undefined, len: number = 8): string {
     if (!arr || arr.length === 0) return "";
 
     // Convert the entire array to hex

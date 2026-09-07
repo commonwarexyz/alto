@@ -24,8 +24,8 @@ export const getLeaderIndicator = (
 
 export const getTimelineIdentifier = (
   standardCertificates: boolean,
-  seedSignature?: Uint8Array,
-  blockDigest?: Uint8Array,
+  seedSignature?: ArrayLike<number>,
+  blockDigest?: ArrayLike<number>,
 ): TimelineIdentifier => {
   const bytes = standardCertificates ? blockDigest : seedSignature;
 

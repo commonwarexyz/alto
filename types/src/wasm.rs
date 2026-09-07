@@ -19,14 +19,6 @@ pub struct SeedJs {
 }
 
 #[derive(Serialize)]
-pub struct ProofJs {
-    pub view: u64,
-    pub parent: u64,
-    pub payload: Vec<u8>,
-    pub signature: Vec<u8>,
-}
-
-#[derive(Serialize)]
 pub struct BlockJs {
     pub leader: Vec<u8>,
     pub parent: Vec<u8>,
@@ -35,15 +27,22 @@ pub struct BlockJs {
     pub digest: Vec<u8>,
 }
 
-#[derive(Serialize)]
-pub struct NotarizedJs {
-    pub proof: ProofJs,
-    pub block: BlockJs,
+impl From<&Block> for BlockJs {
+    fn from(block: &Block) -> Self {
+        Self {
+            leader: block.context.leader.encode().to_vec(),
+            parent: block.parent.to_vec(),
+            height: block.height.get(),
+            timestamp: block.timestamp,
+            digest: block.digest().to_vec(),
+        }
+    }
 }
 
 #[derive(Serialize)]
-pub struct FinalizedJs {
-    pub proof: ProofJs,
+pub struct CertifiedBlockJs {
+    pub view: u64,
+    pub signature: Vec<u8>,
     pub block: BlockJs,
 }
 
@@ -89,20 +88,10 @@ fn parse_notarized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValu
     let Some(signature) = S::vote_signature(&notarized.proof.certificate) else {
         return JsValue::NULL;
     };
-    let notarized_js = NotarizedJs {
-        proof: ProofJs {
-            view: notarized.proof.view().get(),
-            parent: notarized.proof.proposal.parent.get(),
-            payload: notarized.proof.proposal.payload.to_vec(),
-            signature: signature.encode().to_vec(),
-        },
-        block: BlockJs {
-            leader: notarized.block.context.leader.encode().to_vec(),
-            parent: notarized.block.parent.to_vec(),
-            height: notarized.block.height.get(),
-            timestamp: notarized.block.timestamp,
-            digest: notarized.block.digest().to_vec(),
-        },
+    let notarized_js = CertifiedBlockJs {
+        view: notarized.proof.view().get(),
+        signature: signature.encode().to_vec(),
+        block: (&notarized.block).into(),
     };
     serde_wasm_bindgen::to_value(&notarized_js).unwrap_or(JsValue::NULL)
 }
@@ -130,20 +119,10 @@ fn parse_finalized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValu
     let Some(signature) = S::vote_signature(&finalized.proof.certificate) else {
         return JsValue::NULL;
     };
-    let finalized_js = FinalizedJs {
-        proof: ProofJs {
-            view: finalized.proof.view().get(),
-            parent: finalized.proof.proposal.parent.get(),
-            payload: finalized.proof.proposal.payload.to_vec(),
-            signature: signature.encode().to_vec(),
-        },
-        block: BlockJs {
-            leader: finalized.block.context.leader.encode().to_vec(),
-            parent: finalized.block.parent.to_vec(),
-            height: finalized.block.height.get(),
-            timestamp: finalized.block.timestamp,
-            digest: finalized.block.digest().to_vec(),
-        },
+    let finalized_js = CertifiedBlockJs {
+        view: finalized.proof.view().get(),
+        signature: signature.encode().to_vec(),
+        block: (&finalized.block).into(),
     };
     serde_wasm_bindgen::to_value(&finalized_js).unwrap_or(JsValue::NULL)
 }
@@ -153,13 +132,7 @@ pub fn parse_block(bytes: Vec<u8>) -> JsValue {
     let Ok(block) = Block::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config()) else {
         return JsValue::NULL;
     };
-    let block_js = BlockJs {
-        leader: block.context.leader.encode().to_vec(),
-        parent: block.parent.to_vec(),
-        height: block.height.get(),
-        timestamp: block.timestamp,
-        digest: block.digest().to_vec(),
-    };
+    let block_js = BlockJs::from(&block);
     serde_wasm_bindgen::to_value(&block_js).unwrap_or(JsValue::NULL)
 }
 

@@ -336,7 +336,7 @@ builder with the monorepo mounted, once per binary:
 ```bash
 just build-intel-image
 docker run --rm -v "${PWD}:/alto" -v "${PWD}/../monorepo:/monorepo" alto-validator-builder:intel-local
-docker run --rm -v "${PWD}:/alto" -v "${PWD}/../monorepo:/monorepo" -e PACKAGE_NAME=alto-indexer -e BINARY_NAME=indexer -e OUTPUT_NAME=indexer alto-validator-builder:intel-local
+docker run --rm -v "${PWD}:/alto" -v "${PWD}/../monorepo:/monorepo" -e BINARY_NAME=indexer alto-validator-builder:intel-local
 ```
 
 Emitted binaries are placed in `assets/`.
