@@ -78,7 +78,7 @@
 
 use alto_client::{
     consensus::{Message, Payload},
-    ClientBuilder, IndexQuery, Query,
+    Client, ClientBuilder, IndexQuery, Query,
 };
 use alto_types::{CertificateMode, Identity, Scheme, StandardScheme, VrfScheme, NAMESPACE};
 use clap::{value_parser, Arg, ArgMatches, Command};
@@ -117,7 +117,7 @@ async fn main() {
         .arg(
             Arg::new("certificate_mode")
                 .long("certificate-mode")
-                .value_parser(["standard", "vrf"])
+                .value_parser(CertificateMode::ALL.map(CertificateMode::as_str))
                 .default_value(DEFAULT_CERTIFICATE_MODE)
                 .global(true)
                 .help("Threshold certificate construction used by the network"),
@@ -185,15 +185,11 @@ async fn main() {
         Level::INFO
     };
     tracing_subscriber::fmt().with_max_level(log_level).init();
-    let certificate_mode = match matches
+    let certificate_mode: CertificateMode = matches
         .get_one::<String>("certificate_mode")
         .expect("certificate mode has a default")
-        .as_str()
-    {
-        "standard" => CertificateMode::Standard,
-        "vrf" => CertificateMode::Vrf,
-        _ => unreachable!("clap validates certificate mode"),
-    };
+        .parse()
+        .expect("clap validates certificate mode");
 
     match certificate_mode {
         CertificateMode::Standard => run::<StandardScheme>(&matches).await,
@@ -201,18 +197,23 @@ async fn main() {
     }
 }
 
+/// Build a client for the `--indexer` and `--identity` arguments shared by every subcommand.
+fn client<C: Scheme>(matches: &ArgMatches) -> Client<Sequential, C> {
+    let indexer = matches.get_one::<String>("indexer").unwrap();
+    let identity = matches.get_one::<String>("identity").unwrap();
+    let identity = from_hex(identity).expect("Failed to decode identity");
+    let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
+    ClientBuilder::new_with_scheme(
+        indexer,
+        C::certificate_verifier(NAMESPACE, identity),
+        Sequential,
+    )
+    .build()
+}
+
 async fn run<C: Scheme>(matches: &ArgMatches) {
     if let Some(matches) = matches.subcommand_matches("listen") {
-        let indexer = matches.get_one::<String>("indexer").unwrap();
-        let identity = matches.get_one::<String>("identity").unwrap();
-        let identity = from_hex(identity).expect("Failed to decode identity");
-        let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
-        let client = ClientBuilder::<_, C>::new_with_scheme(
-            indexer,
-            C::certificate_verifier(NAMESPACE, identity),
-            Sequential,
-        )
-        .build();
+        let client = client::<C>(matches);
 
         let mut stream = client.listen().await.expect("Failed to connect to indexer");
         info!("listening for consensus messages...");
@@ -227,16 +228,7 @@ async fn run<C: Scheme>(matches: &ArgMatches) {
     } else if let Some(matches) = matches.subcommand_matches("get") {
         let type_ = matches.get_one::<String>("type").unwrap();
         let query_str = matches.get_one::<String>("query").unwrap();
-        let indexer = matches.get_one::<String>("indexer").unwrap();
-        let identity = matches.get_one::<String>("identity").unwrap();
-        let identity = from_hex(identity).expect("Failed to decode identity");
-        let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
-        let client = ClientBuilder::<_, C>::new_with_scheme(
-            indexer,
-            C::certificate_verifier(NAMESPACE, identity),
-            Sequential,
-        )
-        .build();
+        let client = client::<C>(matches);
         let prepare_flag = matches.get_flag("prepare");
 
         if prepare_flag {

@@ -22,7 +22,7 @@ use commonware_math::algebra::Random;
 use commonware_utils::{sys_rng, NZU32};
 use rand::seq::IteratorRandom;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::{NonZeroU32, NonZeroU64, NonZeroUsize},
@@ -41,13 +41,6 @@ const INDEXER_PORT: u16 = 8080;
 const PORT: u16 = 4545;
 const STORAGE_CLASS: &str = "gp3";
 const DASHBOARD_FILE: &str = "dashboard.json";
-
-const fn certificate_mode_name(mode: CertificateMode) -> &'static str {
-    match mode {
-        CertificateMode::Standard => "standard",
-        CertificateMode::Vrf => "vrf",
-    }
-}
 
 fn leader_args() -> [Arg; 4] {
     [
@@ -69,13 +62,6 @@ fn leader_args() -> [Arg; 4] {
             .required_if_eq("leader_mode", "stable")
             .value_parser(value_parser!(u64)),
     ]
-}
-
-fn block_size_arg() -> Arg {
-    Arg::new("block_size")
-        .long("block-size")
-        .default_value("0")
-        .value_parser(value_parser!(u32))
 }
 
 fn parse_traces_sample_rate(value: &str) -> Result<f64, String> {
@@ -319,7 +305,12 @@ fn main() {
                         .required(true)
                         .value_parser(value_parser!(usize)),
                 )
-                .arg(block_size_arg())
+                .arg(
+                    Arg::new("block_size")
+                        .long("block-size")
+                        .default_value("0")
+                        .value_parser(value_parser!(u32)),
+                )
                 .arg(
                     Arg::new("signature_threads")
                         .long("signature-threads")
@@ -687,7 +678,7 @@ fn generate_local(
         println!("To start local indexers, run:");
         for url in &configured_local_indexers {
             if let Some(port) = local_indexer_port(url) {
-                let certificate_mode = certificate_mode_name(leader.certificate_mode());
+                let certificate_mode = leader.certificate_mode().as_str();
                 let command = format!(
                     "cargo run --bin indexer -- --port {port} --identity {identity} --certificate-mode {certificate_mode} --block-size {block_size}"
                 );
@@ -760,11 +751,16 @@ fn generate_remote(
     let dashboard = sub_matches.get_one::<String>("dashboard").unwrap().clone();
     let deploy_indexer = sub_matches.get_flag("indexer");
     let mut configured_indexers = parse_indexers(sub_matches.get_one::<String>("indexers"));
+    let unique_regions = regions.iter().fold(Vec::new(), |mut unique, region| {
+        if !unique.contains(region) {
+            unique.push(region.clone());
+        }
+        unique
+    });
     if deploy_indexer {
-        let region_count = regions.iter().collect::<BTreeSet<_>>().len();
         configured_indexers.push(ConfiguredIndexer {
             url: format!("http://{INDEXER_HOST}:{INDEXER_PORT}"),
-            count: region_count,
+            count: unique_regions.len(),
         });
     }
 
@@ -909,12 +905,6 @@ fn generate_remote(
                 )
             })
             .unzip();
-        let unique_regions = regions.iter().fold(Vec::new(), |mut unique, region| {
-            if !unique.contains(region) {
-                unique.push(region.clone());
-            }
-            unique
-        });
 
         DeployedIndexerConfig {
             port: INDEXER_PORT,
@@ -1038,7 +1028,7 @@ fn explorer_local(dir: String, backend_url: String) {
         fs::read_to_string(&peer_config_path).expect("failed to read peer config");
     let peer_config: Config =
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
-    let certificate_mode = certificate_mode_name(peer_config.leader.certificate_mode());
+    let certificate_mode = peer_config.leader.certificate_mode().as_str();
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
     let polynomial = Sharing::<MinSig>::decode_cfg(
@@ -1109,7 +1099,7 @@ fn explorer_remote(dir: String, backend_url: String) {
         fs::read_to_string(&peer_config_path).expect("failed to read peer config");
     let peer_config: Config =
         serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
-    let certificate_mode = certificate_mode_name(peer_config.leader.certificate_mode());
+    let certificate_mode = peer_config.leader.certificate_mode().as_str();
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
     let polynomial = Sharing::<MinSig>::decode_cfg(
@@ -1140,31 +1130,13 @@ fn explorer_remote(dir: String, backend_url: String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        block_size_arg, certificate_mode_name, leader_args, parse_indexers, parse_leader,
-        select_regional_peers, traces_sample_rate_arg, ConfiguredIndexer,
+        leader_args, parse_indexers, parse_leader, select_regional_peers, traces_sample_rate_arg,
+        ConfiguredIndexer,
     };
     use alto_chain::Leader;
     use alto_types::CertificateMode;
     use clap::Command;
     use commonware_utils::{NZU32, NZU64};
-
-    #[test]
-    fn block_size_defaults_to_zero() {
-        let matches = Command::new("test")
-            .arg(block_size_arg())
-            .try_get_matches_from(["test"])
-            .unwrap();
-        assert_eq!(*matches.get_one::<u32>("block_size").unwrap(), 0);
-
-        let matches = Command::new("test")
-            .arg(block_size_arg())
-            .try_get_matches_from(["test", "--block-size", "2097152"])
-            .unwrap();
-        assert_eq!(
-            *matches.get_one::<u32>("block_size").unwrap(),
-            2 * 1024 * 1024
-        );
-    }
 
     #[test]
     fn traces_sample_rate_accepts_only_fractions() {
@@ -1294,9 +1266,11 @@ signature_threads: 1
     }
 
     #[test]
-    fn certificate_mode_names_match_leader_modes() {
-        assert_eq!(certificate_mode_name(CertificateMode::Standard), "standard");
-        assert_eq!(certificate_mode_name(CertificateMode::Vrf), "vrf");
+    fn indexer_config_and_explorer_spell_certificate_mode_alike() {
+        // indexer.yaml serializes the mode with serde while config.ts is written with `as_str`.
+        for mode in CertificateMode::ALL {
+            assert_eq!(serde_yaml::to_string(&mode).unwrap().trim(), mode.as_str());
+        }
     }
 
     #[test]

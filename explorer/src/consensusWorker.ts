@@ -6,32 +6,18 @@ import init, {
   parse_seed,
 } from "./alto_types/alto_types.js";
 
-let publicKey: Uint8Array | undefined;
-let standard = false;
 const initialized = init();
 const worker = globalThis as unknown as DedicatedWorkerGlobalScope;
 
 worker.onmessage = async (event: MessageEvent) => {
-  if (event.data.type === "initialize") {
-    publicKey = event.data.publicKey;
-    standard = event.data.standard;
-    return;
-  }
-  if (event.data.type !== "verify") {
-    return;
-  }
-
-  const { sequence, kind, payload, receivedAt } = event.data;
+  const { sequence, kind, payload, publicKey, standard } = event.data;
 
   // Always answer: the pool releases results strictly in sequence order, so a job that never
-  // replies (a failed wasm load, a wasm panic, a missing key) would block every later artifact.
+  // replies (a failed wasm load or a wasm panic) would block every later artifact.
   let artifact = null;
   let error: string | undefined;
   try {
     await initialized;
-    if (!publicKey) {
-      throw new Error("consensus verifier was not initialized");
-    }
     switch (kind) {
       case 0:
         artifact = parse_seed(publicKey, payload);
@@ -47,7 +33,7 @@ worker.onmessage = async (event: MessageEvent) => {
     error = err instanceof Error ? err.message : String(err);
   }
 
-  worker.postMessage({ sequence, kind, artifact, receivedAt, error });
+  worker.postMessage({ sequence, artifact, error });
 };
 
 export {};

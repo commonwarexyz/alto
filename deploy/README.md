@@ -29,17 +29,17 @@ generator derives it from the leader mode (`standard` for stable, `vrf` for rota
 into the emitted indexer command, `indexer.yaml`, and the explorer configuration. Follower configs
 take it as `certificate_mode`, and the inspector as `--certificate-mode`.
 
-Changing an existing network from VRF or wrapper-framed standard certificates to native standard
-certificates is not a rolling upgrade: the untagged wire and persistent certificate layouts have
-different fixed sizes. Start with newly generated network configuration and empty validator and
-follower certificate state, then switch every validator, indexer, follower, and browser verifier
-together. `deploy.sh` generates a new network identity and infrastructure for this purpose.
+A network cannot change certificate mode in place: the two certificate layouts have different fixed
+sizes. Redeploy with a newly generated network identity (as `deploy.sh` does) and empty validator
+and follower certificate state, and switch every validator, indexer, follower, and explorer together.
 
-Stable-leader networks are timing-sensitive on a single machine: a validator that times out once
-withholds its finalize votes for the rest of the term, and a handful of local validators cannot
-absorb that. In our runs, `--leader-delay-ms 10` produced repeated term skips and finalization
-stalls of ten seconds or more with four or five local validators, while `--leader-delay-ms 100`
-ran smoothly. Use a larger delay (or rotating mode) for local experiments.
+Stable-leader networks are timing-sensitive on a single machine: a validator that times out
+withholds its finalize votes until it sees a same-term finalization at or above that view, and once
+more than `f` validators are withholding at the same time no finalization can form for the rest of
+the term. A handful of local validators cannot absorb that. In our runs, `--leader-delay-ms 10`
+produced repeated term skips and finalization stalls of ten seconds or more with four or five local
+validators, while `--leader-delay-ms 100` ran smoothly. Use a larger delay (or rotating mode) for
+local experiments.
 
 `--block-size` is a `u32` setting for the number of random bytes appended to each proposed block
 and defaults to `0`. Validators reject only values whose encoded blocks exceed the authenticated
@@ -85,12 +85,10 @@ For a rotating-leader network, drop the two stable-only flags:
 cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode rotating --leader-delay-ms 10 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
 ```
 
-The emitted indexer command then uses `--certificate-mode vrf` instead of `--certificate-mode standard`.
-It also passes the network's `--block-size`, which the indexer uses to reject larger blocks and to
-bound upload request bodies. A deployed indexer reads the same value from `indexer.yaml`. An
-indexer retains only the most recent `--max-views` views in memory (200,000 by default). A deployed
-indexer can override this with `max_views` in `indexer.yaml`. Followers backfilling from genesis
-must therefore start while the indexer still holds the history they need.
+The emitted indexer command then uses `--certificate-mode vrf` instead of `--certificate-mode standard`,
+and passes the network's `--block-size`. A deployed indexer reads the same values (and an optional
+`max_views` override) from `indexer.yaml`. See the [indexer README](../indexer/README.md) for what
+`--block-size` and `--max-views` bound and how they drive memory use.
 
 _If the stable command succeeds, you should see the following output:_
 
@@ -215,7 +213,7 @@ instance discards its NVMe data._
 cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --leader-optimistic-views 48 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 75 --dashboard deploy/dashboard.json
 ```
 
-_This configuration consumes ~30MB of disk space per hour per validator (~13 views per second). With 75GB of storage allocated, validators will exhaust available storage in ~3 months._
+_Disk usage grows roughly linearly with the view rate. At ~13 views per second (the earlier rotating configuration) a validator consumed ~30MB of disk space per hour, so 75GB lasted ~3 months. At 10 ms pipelined views (up to ~100 views per second) expect roughly 8x that, exhausting 75GB in a few weeks._
 
 #### [Optional] Configure Explorer
 
@@ -381,8 +379,9 @@ deployer aws update --config config.yaml
 ```
 
 _`deployer aws update` replaces and restarts the binary on every instance in `config.yaml`,
-including an indexer deployed with `--indexer` (its in-memory history is reset), and also pushes a
-rebuilt `assets/indexer` if present._
+including an indexer deployed with `--indexer` (its in-memory history is reset). Every binary named
+in `config.yaml` must exist under `assets/`, so rebuild `assets/indexer` alongside the validator
+(otherwise the existing file is pushed again)._
 
 #### [Optional] Profile Validator
 

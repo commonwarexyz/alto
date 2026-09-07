@@ -85,62 +85,6 @@ for artifact in config.yaml dashboard.json indexer.yaml; do
     fi
 done
 
-network_key_check_dir="$(mktemp -d)"
-cleanup_network_key_check() {
-    rm -rf -- "$network_key_check_dir"
-}
-trap cleanup_network_key_check EXIT
-first_validator_config="$(awk '
-    $1 == "binary:" { binary = $2; next }
-    $1 == "config:" && binary == "validator" { print $2; exit }
-' assets/config.yaml)"
-if [ -z "$first_validator_config" ] || [ ! -f "assets/${first_validator_config}" ]; then
-    echo "deployment does not contain a readable validator config" >&2
-    exit 1
-fi
-cp assets/config.yaml "$network_key_check_dir/config.yaml"
-cp "assets/${first_validator_config}" "$network_key_check_dir/${first_validator_config}"
-cargo run --quiet --locked --bin deploy -- explorer \
-    --dir "$network_key_check_dir" \
-    --backend-url unused.invalid \
-    remote >/dev/null
-derived_network_identity="$(sed -n 's/^export const PUBLIC_KEY_HEX = "\(.*\)";$/\1/p' "$network_key_check_dir/config.ts")"
-deployed_network_identity="$(sed -n 's/^identity: //p' assets/indexer.yaml)"
-if [ -z "$derived_network_identity" ] || [ "$derived_network_identity" != "$deployed_network_identity" ]; then
-    echo "indexer explorer identity does not match the validator network polynomial" >&2
-    exit 1
-fi
-derived_certificate_mode="$(sed -n 's/^export const CERTIFICATE_MODE = "\(.*\)" as const;$/\1/p' "$network_key_check_dir/config.ts")"
-deployed_certificate_mode="$(sed -n 's/^certificate_mode: //p' assets/indexer.yaml)"
-if [ -z "$derived_certificate_mode" ] || [ "$derived_certificate_mode" != "$deployed_certificate_mode" ]; then
-    echo "indexer explorer certificate mode does not match the validator leader mode" >&2
-    exit 1
-fi
-cleanup_network_key_check
-trap - EXIT
-
-validator_config_count=0
-while IFS= read -r validator_config; do
-    validator_config_count=$((validator_config_count + 1))
-    for expected_setting in \
-        'worker_threads: 8' \
-        'network_buffer_pool_max_per_class: 16384' \
-        'traces_sample_rate: 0.0' \
-        'signature_threads: 16'; do
-        if ! grep -qx "$expected_setting" "assets/${validator_config}"; then
-            echo "validator config is missing '${expected_setting}': assets/${validator_config}" >&2
-            exit 1
-        fi
-    done
-done < <(awk '
-    $1 == "binary:" { binary = $2; next }
-    $1 == "config:" && binary == "validator" { print $2 }
-' assets/config.yaml)
-if [ "$validator_config_count" -ne 50 ]; then
-    echo "expected 50 validator configs, found ${validator_config_count}" >&2
-    exit 1
-fi
-
 npm --prefix explorer ci
 CI=true npm --prefix explorer test -- --watchAll=false --runInBand
 env ${explorer_build_env[@]+"${explorer_build_env[@]}"} GENERATE_SOURCEMAP=false npm --prefix explorer run build

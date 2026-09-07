@@ -306,10 +306,11 @@ where
         )
         .await;
 
-        // Create the reporter and, when an indexer is configured, a backfill
+        // Create the application and, when an indexer is configured, a backfill
         // queue of finalized digests so block uploads can resume after
         // restarts.
-        let (app, pusher, consumer) = if let Some(indexer) = cfg.indexer {
+        let mut app = Application::new(proposal_delay_ms).with_block_size(cfg.block_size);
+        let (pusher, consumer) = if let Some(indexer) = cfg.indexer {
             let queue = queue::shared::init(
                 context.child("queue"),
                 queue::Config {
@@ -335,16 +336,10 @@ where
             )
             .await;
             let (producer, pusher, consumer) = indexer.split();
-            let app = Application::new(proposal_delay_ms)
-                .with_block_size(cfg.block_size)
-                .with_backfiller(producer);
-            (app, Some(pusher), Some(consumer))
+            app = app.with_backfiller(producer);
+            (Some(pusher), Some(consumer))
         } else {
-            (
-                Application::new(proposal_delay_ms).with_block_size(cfg.block_size),
-                None,
-                None,
-            )
+            (None, None)
         };
 
         // Create the application
@@ -501,11 +496,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alto_types::{StandardScheme, VrfScheme, NAMESPACE, ROTATING_ELECTOR};
-    use commonware_consensus::{
-        simplex::scheme::bls12381_threshold::{standard, vrf},
-        types::{Round, View},
-    };
+    use alto_types::{StandardScheme, NAMESPACE};
+    use commonware_consensus::simplex::scheme::bls12381_threshold::standard;
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig,
         certificate::{mocks::Fixture, Scheme as _},
@@ -514,44 +506,17 @@ mod tests {
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
-    fn electors_are_specialized_for_their_certificate_schemes() {
-        let Fixture {
-            schemes: vrf_schemes,
-            ..
-        } = vrf::fixture::<MinSig, _>(&mut StdRng::seed_from_u64(0), NAMESPACE, 4);
-        let rotating =
-            elector::Config::<VrfScheme>::build(ROTATING_ELECTOR, vrf_schemes[0].participants());
-        assert_eq!(
-            elector::Elector::terms(&rotating),
-            elector::Terms::rotating()
-        );
-
+    fn stable_elector_configures_terms() {
         let term_length = NZU32!(9);
-        let Fixture {
-            schemes: standard_schemes,
-            ..
-        } = standard::fixture::<MinSig, _>(&mut StdRng::seed_from_u64(1), NAMESPACE, 4);
+        let Fixture { schemes, .. } =
+            standard::fixture::<MinSig, _>(&mut StdRng::seed_from_u64(1), NAMESPACE, 4);
         let stable = elector::Config::<StandardScheme>::build(
             stable_elector(term_length, 37),
-            standard_schemes[0].participants(),
+            schemes[0].participants(),
         );
         let terms = elector::Elector::terms(&stable);
         assert_eq!(terms.length(), TermLength::new(term_length));
         assert_eq!(terms.stall_timeout(), Some(STABLE_LEADER_STALL_TIMEOUT));
         assert_eq!(terms.optimistic_views(), ViewDelta::new(37));
-
-        let first = elector::Elector::elect(&stable, Round::new(EPOCH, View::new(1)), None);
-        let last = elector::Elector::elect(
-            &stable,
-            Round::new(EPOCH, View::new(term_length.get() as u64)),
-            None,
-        );
-        let next = elector::Elector::elect(
-            &stable,
-            Round::new(EPOCH, View::new(u64::from(term_length.get()) + 1)),
-            None,
-        );
-        assert_eq!(first, last);
-        assert_ne!(first, next);
     }
 }

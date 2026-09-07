@@ -56,39 +56,45 @@ pub struct Config {
 /// Abstraction over the certificate source (HTTP client) used by the
 /// [feeder::Feeder] and [resolver::Resolver].
 #[allow(dead_code)]
-pub(crate) trait Source<C: Scheme>: Clone + Send + Sync + 'static {
+pub(crate) trait Source: Clone + Send + Sync + 'static {
+    type Scheme: Scheme;
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Check if the source is reachable.
     fn health(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Fetch a block by digest or index.
-    fn block(&self, query: Query) -> impl Future<Output = Result<Payload<C>, Self::Error>> + Send;
+    fn block(
+        &self,
+        query: Query,
+    ) -> impl Future<Output = Result<Payload<Self::Scheme>, Self::Error>> + Send;
 
     /// Fetch a notarized block by view or latest.
     fn notarized(
         &self,
         query: IndexQuery,
-    ) -> impl Future<Output = Result<Notarized<C>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Notarized<Self::Scheme>, Self::Error>> + Send;
 
     /// Fetch a finalized block by height or latest.
     fn finalized(
         &self,
         query: IndexQuery,
-    ) -> impl Future<Output = Result<Finalized<C>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Finalized<Self::Scheme>, Self::Error>> + Send;
 
     /// Open a WebSocket stream of certificate messages.
+    #[allow(clippy::type_complexity)]
     fn listen(
         &self,
     ) -> impl Future<
         Output = Result<
-            impl Stream<Item = Result<Message<C>, Self::Error>> + Send + Unpin,
+            impl Stream<Item = Result<Message<Self::Scheme>, Self::Error>> + Send + Unpin,
             Self::Error,
         >,
     > + Send;
 }
 
-impl<S: commonware_parallel::Strategy, C: Scheme> Source<C> for alto_client::Client<S, C> {
+impl<S: commonware_parallel::Strategy, C: Scheme> Source for alto_client::Client<S, C> {
+    type Scheme = C;
     type Error = alto_client::Error;
 
     fn health(&self) -> impl Future<Output = Result<(), Self::Error>> + Send {
@@ -186,13 +192,9 @@ async fn run<C: Scheme>(context: tokio::Context, config: Config, identity: Ident
     // The client decodes this concrete format but leaves signature checks to the feeder,
     // resolver-backed marshal, and checkpoint path so certificates are not verified twice.
     let scheme = C::certificate_verifier(NAMESPACE, identity);
-    let client = ClientBuilder::<_, C>::new_with_scheme(
-        &config.source,
-        C::certificate_verifier(NAMESPACE, identity),
-        Sequential,
-    )
-    .with_verification_disabled()
-    .build();
+    let client = ClientBuilder::new_with_scheme(&config.source, scheme.clone(), Sequential)
+        .with_verification_disabled()
+        .build();
 
     while let Err(e) = client.health().await {
         warn!(error = ?e, "waiting for certificate source to be available...");

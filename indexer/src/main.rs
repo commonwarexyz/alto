@@ -11,7 +11,7 @@ use clap::Parser;
 use commonware_codec::DecodeExt;
 use commonware_formatting::from_hex;
 use commonware_parallel::Sequential;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{num::NonZeroUsize, path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -39,7 +39,7 @@ struct Args {
         long,
         required_unless_present = "config",
         conflicts_with = "config",
-        value_parser = ["standard", "vrf"]
+        value_parser = CertificateMode::ALL.map(CertificateMode::as_str)
     )]
     certificate_mode: Option<String>,
 
@@ -53,12 +53,12 @@ struct Args {
     #[clap(long, default_value_t = DEFAULT_MAX_VIEWS)]
     max_views: NonZeroUsize,
 
-    /// Path to the deployer-generated hosts file.
-    #[clap(long, requires = "config", conflicts_with = "identity")]
+    /// Accepted because the deployer starts every binary with `--hosts`. The indexer does not use it.
+    #[clap(long, conflicts_with = "identity")]
     hosts: Option<PathBuf>,
 
     /// Path to the deployer-provided indexer config YAML.
-    #[clap(long, requires = "hosts", conflicts_with = "identity")]
+    #[clap(long, conflicts_with = "identity")]
     config: Option<PathBuf>,
 }
 
@@ -93,21 +93,6 @@ struct Settings {
     explorer_mode: &'static str,
 }
 
-#[derive(Serialize)]
-struct RuntimeExplorerConfig<'a> {
-    #[serde(rename = "PUBLIC_KEY_HEX")]
-    public_key_hex: &'a str,
-    #[serde(rename = "LOCATIONS")]
-    locations: &'a [([f64; 2], String)],
-    #[serde(rename = "PARTICIPANTS")]
-    participants: &'a [String],
-    #[serde(rename = "CERTIFICATE_MODE")]
-    certificate_mode: CertificateMode,
-    name: &'a str,
-    description: &'a str,
-    mode: &'a str,
-}
-
 #[derive(Clone)]
 struct ExplorerScript(String);
 
@@ -122,7 +107,6 @@ fn local_explorer_config() -> ExplorerConfig {
 
 fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
     if let Some(config) = args.config {
-        debug_assert!(args.hosts.is_some());
         let config = std::fs::read_to_string(config)?;
         let config: DeployerConfig = serde_yaml::from_str(&config)?;
         let explorer_mode = if config.explorer.is_some() {
@@ -146,12 +130,10 @@ fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
         identity: args
             .identity
             .expect("clap requires --identity when --config is absent"),
-        certificate_mode: match args.certificate_mode.as_deref() {
-            Some("standard") => CertificateMode::Standard,
-            Some("vrf") => CertificateMode::Vrf,
-            None => unreachable!("clap requires --certificate-mode in direct mode"),
-            Some(_) => unreachable!("clap validates certificate mode"),
-        },
+        certificate_mode: args
+            .certificate_mode
+            .expect("clap requires --certificate-mode when --config is absent")
+            .parse()?,
         block_size: args.block_size,
         max_views: args.max_views,
         explorer: local_explorer_config(),
@@ -159,20 +141,19 @@ fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
     })
 }
 
-fn explorer_script(settings: &Settings) -> Result<String, serde_json::Error> {
-    let config = RuntimeExplorerConfig {
-        public_key_hex: &settings.identity,
-        locations: &settings.explorer.locations,
-        participants: &settings.explorer.participants,
-        certificate_mode: settings.certificate_mode,
-        name: &settings.explorer.name,
-        description: &settings.explorer.description,
-        mode: settings.explorer_mode,
-    };
-    Ok(format!(
-        "window.ALTO_DEPLOYMENT = {};\nwindow.ALTO_DEPLOYMENT.BACKEND_URL = window.location.host;\n",
-        serde_json::to_string(&config)?
-    ))
+fn explorer_script(settings: &Settings) -> String {
+    let config = serde_json::json!({
+        "PUBLIC_KEY_HEX": settings.identity,
+        "LOCATIONS": settings.explorer.locations,
+        "PARTICIPANTS": settings.explorer.participants,
+        "CERTIFICATE_MODE": settings.certificate_mode,
+        "name": settings.explorer.name,
+        "description": settings.explorer.description,
+        "mode": settings.explorer_mode,
+    });
+    format!(
+        "window.ALTO_DEPLOYMENT = {config};\nwindow.ALTO_DEPLOYMENT.BACKEND_URL = window.location.host;\n"
+    )
 }
 
 fn response(body: Body, content_type: &'static str) -> Response {
@@ -220,7 +201,7 @@ async fn explorer_asset(uri: Uri) -> Response {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse args
     let settings = load_settings(Args::parse())?;
-    let explorer_script = ExplorerScript(explorer_script(&settings)?);
+    let explorer_script = ExplorerScript(explorer_script(&settings));
 
     // Create logger
     tracing_subscriber::fmt()
@@ -351,7 +332,7 @@ mod tests {
             explorer_mode: "public",
         };
 
-        let script = explorer_script(&settings).unwrap();
+        let script = explorer_script(&settings);
         assert!(script.contains(r#""PUBLIC_KEY_HEX":"abcd""#));
         assert!(script.contains(r#""PARTICIPANTS":["participant"]"#));
         assert!(script.contains(r#""CERTIFICATE_MODE":"standard""#));

@@ -1,7 +1,6 @@
-ARG BASE_IMAGE=ubuntu:24.04
-FROM ${BASE_IMAGE}
+# Use same Ubuntu version as `commonware-deployer`
+FROM ubuntu:24.04
 
-ARG RUST_TOOLCHAIN=stable
 ARG TARGET_TRIPLE
 ARG TARGET_CARGO_NAME
 ARG TARGET_CC_NAME
@@ -30,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-    --default-toolchain ${RUST_TOOLCHAIN} \
+    --default-toolchain stable \
     --profile minimal
 
 ENV PATH="/root/.cargo/bin:${PATH}" \

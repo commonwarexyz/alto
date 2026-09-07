@@ -33,7 +33,7 @@ const MAX_FUTURE_SKEW_MS: u64 = 1_000;
 pub struct Application<S: Scheme> {
     backfiller: Option<indexer::Producer>,
     delay_ms: NonZeroU64,
-    block_size: u32,
+    block_size: usize,
     _scheme: PhantomData<S>,
 }
 
@@ -63,7 +63,8 @@ impl<S: Scheme> Application<S> {
     }
 
     pub(crate) fn with_block_size(mut self, block_size: u32) -> Self {
-        self.block_size = block_size;
+        self.block_size = usize::try_from(block_size)
+            .expect("configured block size is unsupported on this platform");
         self
     }
 
@@ -113,10 +114,8 @@ where
         // Each proposal carries a fresh opaque payload of the configured size. The payload only
         // needs to be incompressible, so seed a userspace generator once per proposal instead of
         // drawing every byte from the operating system on the proposal hot path.
-        let block_size = usize::try_from(self.block_size)
-            .expect("configured block size is unsupported on this platform");
-        let mut data = vec![0; block_size];
-        if block_size > 0 {
+        let mut data = vec![0; self.block_size];
+        if self.block_size > 0 {
             StdRng::from_rng(&mut runtime_context).fill_bytes(&mut data);
         }
 
@@ -142,7 +141,7 @@ where
         };
 
         // Block size is a consensus rule, so every proposal must match the local configuration.
-        if usize::try_from(self.block_size).ok() != Some(block.data.len()) {
+        if block.data.len() != self.block_size {
             return false;
         }
 
@@ -150,11 +149,16 @@ where
         if block.timestamp <= parent.timestamp || block.timestamp > MAX_BLOCK_TIMESTAMP_MS {
             return false;
         }
-        let Some(deadline) = SystemTime::UNIX_EPOCH.checked_add(Duration::from_millis(
-            block.timestamp.saturating_sub(MAX_FUTURE_SKEW_MS),
-        )) else {
-            return false;
-        };
+
+        // Never reject on the local clock: this verdict gates certification, which Simplex requires
+        // to be deterministic across validators. Wait for the skew window instead. A stalled
+        // certification times out the view and drops this request.
+        //
+        // The timestamp is chosen by an untrusted proposer, but the check above caps it at
+        // `MAX_BLOCK_TIMESTAMP_MS` (year 2200), which `SystemTime` represents on every platform,
+        // so this addition cannot overflow.
+        let deadline = SystemTime::UNIX_EPOCH
+            + Duration::from_millis(block.timestamp.saturating_sub(MAX_FUTURE_SKEW_MS));
         runtime_context.sleep_until(deadline).await;
 
         // The height and digest invariants are enforced in `Marshaled`:
@@ -197,6 +201,8 @@ mod tests {
     use commonware_utils::NZU64;
     use std::sync::Arc;
 
+    const DELAY_MS: NonZeroU64 = NZU64!(10);
+
     fn test_context(view: u64, parent: (View, sha256::Digest)) -> Context {
         Context {
             round: Round::new(EPOCH, View::new(view)),
@@ -231,7 +237,7 @@ mod tests {
     fn verify_waits_until_future_block_enters_skew_window() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS);
+            let mut application = Application::new(DELAY_MS);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -267,7 +273,7 @@ mod tests {
     fn verify_rejects_equal_parent_timestamp() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS);
+            let mut application = Application::new(DELAY_MS);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -296,8 +302,7 @@ mod tests {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
             let block_size = 4;
-            let mut application =
-                Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS).with_block_size(block_size);
+            let mut application = Application::new(DELAY_MS).with_block_size(block_size);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -337,7 +342,7 @@ mod tests {
     fn verify_returns_immediately_for_mature_block_timestamp() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS);
+            let mut application = Application::new(DELAY_MS);
 
             context.sleep(Duration::from_millis(10)).await;
             let now = context.current().epoch_millis();
@@ -398,8 +403,7 @@ mod tests {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
             let block_size = 128;
-            let mut application =
-                Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS).with_block_size(block_size);
+            let mut application = Application::new(DELAY_MS).with_block_size(block_size);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -426,7 +430,7 @@ mod tests {
     fn verify_rejects_timestamp_above_maximum() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS);
+            let mut application = Application::new(DELAY_MS);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -457,7 +461,7 @@ mod tests {
     fn propose_panics_when_parent_timestamp_is_maximum() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(crate::DEFAULT_STABLE_LEADER_DELAY_MS);
+            let mut application = Application::new(DELAY_MS);
 
             let parent = Block::new(
                 test_context(1, (View::zero(), sha256::Digest::EMPTY)),

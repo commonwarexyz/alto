@@ -1,6 +1,5 @@
 use crate::Source;
 use alto_client::{consensus::Payload, IndexQuery, Query};
-use alto_types::Scheme;
 use bytes::Bytes;
 use commonware_codec::Encode;
 use commonware_consensus::{
@@ -10,7 +9,7 @@ use commonware_consensus::{
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
 use commonware_resolver::opaque;
 use commonware_runtime::{Clock, Metrics, Spawner};
-use std::{future::Future, marker::PhantomData, num::NonZeroUsize, time::Duration};
+use std::{future::Future, num::NonZeroUsize, time::Duration};
 use tracing::{debug, warn};
 
 type Key = handler::Key<Digest>;
@@ -18,7 +17,7 @@ type Subscriber = handler::Annotation;
 pub type Resolver = opaque::Resolver<Key, Subscriber, PublicKey>;
 
 /// Start the follower resolver and marshal handler backed by `client`.
-pub fn init<E, C, CS>(
+pub fn init<E, C>(
     context: E,
     client: C,
     mailbox_size: NonZeroUsize,
@@ -26,13 +25,12 @@ pub fn init<E, C, CS>(
 ) -> (handler::Receiver<Digest>, Resolver)
 where
     E: Clock + Spawner + Metrics,
-    C: Source<CS>,
-    CS: Scheme,
+    C: Source,
 {
     let (handler_rx, handler) = handler::init(context.child("handler"), mailbox_size);
     let resolver = opaque::init::<_, _, _, PublicKey>(
         context.child("resolver"),
-        Fetcher::<C, CS>::new(client),
+        Fetcher(client),
         handler,
         mailbox_size,
         fetch_retry_timeout,
@@ -42,19 +40,9 @@ where
 
 /// Fetches and encodes marshal resolver payloads from an Alto source client.
 #[derive(Clone)]
-struct Fetcher<C, CS>(C, PhantomData<CS>);
+struct Fetcher<C>(C);
 
-impl<C, CS> Fetcher<C, CS> {
-    const fn new(client: C) -> Self {
-        Self(client, PhantomData)
-    }
-}
-
-impl<C, CS> opaque::Fetcher for Fetcher<C, CS>
-where
-    C: Source<CS>,
-    CS: Scheme,
-{
+impl<C: Source> opaque::Fetcher for Fetcher<C> {
     type Key = Key;
     type Value = Bytes;
 
@@ -74,11 +62,7 @@ where
     }
 }
 
-impl<C, CS> Fetcher<C, CS>
-where
-    C: Source<CS>,
-    CS: Scheme,
-{
+impl<C: Source> Fetcher<C> {
     /// Fetch and encode a block response by digest.
     async fn fetch_block_by_digest(digest: Digest, client: C) -> Option<Bytes> {
         debug!(?digest, "fetching block by digest");
@@ -235,7 +219,8 @@ mod tests {
         }
     }
 
-    impl Source<VrfScheme> for BlockingSource {
+    impl Source for BlockingSource {
+        type Scheme = VrfScheme;
         type Error = MockError;
 
         async fn health(&self) -> Result<(), Self::Error> {
@@ -277,14 +262,14 @@ mod tests {
         }
     }
 
-    fn start_resolver<C: Source<VrfScheme>>(
+    fn start_resolver<C: Source<Scheme = VrfScheme>>(
         context: deterministic::Context,
         source: C,
         consumer: TestConsumer,
     ) -> Resolver {
         opaque::init::<_, _, _, PublicKey>(
             context,
-            Fetcher::<C, VrfScheme>::new(source),
+            Fetcher(source),
             consumer,
             NZUsize!(16),
             DEFAULT_FETCH_RETRY_TIMEOUT,

@@ -52,7 +52,8 @@ impl MockSource {
     }
 }
 
-impl Source<VrfScheme> for MockSource {
+impl Source for MockSource {
+    type Scheme = VrfScheme;
     type Error = MockError;
 
     async fn health(&self) -> Result<(), Self::Error> {

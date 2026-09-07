@@ -1,5 +1,5 @@
 use alto_types::CertificateMode;
-use commonware_utils::{NZUsize, Probability, NZU32, NZU64};
+use commonware_utils::{NZUsize, Probability, NZU32};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -21,9 +21,6 @@ pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(4_096);
 /// How long validators wait for a leader's proposal before nullifying the view. The configured
 /// proposal delay must stay below this or a leader could never propose in time.
 pub const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
-const DEFAULT_TRACES_SAMPLE_RATE: f64 = 0.0;
-const DEFAULT_STABLE_LEADER_DELAY_MS: NonZeroU64 = NZU64!(10);
-const DEFAULT_STABLE_LEADER_TERM_LENGTH: NonZeroU32 = NZU32!(1_000);
 const DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS: u64 = 48;
 
 fn default_backfiller_max_active() -> NonZeroUsize {
@@ -46,10 +43,6 @@ fn default_network_buffer_pool_max_per_class() -> Option<NonZeroU32> {
     Some(DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS)
 }
 
-const fn default_traces_sample_rate() -> f64 {
-    DEFAULT_TRACES_SAMPLE_RATE
-}
-
 fn deserialize_traces_sample_rate<'de, D>(deserializer: D) -> Result<f64, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -67,51 +60,33 @@ const fn default_stable_leader_optimistic_views() -> u64 {
     DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS
 }
 
+fn deserialize_term_length<'de, D>(deserializer: D) -> Result<NonZeroU32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let term_length = NonZeroU32::deserialize(deserializer)?;
+    if term_length.get() > 1 {
+        return Ok(term_length);
+    }
+    Err(serde::de::Error::custom(
+        "stable leader term length must be greater than 1",
+    ))
+}
+
 /// Leader election policy for the consensus engine.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(tag = "mode", rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Leader {
     /// Select a new VRF-derived leader for every view.
     Rotating { delay_ms: NonZeroU64 },
     /// Keep one round-robin leader for a term and pace its proposals.
     Stable {
         delay_ms: NonZeroU64,
+        #[serde(deserialize_with = "deserialize_term_length")]
         term_length: NonZeroU32,
+        #[serde(default = "default_stable_leader_optimistic_views")]
         optimistic_views: u64,
     },
-}
-
-impl<'de> Deserialize<'de> for Leader {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
-        enum Config {
-            Rotating {
-                delay_ms: NonZeroU64,
-            },
-            Stable {
-                delay_ms: NonZeroU64,
-                term_length: NonZeroU32,
-                #[serde(default = "default_stable_leader_optimistic_views")]
-                optimistic_views: u64,
-            },
-        }
-
-        match Config::deserialize(deserializer)? {
-            Config::Rotating { delay_ms } => Ok(Self::rotating(delay_ms)),
-            Config::Stable {
-                delay_ms,
-                term_length,
-                optimistic_views,
-            } if term_length.get() > 1 => Ok(Self::stable(delay_ms, term_length, optimistic_views)),
-            Config::Stable { .. } => Err(serde::de::Error::custom(
-                "stable leader term length must be greater than 1",
-            )),
-        }
-    }
 }
 
 impl Leader {
@@ -146,16 +121,6 @@ impl Leader {
     }
 }
 
-impl Default for Leader {
-    fn default() -> Self {
-        Self::stable(
-            DEFAULT_STABLE_LEADER_DELAY_MS,
-            DEFAULT_STABLE_LEADER_TERM_LENGTH,
-            DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS,
-        )
-    }
-}
-
 /// Configuration for the [engine::Engine].
 #[derive(Deserialize, Serialize)]
 pub struct Config {
@@ -178,10 +143,7 @@ pub struct Config {
     #[serde(default)]
     pub network_buffer_pool_parallelism: Option<NonZeroUsize>,
     pub log_level: String,
-    #[serde(
-        default = "default_traces_sample_rate",
-        deserialize_with = "deserialize_traces_sample_rate"
-    )]
+    #[serde(default, deserialize_with = "deserialize_traces_sample_rate")]
     /// Fraction of traces exported to the configured collector. Zero disables tracing.
     pub traces_sample_rate: f64,
 
@@ -217,15 +179,18 @@ impl Config {
     /// are exact multiples of `2^-64` (rejecting common rates such as `0.0001`). A non-zero rate
     /// never rounds down to zero, so any positive rate keeps tracing enabled.
     pub fn traces_sample_probability(&self) -> Probability {
-        const PARTS_PER_BILLION: u64 = 1_000_000_000;
-        let rate = self.traces_sample_rate;
-        let mut numerator = (rate * PARTS_PER_BILLION as f64).round() as u64;
-        if rate > 0.0 {
-            numerator = numerator.max(1);
-        }
-        Probability::new(numerator.min(PARTS_PER_BILLION), PARTS_PER_BILLION)
-            .expect("traces sample rate must be between 0 and 1")
+        traces_sample_probability(self.traces_sample_rate)
     }
+}
+
+fn traces_sample_probability(rate: f64) -> Probability {
+    const PARTS_PER_BILLION: u64 = 1_000_000_000;
+    let mut numerator = (rate * PARTS_PER_BILLION as f64).round() as u64;
+    if rate > 0.0 {
+        numerator = numerator.max(1);
+    }
+    Probability::new(numerator.min(PARTS_PER_BILLION), PARTS_PER_BILLION)
+        .expect("traces sample rate must be between 0 and 1")
 }
 
 /// A list of peers provided when a validator is run locally.
@@ -245,9 +210,7 @@ mod tests {
         types::ViewDelta,
     };
     use commonware_cryptography::{
-        bls12381::primitives::variant::MinSig,
-        certificate::{mocks::Fixture, Scheme as _},
-        ed25519::PublicKey,
+        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519::PublicKey,
         Digestible, Signer,
     };
     use commonware_macros::{select, test_traced};
@@ -260,7 +223,7 @@ mod tests {
         deterministic::{self, Runner},
         Clock, Metrics, Runner as _, Spawner, Supervisor as _,
     };
-    use commonware_utils::{channel::oneshot, ordered::Set, probability, NZUsize, NZU32};
+    use commonware_utils::{channel::oneshot, ordered::Set, probability, NZUsize, NZU32, NZU64};
     use engine::Engine;
     use governor::Quota;
     use indexer::mocks;
@@ -274,6 +237,10 @@ mod tests {
 
     /// (Effectively) unlimited quota for tests.
     const TEST_QUOTA: Quota = Quota::per_second(NZU32!(u32::MAX));
+
+    /// Stable leader policy used by every simulated validator.
+    const STABLE_LEADER_DELAY_MS: NonZeroU64 = NZU64!(10);
+    const STABLE_LEADER_TERM_LENGTH: NonZeroU32 = NZU32!(1_000);
 
     /// Registers all validators using the oracle.
     async fn register_validators(
@@ -426,7 +393,6 @@ mod tests {
 
     #[derive(Clone)]
     struct ValidatorConfig {
-        leader: Leader,
         leader_timeout: Duration,
         certification_timeout: Duration,
         block_size: u32,
@@ -438,7 +404,6 @@ mod tests {
     impl Default for ValidatorConfig {
         fn default() -> Self {
             Self {
-                leader: Leader::default(),
                 leader_timeout: Duration::from_secs(1),
                 certification_timeout: Duration::from_secs(2),
                 block_size: 0,
@@ -454,7 +419,6 @@ mod tests {
         oracle: &Oracle<PublicKey, deterministic::Context>,
         signer: &commonware_cryptography::ed25519::PrivateKey,
         scheme: &bls12381_threshold::Scheme<PublicKey, MinSig>,
-        participants: Set<PublicKey>,
         registration: Registration,
         indexer: Option<mocks::Client>,
     ) {
@@ -463,7 +427,6 @@ mod tests {
             oracle,
             signer,
             scheme,
-            participants,
             registration,
             ValidatorConfig {
                 indexer,
@@ -478,7 +441,6 @@ mod tests {
         oracle: &Oracle<PublicKey, deterministic::Context>,
         signer: &commonware_cryptography::ed25519::PrivateKey,
         scheme: &bls12381_threshold::Scheme<PublicKey, MinSig>,
-        participants: Set<PublicKey>,
         registration: Registration,
         cfg: ValidatorConfig,
     ) {
@@ -487,15 +449,6 @@ mod tests {
 
         let public_key = signer.public_key();
         let uid = format!("validator_{public_key}");
-        assert_eq!(scheme.participants(), &participants);
-        let Leader::Stable {
-            delay_ms,
-            term_length,
-            optimistic_views,
-        } = cfg.leader
-        else {
-            panic!("standard test scheme requires stable leadership");
-        };
         let config = engine::Config {
             blocker: oracle.control(public_key.clone()),
             provider: oracle.manager(),
@@ -504,11 +457,14 @@ mod tests {
             finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
             me: signer.public_key(),
             scheme: scheme.clone(),
-            elector: engine::stable_elector(term_length, optimistic_views),
+            elector: engine::stable_elector(
+                STABLE_LEADER_TERM_LENGTH,
+                DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS,
+            ),
             mailbox_size: 1024,
             deque_size: 10,
             block_size: cfg.block_size,
-            proposal_delay_ms: delay_ms,
+            proposal_delay_ms: STABLE_LEADER_DELAY_MS,
             leader_timeout: cfg.leader_timeout,
             certification_timeout: cfg.certification_timeout,
             nullify_retry: timeout_retry,
@@ -546,43 +502,15 @@ mod tests {
 
     #[test]
     fn traces_sample_probability_preserves_configured_rate() {
-        let config = |traces_sample_rate: f64| Config {
-            private_key: String::new(),
-            share: String::new(),
-            polynomial: String::new(),
-            port: 0,
-            metrics_port: 0,
-            directory: String::new(),
-            worker_threads: 1,
-            blocking_threads: 1,
-            storage_buffer_pool_max_per_class: None,
-            network_buffer_pool_max_per_class: None,
-            storage_buffer_pool_parallelism: None,
-            network_buffer_pool_parallelism: None,
-            log_level: String::new(),
-            traces_sample_rate,
-            local: true,
-            allowed_peers: Vec::new(),
-            bootstrappers: Vec::new(),
-            mailbox_size: 1,
-            deque_size: 1,
-            block_size: 0,
-            signature_threads: 1,
-            leader: Leader::default(),
-            backfiller_max_active: DEFAULT_BACKFILLER_MAX_ACTIVE,
-            backfiller_retry_ms: DEFAULT_BACKFILLER_RETRY_MS,
-            indexer: None,
-        };
-
-        assert!(config(0.0).traces_sample_probability().is_zero());
-        assert!(config(1.0).traces_sample_probability().is_one());
+        assert!(traces_sample_probability(0.0).is_zero());
+        assert!(traces_sample_probability(1.0).is_one());
         // Rates that are not exact multiples of 2^-64 (rejected by `Probability::from_f64`) must
         // still convert.
         assert!(Probability::from_f64(0.0001).is_none());
-        let rate = config(0.0001).traces_sample_probability().as_f64();
+        let rate = traces_sample_probability(0.0001).as_f64();
         assert!((rate - 0.0001).abs() < 1e-12, "{rate}");
         // Positive rates below the ratio's resolution still keep tracing enabled.
-        assert!(!config(1e-12).traces_sample_probability().is_zero());
+        assert!(!traces_sample_probability(1e-12).is_zero());
     }
 
     async fn poll_until_height(
@@ -639,22 +567,12 @@ mod tests {
                 ..
             } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
-            let participants_set = Set::from_iter_dedup(participants.clone());
 
             link_validators(&mut oracle, &participants, link, None).await;
 
             for (signer, scheme) in private_keys.iter().zip(schemes.iter()) {
                 let registration = registrations.remove(&signer.public_key()).unwrap();
-                start_validator(
-                    &context,
-                    &oracle,
-                    signer,
-                    scheme,
-                    participants_set.clone(),
-                    registration,
-                    None,
-                )
-                .await;
+                start_validator(&context, &oracle, signer, scheme, registration, None).await;
             }
 
             poll_until_height(&context, &oracle, required).await;
@@ -723,7 +641,6 @@ mod tests {
                 ..
             } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
-            let participants_set = Set::from_iter_dedup(participants.clone());
 
             // Link all validators (except 0)
             let link = Link {
@@ -744,16 +661,7 @@ mod tests {
                     continue;
                 }
                 let registration = registrations.remove(&signer.public_key()).unwrap();
-                start_validator(
-                    &context,
-                    &oracle,
-                    signer,
-                    scheme,
-                    participants_set.clone(),
-                    registration,
-                    None,
-                )
-                .await;
+                start_validator(&context, &oracle, signer, scheme, registration, None).await;
             }
 
             poll_until_height(&context, &oracle, initial_container_required).await;
@@ -773,7 +681,6 @@ mod tests {
                 &oracle,
                 &private_keys[0],
                 &schemes[0],
-                participants_set,
                 registration,
                 None,
             )
@@ -821,7 +728,6 @@ mod tests {
 
                 // Register participants
                 let mut registrations = register_validators(&mut oracle, &participants).await;
-                let participants_set = Set::from_iter_dedup(participants.clone());
 
                 // Link all validators
                 let link = Link {
@@ -849,7 +755,6 @@ mod tests {
                         &oracle,
                         signer,
                         scheme,
-                        participants_set.clone(),
                         registration,
                         cfg.clone(),
                     )
@@ -958,7 +863,6 @@ mod tests {
                 ..
             } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
-            let participants_set = Set::from_iter_dedup(participants.clone());
 
             // Link all validators
             let link = Link {
@@ -980,7 +884,6 @@ mod tests {
                     &oracle,
                     &signer,
                     &scheme,
-                    participants_set.clone(),
                     registration,
                     Some(indexer.clone()),
                 )
@@ -1041,7 +944,6 @@ mod tests {
                 ..
             } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
-            let participants_set = Set::from_iter_dedup(participants.clone());
 
             let link = Link {
                 latency: Duration::from_millis(10),
@@ -1062,7 +964,6 @@ mod tests {
                     &oracle,
                     &signer,
                     &scheme,
-                    participants_set.clone(),
                     registration,
                     Some(indexer.clone()),
                 )
@@ -1123,7 +1024,6 @@ mod tests {
                 ..
             } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
-            let participants_set = Set::from_iter_dedup(participants.clone());
 
             let link = Link {
                 latency: Duration::from_millis(10),
@@ -1152,7 +1052,6 @@ mod tests {
                     &oracle,
                     &signer,
                     &scheme,
-                    participants_set.clone(),
                     registration,
                     Some(indexer.clone()),
                 )
@@ -1252,7 +1151,6 @@ mod tests {
                 ..
             } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
-            let participants_set = Set::from_iter_dedup(participants.clone());
 
             let link = Link {
                 latency: Duration::from_millis(10),
@@ -1277,7 +1175,6 @@ mod tests {
                     &oracle,
                     &signer,
                     &scheme,
-                    participants_set.clone(),
                     registration,
                     Some(indexer.clone()),
                 )
@@ -1433,7 +1330,6 @@ mod tests {
                 // Rebuild the original validator set so the durable queue state
                 // we recover later comes from a realistic multi-validator run.
                 let mut registrations = register_validators(&mut oracle, &participants).await;
-                let participants_set = Set::from_iter_dedup(participants.clone());
 
                 let link = Link {
                     latency: Duration::from_millis(10),
@@ -1449,7 +1345,6 @@ mod tests {
                         &oracle,
                         &signer,
                         &scheme,
-                        participants_set.clone(),
                         registration,
                         Some(indexer.clone()),
                     )
@@ -1556,7 +1451,6 @@ mod tests {
             network.start();
 
             let mut registrations = register_validators(&mut oracle, &participants).await;
-            let participants_set = Set::from_iter_dedup(participants.clone());
 
             // Do not relink validators on restart. Any successful block
             // uploads in this run must therefore come from replaying the
@@ -1568,7 +1462,6 @@ mod tests {
                     &oracle,
                     &signer,
                     &scheme,
-                    participants_set.clone(),
                     registration,
                     Some(indexer.clone()),
                 )

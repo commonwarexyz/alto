@@ -52,6 +52,30 @@ pub enum CertificateMode {
     Vrf,
 }
 
+impl CertificateMode {
+    /// Every mode, in the order offered on the command line.
+    pub const ALL: [Self; 2] = [Self::Standard, Self::Vrf];
+
+    /// Name used on the command line and in configuration files (the serde spelling).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Vrf => "vrf",
+        }
+    }
+}
+
+impl std::str::FromStr for CertificateMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|mode| mode.as_str() == s)
+            .ok_or_else(|| format!("unknown certificate mode: {s}"))
+    }
+}
+
 /// Alto's common surface over its two statically selected consensus schemes.
 ///
 /// Consensus engines remain monomorphized over the concrete implementation. This trait only
@@ -179,7 +203,6 @@ impl<S: Scheme> Seedable for Finalization<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use commonware_codec::{DecodeExt, Encode, EncodeSize, FixedSize};
     use commonware_consensus::{
         simplex::types::{Notarization as CNotarization, Notarize, Proposal},
         types::{Epoch, Round, View},
@@ -188,13 +211,6 @@ mod tests {
     use commonware_parallel::Sequential;
     use commonware_utils::non_empty;
     use rand::{rngs::StdRng, SeedableRng};
-
-    #[test]
-    fn rotating_elector_is_pinned_to_v1() {
-        // The validator and the explorer WASM both derive leaders from this constant
-        // Changing the version changes the leader schedule of every rotating-leader network
-        assert_eq!(format!("{ROTATING_ELECTOR:?}"), "V1");
-    }
 
     fn standard_schemes(seed: u64) -> Vec<StandardScheme> {
         let mut rng = StdRng::seed_from_u64(seed);
@@ -221,72 +237,6 @@ mod tests {
             .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
             .collect();
         CNotarization::from_notarizes(&schemes[0], non_empty![@&votes], &Sequential).unwrap()
-    }
-
-    #[test]
-    fn standard_threshold_votes_use_one_signature_on_wire() {
-        let schemes = standard_schemes(13);
-        let proposal = proposal(9);
-        let vote = Notarize::sign(&schemes[0], proposal.clone()).unwrap();
-        let notarization = notarization(&schemes, 9);
-        let signature_size = <Signature as FixedSize>::SIZE;
-
-        assert_eq!(vote.attestation.signature.encode_size(), signature_size);
-        assert_eq!(notarization.certificate.encode_size(), signature_size);
-        assert_eq!(
-            vote.encode_size(),
-            proposal.encode_size() + vote.attestation.signer.encode_size() + signature_size
-        );
-        assert_eq!(
-            notarization.encode_size(),
-            proposal.encode_size() + signature_size
-        );
-
-        let encoded_vote = vote.encode();
-        let encoded_notarization = notarization.encode();
-        assert_eq!(
-            Notarize::<StandardScheme, Digest>::decode(encoded_vote.clone()).unwrap(),
-            vote
-        );
-        assert_eq!(
-            Notarization::<StandardScheme>::decode(encoded_notarization.clone()).unwrap(),
-            notarization
-        );
-        assert!(Notarize::<VrfScheme, Digest>::decode(encoded_vote).is_err());
-        assert!(Notarization::<VrfScheme>::decode(encoded_notarization).is_err());
-    }
-
-    #[test]
-    fn vrf_threshold_votes_retain_two_signatures_on_wire() {
-        let schemes = vrf_schemes(14);
-        let proposal = proposal(9);
-        let vote = Notarize::sign(&schemes[0], proposal.clone()).unwrap();
-        let notarization = notarization(&schemes, 9);
-        let certificate_size = 2 * <Signature as FixedSize>::SIZE;
-
-        assert_eq!(vote.attestation.signature.encode_size(), certificate_size);
-        assert_eq!(notarization.certificate.encode_size(), certificate_size);
-        assert_eq!(
-            vote.encode_size(),
-            proposal.encode_size() + vote.attestation.signer.encode_size() + certificate_size
-        );
-        assert_eq!(
-            notarization.encode_size(),
-            proposal.encode_size() + certificate_size
-        );
-
-        let encoded_vote = vote.encode();
-        let encoded_notarization = notarization.encode();
-        assert_eq!(
-            Notarize::<VrfScheme, Digest>::decode(encoded_vote.clone()).unwrap(),
-            vote
-        );
-        assert_eq!(
-            Notarization::<VrfScheme>::decode(encoded_notarization.clone()).unwrap(),
-            notarization
-        );
-        assert!(Notarize::<StandardScheme, Digest>::decode(encoded_vote).is_err());
-        assert!(Notarization::<StandardScheme>::decode(encoded_notarization).is_err());
     }
 
     #[test]

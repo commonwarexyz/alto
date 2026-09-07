@@ -94,23 +94,7 @@ where
                 // blocking so restarts resume with full parallelism immediately.
                 self.fill_slots().await;
 
-                // If there is no work in flight, block for the next queue
-                // row instead of polling an optional future in a tight loop.
-                if self.active.is_empty() {
-                    let item = self
-                        .reader
-                        .recv()
-                        .await
-                        .expect("failed to recv from finalized queue");
-                    let Some((position, entry)) = item else {
-                        warn!("consumer queue closed");
-                        break;
-                    };
-                    self.start_upload(position, entry).await;
-                    continue;
-                }
-
-                // Once the consumer is busy, race newly dequeued rows against
+                // Race newly dequeued rows (while an upload slot is free) against
                 // completions from already-running uploads.
                 let item = OptionFuture::from(
                     (self.active.len() < self.max_active.get()).then(|| self.reader.recv()),

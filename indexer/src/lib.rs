@@ -39,6 +39,9 @@ pub struct State<C: Scheme> {
     notarizations: BTreeMap<View, Notarized<C>>,
     finalizations: BTreeMap<View, Finalized<C>>,
     finalized_height_to_view: BTreeMap<u64, View>,
+    /// View whose retained certificate carries each block, so certificate-owned blocks are served
+    /// after raw-cache eviction without scanning every certificate.
+    certificate_blocks: BTreeMap<Digest, View>,
     blocks_by_digest: BTreeMap<Digest, Block>,
     /// Raw uploads have unauthenticated views, so evict blocks in insertion order.
     block_order: VecDeque<Digest>,
@@ -51,6 +54,7 @@ impl<C: Scheme> Default for State<C> {
             notarizations: BTreeMap::new(),
             finalizations: BTreeMap::new(),
             finalized_height_to_view: BTreeMap::new(),
+            certificate_blocks: BTreeMap::new(),
             blocks_by_digest: BTreeMap::new(),
             block_order: VecDeque::new(),
         }
@@ -77,14 +81,32 @@ impl<C: Scheme> State<C> {
             self.seeds.pop_first();
         }
         while self.notarizations.len() > max_views {
-            self.notarizations.pop_first();
-        }
-        while self.finalizations.len() > max_views {
-            if let Some((_, finalized)) = self.finalizations.pop_first() {
-                self.finalized_height_to_view
-                    .remove(&finalized.block.height.get());
+            if let Some((view, notarized)) = self.notarizations.pop_first() {
+                // A retained finalization for the same view carries the same block
+                if !self.finalizations.contains_key(&view) {
+                    self.certificate_blocks.remove(&notarized.block.digest());
+                }
             }
         }
+        while self.finalizations.len() > max_views {
+            if let Some((view, finalized)) = self.finalizations.pop_first() {
+                self.finalized_height_to_view
+                    .remove(&finalized.block.height.get());
+                if !self.notarizations.contains_key(&view) {
+                    self.certificate_blocks.remove(&finalized.block.digest());
+                }
+            }
+        }
+    }
+
+    /// Block carried by a retained certificate, if any.
+    fn certificate_block(&self, digest: &Digest) -> Option<&Block> {
+        let view = self.certificate_blocks.get(digest)?;
+        self.finalizations
+            .get(view)
+            .map(|f| &f.block)
+            .or_else(|| self.notarizations.get(view).map(|n| &n.block))
+            .filter(|block| &block.digest() == digest)
     }
 }
 
@@ -207,6 +229,9 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         if !state.notarizations.contains_key(&view) {
             return Ok(());
         }
+        state
+            .certificate_blocks
+            .insert(notarized.block.digest(), view);
         state.store_block(notarized.block.clone(), self.max_views);
 
         // Broadcast notarization
@@ -259,6 +284,9 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         if !state.finalizations.contains_key(&view) {
             return Ok(());
         }
+        state
+            .certificate_blocks
+            .insert(finalized.block.digest(), view);
         state.store_block(finalized.block.clone(), self.max_views);
 
         // Broadcast finalization
@@ -306,16 +334,8 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
                 state
                     .blocks_by_digest
                     .get(&digest)
-                    .or_else(|| {
-                        // Retained certificates own their blocks even after raw-cache eviction
-                        state
-                            .finalizations
-                            .values()
-                            .rev()
-                            .map(|f| &f.block)
-                            .chain(state.notarizations.values().rev().map(|n| &n.block))
-                            .find(|block| block.digest() == digest)
-                    })
+                    // Retained certificates own their blocks even after raw-cache eviction
+                    .or_else(|| state.certificate_block(&digest))
                     .map(|b| BlockResult::Block(b.clone()))
             } else {
                 None
@@ -599,7 +619,12 @@ mod tests {
     }
 
     /// Build a finalized block at `view` (height == view) so retention tests get distinct entries.
-    fn finalized_at(schemes: &[VrfScheme], view: u64) -> Finalized<VrfScheme> {
+    fn finalized_at<C: Scheme>(schemes: &[C], view: u64) -> Finalized<C> {
+        finalized_with_payload(schemes, view, Bytes::new())
+    }
+
+    /// Build a finalized block at `view` (height == view) carrying `payload`.
+    fn finalized_with_payload<C: Scheme>(schemes: &[C], view: u64, payload: Bytes) -> Finalized<C> {
         let context = Context {
             round: Round::new(EPOCH, View::new(view)),
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
@@ -610,7 +635,7 @@ mod tests {
             Sha256::hash(&[format!("parent-{view}").as_bytes()]),
             Height::new(view),
             view * 1_000,
-            Bytes::new(),
+            payload,
         );
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(view)),
@@ -747,6 +772,51 @@ mod tests {
     }
 
     #[test]
+    fn certificate_block_index_follows_retained_certificates() {
+        let (schemes, _) = fixture(0);
+        let indexer = Indexer::new(schemes[0].clone(), Sequential)
+            .with_max_views(NonZeroUsize::new(1).unwrap());
+        let digest_query = |block: &Block| commonware_formatting::hex(&block.digest().encode());
+
+        // A notarization and a finalization for the same view share one index entry
+        let first = finalized_at(&schemes, 10);
+        indexer.submit_finalization(first.clone()).unwrap();
+        indexer
+            .submit_notarization(Notarized::new(
+                create_notarization(&schemes, first.proof.proposal),
+                first.block.clone(),
+            ))
+            .unwrap();
+        assert_eq!(indexer.state.read().unwrap().certificate_blocks.len(), 1);
+        for view in 12..16 {
+            indexer.submit_block(finalized_at(&schemes, view).block);
+        }
+
+        // The block stays available while either certificate is retained
+        let second = finalized_at(&schemes, 11);
+        indexer.submit_finalization(second.clone()).unwrap();
+        assert!(indexer.get_finalization(&index_query(10)).is_none());
+        assert!(indexer.get_block(&digest_query(&first.block)).is_some());
+        assert_eq!(indexer.state.read().unwrap().certificate_blocks.len(), 2);
+
+        // Once both certificates are pruned the index releases the block
+        indexer
+            .submit_notarization(Notarized::new(
+                create_notarization(&schemes, second.proof.proposal),
+                second.block.clone(),
+            ))
+            .unwrap();
+        assert!(indexer.get_block(&digest_query(&first.block)).is_none());
+        assert!(indexer.get_block(&digest_query(&second.block)).is_some());
+        let state = indexer.state.read().unwrap();
+        assert_eq!(state.certificate_blocks.len(), 1);
+        assert_eq!(
+            state.certificate_blocks.get(&second.block.digest()),
+            Some(&View::new(11))
+        );
+    }
+
+    #[test]
     fn future_raw_blocks_do_not_pin_the_cache() {
         let (schemes, _) = fixture(0);
         let indexer = Indexer::new(schemes[0].clone(), Sequential)
@@ -832,26 +902,7 @@ mod tests {
         assert_eq!(exact.max_upload_size(), UPLOAD_OVERHEAD);
 
         // A block larger than the configured size fails to decode, before any verification.
-        let oversized = {
-            let context = Context {
-                round: Round::new(EPOCH, View::new(1)),
-                leader: ed25519::PrivateKey::from_seed(0).public_key(),
-                parent: (View::new(0), sha256::Digest::EMPTY),
-            };
-            let block = Block::new(
-                context,
-                Sha256::hash(&[b"parent"]),
-                Height::new(1),
-                1_000,
-                Bytes::from_static(&[1, 2]),
-            );
-            let proposal = Proposal::new(
-                Round::new(EPOCH, View::new(1)),
-                View::new(0),
-                block.digest(),
-            );
-            Finalized::new(create_finalization(&schemes, proposal), block)
-        };
+        let oversized = finalized_with_payload(&schemes, 1, Bytes::from_static(&[1, 2]));
         let bounded = Indexer::new(schemes[0].clone(), Sequential).with_block_size(1);
         assert!(Finalized::<VrfScheme>::decode_cfg(
             oversized.encode(),
@@ -988,28 +1039,11 @@ mod tests {
         );
         wait_for_ready(&client).await;
 
-        let context = Context {
-            round: Round::new(EPOCH, View::new(1)),
-            leader: ed25519::PrivateKey::from_seed(0).public_key(),
-            parent: (View::new(0), sha256::Digest::EMPTY),
-        };
-        let block = Block::new(
-            context,
-            Sha256::hash(&[b"genesis"]),
-            Height::new(1),
-            1000,
-            Bytes::new(),
-        );
-        let proposal = Proposal::new(
-            Round::new(EPOCH, View::new(1)),
-            View::new(0),
-            block.digest(),
-        );
+        let finalized = finalized_at(&schemes, 1);
         let notarized = Notarized::new(
-            create_notarization(&schemes, proposal.clone()),
-            block.clone(),
+            create_notarization(&schemes, finalized.proof.proposal.clone()),
+            finalized.block.clone(),
         );
-        let finalized = Finalized::new(create_finalization(&schemes, proposal), block);
 
         client.notarized_upload(notarized).await.unwrap();
         client.finalized_upload(finalized).await.unwrap();
@@ -1111,16 +1145,7 @@ mod tests {
         }
 
         // The encoded artifact exceeds both default WebSocket receive limits
-        let original = finalized_at(&schemes, 1).block;
-        let block = Block::new(
-            original.context,
-            original.parent,
-            original.height,
-            original.timestamp,
-            Bytes::from(vec![7; 64 * 1024 * 1024]),
-        );
-        let proposal = Proposal::new(block.context.round, block.context.parent.0, block.digest());
-        let finalized = Finalized::new(create_finalization(&schemes, proposal), block);
+        let finalized = finalized_with_payload(&schemes, 1, Bytes::from(vec![7; 64 * 1024 * 1024]));
         client.finalized_upload(finalized.clone()).await.unwrap();
         match stream.next().await.unwrap().unwrap() {
             alto_client::consensus::Message::Finalization(received) => {

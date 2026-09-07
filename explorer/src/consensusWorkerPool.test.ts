@@ -20,31 +20,10 @@ class FakeWorker {
     this.onerror?.({ preventDefault: () => undefined } as unknown as ErrorEvent);
   }
 
-  failNext(error: string) {
-    const message = this.messages.slice(1)[this.completed] as any;
+  completeNext(error?: string) {
+    const message = this.messages[this.completed] as any;
     this.completed += 1;
-    this.onmessage?.({
-      data: {
-        sequence: message.sequence,
-        kind: message.kind,
-        artifact: null,
-        receivedAt: message.receivedAt,
-        error,
-      },
-    } as MessageEvent);
-  }
-
-  completeNext() {
-    const message = this.messages.slice(1)[this.completed] as any;
-    this.completed += 1;
-    this.onmessage?.({
-      data: {
-        sequence: message.sequence,
-        kind: message.kind,
-        artifact: null,
-        receivedAt: message.receivedAt,
-      },
-    } as MessageEvent);
+    this.onmessage?.({ data: { sequence: message.sequence, artifact: null, error } } as MessageEvent);
   }
 }
 
@@ -61,7 +40,7 @@ test("dispatches every artifact across the verifier pool without sampling", () =
     pool.verify(id % 3, new Uint8Array([id]), id);
   }
 
-  expect(workers.map((worker) => worker.messages.slice(1).length)).toEqual([1, 1, 1]);
+  expect(workers.map((worker) => worker.messages.length)).toEqual([1, 1, 1]);
 
   // A worker that finishes early immediately takes the next queued artifact.
   for (let id = 0; id < 6; id++) {
@@ -70,7 +49,7 @@ test("dispatches every artifact across the verifier pool without sampling", () =
   workers[1].completeNext();
   workers[2].completeNext();
 
-  const verificationMessages = workers.flatMap((worker) => worker.messages.slice(1));
+  const verificationMessages = workers.flatMap((worker) => worker.messages);
   expect(verificationMessages).toHaveLength(8);
   expect(verificationMessages.map((message: any) => message.payload[0]).sort()).toEqual([
     0, 1, 2, 3, 4, 5, 6, 7,
@@ -98,7 +77,7 @@ test("keeps delivering recent results when an earlier worker stays pending", () 
     new Uint8Array([1]),
     result => {
       if (result.skipped) skipped.push(result.skipped);
-      else delivered.push(result.receivedAt);
+      delivered.push(result.receivedAt);
     },
     undefined, undefined, false, 4,
   );
@@ -139,7 +118,7 @@ test("retries an in-flight artifact on a replacement worker", () => {
 
   expect(worker.terminated).toBe(true);
   expect(replacements).toHaveLength(1);
-  expect((replacements[0].messages[1] as any).payload[0]).toBe(9);
+  expect((replacements[0].messages[0] as any).payload[0]).toBe(9);
 
   replacements[0].completeNext();
   expect(verifiedReceivedAt).toEqual([42]);
@@ -171,14 +150,14 @@ test("a failed verification still releases later results in order and replaces t
   // Hold the second artifact's result until the first reports
   second.completeNext();
   expect(verifiedReceivedAt).toEqual([]);
-  first.failNext("wasm panic");
+  first.completeNext("wasm panic");
   expect(verifiedReceivedAt).toEqual([0, 1]);
 
   // Retire the failed worker (its WASM may be poisoned) and refill its slot without retrying the
   // released result
   expect(first.terminated).toBe(true);
   expect(replacements).toHaveLength(1);
-  expect(replacements[0].messages.slice(1)).toHaveLength(0);
+  expect(replacements[0].messages).toHaveLength(0);
   expect(errors).toEqual([]);
 
   // A successful verification resets the failure count. Repeated failures without one stop the pool
@@ -188,9 +167,9 @@ test("a failed verification still releases later results in order and replaces t
   for (let id = 3; id < 6; id++) {
     pool.verify(1, new Uint8Array([id]), id);
     const active = [second, ...replacements].find(
-      (worker) => !worker.terminated && worker.messages.slice(1).length > worker.completed,
+      (worker) => !worker.terminated && worker.messages.length > worker.completed,
     )!;
-    active.failNext("wasm init failed");
+    active.completeNext("wasm init failed");
   }
   expect(verifiedReceivedAt).toEqual([0, 1, 2, 3, 4, 5]);
   expect(errors).toHaveLength(1);
@@ -220,8 +199,8 @@ test("an idle worker that fails is removed and replaced, and repeated failures s
 
   // Work goes to the replacement, never to the dead worker.
   pool.verify(1, new Uint8Array([7]), 7);
-  expect(worker.messages.slice(1)).toHaveLength(0);
-  expect(replacements[0].messages.slice(1)).toHaveLength(1);
+  expect(worker.messages).toHaveLength(0);
+  expect(replacements[0].messages).toHaveLength(1);
 
   // Consecutive failures without progress eventually surface an error instead of respawning forever.
   replacements[0].fail();
@@ -238,11 +217,7 @@ test("bounds pending work when every worker stalls", () => {
     [worker] as unknown as Worker[],
     new Uint8Array([1, 2, 3]),
     (result) => {
-      if (result.skipped) {
-        skipped.push(result.skipped);
-        expect(result.artifact).toBeNull();
-        return;
-      }
+      if (result.skipped) skipped.push(result.skipped);
       verifiedReceivedAt.push(result.receivedAt);
     },
     undefined,
@@ -259,11 +234,11 @@ test("bounds pending work when every worker stalls", () => {
 
   worker.completeNext(); // stale artifact 0 only frees the worker
   expect(skipped).toEqual([]);
-  worker.completeNext(); // artifact 997 follows the gap marker
+  worker.completeNext(); // artifact 997 reports the gap
   worker.completeNext(); // artifact 998
   worker.completeNext(); // artifact 999
   expect(verifiedReceivedAt).toEqual([997, 998, 999]);
   expect(skipped).toEqual([997]);
-  expect(worker.messages.slice(1).map((message: any) => message.receivedAt)).toEqual([0, 997, 998, 999]);
+  expect(worker.messages.map((message: any) => message.sequence)).toEqual([0, 997, 998, 999]);
   pool.terminate();
 });

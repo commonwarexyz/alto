@@ -40,76 +40,50 @@ const MaintenancePage: React.FC = () => {
         logoDimensionsRef.current = { width: rect.width, height: rect.height };
     };
 
-    // Show the logo only once the web fonts it uses have loaded. The page renders nothing while the
-    // health check runs, so this box is the first text to use Inconsolata: without waiting, it is
-    // laid out in the fallback font and then reflows (changing the box size) when the font arrives.
-    // A fallback timer keeps the page usable if the fonts never load.
-    useEffect(() => {
-        let cancelled = false;
-        let fallback: ReturnType<typeof setTimeout> | null = null;
-        // Reveal the box in the fallback font if `fonts.load` rejects
-        const fontsReady: Promise<unknown> = document.fonts
-            ? Promise.all([
-                document.fonts.load('bold 32px Inconsolata'),
-                document.fonts.load('bold 18px Inconsolata'),
-            ])
-                .then(() => document.fonts.ready)
-                .catch(() => undefined)
-            : Promise.resolve();
-        const timeout = new Promise<void>((resolve) => {
-            fallback = setTimeout(resolve, 1500);
-        });
-
-        Promise.race([fontsReady, timeout]).then(() => {
-            if (cancelled || initializedRef.current || !containerRef.current || !logoRef.current) {
-                return;
-            }
-            measureLogo();
-            const containerWidth = containerRef.current.clientWidth;
-            const containerHeight = containerRef.current.clientHeight;
-            const { width: logoWidth, height: logoHeight } = logoDimensionsRef.current;
-            positionRef.current = {
-                x: Math.random() * Math.max(0, containerWidth - logoWidth),
-                y: Math.random() * Math.max(0, containerHeight - logoHeight),
-            };
-            applyPosition();
-            logoRef.current.style.color = currentColorRef.current;
-            logoRef.current.style.borderColor = currentColorRef.current;
-            logoRef.current.style.visibility = 'visible';
-            initializedRef.current = true;
-        });
-
-        return () => {
-            cancelled = true;
-            if (fallback !== null) {
-                clearTimeout(fallback);
-            }
-        };
-    }, []);
-
-    // If a font finishes loading later (e.g. the fallback timer fired first), refresh the cached
-    // logo size and keep the logo inside the container.
-    useEffect(() => {
-        if (!document.fonts) {
+    // Refresh the cached box size and keep the box inside the container.
+    const keepInBounds = () => {
+        if (!containerRef.current || !logoRef.current) {
             return;
         }
-        const onFontsLoaded = () => {
+        measureLogo();
+        const maxX = Math.max(0, containerRef.current.clientWidth - logoDimensionsRef.current.width);
+        const maxY = Math.max(0, containerRef.current.clientHeight - logoDimensionsRef.current.height);
+        positionRef.current = {
+            x: Math.min(positionRef.current.x, maxX),
+            y: Math.min(positionRef.current.y, maxY),
+        };
+        applyPosition();
+    };
+
+    // Show the logo once its web font has loaded (or after 1.5s if it has not), so the box is
+    // measured at its final size instead of reflowing when the font arrives. Whichever of the two
+    // fires second re-measures, which keeps the box in bounds if the font lands late.
+    useEffect(() => {
+        const reveal = () => {
             if (!containerRef.current || !logoRef.current) {
                 return;
             }
+            if (initializedRef.current) {
+                keepInBounds();
+                return;
+            }
             measureLogo();
-            const maxX = Math.max(0, containerRef.current.clientWidth - logoDimensionsRef.current.width);
-            const maxY = Math.max(0, containerRef.current.clientHeight - logoDimensionsRef.current.height);
+            const { width, height } = logoDimensionsRef.current;
             positionRef.current = {
-                x: Math.min(positionRef.current.x, maxX),
-                y: Math.min(positionRef.current.y, maxY),
+                x: Math.random() * Math.max(0, containerRef.current.clientWidth - width),
+                y: Math.random() * Math.max(0, containerRef.current.clientHeight - height),
             };
             applyPosition();
+            logoRef.current.style.visibility = 'visible';
+            initializedRef.current = true;
         };
-        document.fonts.addEventListener('loadingdone', onFontsLoaded);
-        return () => {
-            document.fonts.removeEventListener('loadingdone', onFontsLoaded);
-        };
+        const fallback = setTimeout(reveal, 1500);
+        // A rejected load (blocked or failed download) reveals the box in the fallback font.
+        const font: Promise<unknown> = document.fonts
+            ? document.fonts.load('bold 32px Inconsolata')
+            : Promise.resolve();
+        font.then(reveal, reveal);
+        return () => clearTimeout(fallback);
     }, []);
 
     useEffect(() => {
@@ -220,26 +194,11 @@ const MaintenancePage: React.FC = () => {
         };
     }, []);
 
-    // Handle window resize to keep logo in bounds
+    // The box changes size across the responsive breakpoint, so re-measure and clamp on resize.
     useEffect(() => {
-        const handleResize = () => {
-            if (containerRef.current && logoRef.current) {
-                // The box changes size across the responsive breakpoint, so refresh the cached
-                // dimensions and clamp with the same measurements the animation loop uses.
-                measureLogo();
-                const maxX = Math.max(0, containerRef.current.clientWidth - logoDimensionsRef.current.width);
-                const maxY = Math.max(0, containerRef.current.clientHeight - logoDimensionsRef.current.height);
-                positionRef.current = {
-                    x: Math.min(positionRef.current.x, maxX),
-                    y: Math.min(positionRef.current.y, maxY),
-                };
-                applyPosition();
-            }
-        };
-
-        window.addEventListener('resize', handleResize);
+        window.addEventListener('resize', keepInBounds);
         return () => {
-            window.removeEventListener('resize', handleResize);
+            window.removeEventListener('resize', keepInBounds);
         };
     }, []);
 

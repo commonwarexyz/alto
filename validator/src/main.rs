@@ -1,7 +1,7 @@
 use alto_chain::{engine, Config, Leader, Peers, LEADER_TIMEOUT};
 use alto_types::{Scheme, StandardScheme, VrfScheme, EPOCH, NAMESPACE, ROTATING_ELECTOR};
 use clap::{Arg, Command};
-use commonware_codec::{Decode, DecodeExt, EncodeSize};
+use commonware_codec::{varint::UInt, Decode, DecodeExt, EncodeSize};
 use commonware_consensus::{marshal, types::ViewDelta};
 use commonware_cryptography::{
     bls12381::primitives::{
@@ -59,16 +59,12 @@ const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
 fn configured_max_message_size(block_size: u32) -> u32 {
     // Block data contributes its bytes and the codec's variable-length prefix to each message.
-    let block_size =
-        usize::try_from(block_size).expect("configured block size is unsupported on this platform");
-    let encoded_size = block_size
-        .checked_add(block_size.encode_size())
-        .and_then(|size| u32::try_from(size).ok())
-        .expect("block size exceeds authenticated transport maximum");
-
-    // The configured maximum must remain within the authenticated transport payload limit.
-    BASE_MAX_MESSAGE_SIZE
-        .checked_add(encoded_size)
+    // The total must remain within the authenticated transport payload limit.
+    let size = u64::from(BASE_MAX_MESSAGE_SIZE)
+        + u64::from(block_size)
+        + UInt(block_size).encode_size() as u64;
+    u32::try_from(size)
+        .ok()
         .filter(|size| *size <= authenticated::MAX_SIZE)
         .expect("block size exceeds authenticated transport maximum")
 }
@@ -176,13 +172,17 @@ fn main() {
                 std::fs::read_to_string(hosts_file).expect("Could not read hosts file");
             serde_yaml::from_str::<Hosts>(&hosts_file).expect("Could not parse hosts file")
         });
-        if let (Some(hosts), Some(indexer_url)) = (hosts.as_ref(), config.indexer.as_deref()) {
-            let hosts_by_name = hosts
+        let hosts_by_name: Option<HashMap<String, IpAddr>> = hosts.as_ref().map(|hosts| {
+            hosts
                 .hosts
                 .iter()
                 .map(|host| (host.name.clone(), host.ip))
-                .collect();
-            config.indexer = Some(resolve_named_http_url(indexer_url, &hosts_by_name));
+                .collect()
+        });
+        if let (Some(hosts_by_name), Some(indexer_url)) =
+            (hosts_by_name.as_ref(), config.indexer.as_deref())
+        {
+            config.indexer = Some(resolve_named_http_url(indexer_url, hosts_by_name));
         }
         let traces_sample_rate = config.traces_sample_probability();
         let traces = hosts
@@ -208,12 +208,7 @@ fn main() {
         );
 
         // Load peers
-        let (ip, peers, bootstrappers) = if let Some(hosts) = hosts {
-            let hosts_by_name: HashMap<String, IpAddr> = hosts
-                .hosts
-                .into_iter()
-                .map(|host| (host.name, host.ip))
-                .collect();
+        let (ip, peers, bootstrappers) = if let Some(hosts_by_name) = hosts_by_name {
             let peers: HashMap<PublicKey, IpAddr> = config
                 .allowed_peers
                 .iter()

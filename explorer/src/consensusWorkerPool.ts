@@ -6,8 +6,7 @@ export interface VerifiedConsensusArtifact {
   kind: number;
   artifact: ConsensusArtifact | null;
   receivedAt: number;
-  /// Number of artifacts shed immediately before this one because verification fell behind. Set
-  /// only on a marker result (with a `null` artifact) emitted ahead of the next verified artifact.
+  /// Number of artifacts shed immediately before this one because verification fell behind.
   skipped?: number;
 }
 
@@ -30,11 +29,6 @@ interface VerificationJob {
   payload: Uint8Array;
   receivedAt: number;
   attempts: number;
-}
-
-interface WorkerVerifiedConsensusArtifact extends VerifiedConsensusArtifact {
-  sequence: number;
-  error?: string;
 }
 
 export class ConsensusWorkerPool {
@@ -67,11 +61,13 @@ export class ConsensusWorkerPool {
   }
 
   private configureWorker(worker: Worker) {
-    worker.onmessage = (event: MessageEvent<WorkerVerifiedConsensusArtifact>) => {
+    worker.onmessage = (
+      event: MessageEvent<{ sequence: number; artifact: ConsensusArtifact | null; error?: string }>,
+    ) => {
       if (this.stopped) {
         return;
       }
-      const { sequence, kind, artifact, receivedAt, error } = event.data;
+      const { sequence, artifact, error } = event.data;
       const activeJob = this.activeJobs.get(worker);
       if (!activeJob || activeJob.sequence !== sequence) {
         return;
@@ -79,13 +75,18 @@ export class ConsensusWorkerPool {
       this.activeJobs.delete(worker);
       // Release the (possibly null) result first so in-order delivery keeps advancing.
       if (sequence >= this.nextResultSequence) {
-        this.completedResults.set(sequence, { kind, artifact, receivedAt });
+        this.completedResults.set(sequence, {
+          kind: activeJob.kind,
+          artifact,
+          receivedAt: activeJob.receivedAt,
+        });
       }
       this.releaseCompleted();
       if (error) {
-        // The worker could not verify (its wasm module failed to initialize or panicked, or the
-        // artifact does not match the configured identity). Replace it so a poisoned worker does
-        // not keep swallowing its share of the feed, and give up after repeated failures.
+        // The worker could not verify (its wasm module failed to initialize or panicked). Artifacts
+        // that fail to decode or to verify against the identity arrive as a null artifact without
+        // an error. Replace the worker so a poisoned one does not keep swallowing its share of the
+        // feed, and give up after repeated failures.
         console.error(`consensus artifact verification failed: ${error}`);
         this.handleWorkerFailure(worker, new Error(error));
         return;
@@ -98,12 +99,10 @@ export class ConsensusWorkerPool {
       event.preventDefault();
       this.handleWorkerFailure(worker, event);
     };
-    worker.postMessage({ type: "initialize", publicKey: this.publicKey, standard: this.standard });
   }
 
-  /// Hand completed results to the consumer in sequence order. Dropped artifacts are skipped and
-  /// reported as a `skipped` marker ahead of the next released result so the consumer knows the
-  /// stream has a gap.
+  /// Hand completed results to the consumer in sequence order. Dropped artifacts are counted in
+  /// `skipped` on the next released result so the consumer knows the stream has a gap.
   private releaseCompleted() {
     for (;;) {
       const result = this.completedResults.get(this.nextResultSequence);
@@ -112,12 +111,9 @@ export class ConsensusWorkerPool {
       }
       this.completedResults.delete(this.nextResultSequence);
       this.nextResultSequence += 1;
-      if (this.pendingSkipped > 0) {
-        const skipped = this.pendingSkipped;
-        this.pendingSkipped = 0;
-        this.onVerified({ kind: result.kind, artifact: null, receivedAt: result.receivedAt, skipped });
-      }
-      this.onVerified(result);
+      const skipped = this.pendingSkipped;
+      this.pendingSkipped = 0;
+      this.onVerified(skipped ? { ...result, skipped } : result);
     }
   }
 
@@ -215,8 +211,8 @@ export class ConsensusWorkerPool {
       const job = this.queuedJobs.shift()!;
       job.attempts += 1;
       this.activeJobs.set(worker, job);
-      const { sequence, kind, payload, receivedAt } = job;
-      worker.postMessage({ type: "verify", sequence, kind, payload, receivedAt });
+      const { sequence, kind, payload } = job;
+      worker.postMessage({ sequence, kind, payload, publicKey: this.publicKey, standard: this.standard });
     }
   }
 

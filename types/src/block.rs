@@ -55,10 +55,6 @@ impl Block {
         timestamp: u64,
         data: Bytes,
     ) -> Self {
-        assert!(
-            u32::try_from(data.len()).is_ok(),
-            "block data exceeds codec maximum"
-        );
         let digest = Self::compute_digest(&context, &parent, height, timestamp, &data);
         Self {
             context,

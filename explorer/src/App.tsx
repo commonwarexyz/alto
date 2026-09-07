@@ -595,7 +595,6 @@ const App: React.FC = () => {
           // Verification fell behind and artifacts were shed. The views they covered were never
           // observed, so forget the last observed view rather than backfilling them as timeouts.
           lastObservedViewRef.current = null;
-          continue;
         }
         if (!artifact) {
           continue;
