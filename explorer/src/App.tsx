@@ -132,9 +132,6 @@ const App: React.FC = () => {
   const currentPoolRef = useRef<ConsensusWorkerPool | null>(null);
 
   // Manage WebSocket lifecycle
-  const handleSeedRef = useRef<typeof handleSeed>(null!);
-  const handleNotarizedRef = useRef<typeof handleNotarization>(null!);
-  const handleFinalizedRef = useRef<typeof handleFinalization>(null!);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const performClusterSwitch = useCallback((cluster: Cluster) => {
@@ -542,13 +539,13 @@ const App: React.FC = () => {
         }
         switch (kind) {
           case 0:
-            handleSeedRef.current(artifact as SeedJs, receivedAt);
+            handleSeed(artifact as SeedJs, receivedAt);
             break;
           case 1:
-            handleNotarizedRef.current(artifact as CertifiedBlockJs, receivedAt);
+            handleNotarization(artifact as CertifiedBlockJs, receivedAt);
             break;
           case 2:
-            handleFinalizedRef.current(artifact as CertifiedBlockJs, receivedAt);
+            handleFinalization(artifact as CertifiedBlockJs, receivedAt);
             break;
         }
       }
@@ -557,20 +554,7 @@ const App: React.FC = () => {
       }
     }, VIEW_RENDER_INTERVAL);
     return () => clearInterval(interval);
-  }, [adjustTime]);
-
-  // Update handler refs when the handlers change
-  useEffect(() => {
-    handleSeedRef.current = handleSeed;
-  }, [handleSeed]);
-
-  useEffect(() => {
-    handleNotarizedRef.current = handleNotarization;
-  }, [handleNotarization]);
-
-  useEffect(() => {
-    handleFinalizedRef.current = handleFinalization;
-  }, [handleFinalization]);
+  }, [adjustTime, handleSeed, handleNotarization, handleFinalization]);
 
   // WebSocket connection management with fixed single-connection approach
   useEffect(() => {
