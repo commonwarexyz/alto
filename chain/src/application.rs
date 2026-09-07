@@ -151,8 +151,9 @@ where
         }
 
         // Never reject on the local clock: this verdict gates certification, which Simplex requires
-        // to be deterministic across validators. Wait for the skew window instead. A stalled
-        // certification times out the view and drops this request.
+        // to be deterministic across validators. Wait for the skew window instead. Nullification
+        // keeps the pending certification alive, and finalization cancels it at or below the
+        // finalized view.
         //
         // The timestamp is chosen by an untrusted proposer, but the check above caps it at
         // `MAX_BLOCK_TIMESTAMP_MS` (year 2200), which `SystemTime` represents on every platform,
