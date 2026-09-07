@@ -369,11 +369,10 @@ fn main() {
 
         macro_rules! start_consensus {
             ($scheme:ty, $elector:expr, $delay_ms:expr) => {{
-                let scheme =
-                    <$scheme as Scheme>::signer(NAMESPACE, participants, polynomial, share)
-                        .expect("failed to create consensus scheme");
+                let scheme = <$scheme>::signer(NAMESPACE, participants, polynomial, share)
+                    .expect("failed to create consensus scheme");
                 let indexer = config.indexer.as_deref().map(|indexer_url| {
-                    alto_client::ClientBuilder::<_, $scheme>::new_with_scheme(
+                    alto_client::ClientBuilder::new(
                         indexer_url,
                         <$scheme as Scheme>::certificate_verifier(NAMESPACE, identity),
                         strategy.clone(),

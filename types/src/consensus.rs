@@ -11,16 +11,11 @@ use commonware_consensus::simplex::{
     },
 };
 use commonware_cryptography::{
-    bls12381::primitives::{
-        group::Share,
-        sharing::Sharing,
-        variant::{MinSig, Variant},
-    },
+    bls12381::primitives::variant::{MinSig, Variant},
     certificate::Verifier as CertificateVerifier,
     ed25519,
     sha256::{Digest, Sha256},
 };
-use commonware_utils::ordered::Set;
 use serde::{Deserialize, Serialize};
 
 /// Native one-signature threshold certificates used by stable leaders.
@@ -85,13 +80,6 @@ pub trait Scheme:
     + CertificateVerifier<Certificate: Read<Cfg = ()>>
     + Sized
 {
-    fn signer(
-        namespace: &[u8],
-        participants: Set<PublicKey>,
-        polynomial: Sharing<MinSig>,
-        share: Share,
-    ) -> Option<Self>;
-
     fn certificate_verifier(namespace: &[u8], identity: Identity) -> Self;
 
     fn verify_seed(&self, seed: &Seed) -> bool;
@@ -106,15 +94,6 @@ pub trait Scheme:
 }
 
 impl Scheme for StandardScheme {
-    fn signer(
-        namespace: &[u8],
-        participants: Set<PublicKey>,
-        polynomial: Sharing<MinSig>,
-        share: Share,
-    ) -> Option<Self> {
-        standard::Scheme::<PublicKey, MinSig>::signer(namespace, participants, polynomial, share)
-    }
-
     fn certificate_verifier(namespace: &[u8], identity: Identity) -> Self {
         standard::Scheme::<PublicKey, MinSig>::certificate_verifier(namespace, identity)
     }
@@ -137,15 +116,6 @@ impl Scheme for StandardScheme {
 }
 
 impl Scheme for VrfScheme {
-    fn signer(
-        namespace: &[u8],
-        participants: Set<PublicKey>,
-        polynomial: Sharing<MinSig>,
-        share: Share,
-    ) -> Option<Self> {
-        vrf::Scheme::<PublicKey, MinSig>::signer(namespace, participants, polynomial, share)
-    }
-
     fn certificate_verifier(namespace: &[u8], identity: Identity) -> Self {
         vrf::Scheme::<PublicKey, MinSig>::certificate_verifier(namespace, identity)
     }

@@ -1,6 +1,6 @@
 //! Interact with an `alto` indexer.
 
-use alto_types::{Identity, Scheme, StandardScheme, VrfScheme, NAMESPACE};
+use alto_types::Scheme;
 use commonware_cryptography::sha256::Digest;
 use commonware_formatting::hex;
 use commonware_parallel::Strategy;
@@ -62,7 +62,7 @@ pub enum Error {
 type WsConnector = tokio_tungstenite::Connector;
 
 /// Builder for creating a [`Client`].
-pub struct ClientBuilder<S: Strategy, C: Scheme = VrfScheme> {
+pub struct ClientBuilder<S: Strategy, C: Scheme> {
     uri: String,
     ws_uri: String,
     certificate_verifier: C,
@@ -71,33 +71,11 @@ pub struct ClientBuilder<S: Strategy, C: Scheme = VrfScheme> {
     verify: bool,
 }
 
-impl<S: Strategy> ClientBuilder<S, VrfScheme> {
-    /// Create a new builder for the given indexer URI.
-    ///
-    /// The default constructor targets a rotating-leader network using VRF certificates.
-    pub fn new(uri: &str, identity: Identity, strategy: S) -> Self {
-        Self::new_with_scheme(
-            uri,
-            VrfScheme::certificate_verifier(NAMESPACE, identity),
-            strategy,
-        )
-    }
-}
-
-impl<S: Strategy> ClientBuilder<S, StandardScheme> {
-    /// Create a builder for a stable-leader network using native standard certificates.
-    pub fn new_standard(uri: &str, identity: Identity, strategy: S) -> Self {
-        Self::new_with_scheme(
-            uri,
-            StandardScheme::certificate_verifier(NAMESPACE, identity),
-            strategy,
-        )
-    }
-}
-
 impl<S: Strategy, C: Scheme> ClientBuilder<S, C> {
     /// Create a builder with an already initialized concrete certificate verifier.
-    pub fn new_with_scheme(uri: &str, certificate_verifier: C, strategy: S) -> Self {
+    ///
+    /// TLS uses the system's root certificates. Add private roots with [`Self::with_tls_cert`].
+    pub fn new(uri: &str, certificate_verifier: C, strategy: S) -> Self {
         let uri = uri.to_string();
         let ws_uri = if let Some(rest) = uri.strip_prefix("https://") {
             format!("wss://{rest}")
@@ -181,7 +159,7 @@ impl<S: Strategy, C: Scheme> ClientBuilder<S, C> {
 }
 
 #[derive(Clone)]
-pub struct Client<S: Strategy, C: Scheme = VrfScheme> {
+pub struct Client<S: Strategy, C: Scheme> {
     uri: String,
     ws_uri: String,
     certificate_verifier: C,
@@ -190,27 +168,4 @@ pub struct Client<S: Strategy, C: Scheme = VrfScheme> {
     http_client: reqwest::Client,
     ws_connector: WsConnector,
     strategy: S,
-}
-
-impl<S: Strategy> Client<S, VrfScheme> {
-    /// Create a new client for the given indexer URI.
-    ///
-    /// This constructor verifies VRF certificates.
-    ///
-    /// TLS is automatically configured using the system's root certificates.
-    /// For HTTPS/WSS endpoints with certificates signed by trusted CAs,
-    /// no additional configuration is needed.
-    ///
-    /// For custom TLS configuration (e.g., self-signed certificates),
-    /// use [`ClientBuilder`] instead.
-    pub fn new(uri: &str, identity: Identity, strategy: S) -> Self {
-        ClientBuilder::new(uri, identity, strategy).build()
-    }
-}
-
-impl<S: Strategy> Client<S, StandardScheme> {
-    /// Create a client for a stable-leader network using native standard certificates.
-    pub fn new_standard(uri: &str, identity: Identity, strategy: S) -> Self {
-        ClientBuilder::new_standard(uri, identity, strategy).build()
-    }
 }

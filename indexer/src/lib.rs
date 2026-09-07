@@ -556,7 +556,7 @@ mod tests {
     /// Test context containing common setup for indexer tests.
     struct TestContext {
         schemes: Vec<VrfScheme>,
-        client: Client<Sequential>,
+        client: Client<Sequential, VrfScheme>,
     }
 
     impl TestContext {
@@ -565,7 +565,12 @@ mod tests {
             let (schemes, identity) = fixture(0);
 
             let (addr, _) = start_server(schemes[0].clone(), Sequential).await;
-            let client = Client::new(&format!("http://{addr}"), identity, Sequential);
+            let client = ClientBuilder::new(
+                &format!("http://{addr}"),
+                VrfScheme::certificate_verifier(NAMESPACE, identity),
+                Sequential,
+            )
+            .build();
             wait_for_ready(&client).await;
 
             Self { schemes, client }
@@ -1032,11 +1037,12 @@ mod tests {
         let Fixture { schemes, .. } = standard::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
         let identity = *schemes[0].identity();
         let (addr, _handle) = start_server(schemes[0].clone(), Sequential).await;
-        let client = Client::<Sequential, StandardScheme>::new_standard(
+        let client = ClientBuilder::new(
             &format!("http://{addr}"),
-            identity,
+            StandardScheme::certificate_verifier(NAMESPACE, identity),
             Sequential,
-        );
+        )
+        .build();
         wait_for_ready(&client).await;
 
         let finalized = finalized_at(&schemes, 1);
@@ -1138,7 +1144,12 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let client = Client::new(&format!("http://{addr}"), identity, Sequential);
+        let client = ClientBuilder::new(
+            &format!("http://{addr}"),
+            VrfScheme::certificate_verifier(NAMESPACE, identity),
+            Sequential,
+        )
+        .build();
         let mut stream = client.listen().await.unwrap();
         while indexer.consensus_tx.receiver_count() == 0 {
             tokio::task::yield_now().await;
@@ -1193,7 +1204,12 @@ mod tests {
 
         // Start server with schemes1, but create client expecting identity2
         let (addr, _handle) = start_server(schemes1[0].clone(), Sequential).await;
-        let client = Client::new(&format!("http://{addr}"), identity2, Sequential);
+        let client = ClientBuilder::new(
+            &format!("http://{addr}"),
+            VrfScheme::certificate_verifier(NAMESPACE, identity2),
+            Sequential,
+        )
+        .build();
         wait_for_ready(&client).await;
 
         // Create a seed signed by schemes1
@@ -1307,10 +1323,14 @@ mod tests {
         addr: SocketAddr,
         identity: Identity,
         cert_key: &CertifiedKey<KeyPair>,
-    ) -> Client<Sequential> {
-        ClientBuilder::new(&format!("https://{addr}"), identity, Sequential)
-            .with_tls_cert(cert_key.cert.der().to_vec())
-            .build()
+    ) -> Client<Sequential, VrfScheme> {
+        ClientBuilder::new(
+            &format!("https://{addr}"),
+            VrfScheme::certificate_verifier(NAMESPACE, identity),
+            Sequential,
+        )
+        .with_tls_cert(cert_key.cert.der().to_vec())
+        .build()
     }
 
     #[tokio::test]

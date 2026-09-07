@@ -10,7 +10,7 @@ const initialized = init();
 const worker = globalThis as unknown as DedicatedWorkerGlobalScope;
 
 worker.onmessage = async (event: MessageEvent) => {
-  const { sequence, kind, payload, publicKey, standard } = event.data;
+  const { kind, payload, publicKey, standard } = event.data;
 
   // Always answer: the pool releases results strictly in sequence order, so a job that never
   // replies (a failed wasm load or a wasm panic) would block every later artifact.
@@ -33,7 +33,7 @@ worker.onmessage = async (event: MessageEvent) => {
     error = err instanceof Error ? err.message : String(err);
   }
 
-  worker.postMessage({ sequence, artifact, error });
+  worker.postMessage({ artifact, error });
 };
 
 export {};

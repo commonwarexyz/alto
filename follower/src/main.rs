@@ -192,7 +192,7 @@ async fn run<C: Scheme>(context: tokio::Context, config: Config, identity: Ident
     // The client decodes this concrete format but leaves signature checks to the feeder,
     // resolver-backed marshal, and checkpoint path so certificates are not verified twice.
     let scheme = C::certificate_verifier(NAMESPACE, identity);
-    let client = ClientBuilder::new_with_scheme(&config.source, scheme.clone(), Sequential)
+    let client = ClientBuilder::new(&config.source, scheme.clone(), Sequential)
         .with_verification_disabled()
         .build();
 

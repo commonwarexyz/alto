@@ -110,7 +110,6 @@ const MaintenancePage: React.FC = () => {
             currentColorRef.current = newColor;
             if (logoRef.current) {
                 logoRef.current.style.color = newColor;
-                logoRef.current.style.borderColor = newColor;
             }
         };
 

@@ -203,7 +203,7 @@ fn client<C: Scheme>(matches: &ArgMatches) -> Client<Sequential, C> {
     let identity = matches.get_one::<String>("identity").unwrap();
     let identity = from_hex(identity).expect("Failed to decode identity");
     let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
-    ClientBuilder::new_with_scheme(
+    ClientBuilder::new(
         indexer,
         C::certificate_verifier(NAMESPACE, identity),
         Sequential,

@@ -18,7 +18,6 @@ import { resolveLeaderLocation } from "./leaderLocation";
 import {
   ConsensusWorkerPool,
   consensusWorkerCount,
-  VerifiedConsensusArtifact,
 } from "./consensusWorkerPool";
 import { scaleTimelineWidth } from "./timeline";
 import { getLeaderIndicator, getTimelineIdentifier } from "./timelineIdentifier";
@@ -145,14 +144,12 @@ const App: React.FC = () => {
   const adjustTime = useClockSkew();
   const currentTimeRef = useRef(adjustTime(Date.now()));
   const wsRef = useRef<WebSocket | null>(null);
-  const verifierPoolRef = useRef<ConsensusWorkerPool | null>(null);
-  const verifiedQueueRef = useRef<VerifiedConsensusArtifact[]>([]);
+  const currentPoolRef = useRef<ConsensusWorkerPool | null>(null);
 
   // Manage WebSocket lifecycle
   const handleSeedRef = useRef<typeof handleSeed>(null!);
   const handleNotarizedRef = useRef<typeof handleNotarization>(null!);
   const handleFinalizedRef = useRef<typeof handleFinalization>(null!);
-  const isInitializedRef = useRef(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const performClusterSwitch = useCallback((cluster: Cluster) => {
@@ -160,7 +157,6 @@ const App: React.FC = () => {
 
     // When switching, we close the old socket. The `onclose` handler for that socket
     // should not trigger a reconnect or error message.
-    isInitializedRef.current = false;
     if (wsRef.current) {
       // Temporarily disable the onclose handler to prevent side-effects.
       wsRef.current.onclose = null;
@@ -203,7 +199,6 @@ const App: React.FC = () => {
   useEffect(() => {
     setViews([]);
     lastObservedViewRef.current = null;
-    verifiedQueueRef.current = [];
     setErrorMessage("");
     setShowError(false);
   }, [selectedCluster]);
@@ -585,14 +580,14 @@ const App: React.FC = () => {
     });
   }, [adjustTime, LOCATIONS, PARTICIPANTS, observeView, fillMissedViews]);
 
-  // Merge every verified artifact while limiting React rendering work.
+  // Consume verified artifacts in bounded batches while limiting React rendering work
   useEffect(() => {
     const interval = setInterval(() => {
       currentTimeRef.current = adjustTime(Date.now());
-      const verified = verifiedQueueRef.current.splice(0);
+      const verified = currentPoolRef.current?.drain() ?? [];
       for (const { kind, artifact, receivedAt, skipped } of verified) {
         if (skipped) {
-          // Verification fell behind and artifacts were shed. The views they covered were never
+          // Processing fell behind and artifacts were shed. The views they covered were never
           // observed, so forget the last observed view rather than backfilling them as timeouts.
           lastObservedViewRef.current = null;
         }
@@ -651,10 +646,8 @@ const App: React.FC = () => {
       return;
     }
 
-    // Skip if already initialized to prevent duplicate connections during development mode's double-invocation
-    if (isInitializedRef.current) return;
-    isInitializedRef.current = true;
     let cancelled = false;
+    let verifierPool: ConsensusWorkerPool | undefined;
 
     const connectWebSocket = () => {
       if (cancelled) {
@@ -697,7 +690,7 @@ const App: React.FC = () => {
         const data = new Uint8Array(event.data);
         const kind = data[0];
         if (kind <= 2) {
-          verifierPoolRef.current?.verify(kind, data.slice(1), Date.now());
+          verifierPool?.verify(kind, data.slice(1), Date.now());
         }
       };
 
@@ -744,27 +737,17 @@ const App: React.FC = () => {
       if (cancelled) {
         return;
       }
-      const createWorker = () => new Worker(new URL("./consensusWorker.ts", import.meta.url));
-      const workers: Worker[] = [];
-      try {
-        for (let index = 0; index < consensusWorkerCount(navigator.hardwareConcurrency || 4); index++) {
-          workers.push(createWorker());
-        }
-      } catch (error) {
-        workers.forEach((worker) => worker.terminate());
-        throw error;
-      }
-      verifierPoolRef.current = new ConsensusWorkerPool(
-        workers,
+      verifierPool = new ConsensusWorkerPool(
+        consensusWorkerCount(navigator.hardwareConcurrency || 4),
+        () => new Worker(new URL("./consensusWorker.ts", import.meta.url)),
         PUBLIC_KEY,
-        (verified) => verifiedQueueRef.current.push(verified),
+        standardCertificates,
         () => {
           setErrorMessage("A consensus verifier stopped unexpectedly. Refresh to reconnect.");
           setShowError(true);
         },
-        createWorker,
-        standardCertificates,
       );
+      currentPoolRef.current = verifierPool;
       connectWebSocket();
     };
 
@@ -773,7 +756,6 @@ const App: React.FC = () => {
         return;
       }
       console.error("Unable to initialize consensus verifiers:", error);
-      isInitializedRef.current = false;
       setErrorMessage("Consensus verification could not start. Refresh to retry.");
       setShowError(true);
     });
@@ -781,16 +763,14 @@ const App: React.FC = () => {
     // Cleanup function when component unmounts
     return () => {
       cancelled = true;
-      isInitializedRef.current = false;
       // Clear any reconnection timers
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
 
-      verifierPoolRef.current?.terminate();
-      verifierPoolRef.current = null;
-      verifiedQueueRef.current = [];
+      verifierPool?.terminate();
+      currentPoolRef.current = null;
 
       // Close and clean up the websocket
       if (wsRef.current) {
@@ -803,7 +783,7 @@ const App: React.FC = () => {
         }
       }
     };
-  }, [isLoading, isInMaintenance, BACKEND_URL, PUBLIC_KEY, standardCertificates]);
+  }, [selectedCluster, isLoading, isInMaintenance, BACKEND_URL, PUBLIC_KEY, standardCertificates]);
 
   // Loading state - show nothing until we get the result of the health check
   if (isLoading) {

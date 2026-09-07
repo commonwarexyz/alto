@@ -1,5 +1,5 @@
 import { expect, test } from "@jest/globals";
-import { ConsensusWorkerPool, consensusWorkerCount } from "./consensusWorkerPool";
+import { ConsensusWorkerPool, consensusWorkerCount, MAX_PENDING_JOBS } from "./consensusWorkerPool";
 
 class FakeWorker {
   onmessage: ((event: MessageEvent) => void) | null = null;
@@ -21,19 +21,25 @@ class FakeWorker {
   }
 
   completeNext(error?: string) {
-    const message = this.messages[this.completed] as any;
     this.completed += 1;
-    this.onmessage?.({ data: { sequence: message.sequence, artifact: null, error } } as MessageEvent);
+    this.onmessage?.({ data: { artifact: null, error } } as MessageEvent);
   }
 }
 
+const workerFactory = (workers: FakeWorker[]) => () => {
+  const worker = new FakeWorker();
+  workers.push(worker);
+  return worker as unknown as Worker;
+};
+
 test("dispatches every artifact across the verifier pool without sampling", () => {
-  const workers = [new FakeWorker(), new FakeWorker(), new FakeWorker()];
-  const verifiedReceivedAt: number[] = [];
+  const workers: FakeWorker[] = [];
   const pool = new ConsensusWorkerPool(
-    workers as unknown as Worker[],
+    3,
+    workerFactory(workers),
     new Uint8Array([1, 2, 3]),
-    (result) => verifiedReceivedAt.push(result.receivedAt),
+    false,
+    (error) => { throw error; },
   );
 
   for (let id = 0; id < 8; id++) {
@@ -54,7 +60,7 @@ test("dispatches every artifact across the verifier pool without sampling", () =
   expect(verificationMessages.map((message: any) => message.payload[0]).sort()).toEqual([
     0, 1, 2, 3, 4, 5, 6, 7,
   ]);
-  expect(verifiedReceivedAt).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  expect(pool.drain().map(result => result.receivedAt)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
 
   pool.terminate();
   expect(workers.every((worker) => worker.terminated)).toBe(true);
@@ -68,177 +74,208 @@ test("reserves a core while using enough parallel verifiers", () => {
 });
 
 test("keeps delivering recent results when an earlier worker stays pending", () => {
-  const stalled = new FakeWorker();
-  const healthy = new FakeWorker();
+  const workers: FakeWorker[] = [];
   const delivered: number[] = [];
   const skipped: number[] = [];
   const pool = new ConsensusWorkerPool(
-    [stalled, healthy] as unknown as Worker[],
+    2,
+    workerFactory(workers),
     new Uint8Array([1]),
-    result => {
-      if (result.skipped) skipped.push(result.skipped);
-      delivered.push(result.receivedAt);
-    },
-    undefined, undefined, false, 4,
+    false,
+    (error) => { throw error; },
   );
+  const [stalled, healthy] = workers;
+  const total = MAX_PENDING_JOBS * 2;
   pool.verify(1, new Uint8Array([0]), 0);
-  for (let id = 1; id < 40; id++) {
+  for (let id = 1; id < total; id++) {
     pool.verify(1, new Uint8Array([id]), id);
     healthy.completeNext();
+    for (const result of pool.drain()) {
+      if (result.skipped) skipped.push(result.skipped);
+      delivered.push(result.receivedAt);
+    }
   }
-  expect(delivered).toEqual(Array.from({ length: 39 }, (_, i) => i + 1));
+  expect(delivered).toEqual(Array.from({ length: total - 1 }, (_, i) => i + 1));
   expect(skipped).toEqual([1]);
 
   // A late response cannot resurrect work already reported as skipped
   stalled.completeNext();
-  expect(delivered).toHaveLength(39);
-  expect(pool.droppedCount()).toBe(1);
+  expect(pool.drain()).toEqual([]);
   pool.terminate();
 });
 
 test("retries an in-flight artifact on a replacement worker", () => {
-  const worker = new FakeWorker();
-  const replacements: FakeWorker[] = [];
-  const verifiedReceivedAt: number[] = [];
+  const workers: FakeWorker[] = [];
   const errors: (ErrorEvent | Error)[] = [];
   const pool = new ConsensusWorkerPool(
-    [worker] as unknown as Worker[],
+    1,
+    workerFactory(workers),
     new Uint8Array([1, 2, 3]),
-    (result) => verifiedReceivedAt.push(result.receivedAt),
+    false,
     (error) => errors.push(error),
-    () => {
-      const replacement = new FakeWorker();
-      replacements.push(replacement);
-      return replacement as unknown as Worker;
-    },
   );
 
   pool.verify(1, new Uint8Array([9]), 42);
+  const worker = workers[0];
   worker.fail();
 
   expect(worker.terminated).toBe(true);
-  expect(replacements).toHaveLength(1);
-  expect((replacements[0].messages[0] as any).payload[0]).toBe(9);
+  expect(workers).toHaveLength(2);
+  expect((workers[1].messages[0] as any).payload[0]).toBe(9);
 
-  replacements[0].completeNext();
-  expect(verifiedReceivedAt).toEqual([42]);
+  workers[1].completeNext();
+  expect(pool.drain().map(result => result.receivedAt)).toEqual([42]);
   expect(errors).toEqual([]);
 });
 
 test("a failed verification still releases later results in order and replaces the worker", () => {
-  // The pool swaps replacements into the array it is given, so keep our own references.
-  const first = new FakeWorker();
-  const second = new FakeWorker();
-  const workers = [first, second];
-  const replacements: FakeWorker[] = [];
-  const verifiedReceivedAt: number[] = [];
+  const workers: FakeWorker[] = [];
   const errors: (ErrorEvent | Error)[] = [];
   const pool = new ConsensusWorkerPool(
-    workers as unknown as Worker[],
+    2,
+    workerFactory(workers),
     new Uint8Array([1, 2, 3]),
-    (result) => verifiedReceivedAt.push(result.receivedAt),
+    false,
     (error) => errors.push(error),
-    () => {
-      const replacement = new FakeWorker();
-      replacements.push(replacement);
-      return replacement as unknown as Worker;
-    },
   );
+  const [first, second] = workers;
   pool.verify(1, new Uint8Array([0]), 0);
   pool.verify(1, new Uint8Array([1]), 1);
 
   // Hold the second artifact's result until the first reports
   second.completeNext();
-  expect(verifiedReceivedAt).toEqual([]);
+  expect(pool.drain()).toEqual([]);
   first.completeNext("wasm panic");
-  expect(verifiedReceivedAt).toEqual([0, 1]);
+  expect(pool.drain().map(result => result.receivedAt)).toEqual([0, 1]);
 
   // Retire the failed worker (its WASM may be poisoned) and refill its slot without retrying the
   // released result
   expect(first.terminated).toBe(true);
-  expect(replacements).toHaveLength(1);
-  expect(replacements[0].messages).toHaveLength(0);
+  expect(workers).toHaveLength(3);
+  expect(workers[2].messages).toHaveLength(0);
   expect(errors).toEqual([]);
 
   // A successful verification resets the failure count. Repeated failures without one stop the pool
   pool.verify(1, new Uint8Array([2]), 2);
   second.completeNext();
-  expect(verifiedReceivedAt).toEqual([0, 1, 2]);
+  expect(pool.drain().map(result => result.receivedAt)).toEqual([2]);
   for (let id = 3; id < 6; id++) {
     pool.verify(1, new Uint8Array([id]), id);
-    const active = [second, ...replacements].find(
+    const active = workers.find(
       (worker) => !worker.terminated && worker.messages.length > worker.completed,
     )!;
     active.completeNext("wasm init failed");
   }
-  expect(verifiedReceivedAt).toEqual([0, 1, 2, 3, 4, 5]);
   expect(errors).toHaveLength(1);
-  expect([first, second, ...replacements].every((worker) => worker.terminated)).toBe(true);
+  expect(workers.every((worker) => worker.terminated)).toBe(true);
+  expect(pool.drain().map(result => result.receivedAt)).toEqual([3, 4, 5]);
 });
 
 test("an idle worker that fails is removed and replaced, and repeated failures stop the pool", () => {
-  const worker = new FakeWorker();
-  const replacements: FakeWorker[] = [];
+  const workers: FakeWorker[] = [];
   const errors: (ErrorEvent | Error)[] = [];
   const pool = new ConsensusWorkerPool(
-    [worker] as unknown as Worker[],
+    1,
+    workerFactory(workers),
     new Uint8Array([1, 2, 3]),
-    () => undefined,
+    false,
     (error) => errors.push(error),
-    () => {
-      const replacement = new FakeWorker();
-      replacements.push(replacement);
-      return replacement as unknown as Worker;
-    },
   );
+  const worker = workers[0];
 
   // Fails before any artifact was dispatched (e.g. the worker script did not load).
   worker.fail();
   expect(worker.terminated).toBe(true);
-  expect(replacements).toHaveLength(1);
+  expect(workers).toHaveLength(2);
 
   // Work goes to the replacement, never to the dead worker.
   pool.verify(1, new Uint8Array([7]), 7);
   expect(worker.messages).toHaveLength(0);
-  expect(replacements[0].messages).toHaveLength(1);
+  expect(workers[1].messages).toHaveLength(1);
 
   // Consecutive failures without progress eventually surface an error instead of respawning forever.
-  replacements[0].fail();
-  replacements[1].fail();
+  workers[1].fail();
+  workers[2].fail();
   expect(errors).toHaveLength(1);
-  expect(replacements.every((replacement) => replacement.terminated)).toBe(true);
+  expect(workers.every((worker) => worker.terminated)).toBe(true);
 });
 
 test("bounds pending work when every worker stalls", () => {
-  const worker = new FakeWorker();
-  const verifiedReceivedAt: number[] = [];
-  const skipped: number[] = [];
+  const workers: FakeWorker[] = [];
   const pool = new ConsensusWorkerPool(
-    [worker] as unknown as Worker[],
+    1,
+    workerFactory(workers),
     new Uint8Array([1, 2, 3]),
-    (result) => {
-      if (result.skipped) skipped.push(result.skipped);
-      verifiedReceivedAt.push(result.receivedAt);
-    },
-    undefined,
-    undefined,
     false,
-    3,
+    (error) => { throw error; },
   );
+  const worker = workers[0];
+  const total = MAX_PENDING_JOBS * 4;
+  const firstRetained = total - MAX_PENDING_JOBS;
 
   // The pending bound includes work waiting on a worker response
-  for (let id = 0; id < 1000; id++) {
+  for (let id = 0; id < total; id++) {
     pool.verify(1, new Uint8Array([id]), id);
   }
-  expect(pool.droppedCount()).toBe(997);
+  expect(pool.drain()).toEqual([]);
 
   worker.completeNext(); // stale artifact 0 only frees the worker
-  expect(skipped).toEqual([]);
-  worker.completeNext(); // artifact 997 reports the gap
-  worker.completeNext(); // artifact 998
-  worker.completeNext(); // artifact 999
-  expect(verifiedReceivedAt).toEqual([997, 998, 999]);
-  expect(skipped).toEqual([997]);
-  expect(worker.messages.map((message: any) => message.sequence)).toEqual([0, 997, 998, 999]);
+  expect(pool.drain()).toEqual([]);
+  for (let id = firstRetained; id < total; id++) {
+    worker.completeNext();
+  }
+  const retained = Array.from({ length: MAX_PENDING_JOBS }, (_, i) => firstRetained + i);
+  const results = pool.drain();
+  expect(results.map(result => result.receivedAt)).toEqual(retained);
+  expect(results.filter(result => result.skipped).map(result => result.skipped)).toEqual([firstRetained]);
+  expect(worker.messages.map((message: any) => message.payload[0])).toEqual(
+    Array.from(new Uint8Array([0, ...retained])),
+  );
   pool.terminate();
+});
+
+test("keeps only recent results when verification outpaces consumption", () => {
+  const workers: FakeWorker[] = [];
+  const pool = new ConsensusWorkerPool(
+    1,
+    workerFactory(workers),
+    new Uint8Array([1]),
+    false,
+    (error) => { throw error; },
+  );
+  const total = MAX_PENDING_JOBS * 4;
+  const firstRetained = total - MAX_PENDING_JOBS;
+
+  // Workers keep making progress while the consumer waits between batches
+  for (let id = 0; id < total; id++) {
+    pool.verify(1, new Uint8Array([id]), id);
+    workers[0].completeNext();
+  }
+
+  const results = pool.drain();
+  expect(results.map(result => result.receivedAt)).toEqual(
+    Array.from({ length: MAX_PENDING_JOBS }, (_, i) => firstRetained + i),
+  );
+  expect(results.filter(result => result.skipped).map(result => result.skipped)).toEqual([firstRetained]);
+  expect(pool.drain()).toEqual([]);
+  pool.terminate();
+});
+
+test("terminates created workers when startup fails", () => {
+  const worker = new FakeWorker();
+  const failure = new Error("worker creation failed");
+  let created = 0;
+  const errors: (ErrorEvent | Error)[] = [];
+  expect(() => new ConsensusWorkerPool(
+    2,
+    () => {
+      if (created++ === 0) return worker as unknown as Worker;
+      throw failure;
+    },
+    new Uint8Array([1]),
+    false,
+    (error) => errors.push(error),
+  )).toThrow(failure);
+  expect(worker.terminated).toBe(true);
+  expect(errors).toEqual([]);
 });

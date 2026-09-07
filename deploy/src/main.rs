@@ -190,13 +190,9 @@ fn select_regional_peers(
 /// Parses the explorer backend URL, which the explorer stores without a scheme and prefixes with
 /// `http(s)://` or `ws(s)://` itself.
 fn parse_backend_url(value: &str) -> Result<String, String> {
-    if value.contains("://") {
+    if let Some((_, rest)) = value.split_once("://") {
         return Err(format!(
-            "backend URL must be a host[:port] without a scheme (for example, {})",
-            value
-                .split_once("://")
-                .map(|(_, rest)| rest)
-                .unwrap_or(value)
+            "backend URL must be a host[:port] without a scheme (for example, {rest})"
         ));
     }
     let trimmed = value.trim_end_matches('/');
