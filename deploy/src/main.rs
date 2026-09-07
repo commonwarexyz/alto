@@ -1367,19 +1367,18 @@ signature_threads: 1
             let encoded = serde_yaml::to_string(&leader).unwrap();
             assert_eq!(serde_yaml::from_str::<Leader>(&encoded).unwrap(), leader);
         }
-
-        assert_eq!(
-            serde_yaml::from_str::<Leader>("mode: stable\ndelay_ms: 10\nterm_length: 1000\n")
-                .unwrap(),
-            Leader::stable(NZU64!(10), NZU32!(1_000), 48)
-        );
     }
 
     #[test]
     fn leader_config_rejects_invalid_fields() {
         assert!(
-            serde_yaml::from_str::<Leader>("mode: stable\ndelay_ms: 10\nterm_length: 1\n").is_err()
+            serde_yaml::from_str::<Leader>("mode: stable\ndelay_ms: 10\nterm_length: 1000\n")
+                .is_err()
         );
+        assert!(serde_yaml::from_str::<Leader>(
+            "mode: stable\ndelay_ms: 10\nterm_length: 1\noptimistic_views: 48\n"
+        )
+        .is_err());
         assert!(serde_yaml::from_str::<Leader>("mode: rotating\n").is_err());
         assert!(serde_yaml::from_str::<Leader>(
             "mode: rotating\ndelay_ms: 10\nterm_length: 1000\n"

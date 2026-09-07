@@ -1,12 +1,22 @@
-use crate::consensus::{Context, Finalization, Notarization, Scheme};
+use crate::{
+    consensus::{Context, Finalization, Notarization, Scheme},
+    EPOCH,
+};
 use bytes::{Buf, BufMut, Bytes};
 use commonware_codec::{
     varint::UInt, BufsMut, Encode, EncodeSize, Error, RangeCfg, Read, ReadExt, Write,
 };
-use commonware_consensus::{types::Height, CertifiableBlock, Heightable};
-use commonware_cryptography::{sha256::Digest, Digestible, Hasher, Sha256};
+use commonware_consensus::{
+    types::{Height, Round, View},
+    CertifiableBlock, Heightable,
+};
+use commonware_cryptography::{
+    ed25519, sha256::Digest, Digest as _, Digestible, Hasher, Sha256, Signer,
+};
 use commonware_parallel::Strategy;
 use commonware_utils::sys_rng;
+
+const GENESIS: &[u8] = b"commonware is neat";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
@@ -30,6 +40,22 @@ pub struct Block {
 }
 
 impl Block {
+    /// The fixed genesis block shared by validators and followers.
+    pub fn genesis() -> Self {
+        let context = Context {
+            round: Round::new(EPOCH, View::zero()),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::zero(), Digest::EMPTY),
+        };
+        Self::new(
+            context,
+            Sha256::hash(&[GENESIS]),
+            Height::zero(),
+            0,
+            Bytes::new(),
+        )
+    }
+
     fn compute_digest(
         context: &Context,
         parent: &Digest,

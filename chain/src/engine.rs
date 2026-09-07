@@ -36,7 +36,6 @@ use commonware_storage::{archive::immutable, queue};
 use commonware_utils::{NZUsize, NZU64};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
-use governor::Quota;
 use rand::{CryptoRng, Rng};
 use std::{
     num::{NonZero, NonZeroUsize},
@@ -107,9 +106,6 @@ pub struct Config<
     pub fetch_timeout: Duration,
     pub activity_timeout: ViewDelta,
     pub skip_timeout: Duration,
-    pub max_fetch_count: usize,
-    pub max_fetch_size: usize,
-    pub fetch_rate_per_peer: Quota,
     pub backfiller_max_active: NonZeroUsize,
     pub backfiller_retry: Duration,
 
@@ -276,7 +272,7 @@ where
         let scheme = cfg.scheme;
         let provider = ConstantProvider::new(scheme.clone());
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-        let genesis = Application::<CS>::genesis();
+        let genesis = Block::genesis();
         let genesis_digest = genesis.digest();
         let (marshal, marshal_mailbox, _) = MarshalActor::init(
             context.child("marshal"),
@@ -309,7 +305,7 @@ where
         // Create the application and, when an indexer is configured, a backfill
         // queue of finalized digests so block uploads can resume after
         // restarts.
-        let mut app = Application::new(proposal_delay_ms).with_block_size(cfg.block_size);
+        let mut app = Application::new(proposal_delay_ms, cfg.block_size);
         let (pusher, consumer) = if let Some(indexer) = cfg.indexer {
             let queue = queue::shared::init(
                 context.child("queue"),
@@ -325,7 +321,7 @@ where
             )
             .await
             .expect("failed to initialize finalized queue");
-            let indexer = indexer::Indexer::new(
+            let (producer, pusher, consumer) = indexer::init(
                 context.child("indexer"),
                 indexer,
                 marshal_mailbox.clone(),
@@ -333,9 +329,7 @@ where
                 mailbox_size,
                 cfg.backfiller_max_active,
                 cfg.backfiller_retry,
-            )
-            .await;
-            let (producer, pusher, consumer) = indexer.split();
+            );
             app = app.with_backfiller(producer);
             (Some(pusher), Some(consumer))
         } else {

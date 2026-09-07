@@ -5,8 +5,7 @@ use crate::{
     },
     resolver::Resolver,
 };
-use alto_types::{Block, Context, Scheme, EPOCH, EPOCH_LENGTH};
-use bytes::Bytes;
+use alto_types::{Block, Scheme, EPOCH_LENGTH};
 use commonware_consensus::{
     marshal::{
         self,
@@ -16,12 +15,7 @@ use commonware_consensus::{
     },
     types::{FixedEpocher, Height, ViewDelta},
 };
-use commonware_cryptography::{
-    certificate::ConstantProvider,
-    ed25519::PrivateKey,
-    sha256::{self, Digest, Sha256},
-    Digest as _, Hasher, Signer,
-};
+use commonware_cryptography::{certificate::ConstantProvider, sha256::Digest};
 use commonware_parallel::Strategy;
 use commonware_runtime::{
     spawn_cell, BufferPooler, ContextCell, Handle, Metrics, Spawner, Storage,
@@ -35,28 +29,6 @@ use tracing::{error, warn};
 
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(1024);
-const GENESIS: &[u8] = b"commonware is neat";
-
-fn genesis() -> Block {
-    let genesis_context = Context {
-        round: commonware_consensus::types::Round::new(
-            EPOCH,
-            commonware_consensus::types::View::zero(),
-        ),
-        leader: PrivateKey::from_seed(0).public_key(),
-        parent: (
-            commonware_consensus::types::View::zero(),
-            sha256::Digest::EMPTY,
-        ),
-    };
-    Block::new(
-        genesis_context,
-        Sha256::hash(&[GENESIS]),
-        commonware_consensus::types::Height::zero(),
-        0,
-        Bytes::new(),
-    )
-}
 
 /// The engine that drives the follower's [MarshalActor].
 ///
@@ -130,7 +102,7 @@ where
             marshal::Config {
                 provider,
                 epocher,
-                start: marshal::Start::Genesis(genesis()),
+                start: marshal::Start::Genesis(Block::genesis()),
                 partition_prefix: "follower-marshal".to_string(),
                 mailbox_size,
                 view_retention: VIEW_RETENTION_TIMEOUT,
@@ -189,6 +161,7 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{MockSource, TestFixture};
+    use alto_types::EPOCH;
     use bytes::Bytes;
     use commonware_codec::Encode;
     use commonware_consensus::types::{Round, View};

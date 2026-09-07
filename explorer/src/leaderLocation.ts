@@ -6,11 +6,11 @@ export interface LeaderLocation {
 }
 
 export const resolveLeaderLocation = (
-  leader: Uint8Array | undefined,
+  leader: Uint8Array,
   participants: string[] | undefined,
   locations: [[number, number], string][],
 ): LeaderLocation | undefined => {
-  if (!leader || !participants || participants.length !== locations.length) {
+  if (!participants || participants.length !== locations.length) {
     return undefined;
   }
 

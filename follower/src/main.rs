@@ -1,7 +1,7 @@
 use alto_client::consensus::{Message, Payload};
 use alto_client::{ClientBuilder, IndexQuery, Query};
 use alto_types::{
-    CertificateMode, Finalized, Identity, Notarized, Scheme, StandardScheme, VrfScheme, NAMESPACE,
+    CertificateMode, Identity, Notarized, Scheme, StandardScheme, VrfScheme, NAMESPACE,
 };
 use clap::{Arg, Command};
 use commonware_codec::DecodeExt;
@@ -55,13 +55,9 @@ pub struct Config {
 
 /// Abstraction over the certificate source (HTTP client) used by the
 /// [feeder::Feeder] and [resolver::Resolver].
-#[allow(dead_code)]
 pub(crate) trait Source: Clone + Send + Sync + 'static {
     type Scheme: Scheme;
     type Error: std::error::Error + Send + Sync + 'static;
-
-    /// Check if the source is reachable.
-    fn health(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Fetch a block by digest or index.
     fn block(
@@ -74,12 +70,6 @@ pub(crate) trait Source: Clone + Send + Sync + 'static {
         &self,
         query: IndexQuery,
     ) -> impl Future<Output = Result<Notarized<Self::Scheme>, Self::Error>> + Send;
-
-    /// Fetch a finalized block by height or latest.
-    fn finalized(
-        &self,
-        query: IndexQuery,
-    ) -> impl Future<Output = Result<Finalized<Self::Scheme>, Self::Error>> + Send;
 
     /// Open a WebSocket stream of certificate messages.
     #[allow(clippy::type_complexity)]
@@ -97,10 +87,6 @@ impl<S: commonware_parallel::Strategy, C: Scheme> Source for alto_client::Client
     type Scheme = C;
     type Error = alto_client::Error;
 
-    fn health(&self) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.health()
-    }
-
     fn block(&self, query: Query) -> impl Future<Output = Result<Payload<C>, Self::Error>> + Send {
         self.block_get(query)
     }
@@ -110,13 +96,6 @@ impl<S: commonware_parallel::Strategy, C: Scheme> Source for alto_client::Client
         query: IndexQuery,
     ) -> impl Future<Output = Result<Notarized<C>, Self::Error>> + Send {
         self.notarized_get(query)
-    }
-
-    fn finalized(
-        &self,
-        query: IndexQuery,
-    ) -> impl Future<Output = Result<Finalized<C>, Self::Error>> + Send {
-        self.finalized_get(query)
     }
 
     fn listen(

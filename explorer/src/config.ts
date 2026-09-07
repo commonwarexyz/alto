@@ -47,35 +47,27 @@ const defaultPublicConfigs: Record<'global' | 'usa', ClusterConfig> = {
     },
 };
 
-const publicConfigs: Partial<Record<'global' | 'usa', ClusterConfig>> = deployedConfig
-    ? { global: deployedConfig }
-    : defaultPublicConfigs;
-
-const localClusterConfig: ClusterConfig = deployedConfig && MODE === 'local'
-    ? deployedConfig
-    : {
-        ...localConfig,
-        name: 'Local Cluster',
-        description: `A local test cluster running on localhost.`,
-    };
+const localClusterConfig: ClusterConfig = {
+    ...localConfig,
+    name: 'Local Cluster',
+    description: `A local test cluster running on localhost.`,
+};
 
 export const DEFAULT_CLUSTER: Cluster = MODE === 'public' ? 'global' : 'local';
 
-export const getClusterConfig = (cluster: Cluster): ClusterConfig => {
-    if (MODE === 'local') {
-        return localClusterConfig;
-    }
-    if (cluster === 'local') {
-        return localClusterConfig;
-    }
-    return publicConfigs[cluster] || publicConfigs.global!;
-};
+const configs: Record<string, ClusterConfig> = deployedConfig
+    ? { [DEFAULT_CLUSTER]: deployedConfig }
+    : MODE === 'local' ? { local: localClusterConfig } : defaultPublicConfigs;
 
-export const getClusters = (): Record<Cluster, ClusterConfig> => {
-    if (MODE === 'local') {
-        return { local: localClusterConfig } as Record<Cluster, ClusterConfig>;
-    }
-    return publicConfigs as Record<Cluster, ClusterConfig>;
+export const getClusterConfig = (cluster: Cluster): ClusterConfig => configs[cluster];
+
+export const getClusters = (): Record<string, ClusterConfig> => configs;
+
+export const getInitialCluster = (): Cluster => {
+    const cluster = new URLSearchParams(window.location.search).get('cluster');
+    return cluster && Object.keys(configs).includes(cluster)
+        ? cluster as Cluster
+        : DEFAULT_CLUSTER;
 };
 
 export const getHttpBackendUrl = (backendUrl: string): string => {
@@ -85,10 +77,5 @@ export const getHttpBackendUrl = (backendUrl: string): string => {
     return `${MODE === 'local' ? 'http' : 'https'}://${backendUrl}`;
 };
 
-export const getWebSocketBackendUrl = (backendUrl: string): string => {
-    if (backendUrl === window.location.host) {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        return `${protocol}//${window.location.host}`;
-    }
-    return `${MODE === 'local' ? 'ws' : 'wss'}://${backendUrl}`;
-};
+export const getWebSocketBackendUrl = (backendUrl: string): string =>
+    getHttpBackendUrl(backendUrl).replace(/^http/, 'ws');

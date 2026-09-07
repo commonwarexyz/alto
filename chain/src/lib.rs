@@ -21,7 +21,6 @@ pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(4_096);
 /// How long validators wait for a leader's proposal before nullifying the view. The configured
 /// proposal delay must stay below this or a leader could never propose in time.
 pub const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
-const DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS: u64 = 48;
 
 fn default_backfiller_max_active() -> NonZeroUsize {
     DEFAULT_BACKFILLER_MAX_ACTIVE
@@ -56,10 +55,6 @@ where
     ))
 }
 
-const fn default_stable_leader_optimistic_views() -> u64 {
-    DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS
-}
-
 fn deserialize_term_length<'de, D>(deserializer: D) -> Result<NonZeroU32, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -84,7 +79,6 @@ pub enum Leader {
         delay_ms: NonZeroU64,
         #[serde(deserialize_with = "deserialize_term_length")]
         term_length: NonZeroU32,
-        #[serde(default = "default_stable_leader_optimistic_views")]
         optimistic_views: u64,
     },
 }
@@ -204,7 +198,7 @@ pub struct Peers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alto_types::NAMESPACE;
+    use alto_types::{Block, NAMESPACE};
     use commonware_consensus::{
         marshal,
         simplex::{
@@ -420,10 +414,7 @@ mod tests {
 
     /// Stable-leader election used by every simulation that does not pick its own elector.
     fn stable_elector() -> engine::StableElector {
-        engine::stable_elector(
-            STABLE_LEADER_TERM_LENGTH,
-            DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS,
-        )
+        engine::stable_elector(STABLE_LEADER_TERM_LENGTH, 48)
     }
 
     async fn start_validator(
@@ -483,9 +474,6 @@ mod tests {
             fetch_timeout: Duration::from_secs(1),
             activity_timeout: ViewDelta::new(10),
             skip_timeout,
-            max_fetch_count: 10,
-            max_fetch_size: 1024 * 512,
-            fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
             backfiller_max_active: cfg.backfiller_max_active,
             backfiller_retry: cfg.backfiller_retry,
             indexer: cfg.indexer,
@@ -923,7 +911,7 @@ mod tests {
             assert!(indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
-            let genesis_digest = application::Application::<CS>::genesis().digest();
+            let genesis_digest = Block::genesis().digest();
             let started_digests = indexer.block_upload_started_digests.lock().clone();
             let expected_genesis_uploads = n as usize;
             assert_eq!(
@@ -1124,8 +1112,7 @@ mod tests {
                 queue_outstanding(&metrics) > 0,
                 "expected finalized queue work while certificate uploads were blocked",
             );
-            let genesis_digest =
-                application::Application::<alto_types::StandardScheme>::genesis().digest();
+            let genesis_digest = Block::genesis().digest();
             let expected_genesis_uploads = n as usize;
             let started_digests = indexer.block_upload_started_digests.lock().clone();
             assert_eq!(

@@ -28,15 +28,12 @@ pub struct MockError(pub String);
 
 pub type BlockHandler =
     Arc<Mutex<Option<Box<dyn Fn(Query) -> Option<Payload<VrfScheme>> + Send + Sync>>>>;
-pub type FinalizedHandler =
-    Arc<Mutex<Option<Box<dyn Fn(IndexQuery) -> Option<Finalized<VrfScheme>> + Send + Sync>>>>;
 pub type NotarizedHandler =
     Arc<Mutex<Option<Box<dyn Fn(IndexQuery) -> Option<Notarized<VrfScheme>> + Send + Sync>>>>;
 
 #[derive(Clone)]
 pub struct MockSource {
     pub block_handler: BlockHandler,
-    pub finalized_handler: FinalizedHandler,
     pub notarized_handler: NotarizedHandler,
     pub messages: Arc<Mutex<Vec<Message<VrfScheme>>>>,
 }
@@ -45,7 +42,6 @@ impl MockSource {
     pub fn new() -> Self {
         Self {
             block_handler: Arc::new(Mutex::new(None)),
-            finalized_handler: Arc::new(Mutex::new(None)),
             notarized_handler: Arc::new(Mutex::new(None)),
             messages: Arc::new(Mutex::new(Vec::new())),
         }
@@ -55,10 +51,6 @@ impl MockSource {
 impl Source for MockSource {
     type Scheme = VrfScheme;
     type Error = MockError;
-
-    async fn health(&self) -> Result<(), Self::Error> {
-        Ok(())
-    }
 
     async fn block(&self, query: Query) -> Result<Payload<VrfScheme>, Self::Error> {
         let handler = self.block_handler.clone();
@@ -75,15 +67,6 @@ impl Source for MockSource {
         match guard.as_ref().and_then(|f| f(query)) {
             Some(notarized) => Ok(notarized),
             None => Err(MockError("notarized not found".to_string())),
-        }
-    }
-
-    async fn finalized(&self, query: IndexQuery) -> Result<Finalized<VrfScheme>, Self::Error> {
-        let handler = self.finalized_handler.clone();
-        let guard = handler.lock();
-        match guard.as_ref().and_then(|f| f(query)) {
-            Some(finalized) => Ok(finalized),
-            None => Err(MockError("finalized not found".to_string())),
         }
     }
 

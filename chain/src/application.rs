@@ -1,13 +1,11 @@
 use crate::indexer;
-use alto_types::{Block, Context, Scheme, EPOCH};
-use bytes::Bytes;
+use alto_types::{Block, Context, Scheme};
 use commonware_actor::Feedback;
 use commonware_consensus::{
     marshal::{ancestry::Ancestry, Update},
-    types::{Height, Round, View},
     Application as ConsensusApplication, Heightable, Reporter,
 };
-use commonware_cryptography::{ed25519, sha256, Digest as _, Digestible, Hasher, Sha256, Signer};
+use commonware_cryptography::Digestible;
 use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
@@ -18,9 +16,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tracing::info;
-
-/// Genesis message to use during initialization.
-const GENESIS: &[u8] = b"commonware is neat";
 
 /// Fixed consensus cutoff for block timestamps: 2200-01-01T00:00:00Z.
 ///
@@ -38,34 +33,14 @@ pub struct Application<S: Scheme> {
 }
 
 impl<S: Scheme> Application<S> {
-    pub fn genesis() -> Block {
-        let genesis_context = Context {
-            round: Round::new(EPOCH, View::zero()),
-            leader: ed25519::PrivateKey::from_seed(0).public_key(),
-            parent: (View::zero(), sha256::Digest::EMPTY),
-        };
-        Block::new(
-            genesis_context,
-            Sha256::hash(&[GENESIS]),
-            Height::zero(),
-            0,
-            Bytes::new(),
-        )
-    }
-
-    pub fn new(delay_ms: NonZeroU64) -> Self {
+    pub fn new(delay_ms: NonZeroU64, block_size: u32) -> Self {
         Self {
             backfiller: None,
             delay_ms,
-            block_size: 0,
+            block_size: usize::try_from(block_size)
+                .expect("configured block size is unsupported on this platform"),
             _scheme: PhantomData,
         }
-    }
-
-    pub(crate) fn with_block_size(mut self, block_size: u32) -> Self {
-        self.block_size = usize::try_from(block_size)
-            .expect("configured block size is unsupported on this platform");
-        self
     }
 
     pub(crate) fn with_backfiller(mut self, backfiller: indexer::Producer) -> Self {
@@ -196,8 +171,13 @@ impl<S: Scheme> Reporter for Application<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alto_types::VrfScheme;
-    use commonware_consensus::marshal::ancestry;
+    use alto_types::{VrfScheme, EPOCH};
+    use bytes::Bytes;
+    use commonware_consensus::{
+        marshal::ancestry,
+        types::{Height, Round, View},
+    };
+    use commonware_cryptography::{ed25519, sha256, Digest as _, Hasher, Sha256, Signer};
     use commonware_runtime::{deterministic, Runner as _, Supervisor as _};
     use commonware_utils::NZU64;
     use std::sync::Arc;
@@ -238,7 +218,7 @@ mod tests {
     fn verify_waits_until_future_block_enters_skew_window() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(DELAY_MS);
+            let mut application = Application::new(DELAY_MS, 0);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -274,7 +254,7 @@ mod tests {
     fn verify_rejects_equal_parent_timestamp() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(DELAY_MS);
+            let mut application = Application::new(DELAY_MS, 0);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -303,7 +283,7 @@ mod tests {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
             let block_size = 4;
-            let mut application = Application::new(DELAY_MS).with_block_size(block_size);
+            let mut application = Application::new(DELAY_MS, block_size);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -343,7 +323,7 @@ mod tests {
     fn verify_returns_immediately_for_mature_block_timestamp() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(DELAY_MS);
+            let mut application = Application::new(DELAY_MS, 0);
 
             context.sleep(Duration::from_millis(10)).await;
             let now = context.current().epoch_millis();
@@ -374,7 +354,7 @@ mod tests {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
             let delay_ms = NZU64!(37);
-            let mut application = Application::new(delay_ms);
+            let mut application = Application::new(delay_ms, 0);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -404,7 +384,7 @@ mod tests {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
             let block_size = 128;
-            let mut application = Application::new(DELAY_MS).with_block_size(block_size);
+            let mut application = Application::new(DELAY_MS, block_size);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -431,7 +411,7 @@ mod tests {
     fn verify_rejects_timestamp_above_maximum() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(DELAY_MS);
+            let mut application = Application::new(DELAY_MS, 0);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -462,7 +442,7 @@ mod tests {
     fn propose_panics_when_parent_timestamp_is_maximum() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(DELAY_MS);
+            let mut application = Application::new(DELAY_MS, 0);
 
             let parent = Block::new(
                 test_context(1, (View::zero(), sha256::Digest::EMPTY)),

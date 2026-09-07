@@ -1,7 +1,6 @@
 //! Common types used throughout `alto`.
 
 use commonware_consensus::types::Epoch;
-use commonware_formatting::hex;
 use commonware_utils::NZU64;
 use std::num::NonZero;
 
@@ -49,14 +48,6 @@ impl Kind {
             1 => Some(Self::Notarization),
             2 => Some(Self::Finalization),
             _ => None,
-        }
-    }
-
-    pub fn to_hex(&self) -> String {
-        match self {
-            Self::Seed => hex(&[0]),
-            Self::Notarization => hex(&[1]),
-            Self::Finalization => hex(&[2]),
         }
     }
 }

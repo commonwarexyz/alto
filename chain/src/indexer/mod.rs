@@ -7,12 +7,8 @@
 //!   `Consumer` retries block uploads from the backfill queue across
 //!   restarts.
 //!
-//! `Indexer` is the top-level abstraction over those pieces. It owns
-//! the shared `State` used to deduplicate uploads, cache blocks, and
-//! coordinate the live and backfiller paths. The actors are still exposed
-//! separately because they plug into three different integration points:
-//! the application's finalized block stream, the consensus reporter, and a
-//! background consumer task.
+//! The live and backfiller actors share upload state to deduplicate uploads,
+//! cache blocks, and coordinate ownership across both paths.
 
 use alto_types::{Block, Finalized, Notarized, Scheme, Seed};
 use commonware_consensus::marshal::{core::Mailbox as MarshalMailbox, standard::Standard};
@@ -80,77 +76,43 @@ impl<S: Strategy, C: Scheme> Client<C> for alto_client::Client<S, C> {
     }
 }
 
-/// Builds and owns the indexer's live and backfiller upload actors.
-///
-/// This is the high-level abstraction over the indexer upload subsystem. It
-/// constructs the shared upload state once, then hands out the specific actor
-/// handles needed by the engine:
-/// - a producer for the application's finalized block stream;
-/// - a pusher for consensus activity;
-/// - a consumer for the background retry task.
-pub(crate) struct Indexer<
-    E: Spawner + Clock + Storage + Metrics + BufferPooler,
-    C: Client<CS>,
-    CS: Scheme,
-> {
-    producer: Producer,
-    pusher: Pusher<E, C, CS>,
-    consumer: Consumer<E, C, CS>,
-}
-
-impl<E, C, CS> Indexer<E, C, CS>
+/// Constructs the live and backfiller actors with shared upload state.
+pub(crate) fn init<E, C, CS>(
+    context: E,
+    client: C,
+    marshal: MarshalMailbox<CS, Standard<Block>>,
+    backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
+    mailbox_size: NonZeroUsize,
+    backfiller_max_active: NonZeroUsize,
+    backfiller_retry: Duration,
+) -> (Producer, Pusher<E, C, CS>, Consumer<E, C, CS>)
 where
     E: Spawner + Clock + Storage + Metrics + BufferPooler,
     C: Client<CS>,
     CS: Scheme,
 {
-    pub(crate) async fn new(
-        context: E,
-        client: C,
-        marshal: MarshalMailbox<CS, Standard<Block>>,
-        backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
-        mailbox_size: NonZeroUsize,
-        backfiller_max_active: NonZeroUsize,
-        backfiller_retry: Duration,
-    ) -> Self {
-        let uploads: SharedState = Arc::new(Mutex::new(State::new()));
-        let pusher = Pusher::new(
-            context.child("pusher"),
-            client.clone(),
-            marshal.clone(),
-            uploads.clone(),
-        );
-        let (writer, reader) = backfiller;
-        let producer = backfiller::producer::init(
-            context.child("producer"),
-            uploads.clone(),
-            writer.clone(),
-            mailbox_size,
-        );
-        let consumer = Consumer::new(
-            context.child("consumer"),
-            client,
-            marshal,
-            uploads,
-            (writer, reader),
-            backfiller_max_active,
-            backfiller_retry,
-        );
-
-        Self {
-            producer,
-            pusher,
-            consumer,
-        }
-    }
-
-    /// Consumes the runtime and returns the actor handles it constructed.
-    pub(crate) fn split(self) -> (Producer, Pusher<E, C, CS>, Consumer<E, C, CS>) {
-        let Self {
-            producer,
-            pusher,
-            consumer,
-        } = self;
-        (producer, pusher, consumer)
-    }
+    let uploads: SharedState = Arc::new(Mutex::new(State::new()));
+    let pusher = Pusher::new(
+        context.child("pusher"),
+        client.clone(),
+        marshal.clone(),
+        uploads.clone(),
+    );
+    let (writer, reader) = backfiller;
+    let producer = backfiller::producer::init(
+        context.child("producer"),
+        uploads.clone(),
+        writer.clone(),
+        mailbox_size,
+    );
+    let consumer = Consumer::new(
+        context.child("consumer"),
+        client,
+        marshal,
+        uploads,
+        (writer, reader),
+        backfiller_max_active,
+        backfiller_retry,
+    );
+    (producer, pusher, consumer)
 }

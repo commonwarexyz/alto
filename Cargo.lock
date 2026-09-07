@@ -223,7 +223,6 @@ dependencies = [
  "commonware-codec",
  "commonware-consensus",
  "commonware-cryptography",
- "commonware-formatting",
  "commonware-math",
  "commonware-parallel",
  "commonware-utils",

@@ -7,9 +7,9 @@ import {
   getClusterConfig,
   getClusters,
   getHttpBackendUrl,
+  getInitialCluster,
   getWebSocketBackendUrl,
   Cluster,
-  DEFAULT_CLUSTER,
   MODE,
 } from "./config";
 import { SeedJs, NotarizedJs, FinalizedJs, ViewData } from "./types";
@@ -35,21 +35,6 @@ import './ErrorNotification.css';
 import MaintenancePage from './MaintenancePage';
 import SearchModal from './SearchModal';
 import './SearchModal.css';
-
-const getInitialCluster = (): Cluster => {
-  // Get the cluster from the URL
-  const params = new URLSearchParams(window.location.search);
-  const clusterFromUrl = params.get('cluster');
-  const allClusters = getClusters();
-
-  // If the cluster exists, use it
-  if (clusterFromUrl && (clusterFromUrl in allClusters)) {
-    return clusterFromUrl as Cluster;
-  }
-
-  // Otherwise, use the default cluster
-  return DEFAULT_CLUSTER;
-};
 
 const TIMEOUT_DURATION = 5000; // 5s
 const HEALTH_CHECK_INTERVAL = 60000; // Check health every minute
@@ -425,7 +410,7 @@ const App: React.FC = () => {
 
   const handleNotarization = useCallback((notarized: NotarizedJs, receivedAt: number) => {
     const view = notarized.proof.view;
-    const leaderLocation = resolveLeaderLocation(notarized.block?.leader, PARTICIPANTS, LOCATIONS);
+    const leaderLocation = resolveLeaderLocation(notarized.block.leader, PARTICIPANTS, LOCATIONS);
     const currentTime = adjustTime(receivedAt);
     const lastObservedView = observeView(view);
     setViews((prevViews) => {
@@ -502,7 +487,7 @@ const App: React.FC = () => {
 
   const handleFinalization = useCallback((finalized: FinalizedJs, receivedAt: number) => {
     const view = finalized.proof.view;
-    const leaderLocation = resolveLeaderLocation(finalized.block?.leader, PARTICIPANTS, LOCATIONS);
+    const leaderLocation = resolveLeaderLocation(finalized.block.leader, PARTICIPANTS, LOCATIONS);
     const currentTime = adjustTime(receivedAt);
     const lastObservedView = observeView(view);
     setViews((prevViews) => {

@@ -223,10 +223,6 @@ mod tests {
         type Scheme = VrfScheme;
         type Error = MockError;
 
-        async fn health(&self) -> Result<(), Self::Error> {
-            Ok(())
-        }
-
         async fn block(&self, _query: Query) -> Result<Payload<VrfScheme>, Self::Error> {
             if let Some(sender) = self.started.lock().take() {
                 let _ = sender.send(());
@@ -240,13 +236,6 @@ mod tests {
             _query: IndexQuery,
         ) -> Result<alto_types::Notarized<VrfScheme>, Self::Error> {
             Err(MockError("notarized not supported".to_string()))
-        }
-
-        async fn finalized(
-            &self,
-            _query: IndexQuery,
-        ) -> Result<alto_types::Finalized<VrfScheme>, Self::Error> {
-            Err(MockError("finalized not supported".to_string()))
         }
 
         async fn listen(
@@ -327,7 +316,6 @@ mod tests {
         let finalized = fixture.create_finalized(5, 8);
         let height = Height::new(5);
         let block_calls = Arc::new(AtomicU32::new(0));
-        let finalized_calls = Arc::new(AtomicU32::new(0));
 
         let source = MockSource::new();
         {
@@ -340,13 +328,6 @@ mod tests {
                     }
                     _ => None,
                 }
-            }));
-        }
-        {
-            let finalized_calls = finalized_calls.clone();
-            *source.finalized_handler.lock() = Some(Box::new(move |_| {
-                finalized_calls.fetch_add(1, Ordering::Relaxed);
-                None
             }));
         }
 
@@ -363,7 +344,6 @@ mod tests {
             delivery.response.send(true).expect("response dropped");
 
             assert_eq!(block_calls.load(Ordering::Relaxed), 1);
-            assert_eq!(finalized_calls.load(Ordering::Relaxed), 0);
         });
     }
 

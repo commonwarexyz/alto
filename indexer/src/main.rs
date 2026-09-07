@@ -180,16 +180,7 @@ async fn explorer_asset(uri: Uri) -> Response {
     let path = if path.is_empty() { "index.html" } else { path };
     let asset = EXPLORER_ASSETS
         .iter()
-        .find(|(asset_path, _, _)| *asset_path == path)
-        .or_else(|| {
-            (!path.contains('.'))
-                .then(|| {
-                    EXPLORER_ASSETS
-                        .iter()
-                        .find(|(asset_path, _, _)| *asset_path == "index.html")
-                })
-                .flatten()
-        });
+        .find(|(asset_path, _, _)| *asset_path == path);
     let Some((_, contents, content_type)) = asset else {
         return StatusCode::NOT_FOUND.into_response();
     };

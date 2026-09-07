@@ -54,8 +54,6 @@ const SKIP_TIMEOUT: Duration = Duration::from_secs(11);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(2);
 const MARSHAL_RESOLVER_TIMEOUT: Duration = Duration::from_secs(10);
 const BASE_MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
-const MAX_FETCH_COUNT: usize = 16;
-const MAX_FETCH_SIZE: usize = 512 * 1024;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
@@ -398,9 +396,6 @@ fn main() {
                     activity_timeout: ACTIVITY_TIMEOUT,
                     skip_timeout: SKIP_TIMEOUT,
                     fetch_timeout: FETCH_TIMEOUT,
-                    max_fetch_count: MAX_FETCH_COUNT,
-                    max_fetch_size: MAX_FETCH_SIZE,
-                    fetch_rate_per_peer: resolver_limit,
                     backfiller_max_active: config.backfiller_max_active,
                     backfiller_retry: Duration::from_millis(config.backfiller_retry_ms),
                     indexer,
