@@ -43,7 +43,7 @@ struct Args {
     )]
     certificate_mode: Option<String>,
 
-    /// Payload size of the network's blocks in bytes; uploads carrying a larger payload are
+    /// Payload size of the network's blocks in bytes. Uploads carrying a larger payload are
     /// rejected and the request body limit is derived from it. Without it, blocks of any size up
     /// to a fixed limit are accepted.
     #[clap(long, conflicts_with = "config")]

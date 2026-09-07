@@ -88,6 +88,35 @@ test("reserves a core while using enough parallel verifiers", () => {
   expect(consensusWorkerCount(32)).toBe(16);
 });
 
+test("keeps delivering recent results when an earlier worker stays pending", () => {
+  const stalled = new FakeWorker();
+  const healthy = new FakeWorker();
+  const delivered: number[] = [];
+  const skipped: number[] = [];
+  const pool = new ConsensusWorkerPool(
+    [stalled, healthy] as unknown as Worker[],
+    new Uint8Array([1]),
+    result => {
+      if (result.skipped) skipped.push(result.skipped);
+      else delivered.push(result.receivedAt);
+    },
+    undefined, undefined, false, 4,
+  );
+  pool.verify(1, new Uint8Array([0]), 0);
+  for (let id = 1; id < 40; id++) {
+    pool.verify(1, new Uint8Array([id]), id);
+    healthy.completeNext();
+  }
+  expect(delivered).toEqual(Array.from({ length: 39 }, (_, i) => i + 1));
+  expect(skipped).toEqual([1]);
+
+  // A late response cannot resurrect work already reported as skipped
+  stalled.completeNext();
+  expect(delivered).toHaveLength(39);
+  expect(pool.droppedCount()).toBe(1);
+  pool.terminate();
+});
+
 test("retries an in-flight artifact on a replacement worker", () => {
   const worker = new FakeWorker();
   const replacements: FakeWorker[] = [];
@@ -139,20 +168,20 @@ test("a failed verification still releases later results in order and replaces t
   pool.verify(1, new Uint8Array([0]), 0);
   pool.verify(1, new Uint8Array([1]), 1);
 
-  // The second artifact finishes first; nothing is released until the first reports.
+  // Hold the second artifact's result until the first reports
   second.completeNext();
   expect(verifiedReceivedAt).toEqual([]);
   first.failNext("wasm panic");
   expect(verifiedReceivedAt).toEqual([0, 1]);
 
-  // The failing worker is retired (its wasm may be poisoned) and its slot refilled; the released
-  // result is not retried.
+  // Retire the failed worker (its WASM may be poisoned) and refill its slot without retrying the
+  // released result
   expect(first.terminated).toBe(true);
   expect(replacements).toHaveLength(1);
   expect(replacements[0].messages.slice(1)).toHaveLength(0);
   expect(errors).toEqual([]);
 
-  // A successful verification resets the failure count; repeated failures without one stop the pool.
+  // A successful verification resets the failure count. Repeated failures without one stop the pool
   pool.verify(1, new Uint8Array([2]), 2);
   second.completeNext();
   expect(verifiedReceivedAt).toEqual([0, 1, 2]);
@@ -201,7 +230,7 @@ test("an idle worker that fails is removed and replaced, and repeated failures s
   expect(replacements.every((replacement) => replacement.terminated)).toBe(true);
 });
 
-test("sheds the oldest queued artifacts when verification falls behind", () => {
+test("bounds pending work when every worker stalls", () => {
   const worker = new FakeWorker();
   const verifiedReceivedAt: number[] = [];
   const skipped: number[] = [];
@@ -219,22 +248,22 @@ test("sheds the oldest queued artifacts when verification falls behind", () => {
     undefined,
     undefined,
     false,
-    2,
+    3,
   );
 
-  // One in flight, then more than the queue bound waiting.
-  for (let id = 0; id < 5; id++) {
+  // The pending bound includes work waiting on a worker response
+  for (let id = 0; id < 1000; id++) {
     pool.verify(1, new Uint8Array([id]), id);
   }
-  expect(pool.droppedCount()).toBe(2);
+  expect(pool.droppedCount()).toBe(997);
 
-  worker.completeNext(); // artifact 0
+  worker.completeNext(); // stale artifact 0 only frees the worker
   expect(skipped).toEqual([]);
-  worker.completeNext(); // artifact 3 (1 and 2 were shed): a gap marker precedes it
-  expect(skipped).toEqual([2]);
-  worker.completeNext(); // artifact 4
-  expect(verifiedReceivedAt).toEqual([0, 3, 4]);
-  expect(skipped).toEqual([2]);
-  expect(worker.messages.slice(1).map((message: any) => message.receivedAt)).toEqual([0, 3, 4]);
+  worker.completeNext(); // artifact 997 follows the gap marker
+  worker.completeNext(); // artifact 998
+  worker.completeNext(); // artifact 999
+  expect(verifiedReceivedAt).toEqual([997, 998, 999]);
+  expect(skipped).toEqual([997]);
+  expect(worker.messages.slice(1).map((message: any) => message.receivedAt)).toEqual([0, 997, 998, 999]);
   pool.terminate();
 });

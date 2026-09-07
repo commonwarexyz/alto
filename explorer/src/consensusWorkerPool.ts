@@ -14,10 +14,9 @@ export interface VerifiedConsensusArtifact {
 export const consensusWorkerCount = (hardwareConcurrency: number): number =>
   Math.min(16, Math.max(2, hardwareConcurrency - 1));
 
-/// Most artifacts waiting for a worker. When the feed outpaces verification, the oldest queued
-/// artifacts are dropped so the live head of the timeline stays current instead of drifting behind
-/// while memory grows.
-export const MAX_QUEUED_JOBS = 256;
+/// Most artifacts awaiting ordered delivery, including queued, active, and completed work.
+/// Older artifacts are shed so one pending worker cannot hold the live timeline behind it.
+export const MAX_PENDING_JOBS = 256;
 
 /// Consecutive worker failures without a successful verification before the pool gives up.
 const MAX_CONSECUTIVE_FAILURES = 3;
@@ -42,7 +41,6 @@ export class ConsensusWorkerPool {
   private readonly availableWorkers: Worker[];
   private readonly queuedJobs: VerificationJob[] = [];
   private readonly completedResults = new Map<number, VerifiedConsensusArtifact>();
-  private readonly droppedSequences = new Set<number>();
   private readonly activeJobs = new Map<Worker, VerificationJob>();
   private nextJobSequence = 0;
   private nextResultSequence = 0;
@@ -59,7 +57,7 @@ export class ConsensusWorkerPool {
     private readonly onError?: (error: ErrorEvent | Error) => void,
     private readonly createWorker?: () => Worker,
     private readonly standard = false,
-    private readonly maxQueuedJobs = MAX_QUEUED_JOBS,
+    private readonly maxPendingJobs = MAX_PENDING_JOBS,
   ) {
     this.availableWorkers = [];
     for (const worker of workers) {
@@ -80,7 +78,9 @@ export class ConsensusWorkerPool {
       }
       this.activeJobs.delete(worker);
       // Release the (possibly null) result first so in-order delivery keeps advancing.
-      this.completedResults.set(sequence, { kind, artifact, receivedAt });
+      if (sequence >= this.nextResultSequence) {
+        this.completedResults.set(sequence, { kind, artifact, receivedAt });
+      }
       this.releaseCompleted();
       if (error) {
         // The worker could not verify (its wasm module failed to initialize or panicked, or the
@@ -106,11 +106,6 @@ export class ConsensusWorkerPool {
   /// stream has a gap.
   private releaseCompleted() {
     for (;;) {
-      if (this.droppedSequences.delete(this.nextResultSequence)) {
-        this.nextResultSequence += 1;
-        this.pendingSkipped += 1;
-        continue;
-      }
       const result = this.completedResults.get(this.nextResultSequence);
       if (!result) {
         return;
@@ -132,11 +127,12 @@ export class ConsensusWorkerPool {
   }
 
   /// Retire a worker that crashed (`onerror`) or reported a verification error. An in-flight job
-  /// is retried on the replacement; a job whose result was already released is not.
+  /// is retried on the replacement. A job whose result was already released is not.
   private handleWorkerFailure(worker: Worker, error: ErrorEvent | Error) {
-    const job = this.activeJobs.get(worker);
+    const activeJob = this.activeJobs.get(worker);
+    const job = activeJob && activeJob.sequence >= this.nextResultSequence ? activeJob : undefined;
     this.activeJobs.delete(worker);
-    // A worker can fail while idle (for example, its script failed to load); never dispatch to it.
+    // Remove a failed worker from the available pool even if it was idle
     const availableIndex = this.availableWorkers.indexOf(worker);
     if (availableIndex !== -1) {
       this.availableWorkers.splice(availableIndex, 1);
@@ -187,16 +183,21 @@ export class ConsensusWorkerPool {
       attempts: 0,
     });
     this.nextJobSequence += 1;
-    // Shed the oldest waiting artifacts when the feed outpaces verification; their sequence
-    // numbers are marked dropped so in-order release keeps advancing.
-    let shed = 0;
-    while (this.queuedJobs.length > this.maxQueuedJobs) {
-      const stale = this.queuedJobs.shift()!;
-      this.droppedSequences.add(stale.sequence);
-      shed += 1;
-    }
+    // Advance past the oldest outstanding work even if a worker has not replied. Its eventual
+    // response can free that worker, but cannot reintroduce an artifact already reported as shed.
+    const floor = Math.max(this.nextResultSequence, this.nextJobSequence - this.maxPendingJobs);
+    const shed = floor - this.nextResultSequence;
     if (shed > 0) {
+      this.nextResultSequence = floor;
+      this.pendingSkipped += shed;
+      while (this.queuedJobs.length > 0 && this.queuedJobs[0].sequence < floor) {
+        this.queuedJobs.shift();
+      }
+      this.completedResults.forEach((_, sequence) => {
+        if (sequence < floor) this.completedResults.delete(sequence);
+      });
       this.dropped += shed;
+      this.releaseCompleted();
       const now = Date.now();
       if (now - this.lastDropWarning >= DROP_WARNING_INTERVAL_MS) {
         this.lastDropWarning = now;
@@ -224,7 +225,6 @@ export class ConsensusWorkerPool {
     this.queuedJobs.length = 0;
     this.availableWorkers.length = 0;
     this.completedResults.clear();
-    this.droppedSequences.clear();
     this.pendingSkipped = 0;
     this.activeJobs.clear();
     for (const worker of this.workers) {

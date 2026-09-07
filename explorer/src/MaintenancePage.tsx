@@ -47,8 +47,7 @@ const MaintenancePage: React.FC = () => {
     useEffect(() => {
         let cancelled = false;
         let fallback: ReturnType<typeof setTimeout> | null = null;
-        // `fonts.load` rejects when a face fails to download; treat that like "ready" so the
-        // box is still revealed (in the fallback font) rather than staying hidden.
+        // Reveal the box in the fallback font if `fonts.load` rejects
         const fontsReady: Promise<unknown> = document.fonts
             ? Promise.all([
                 document.fonts.load('bold 32px Inconsolata'),
@@ -144,8 +143,8 @@ const MaintenancePage: React.FC = () => {
                 return;
             }
 
-            // Advance by elapsed time so motion is smooth at any refresh rate; cap the step so a
-            // background tab does not teleport the logo when it becomes visible again.
+            // Use elapsed time for smooth motion and cap the step to prevent jumps when a
+            // background tab becomes visible again
             const elapsed = lastFrameRef.current === null ? 0 : timestamp - lastFrameRef.current;
             lastFrameRef.current = timestamp;
             const step = speed * Math.min(elapsed, 100) / 1000;

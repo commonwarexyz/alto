@@ -107,8 +107,8 @@ mod tests {
             Block::decode_cfg(block.encode(), &Block::codec_config(1024 * 1024 + 1)).unwrap(),
             block
         );
-        // Validators reject payloads larger than the configured block size before caching them;
-        // smaller payloads (e.g. the empty genesis block) still decode.
+        // Validators reject payloads larger than the configured block size before caching them
+        // Smaller payloads (e.g. the empty genesis block) still decode
         assert!(Block::decode_cfg(block.encode(), &Block::codec_config(1024 * 1024)).is_err());
         assert_eq!(
             Block::decode_cfg(empty.encode(), &Block::codec_config(1024)).unwrap(),

@@ -5,7 +5,10 @@ use commonware_consensus::Viewable;
 use commonware_cryptography::Digestible;
 use commonware_parallel::Strategy;
 use futures::{channel::mpsc::unbounded, Stream, StreamExt};
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message as TMessage};
+use tokio_tungstenite::{
+    connect_async_tls_with_config,
+    tungstenite::{protocol::WebSocketConfig, Message as TMessage},
+};
 
 fn seed_upload_path(base: String) -> String {
     format!("{base}/seed")
@@ -252,10 +255,14 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
     }
 
     pub async fn listen(&self) -> Result<impl Stream<Item = Result<Message<C>, Error>>, Error> {
+        // Match HTTP retrieval and decoding, which accept the indexer's configured block size
+        let config = WebSocketConfig::default()
+            .max_frame_size(None)
+            .max_message_size(None);
         // Connect to the websocket endpoint
         let (stream, _) = connect_async_tls_with_config(
             listen_path(self.ws_uri.clone()),
-            None,
+            Some(config),
             false,
             Some(self.ws_connector.clone()),
         )

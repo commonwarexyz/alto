@@ -15,7 +15,7 @@ use commonware_formatting::from_hex;
 use commonware_parallel::Strategy;
 use futures::{SinkExt, StreamExt};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, VecDeque},
     num::NonZeroUsize,
     sync::{Arc, RwLock},
 };
@@ -40,9 +40,8 @@ pub struct State<C: Scheme> {
     finalizations: BTreeMap<View, Finalized<C>>,
     finalized_height_to_view: BTreeMap<u64, View>,
     blocks_by_digest: BTreeMap<Digest, Block>,
-    /// Blocks keyed by their view so eviction drops the oldest views first, however late a
-    /// historical block is uploaded.
-    block_order: BTreeSet<(View, Digest)>,
+    /// Raw uploads have unauthenticated views, so evict blocks in insertion order.
+    block_order: VecDeque<Digest>,
 }
 
 impl<C: Scheme> Default for State<C> {
@@ -53,29 +52,26 @@ impl<C: Scheme> Default for State<C> {
             finalizations: BTreeMap::new(),
             finalized_height_to_view: BTreeMap::new(),
             blocks_by_digest: BTreeMap::new(),
-            block_order: BTreeSet::new(),
+            block_order: VecDeque::new(),
         }
     }
 }
 
 impl<C: Scheme> State<C> {
-    fn store_block(&mut self, block: Block) {
+    fn store_block(&mut self, block: Block, max_views: usize) {
         let digest = block.digest();
-        let view = block.context.round.view();
         if self.blocks_by_digest.insert(digest, block).is_none() {
-            self.block_order.insert((view, digest));
+            self.block_order.push_back(digest);
+        }
+        // Keep twice the certificate budget while allowing new uploads to replace old entries
+        while self.block_order.len() > max_views.saturating_mul(2) {
+            if let Some(digest) = self.block_order.pop_front() {
+                self.blocks_by_digest.remove(&digest);
+            }
         }
     }
 
-    /// Restore a certified block that was evicted while its certificate is still retained. The
-    /// held certificate already bound `digest`, so a matching upload needs no re-verification.
-    fn restore_block(&mut self, digest: Digest, block: &Block) {
-        if !self.blocks_by_digest.contains_key(&digest) {
-            self.store_block(block.clone());
-        }
-    }
-
-    /// Drop everything older than the most recent `max_views` views so memory stays bounded.
+    /// Retain each artifact kind's most recent `max_views` entries.
     fn prune(&mut self, max_views: usize) {
         while self.seeds.len() > max_views {
             self.seeds.pop_first();
@@ -87,13 +83,6 @@ impl<C: Scheme> State<C> {
             if let Some((_, finalized)) = self.finalizations.pop_first() {
                 self.finalized_height_to_view
                     .remove(&finalized.block.height.get());
-            }
-        }
-        // A view can contribute a notarized and a distinct finalized block, so keep twice as many
-        // blocks as views before evicting (lowest view first).
-        while self.block_order.len() > max_views.saturating_mul(2) {
-            if let Some((_, digest)) = self.block_order.pop_first() {
-                self.blocks_by_digest.remove(&digest);
             }
         }
     }
@@ -135,7 +124,7 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         self
     }
 
-    /// Retain only the most recent `max_views` views in memory.
+    /// Retain each artifact kind's most recent `max_views` entries and twice as many block uploads.
     pub fn with_max_views(mut self, max_views: NonZeroUsize) -> Self {
         self.max_views = max_views.get();
         self
@@ -167,6 +156,9 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
             return Ok(()); // Already exists
         }
         state.prune(self.max_views);
+        if !state.seeds.contains_key(&seed.view()) {
+            return Ok(());
+        }
 
         // Broadcast seed
         let mut data = vec![0u8; u8::SIZE + seed.encode_size()];
@@ -192,20 +184,7 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         // Skip the signature check for a view we already hold (many validators upload each
         // certificate)
         let view = notarized.proof.view();
-        let held = self
-            .state
-            .read()
-            .unwrap()
-            .notarizations
-            .get(&view)
-            .map(|held| held.block.digest());
-        if let Some(digest) = held {
-            if digest == notarized.block.digest() {
-                self.state
-                    .write()
-                    .unwrap()
-                    .restore_block(digest, &notarized.block);
-            }
+        if self.state.read().unwrap().notarizations.contains_key(&view) {
             return Ok(());
         }
 
@@ -216,9 +195,6 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
 
         let mut state = self.state.write().unwrap();
 
-        // Store block by digest
-        state.store_block(notarized.block.clone());
-
         // Store notarization
         if state
             .notarizations
@@ -228,6 +204,10 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
             return Ok(()); // Already exists
         }
         state.prune(self.max_views);
+        if !state.notarizations.contains_key(&view) {
+            return Ok(());
+        }
+        state.store_block(notarized.block.clone(), self.max_views);
 
         // Broadcast notarization
         let mut data = vec![0u8; u8::SIZE + notarized.encode_size()];
@@ -253,20 +233,7 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         // Skip the signature check for a view we already hold (many validators upload each
         // certificate)
         let view = finalized.proof.view();
-        let held = self
-            .state
-            .read()
-            .unwrap()
-            .finalizations
-            .get(&view)
-            .map(|held| held.block.digest());
-        if let Some(digest) = held {
-            if digest == finalized.block.digest() {
-                self.state
-                    .write()
-                    .unwrap()
-                    .restore_block(digest, &finalized.block);
-            }
+        if self.state.read().unwrap().finalizations.contains_key(&view) {
             return Ok(());
         }
 
@@ -276,9 +243,6 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         }
 
         let mut state = self.state.write().unwrap();
-
-        // Store block by digest
-        state.store_block(finalized.block.clone());
 
         // Store finalization
         if state
@@ -292,6 +256,10 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
             .finalized_height_to_view
             .insert(finalized.block.height.get(), view);
         state.prune(self.max_views);
+        if !state.finalizations.contains_key(&view) {
+            return Ok(());
+        }
+        state.store_block(finalized.block.clone(), self.max_views);
 
         // Broadcast finalization
         let mut data = vec![0u8; u8::SIZE + finalized.encode_size()];
@@ -338,6 +306,16 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
                 state
                     .blocks_by_digest
                     .get(&digest)
+                    .or_else(|| {
+                        // Retained certificates own their blocks even after raw-cache eviction
+                        state
+                            .finalizations
+                            .values()
+                            .rev()
+                            .map(|f| &f.block)
+                            .chain(state.notarizations.values().rev().map(|n| &n.block))
+                            .find(|block| block.digest() == digest)
+                    })
                     .map(|b| BlockResult::Block(b.clone()))
             } else {
                 None
@@ -350,8 +328,7 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
     pub fn submit_block(&self, block: Block) {
         // Store block by digest (no guarantee this is part of the canonical chain)
         let mut state = self.state.write().unwrap();
-        state.store_block(block);
-        state.prune(self.max_views);
+        state.store_block(block, self.max_views);
     }
 
     pub fn consensus_subscriber(&self) -> broadcast::Receiver<Bytes> {
@@ -511,8 +488,7 @@ async fn handle_consensus_ws<C: Scheme, S: Strategy>(
     loop {
         let data = match consensus.recv().await {
             Ok(data) => data,
-            // A slow subscriber missed some artifacts; keep streaming from the current position
-            // rather than dropping the connection.
+            // Keep streaming from the current position when a slow subscriber misses artifacts
             Err(broadcast::error::RecvError::Lagged(skipped)) => {
                 tracing::debug!(skipped, "consensus subscriber lagged");
                 continue;
@@ -649,6 +625,45 @@ mod tests {
     }
 
     #[test]
+    fn pruned_artifacts_are_not_rebroadcast() {
+        let (schemes, _) = fixture(0);
+        let mut replayed_kinds = Vec::new();
+        for kind in 0..=2 {
+            let indexer = Indexer::new(schemes[0].clone(), Sequential)
+                .with_max_views(NonZeroUsize::new(2).unwrap());
+            let mut subscriber = indexer.consensus_subscriber();
+            let submit = |view| {
+                let finalized = finalized_at(&schemes, view);
+                match Kind::from_u8(kind).unwrap() {
+                    Kind::Seed => indexer.submit_seed(finalized.proof.seed().unwrap()),
+                    Kind::Notarization => indexer.submit_notarization(Notarized::new(
+                        create_notarization(&schemes, finalized.proof.proposal),
+                        finalized.block,
+                    )),
+                    Kind::Finalization => indexer.submit_finalization(finalized),
+                }
+                .unwrap();
+            };
+
+            // Useful late arrivals still enter the retained window and the live feed
+            for view in [1, 10, 12, 11] {
+                submit(view);
+                assert!(subscriber.try_recv().is_ok());
+            }
+            for _ in 0..3 {
+                submit(1);
+                if subscriber.try_recv().is_ok() {
+                    replayed_kinds.push(kind);
+                }
+            }
+        }
+        assert!(
+            replayed_kinds.is_empty(),
+            "replayed kinds: {replayed_kinds:?}"
+        );
+    }
+
+    #[test]
     fn retains_only_the_most_recent_views() {
         let (schemes, _) = fixture(0);
         let indexer = Indexer::new(schemes[0].clone(), Sequential)
@@ -683,6 +698,90 @@ mod tests {
     }
 
     #[test]
+    fn retained_certificates_serve_blocks_after_cache_eviction() {
+        let (schemes, _) = fixture(0);
+        let indexer = Indexer::new(schemes[0].clone(), Sequential)
+            .with_max_views(NonZeroUsize::new(1).unwrap());
+        let finalized = finalized_at(&schemes, 10);
+        let other = finalized_at(&schemes, 11);
+        let notarized = Notarized::new(
+            create_notarization(&schemes, other.proof.proposal),
+            other.block,
+        );
+        indexer.submit_finalization(finalized.clone()).unwrap();
+        indexer.submit_notarization(notarized.clone()).unwrap();
+
+        // Later raw uploads can evict both blocks from the bounded digest cache
+        for view in 12..16 {
+            indexer.submit_block(finalized_at(&schemes, view).block);
+        }
+        assert_eq!(indexer.get_finalization(LATEST), Some(finalized.clone()));
+        assert_eq!(indexer.get_notarization(LATEST), Some(notarized.clone()));
+
+        // A follower installing a retained certificate must be able to resolve its anchor
+        let blocks = [finalized.block.clone(), notarized.block.clone()];
+        for block in &blocks {
+            let query = commonware_formatting::hex(&block.digest().encode());
+            assert!(matches!(
+                indexer.get_block(&query),
+                Some(BlockResult::Block(found)) if &found == block
+            ));
+        }
+
+        // Duplicates need no new cache entry, and expired certificate owners release their blocks
+        indexer.submit_finalization(finalized).unwrap();
+        indexer.submit_notarization(notarized).unwrap();
+        assert_eq!(indexer.state.read().unwrap().blocks_by_digest.len(), 2);
+        let replacement = finalized_at(&schemes, 20);
+        indexer.submit_finalization(replacement.clone()).unwrap();
+        indexer
+            .submit_notarization(Notarized::new(
+                create_notarization(&schemes, replacement.proof.proposal),
+                replacement.block,
+            ))
+            .unwrap();
+        for block in blocks {
+            let query = commonware_formatting::hex(&block.digest().encode());
+            assert!(indexer.get_block(&query).is_none());
+        }
+    }
+
+    #[test]
+    fn future_raw_blocks_do_not_pin_the_cache() {
+        let (schemes, _) = fixture(0);
+        let indexer = Indexer::new(schemes[0].clone(), Sequential)
+            .with_max_views(NonZeroUsize::new(1).unwrap());
+
+        // Unsigned uploads cannot reserve the cache by claiming arbitrarily high views
+        for height in 1..=2 {
+            let block = Block::new(
+                Context {
+                    round: Round::new(EPOCH, View::new(u64::MAX)),
+                    leader: ed25519::PrivateKey::from_seed(0).public_key(),
+                    parent: (View::new(0), sha256::Digest::EMPTY),
+                },
+                sha256::Digest::EMPTY,
+                Height::new(height),
+                0,
+                Bytes::new(),
+            );
+            indexer.submit_block(block);
+        }
+
+        // Honest raw backfills must remain available after the finite flood stops
+        for view in 10..14 {
+            let block = finalized_at(&schemes, view).block;
+            let query = commonware_formatting::hex(&block.digest().encode());
+            indexer.submit_block(block.clone());
+            assert!(matches!(
+                indexer.get_block(&query),
+                Some(BlockResult::Block(found)) if found == block
+            ));
+            assert_eq!(indexer.state.read().unwrap().blocks_by_digest.len(), 2);
+        }
+    }
+
+    #[test]
     fn late_historical_blocks_do_not_evict_recent_ones() {
         let (schemes, _) = fixture(0);
         let indexer = Indexer::new(schemes[0].clone(), Sequential)
@@ -707,18 +806,6 @@ mod tests {
         assert!(indexer
             .get_block(&digest_query(&finalized_at(&schemes, 1)))
             .is_none());
-
-        // Should a certified block ever be evicted, the next upload of its (already verified)
-        // certificate restores it without re-verification.
-        {
-            let mut state = indexer.state.write().unwrap();
-            let digest = recent[1].block.digest();
-            state.blocks_by_digest.remove(&digest);
-            state.block_order.remove(&(recent[1].proof.view(), digest));
-        }
-        assert!(indexer.get_block(&digest_query(&recent[1])).is_none());
-        indexer.submit_finalization(recent[1].clone()).unwrap();
-        assert!(indexer.get_block(&digest_query(&recent[1])).is_some());
     }
 
     #[test]
@@ -1003,6 +1090,45 @@ mod tests {
             }
             _ => panic!("Expected block"),
         }
+    }
+
+    #[tokio::test]
+    async fn large_block_uploads_stream_to_rust_clients() {
+        let (schemes, identity) = fixture(0);
+        let indexer = Arc::new(
+            Indexer::new(schemes[0].clone(), Sequential)
+                .with_block_size(64 * 1024 * 1024)
+                .with_max_views(NonZeroUsize::new(1).unwrap()),
+        );
+        let app = Api::new(indexer.clone()).router();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = Client::new(&format!("http://{addr}"), identity, Sequential);
+        let mut stream = client.listen().await.unwrap();
+        while indexer.consensus_tx.receiver_count() == 0 {
+            tokio::task::yield_now().await;
+        }
+
+        // The encoded artifact exceeds both default WebSocket receive limits
+        let original = finalized_at(&schemes, 1).block;
+        let block = Block::new(
+            original.context,
+            original.parent,
+            original.height,
+            original.timestamp,
+            Bytes::from(vec![7; 64 * 1024 * 1024]),
+        );
+        let proposal = Proposal::new(block.context.round, block.context.parent.0, block.digest());
+        let finalized = Finalized::new(create_finalization(&schemes, proposal), block);
+        client.finalized_upload(finalized.clone()).await.unwrap();
+        match stream.next().await.unwrap().unwrap() {
+            alto_client::consensus::Message::Finalization(received) => {
+                assert_eq!(received, finalized);
+            }
+            _ => panic!("expected finalization"),
+        }
+        server.abort();
     }
 
     #[tokio::test]

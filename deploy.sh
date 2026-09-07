@@ -29,7 +29,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
         exit 1
     fi
     if ! llvm_prefix="$(brew --prefix llvm 2>/dev/null)"; then
-        echo "Homebrew LLVM is not installed; run: brew install llvm" >&2
+        echo "Homebrew LLVM is not installed. Run: brew install llvm" >&2
         exit 1
     fi
     wasm_clang="${llvm_prefix}/bin/clang"
@@ -174,6 +174,6 @@ if [ -f "$HOSTS_PATH" ]; then
     if [ -n "$INDEXER_IP" ]; then
         echo "Explorer: http://${INDEXER_IP}:8080/"
     else
-        echo "Explorer is on port 8080; indexer IP is in $HOSTS_PATH"
+        echo "Explorer is on port 8080. The indexer IP is in $HOSTS_PATH"
     fi
 fi

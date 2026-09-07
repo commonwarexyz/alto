@@ -38,10 +38,11 @@ consensus artifacts. Use `standard` for a stable-leader network and `vrf` for a 
 network.
 
 `--block-size` is the payload size of the network's blocks. When set, uploads carrying a larger block
-are rejected and the request body limit is derived from it; without it, blocks up to a fixed limit
-are accepted. `--max-views` (default 200,000) bounds how many recent views are kept in
-memory; older seeds, certificates, and blocks are dropped, so a follower that must backfill from
-genesis needs an indexer retaining the whole history.
+are rejected and the request body limit is derived from it. Without it, blocks up to a fixed limit
+are accepted. `--max-views` (default 200,000) bounds the recent seeds and each kind of certificate
+kept in memory. The digest cache retains up to twice as many distinct blocks in insertion order.
+Retained certificates also keep their blocks available. Older artifacts are dropped, so a follower
+that must backfill from genesis needs an indexer retaining the whole history.
 
 ## API Endpoints
 

@@ -191,8 +191,8 @@ mod tests {
 
     #[test]
     fn rotating_elector_is_pinned_to_v1() {
-        // The validator and the explorer WASM both derive leaders from this constant; changing
-        // the version changes the leader schedule of every rotating-leader network.
+        // The validator and the explorer WASM both derive leaders from this constant
+        // Changing the version changes the leader schedule of every rotating-leader network
         assert_eq!(format!("{ROTATING_ELECTOR:?}"), "V1");
     }
 

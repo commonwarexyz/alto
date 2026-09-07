@@ -186,19 +186,16 @@ fn select_regional_peers(
     let mut selected = Vec::with_capacity(count);
     let mut assigned = BTreeMap::new();
     while selected.len() < count {
-        let mut progressed = false;
         for (region, peers) in &mut region_to_peers {
             let Some(peer) = peers.pop_front() else {
                 continue;
             };
             selected.push(peer);
             *assigned.entry(region.clone()).or_insert(0) += 1;
-            progressed = true;
             if selected.len() == count {
                 break;
             }
         }
-        assert!(progressed, "indexer count exceeds number of peers");
     }
 
     (selected, assigned)

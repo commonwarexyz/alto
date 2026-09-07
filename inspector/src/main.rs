@@ -20,7 +20,7 @@
 //!
 //! # Usage
 //!
-//! _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement). Use `--certificate-mode standard` for a stable-leader network; the default matches the default indexer's network (see `DEFAULT_CERTIFICATE_MODE`)._
+//! _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement). Use `--certificate-mode standard` for a stable-leader network. The default matches the default indexer's network (see `DEFAULT_CERTIFICATE_MODE`)._
 //!
 //! ## Get the latest seed
 //!

@@ -21,7 +21,7 @@ notarized ancestry. Values above the term length add no window. Stable mode uses
 threshold crypto with one signature per vote and certificate. Rotating mode carries an additional
 VRF seed signature used to select the next leader. Rotating mode takes only `--leader-delay-ms`:
 `--leader-term-length` and `--leader-optimistic-views` are rejected. `--leader-delay-ms` must stay
-below the validators' 1 s leader timeout; the generator rejects larger values because every
+below the validators' 1 s leader timeout. The generator rejects larger values because every
 validator would refuse to start.
 
 Every component that verifies certificates must be told which construction the network uses. The
@@ -47,8 +47,8 @@ transport capacity. All validators in a network must use the same value: every v
 incoming blocks whose payload exceeds the configured size before caching or verifying them.
 
 Validators and followers must start from an empty `directory`. The storage page layout changed in
-this release, so a data directory written by an earlier binary cannot be reopened; a node upgraded
-in place fails to restore its archives instead of silently reading stale data. The indexer keeps
+this release, so a data directory written by an earlier binary cannot be reopened. A node upgraded
+in place fails to restore its archives. The indexer keeps
 its state in memory and simply restarts empty.
 
 `--traces-sample-rate` sets the fraction of traces exported by each validator and accepts values
@@ -87,8 +87,8 @@ cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 
 
 The emitted indexer command then uses `--certificate-mode vrf` instead of `--certificate-mode standard`.
 It also passes the network's `--block-size`, which the indexer uses to reject larger blocks and to
-bound upload request bodies; a deployed indexer reads the same value from `indexer.yaml`. An
-indexer retains only the most recent `--max-views` views in memory (200,000 by default); a deployed
+bound upload request bodies. A deployed indexer reads the same value from `indexer.yaml`. An
+indexer retains only the most recent `--max-views` views in memory (200,000 by default). A deployed
 indexer can override this with `max_views` in `indexer.yaml`. Followers backfilling from genesis
 must therefore start while the indexer still holds the history they need.
 
@@ -132,9 +132,11 @@ _It is necessary to start at least one bootstrapper for any other peers to conne
 
 #### [Optional] Configure Explorer
 
-The indexer already serves the explorer at `http://localhost:8080` with the network identity and
-certificate mode injected, so nothing else is needed to browse a local network. To run the explorer
-from source instead, generate its configuration (pass the indexer as `host:port` without a scheme)
+The indexer embeds `explorer/build` at compile time. To browse a local network at
+`http://localhost:8080`, first [build the embedded explorer](#build-the-embedded-explorer), then
+compile and start (or restart) the indexer using the emitted `cargo run` command. Its network
+identity and certificate mode are injected automatically. To run the explorer from source,
+generate its configuration (pass the indexer as `host:port` without a scheme)
 and copy it over `explorer/src/local_config.ts`:
 
 ```bash
@@ -170,7 +172,7 @@ cargo install commonware-deployer --features aws
 Pass `--indexer` to deploy Alto's indexer alongside the validators. The generator configures one
 validator in each region to upload to `http://indexer:8080`. The indexer also serves the explorer
 from port 8080, so its public URL can be opened directly from a laptop. To use indexers managed
-outside this deployment instead, pass `--indexers '<url>:<count>[;<url>:<count>...]'`; for example,
+outside this deployment instead, pass `--indexers '<url>:<count>[;<url>:<count>...]'`, for example,
 `https://idx-a.example.com:2;https://idx-b.example.com:1`. Uploaders are selected round-robin
 across regions.
 
@@ -189,7 +191,7 @@ indexer: https://your-indexer.example.com
 `deploy.sh` runs the whole remote flow for the Global cluster: it generates the artifacts, checks
 them, builds the explorer and the Graviton binaries, runs `deployer aws create`, and prints the
 explorer URL. Do not repeat the manual "Build Deployment Binaries" and "Deploy Cluster" steps below
-after it (a second `create` fails because the deployment tag already exists); those sections
+after it (a second `create` fails because the deployment tag already exists). Those sections
 describe the manual flow used for the USA cluster.
 
 It deploys 50 validators on 16-core `c7gd.4xlarge` Graviton 3 instances with 8 Tokio workers and
@@ -204,7 +206,7 @@ The runtime and signature pools deliberately oversubscribe the 16 single-threade
 for another workload.
 
 _C7gd provides a 950GB ephemeral NVMe instance store, which the deployer mounts at `/home/ubuntu`
-for validator data. The 25GB storage setting sizes the gp3 root volume; terminating or replacing an
+for validator data. The 25GB storage setting sizes the gp3 root volume. Terminating or replacing an
 instance discards its NVMe data._
 
 ##### USA
@@ -223,7 +225,7 @@ public deployment such as `alto.commonware.xyz`. For that, generate the cluster 
 (pass the public indexer as `host[:port]` without a scheme) and copy `PUBLIC_KEY_HEX`,
 `CERTIFICATE_MODE`, `PARTICIPANTS`, and `LOCATIONS` into `explorer/src/global_config.ts` or
 `explorer/src/usa_config.ts`. `PARTICIPANTS` lists the validator public keys in the same order as
-`LOCATIONS`; a stable-leader network has no seeds, so the explorer needs it to place each block's
+`LOCATIONS`. A stable-leader network has no seeds, so the explorer needs it to place each block's
 leader on the map:
 
 ```bash
@@ -244,8 +246,8 @@ NEW_KEY="<new-key-hex>"
 NEW_MODE="standard"
 sed -i '' -E "s/^identity: \".*\"$/identity: \"$NEW_KEY\"/" follower/examples/global.yml
 sed -i '' -E "s/^certificate_mode: \".*\"$/certificate_mode: \"$NEW_MODE\"/" follower/examples/global.yml
-sed -i '' -E "s|^const DEFAULT_IDENTITY: &str = \".*\";|const DEFAULT_IDENTITY: &str = \"$NEW_KEY\";|" inspector/src/main.rs
-sed -i '' -E "s|^const DEFAULT_CERTIFICATE_MODE: &str = \".*\";|const DEFAULT_CERTIFICATE_MODE: &str = \"$NEW_MODE\";|" inspector/src/main.rs
+sed -i '' -E "s|^const DEFAULT_IDENTITY: &str = \".*\";|const DEFAULT_IDENTITY: \&str = \"$NEW_KEY\";|" inspector/src/main.rs
+sed -i '' -E "s|^const DEFAULT_CERTIFICATE_MODE: &str = \".*\";|const DEFAULT_CERTIFICATE_MODE: \&str = \"$NEW_MODE\";|" inspector/src/main.rs
 
 # USA cluster:
 NEW_KEY="<new-key-hex>"
@@ -259,7 +261,29 @@ redeploy the hosted explorer together with the cluster. Its WebAssembly derives 
 from the seed with the same elector version as the validators, so an explorer built from a
 different commit than the validators shows the wrong leaders.
 
+#### Build the Embedded Explorer
+
+Install Node.js/npm and `wasm-pack`, then run from the repository root before compiling an indexer
+that will serve the explorer:
+
+```bash
+npm --prefix explorer ci
+npm --prefix explorer run build
+```
+
+On macOS, install Homebrew LLVM (`brew install llvm`) and replace the second command with:
+
+```bash
+CC="$(brew --prefix llvm)/bin/clang" AR="$(brew --prefix llvm)/bin/llvm-ar" npm --prefix explorer run build
+```
+
+`deploy.sh` performs this step automatically. An indexer compiled without `explorer/build` serves
+only the API. Building the frontend afterward requires recompiling and restarting the indexer.
+
 #### Build Deployment Binaries
+
+Before building an indexer that serves the explorer, complete
+[Build the Embedded Explorer](#build-the-embedded-explorer).
 
 Run every `just` recipe from the repository root (the root `justfile` imports `deploy/justfile`).
 The build platform is an explicit recipe:

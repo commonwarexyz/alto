@@ -3,7 +3,7 @@
 root := source_directory() / ".."
 source-mounts := "-v '" + root + ":/alto' -v '" + root + "/.docker-cache/cargo:/cargo-home' -v '" + root + "/.docker-cache/target:/alto/target'"
 cache-env := "-e CARGO_HOME=/cargo-home"
-bake := "docker buildx bake --progress plain -f '" + root + "/deploy/docker-bake.hcl' --set '*.context=" + root + "'"
+bake := "docker buildx bake --load --progress plain -f '" + root + "/deploy/docker-bake.hcl' --set '*.context=" + root + "'"
 
 prepare-docker-cache:
     mkdir -p '{{root}}/.docker-cache/cargo' '{{root}}/.docker-cache/target'

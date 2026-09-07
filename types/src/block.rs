@@ -74,7 +74,7 @@ impl Block {
     ///
     /// Validators decode every block they receive with this configuration so an oversized payload
     /// is rejected before it is cached or verified. Smaller payloads (such as the empty genesis
-    /// block) still decode; the exact-size consensus rule is enforced when a block is verified.
+    /// block) still decode. The exact-size consensus rule is enforced when a block is verified.
     pub fn codec_config(block_size: u32) -> RangeCfg<usize> {
         let block_size =
             usize::try_from(block_size).expect("block size is unsupported on this platform");

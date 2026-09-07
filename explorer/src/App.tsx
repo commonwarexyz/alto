@@ -305,9 +305,9 @@ const App: React.FC = () => {
     return lastObservedView;
   }, []);
 
-  // Insert placeholders for views skipped between `lastObservedView` and `view`. Seeds trigger
-  // this in VRF mode; in standard mode there are no seeds, so notarizations and finalizations must
-  // do it themselves or nullified views would silently vanish from the timeline.
+  // Insert placeholders for views skipped between `lastObservedView` and `view`
+  // Seeds trigger this in VRF mode. Standard mode uses notarizations and finalizations because
+  // it has no seeds
   const fillMissedViews = useCallback((
     newViews: ViewData[],
     lastObservedView: number | null,
@@ -372,11 +372,6 @@ const App: React.FC = () => {
             signature: seed.signature,
           };
 
-          return newViews;
-        }
-
-        // Skip processing for views with "unknown" status
-        if (existingStatus === "unknown") {
           return newViews;
         }
 
@@ -759,10 +754,6 @@ const App: React.FC = () => {
       } catch (error) {
         workers.forEach((worker) => worker.terminate());
         throw error;
-      }
-      if (cancelled) {
-        workers.forEach((worker) => worker.terminate());
-        return;
       }
       verifierPoolRef.current = new ConsensusWorkerPool(
         workers,
@@ -1304,7 +1295,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, standardCert
         {/* Timing information underneath */}
         <div className="timing-info">
           {/* Show timing for all states that need it */}
-          {(signature || status === "unknown") && (
+          {(standardCertificates || signature || status === "unknown") && (
             <>
               {/* Latency at notarization point - only show if text exists and we have notarization */}
               {!renderFinalizedWithoutNotarization &&

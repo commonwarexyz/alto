@@ -182,7 +182,7 @@ pub struct Config {
         default = "default_traces_sample_rate",
         deserialize_with = "deserialize_traces_sample_rate"
     )]
-    /// Fraction of traces exported to the configured collector; zero disables tracing.
+    /// Fraction of traces exported to the configured collector. Zero disables tracing.
     pub traces_sample_rate: f64,
 
     pub local: bool,
