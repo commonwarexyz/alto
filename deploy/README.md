@@ -187,8 +187,8 @@ indexer: https://your-indexer.example.com
 ```
 
 `deploy.sh` runs the whole remote flow for the Global cluster: it generates the artifacts, checks
-them, builds the explorer and the Graviton binaries, runs `deployer aws create`, and prints the
-explorer URL. Do not repeat the manual "Build Deployment Binaries" and "Deploy Cluster" steps below
+that they exist, tests and builds the explorer, builds the Graviton binaries, runs
+`deployer aws create`, and prints the explorer URL. Do not repeat the manual "Build Deployment Binaries" and "Deploy Cluster" steps below
 after it (a second `create` fails because the deployment tag already exists). Those sections
 describe the manual flow used for the USA cluster.
 

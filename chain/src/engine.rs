@@ -342,7 +342,7 @@ where
             (None, None)
         };
 
-        // Create the application
+        // Wrap the application in marshal
         let marshaled = Marshaled::<E, CS>::new(
             context.child("marshaled"),
             app,

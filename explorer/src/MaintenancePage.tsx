@@ -40,25 +40,25 @@ const MaintenancePage: React.FC = () => {
         logoDimensionsRef.current = { width: rect.width, height: rect.height };
     };
 
-    // Refresh the cached box size and keep the box inside the container.
-    const keepInBounds = () => {
-        if (!containerRef.current || !logoRef.current) {
-            return;
-        }
-        measureLogo();
-        const maxX = Math.max(0, containerRef.current.clientWidth - logoDimensionsRef.current.width);
-        const maxY = Math.max(0, containerRef.current.clientHeight - logoDimensionsRef.current.height);
-        positionRef.current = {
-            x: Math.min(positionRef.current.x, maxX),
-            y: Math.min(positionRef.current.y, maxY),
-        };
-        applyPosition();
-    };
-
     // Show the logo once its web font has loaded (or after 1.5s if it has not), so the box is
     // measured at its final size instead of reflowing when the font arrives. Whichever of the two
-    // fires second re-measures, which keeps the box in bounds if the font lands late.
+    // fires second re-measures, as does a window resize (the box changes size across the
+    // responsive breakpoint), which keeps the box in bounds.
     useEffect(() => {
+        // Refresh the cached box size and keep the box inside the container.
+        const keepInBounds = () => {
+            if (!containerRef.current || !logoRef.current) {
+                return;
+            }
+            measureLogo();
+            const maxX = Math.max(0, containerRef.current.clientWidth - logoDimensionsRef.current.width);
+            const maxY = Math.max(0, containerRef.current.clientHeight - logoDimensionsRef.current.height);
+            positionRef.current = {
+                x: Math.min(positionRef.current.x, maxX),
+                y: Math.min(positionRef.current.y, maxY),
+            };
+            applyPosition();
+        };
         const reveal = () => {
             if (!containerRef.current || !logoRef.current) {
                 return;
@@ -83,7 +83,11 @@ const MaintenancePage: React.FC = () => {
             ? document.fonts.load('bold 32px Inconsolata')
             : Promise.resolve();
         font.then(reveal, reveal);
-        return () => clearTimeout(fallback);
+        window.addEventListener('resize', keepInBounds);
+        return () => {
+            clearTimeout(fallback);
+            window.removeEventListener('resize', keepInBounds);
+        };
     }, []);
 
     useEffect(() => {
@@ -191,14 +195,6 @@ const MaintenancePage: React.FC = () => {
             if (animationFrameRef.current !== null) {
                 cancelAnimationFrame(animationFrameRef.current);
             }
-        };
-    }, []);
-
-    // The box changes size across the responsive breakpoint, so re-measure and clamp on resize.
-    useEffect(() => {
-        window.addEventListener('resize', keepInBounds);
-        return () => {
-            window.removeEventListener('resize', keepInBounds);
         };
     }, []);
 

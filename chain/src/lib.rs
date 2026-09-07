@@ -206,7 +206,11 @@ mod tests {
     use super::*;
     use alto_types::NAMESPACE;
     use commonware_consensus::{
-        marshal, simplex::scheme::bls12381_threshold::standard as bls12381_threshold,
+        marshal,
+        simplex::{
+            elector,
+            scheme::bls12381_threshold::{standard as bls12381_threshold, vrf},
+        },
         types::ViewDelta,
     };
     use commonware_cryptography::{
@@ -238,8 +242,8 @@ mod tests {
     /// (Effectively) unlimited quota for tests.
     const TEST_QUOTA: Quota = Quota::per_second(NZU32!(u32::MAX));
 
-    /// Stable leader policy used by every simulated validator.
-    const STABLE_LEADER_DELAY_MS: NonZeroU64 = NZU64!(10);
+    /// Proposal delay of every simulated validator and the term length of stable leaders.
+    const PROPOSAL_DELAY_MS: NonZeroU64 = NZU64!(10);
     const STABLE_LEADER_TERM_LENGTH: NonZeroU32 = NZU32!(1_000);
 
     /// Registers all validators using the oracle.
@@ -414,6 +418,14 @@ mod tests {
         }
     }
 
+    /// Stable-leader election used by every simulation that does not pick its own elector.
+    fn stable_elector() -> engine::StableElector {
+        engine::stable_elector(
+            STABLE_LEADER_TERM_LENGTH,
+            DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS,
+        )
+    }
+
     async fn start_validator(
         context: &deterministic::Context,
         oracle: &Oracle<PublicKey, deterministic::Context>,
@@ -427,6 +439,7 @@ mod tests {
             oracle,
             signer,
             scheme,
+            stable_elector(),
             registration,
             ValidatorConfig {
                 indexer,
@@ -436,11 +449,13 @@ mod tests {
         .await;
     }
 
-    async fn start_validator_with(
+    /// Starts a validator with an explicit certificate scheme and leader election policy.
+    async fn start_validator_with<CS: alto_types::Scheme, L: elector::Config<CS>>(
         context: &deterministic::Context,
         oracle: &Oracle<PublicKey, deterministic::Context>,
         signer: &commonware_cryptography::ed25519::PrivateKey,
-        scheme: &bls12381_threshold::Scheme<PublicKey, MinSig>,
+        scheme: &CS,
+        elector: L,
         registration: Registration,
         cfg: ValidatorConfig,
     ) {
@@ -457,14 +472,11 @@ mod tests {
             finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
             me: signer.public_key(),
             scheme: scheme.clone(),
-            elector: engine::stable_elector(
-                STABLE_LEADER_TERM_LENGTH,
-                DEFAULT_STABLE_LEADER_OPTIMISTIC_VIEWS,
-            ),
+            elector,
             mailbox_size: 1024,
             deque_size: 10,
             block_size: cfg.block_size,
-            proposal_delay_ms: STABLE_LEADER_DELAY_MS,
+            proposal_delay_ms: PROPOSAL_DELAY_MS,
             leader_timeout: cfg.leader_timeout,
             certification_timeout: cfg.certification_timeout,
             nullify_retry: timeout_retry,
@@ -755,6 +767,7 @@ mod tests {
                         &oracle,
                         signer,
                         scheme,
+                        stable_elector(),
                         registration,
                         cfg.clone(),
                     )
@@ -834,8 +847,13 @@ mod tests {
         info!(runs, "unclean shutdown recovery worked");
     }
 
-    #[test_traced]
-    fn test_indexer() {
+    /// Runs validators with an indexer and checks what they upload: certificates always, seeds
+    /// only when the scheme produces them, and bare blocks only for genesis.
+    fn indexer_simulation<CS: alto_types::Scheme, L: elector::Config<CS>>(
+        fixture: impl FnOnce(&mut deterministic::Context, u32) -> Fixture<CS> + Send + 'static,
+        elector: impl Fn() -> L + Send + 'static,
+        expect_seeds: bool,
+    ) {
         // Create context
         let n = 5;
         let required_container = 10;
@@ -861,7 +879,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = fixture(&mut context, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
 
             // Link all validators
@@ -872,20 +890,22 @@ mod tests {
             };
             link_validators(&mut oracle, &participants, link, None).await;
 
-            // Derive threshold
-
             // Define mock indexer
             let indexer = mocks::Client::new();
 
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
                 let registration = registrations.remove(&signer.public_key()).unwrap();
-                start_validator(
+                start_validator_with(
                     &context,
                     &oracle,
                     &signer,
                     &scheme,
+                    elector(),
                     registration,
-                    Some(indexer.clone()),
+                    ValidatorConfig {
+                        indexer: Some(indexer.clone()),
+                        ..Default::default()
+                    },
                 )
                 .await;
             }
@@ -893,15 +913,17 @@ mod tests {
             poll_until_height(&context, &oracle, required_container).await;
 
             // Check indexer uploads
-            assert!(!indexer.seed_seen.load(std::sync::atomic::Ordering::Relaxed));
+            assert_eq!(
+                indexer.seed_seen.load(std::sync::atomic::Ordering::Relaxed),
+                expect_seeds
+            );
             assert!(indexer
                 .notarization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
             assert!(indexer
                 .finalization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
-            let genesis_digest =
-                application::Application::<alto_types::StandardScheme>::genesis().digest();
+            let genesis_digest = application::Application::<CS>::genesis().digest();
             let started_digests = indexer.block_upload_started_digests.lock().clone();
             let expected_genesis_uploads = n as usize;
             assert_eq!(
@@ -916,6 +938,26 @@ mod tests {
                 "non-genesis block uploads should stay idle when certified uploads succeed",
             );
         });
+    }
+
+    #[test_traced]
+    fn test_indexer() {
+        // Standard certificates carry no seed
+        indexer_simulation(
+            |context, n| bls12381_threshold::fixture::<MinSig, _>(context, NAMESPACE, n),
+            stable_elector,
+            false,
+        );
+    }
+
+    #[test_traced]
+    fn test_indexer_rotating() {
+        // VRF certificates carry seeds, which validators publish to the indexer
+        indexer_simulation(
+            |context, n| vrf::fixture::<MinSig, _>(context, NAMESPACE, n),
+            || alto_types::ROTATING_ELECTOR,
+            true,
+        );
     }
 
     #[test_traced]

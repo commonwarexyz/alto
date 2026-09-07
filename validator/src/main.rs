@@ -42,8 +42,10 @@ const RESOLVER_CHANNEL: u64 = 2;
 const BROADCASTER_CHANNEL: u64 = 3;
 const MARSHAL_CHANNEL: u64 = 4;
 
+// Per-peer message quotas: votes, certificates, and resolver traffic use the base quota, while
+// the channels that carry blocks (broadcast and marshal backfill) get a higher one.
 const BASE_CHANNEL_QUOTA_PER_SECOND: u32 = 1_500;
-const VOTING_CHANNEL_QUOTA_PER_SECOND: u32 = 3_000;
+const BLOCK_CHANNEL_QUOTA_PER_SECOND: u32 = 3_000;
 
 const CERTIFICATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NULLIFY_RETRY: Duration = Duration::from_secs(10);
@@ -336,12 +338,12 @@ fn main() {
 
         // Register broadcast channel
         let broadcaster_limit =
-            Quota::per_second(NonZeroU32::new(VOTING_CHANNEL_QUOTA_PER_SECOND).unwrap());
+            Quota::per_second(NonZeroU32::new(BLOCK_CHANNEL_QUOTA_PER_SECOND).unwrap());
         let broadcaster = network.register(BROADCASTER_CHANNEL, broadcaster_limit);
 
         // Register marshal channel
         let marshal_quota =
-            Quota::per_second(NonZeroU32::new(VOTING_CHANNEL_QUOTA_PER_SECOND).unwrap());
+            Quota::per_second(NonZeroU32::new(BLOCK_CHANNEL_QUOTA_PER_SECOND).unwrap());
         let marshal = network.register(MARSHAL_CHANNEL, marshal_quota);
 
         // Create network
