@@ -310,7 +310,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onC
 
             <div className="stats-disclaimer">
                 All latency measurements made by your browser are only performed after verifying the integrity of incoming artifacts with the network key.
-                Local clock skew is automatically detected and corrected.
+                Local clock skew is estimated from an external time source.
             </div>
         </div >
     );

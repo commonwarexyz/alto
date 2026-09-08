@@ -1,100 +1,79 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 
-// The source to use as a time oracle
+// External time oracle
 const endpoint = 'https://1.1.1.1/cdn-cgi/trace';
 
-// Timeout for any request (in milliseconds)
+// Timeout for each request, in milliseconds
 const timeout = 3000;
 
-// Interval to fetch server time (in milliseconds)
+// Interval between samples, in milliseconds
 const interval = 15000;
 
 /**
- * Custom hook to detect clock skew between client and server
- * Runs once on mount and then every 15 seconds, using the latest successful measurement as the skew
+ * Estimates local clock skew on mount and every 15 seconds.
+ * Retains the latest successful estimate when a sample fails.
  */
 export const useClockSkew = () => {
     const [clockSkew, setClockSkew] = useState<number>(0);
-    const isFirstMountRef = useRef(true);
 
     useEffect(() => {
+        let active = true;
         const fetchSkew = async () => {
             try {
-                // Establish connection with a HEAD request
-                const controller = new AbortController();
-                const connectionTimeoutId = setTimeout(() => {
-                    controller.abort('Connection timeout exceeded');
-                }, timeout);
+                // Warm the connection with a CORS-enabled GET to reduce setup delay in the sample
+                // Consume its body before issuing the measured request so the connection can be reused
+                const warmup = await fetch(endpoint, {
+                    cache: 'no-store',
+                    signal: AbortSignal.timeout(timeout),
+                });
+                await warmup.text();
+                if (!active) return;
 
-                try {
-                    await fetch(endpoint, {
-                        method: 'HEAD',
-                        signal: controller.signal,
-                    });
-                    clearTimeout(connectionTimeoutId);
-                } catch (error) {
-                    if (!(error instanceof DOMException && error.name === 'AbortError')) {
-                        throw error;
-                    }
-                    clearTimeout(connectionTimeoutId);
-                }
-
-                // Perform the GET request to fetch server time
+                // Anchor the sample in wall time and measure its duration with a monotonic clock
                 const startTime = performance.now();
                 const localStartTime = Date.now();
                 const response = await fetch(endpoint, {
+                    cache: 'no-store',
                     signal: AbortSignal.timeout(timeout),
                 });
+
+                // Stop timing at the response headers, before body delivery and parsing
+                const elapsed = performance.now() - startTime;
                 if (!response.ok) {
                     throw new Error(`API returned status ${response.status}`);
                 }
-                const endTime = performance.now();
-                const networkLatency = Math.floor((endTime - startTime) / 4);
-
-                // Parse server time from the response
                 const text = await response.text();
-                const lines = text.split('\n');
-                const tsLine = lines.find(line => line.startsWith('ts='));
-                if (!tsLine) {
-                    throw new Error('ts field not found in response');
-                }
-                const serverTimeStr = tsLine.substring(3);
-                const serverTimeFloat = parseFloat(serverTimeStr);
-                if (isNaN(serverTimeFloat)) {
-                    throw new Error('Invalid ts field format');
-                }
-                const serverTime = Math.floor(serverTimeFloat * 1000); // Convert to ms
 
-                // Calculate skew
-                const adjustedLocalTime = localStartTime + networkLatency;
-                const skew = adjustedLocalTime - serverTime;
+                // Trace timestamps are Unix seconds, while browser timestamps are milliseconds
+                const ts = text.split('\n').find(line => line.startsWith('ts='))?.slice(3);
+                const serverTime = Number(ts) * 1000;
+                if (!Number.isFinite(serverTime) || serverTime <= 0) {
+                    throw new Error('Invalid ts field');
+                }
 
-                // Update state with the measured skew
-                console.log(`Measured clock skew: ${skew}ms`);
-                setClockSkew(skew);
+                // The midpoint assumes similar request and response delays
+                // Timestamp precision and network asymmetry limit the estimate's accuracy
+                const skew = localStartTime + elapsed / 2 - serverTime;
+                if (active) {
+                    console.log(`Measured clock skew: ${skew}ms`);
+                    setClockSkew(skew);
+                }
             } catch (err) {
-                console.error('Failed to fetch skew:', err);
-                // Keep the previous skew if the request fails
+                // Keep the last successful estimate when either request or timestamp parsing fails
+                if (active) console.error('Failed to fetch skew:', err);
             }
         };
 
-        // Run immediately only on the first mount
-        if (isFirstMountRef.current) {
-            isFirstMountRef.current = false;
-            fetchSkew();
-        }
-
-        // Set up an interval to run every 5 seconds
+        // Sample immediately, then refresh periodically
+        fetchSkew();
         const intervalId = setInterval(fetchSkew, interval);
-
-        // Cleanup interval on unmount
-        return () => clearInterval(intervalId);
+        return () => {
+            // Stop polling and ignore completions from this effect after cleanup
+            active = false;
+            clearInterval(intervalId);
+        };
     }, []);
 
-    // Utility functions
-    const adjustTime = (timestamp: number): number => {
-        return timestamp - clockSkew;
-    };
-
-    return adjustTime;
+    // Convert browser wall time to the time oracle's clock
+    return (timestamp: number): number => timestamp - clockSkew;
 };

@@ -51,10 +51,10 @@ const KeyInfoModal: React.FC<KeyInfoModalProps> = ({ isOpen, onClose, publicKeyH
                         </p>
                         <p>
                             The <strong>Network Key</strong> for alto is:
-                            <pre className="code-block">
-                                <code>{publicKeyHex}</code>
-                            </pre>
                         </p>
+                        <pre className="code-block">
+                            <code>{publicKeyHex}</code>
+                        </pre>
                         <p>
                             <i>
                                 In a production environment, you would hardcode this in your binary or store it locally rather than relying
