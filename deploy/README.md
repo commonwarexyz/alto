@@ -86,9 +86,7 @@ cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 
 ```
 
 The emitted indexer command then uses `--certificate-mode vrf` instead of `--certificate-mode standard`,
-and passes the network's `--block-size`. A deployed indexer reads the same values (and an optional
-`max_views` override) from `indexer.yaml`. See the [indexer README](../indexer/README.md) for what
-`--block-size` and `--max-views` bound and how they drive memory use.
+and passes the network's `--block-size`. A deployed indexer reads the same values from `indexer.yaml`.
 
 _If the stable command succeeds, you should see the following output:_
 

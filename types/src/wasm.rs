@@ -49,12 +49,12 @@ pub struct CertifiedBlockJs {
 #[wasm_bindgen]
 pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
     let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
-    let certificate_verifier = VrfScheme::certificate_verifier(NAMESPACE, identity);
+    let verifier = VrfScheme::certificate_verifier(NAMESPACE, identity);
 
     let Ok(seed) = Seed::decode(bytes.as_ref()) else {
         return JsValue::NULL;
     };
-    if !seed.verify(&certificate_verifier) {
+    if !seed.verify(&verifier) {
         return JsValue::NULL;
     }
     let seed_js = SeedJs {
@@ -75,14 +75,14 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsV
 }
 
 fn parse_notarized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValue {
-    let certificate_verifier = S::certificate_verifier(NAMESPACE, identity);
+    let verifier = S::certificate_verifier(NAMESPACE, identity);
 
     let Ok(notarized) =
         Notarized::<S>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
     else {
         return JsValue::NULL;
     };
-    if !notarized.verify(&certificate_verifier, &Sequential) {
+    if !notarized.verify(&verifier, &Sequential) {
         return JsValue::NULL;
     }
     let Some(signature) = S::vote_signature(&notarized.proof.certificate) else {
@@ -107,13 +107,13 @@ pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsV
 }
 
 fn parse_finalized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValue {
-    let certificate_verifier = S::certificate_verifier(NAMESPACE, identity);
+    let verifier = S::certificate_verifier(NAMESPACE, identity);
     let Ok(finalized) =
         Finalized::<S>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
     else {
         return JsValue::NULL;
     };
-    if !finalized.verify(&certificate_verifier, &Sequential) {
+    if !finalized.verify(&verifier, &Sequential) {
         return JsValue::NULL;
     }
     let Some(signature) = S::vote_signature(&finalized.proof.certificate) else {

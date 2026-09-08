@@ -99,7 +99,6 @@ mod utils;
 
 const DEFAULT_INDEXER: &str = "https://global.alto.exoware.xyz";
 const DEFAULT_IDENTITY: &str = "83a93d74819bc17b3f53258216b54ecba1a13e1257a0514241bdd79c7757b7c3921451021e7a592d12296076ef58a8b600179a2d006e8d73c337f2f3578a245c286f4af8921e4e4fca0b3375842c81cccd2b4ce7e875a5591fdded49c93a905c";
-/// Certificate construction of the network at [DEFAULT_INDEXER] (`standard` or `vrf`).
 const DEFAULT_CERTIFICATE_MODE: &str = "vrf";
 
 #[tokio::main]
@@ -185,13 +184,13 @@ async fn main() {
         Level::INFO
     };
     tracing_subscriber::fmt().with_max_level(log_level).init();
-    let certificate_mode: CertificateMode = matches
+    let mode: CertificateMode = matches
         .get_one::<String>("certificate_mode")
         .expect("certificate mode has a default")
         .parse()
         .expect("clap validates certificate mode");
 
-    match certificate_mode {
+    match mode {
         CertificateMode::Standard => run::<StandardScheme>(&matches).await,
         CertificateMode::Vrf => run::<VrfScheme>(&matches).await,
     }

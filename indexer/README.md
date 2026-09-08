@@ -30,7 +30,7 @@ cargo install alto-indexer
 ### Start the indexer
 
 ```bash
-indexer --port 8080 --identity <hex-encoded BLS12-381 public key> --certificate-mode <standard|vrf> [--block-size <bytes>] [--max-views <count>]
+indexer --port 8080 --identity <hex-encoded BLS12-381 public key> --certificate-mode <standard|vrf> [--block-size <bytes>]
 ```
 
 The identity is the threshold public key of the consensus network. It is used to verify incoming
@@ -39,12 +39,7 @@ network.
 
 `--block-size` is the payload size of the network's blocks. When set, uploads carrying a larger block
 are rejected and the request body limit is derived from it. Without it, blocks up to a fixed limit
-are accepted. `--max-views` (default 200,000) bounds the recent seeds and each kind of certificate
-kept in memory, plus up to twice that many raw block uploads. Blocks carried by a retained
-certificate stay available after the raw cache drops them. Memory therefore scales with
-`--max-views` times the block size (each retained view holds a notarized and a finalized copy of its
-block), so lower `--max-views` when raising `--block-size`. Older artifacts are dropped, so a
-follower that must backfill from genesis needs an indexer retaining the whole history.
+are accepted. The indexer retains all accepted artifacts in memory until restart.
 
 ## API Endpoints
 

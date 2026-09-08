@@ -15,8 +15,7 @@ use commonware_formatting::from_hex;
 use commonware_parallel::Strategy;
 use futures::{SinkExt, StreamExt};
 use std::{
-    collections::{BTreeMap, VecDeque},
-    num::NonZeroUsize,
+    collections::BTreeMap,
     sync::{Arc, RwLock},
 };
 use tokio::sync::broadcast;
@@ -28,9 +27,6 @@ pub const UPLOAD_OVERHEAD: usize = 1024 * 1024;
 /// Largest block payload accepted when the network's block size is unknown.
 pub const DEFAULT_MAX_BLOCK_SIZE: usize = 4 * 1024 * 1024;
 
-/// Number of recent views retained by default (older artifacts are dropped from memory).
-pub const DEFAULT_MAX_VIEWS: NonZeroUsize = NonZeroUsize::new(200_000).unwrap();
-
 /// Capacity of the consensus broadcast channel feeding WebSocket subscribers.
 const CONSENSUS_CHANNEL_CAPACITY: usize = 1024;
 
@@ -39,12 +35,7 @@ pub struct State<C: Scheme> {
     notarizations: BTreeMap<View, Notarized<C>>,
     finalizations: BTreeMap<View, Finalized<C>>,
     finalized_height_to_view: BTreeMap<u64, View>,
-    /// View whose retained certificate carries each block, so certificate-owned blocks are served
-    /// after raw-cache eviction without scanning every certificate.
-    certificate_blocks: BTreeMap<Digest, View>,
     blocks_by_digest: BTreeMap<Digest, Block>,
-    /// Raw uploads have unauthenticated views, so evict blocks in insertion order.
-    block_order: VecDeque<Digest>,
 }
 
 impl<C: Scheme> Default for State<C> {
@@ -54,59 +45,8 @@ impl<C: Scheme> Default for State<C> {
             notarizations: BTreeMap::new(),
             finalizations: BTreeMap::new(),
             finalized_height_to_view: BTreeMap::new(),
-            certificate_blocks: BTreeMap::new(),
             blocks_by_digest: BTreeMap::new(),
-            block_order: VecDeque::new(),
         }
-    }
-}
-
-impl<C: Scheme> State<C> {
-    fn store_block(&mut self, block: Block, max_views: usize) {
-        let digest = block.digest();
-        if self.blocks_by_digest.insert(digest, block).is_none() {
-            self.block_order.push_back(digest);
-        }
-        // Keep twice the certificate budget while allowing new uploads to replace old entries
-        while self.block_order.len() > max_views.saturating_mul(2) {
-            if let Some(digest) = self.block_order.pop_front() {
-                self.blocks_by_digest.remove(&digest);
-            }
-        }
-    }
-
-    /// Retain each artifact kind's most recent `max_views` entries.
-    fn prune(&mut self, max_views: usize) {
-        while self.seeds.len() > max_views {
-            self.seeds.pop_first();
-        }
-        while self.notarizations.len() > max_views {
-            if let Some((view, notarized)) = self.notarizations.pop_first() {
-                // A retained finalization for the same view carries the same block
-                if !self.finalizations.contains_key(&view) {
-                    self.certificate_blocks.remove(&notarized.block.digest());
-                }
-            }
-        }
-        while self.finalizations.len() > max_views {
-            if let Some((view, finalized)) = self.finalizations.pop_first() {
-                self.finalized_height_to_view
-                    .remove(&finalized.block.height.get());
-                if !self.notarizations.contains_key(&view) {
-                    self.certificate_blocks.remove(&finalized.block.digest());
-                }
-            }
-        }
-    }
-
-    /// Block carried by a retained certificate, if any.
-    fn certificate_block(&self, digest: &Digest) -> Option<&Block> {
-        let view = self.certificate_blocks.get(digest)?;
-        self.finalizations
-            .get(view)
-            .map(|f| &f.block)
-            .or_else(|| self.notarizations.get(view).map(|n| &n.block))
-            .filter(|block| &block.digest() == digest)
     }
 }
 
@@ -118,7 +58,6 @@ pub struct Indexer<C: Scheme, S: Strategy> {
     strategy: S,
     block_codec_config: RangeCfg<usize>,
     max_upload_size: usize,
-    max_views: usize,
 }
 
 impl<C: Scheme, S: Strategy> Indexer<C, S> {
@@ -133,7 +72,6 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
             strategy,
             block_codec_config: Block::unbounded_codec_config(),
             max_upload_size: UPLOAD_OVERHEAD + DEFAULT_MAX_BLOCK_SIZE,
-            max_views: DEFAULT_MAX_VIEWS.get(),
         }
     }
 
@@ -143,12 +81,6 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         self.block_codec_config = Block::codec_config(block_size);
         self.max_upload_size = UPLOAD_OVERHEAD
             + usize::try_from(block_size).expect("block size is unsupported on this platform");
-        self
-    }
-
-    /// Retain each artifact kind's most recent `max_views` entries and twice as many block uploads.
-    pub fn with_max_views(mut self, max_views: NonZeroUsize) -> Self {
-        self.max_views = max_views.get();
         self
     }
 
@@ -176,10 +108,6 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         let mut state = self.state.write().unwrap();
         if state.seeds.insert(seed.view(), seed.clone()).is_some() {
             return Ok(()); // Already exists
-        }
-        state.prune(self.max_views);
-        if !state.seeds.contains_key(&seed.view()) {
-            return Ok(());
         }
 
         // Broadcast seed
@@ -225,14 +153,9 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         {
             return Ok(()); // Already exists
         }
-        state.prune(self.max_views);
-        if !state.notarizations.contains_key(&view) {
-            return Ok(());
-        }
         state
-            .certificate_blocks
-            .insert(notarized.block.digest(), view);
-        state.store_block(notarized.block.clone(), self.max_views);
+            .blocks_by_digest
+            .insert(notarized.block.digest(), notarized.block.clone());
 
         // Broadcast notarization
         let mut data = vec![0u8; u8::SIZE + notarized.encode_size()];
@@ -280,14 +203,9 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         state
             .finalized_height_to_view
             .insert(finalized.block.height.get(), view);
-        state.prune(self.max_views);
-        if !state.finalizations.contains_key(&view) {
-            return Ok(());
-        }
         state
-            .certificate_blocks
-            .insert(finalized.block.digest(), view);
-        state.store_block(finalized.block.clone(), self.max_views);
+            .blocks_by_digest
+            .insert(finalized.block.digest(), finalized.block.clone());
 
         // Broadcast finalization
         let mut data = vec![0u8; u8::SIZE + finalized.encode_size()];
@@ -334,8 +252,6 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
                 state
                     .blocks_by_digest
                     .get(&digest)
-                    // Retained certificates own their blocks even after raw-cache eviction
-                    .or_else(|| state.certificate_block(&digest))
                     .map(|b| BlockResult::Block(b.clone()))
             } else {
                 None
@@ -348,7 +264,7 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
     pub fn submit_block(&self, block: Block) {
         // Store block by digest (no guarantee this is part of the canonical chain)
         let mut state = self.state.write().unwrap();
-        state.store_block(block, self.max_views);
+        state.blocks_by_digest.insert(block.digest(), block);
     }
 
     pub fn consensus_subscriber(&self) -> broadcast::Receiver<Bytes> {
@@ -623,7 +539,7 @@ mod tests {
         }
     }
 
-    /// Build a finalized block at `view` (height == view) so retention tests get distinct entries.
+    /// Build a finalized block at `view` (height == view).
     fn finalized_at<C: Scheme>(schemes: &[C], view: u64) -> Finalized<C> {
         finalized_with_payload(schemes, view, Bytes::new())
     }
@@ -648,239 +564,6 @@ mod tests {
             block.digest(),
         );
         Finalized::new(create_finalization(schemes, proposal), block)
-    }
-
-    fn index_query(index: u64) -> String {
-        commonware_formatting::hex(&index.encode())
-    }
-
-    #[test]
-    fn pruned_artifacts_are_not_rebroadcast() {
-        let (schemes, _) = fixture(0);
-        let mut replayed_kinds = Vec::new();
-        for kind in 0..=2 {
-            let indexer = Indexer::new(schemes[0].clone(), Sequential)
-                .with_max_views(NonZeroUsize::new(2).unwrap());
-            let mut subscriber = indexer.consensus_subscriber();
-            let submit = |view| {
-                let finalized = finalized_at(&schemes, view);
-                match Kind::from_u8(kind).unwrap() {
-                    Kind::Seed => indexer.submit_seed(finalized.proof.seed().unwrap()),
-                    Kind::Notarization => indexer.submit_notarization(Notarized::new(
-                        create_notarization(&schemes, finalized.proof.proposal),
-                        finalized.block,
-                    )),
-                    Kind::Finalization => indexer.submit_finalization(finalized),
-                }
-                .unwrap();
-            };
-
-            // Useful late arrivals still enter the retained window and the live feed
-            for view in [1, 10, 12, 11] {
-                submit(view);
-                assert!(subscriber.try_recv().is_ok());
-            }
-            for _ in 0..3 {
-                submit(1);
-                if subscriber.try_recv().is_ok() {
-                    replayed_kinds.push(kind);
-                }
-            }
-        }
-        assert!(
-            replayed_kinds.is_empty(),
-            "replayed kinds: {replayed_kinds:?}"
-        );
-    }
-
-    #[test]
-    fn retains_only_the_most_recent_views() {
-        let (schemes, _) = fixture(0);
-        let indexer = Indexer::new(schemes[0].clone(), Sequential)
-            .with_max_views(NonZeroUsize::new(2).unwrap());
-        let finalized: Vec<_> = (1..=6).map(|view| finalized_at(&schemes, view)).collect();
-        for f in &finalized {
-            indexer.submit_finalization(f.clone()).unwrap();
-        }
-
-        // Only the newest two views (and their height index) survive.
-        assert!(indexer.get_finalization(&index_query(4)).is_none());
-        assert!(indexer.get_finalization(&index_query(5)).is_some());
-        assert!(indexer.get_finalization(&index_query(6)).is_some());
-        assert!(matches!(
-            indexer.get_finalization(LATEST),
-            Some(f) if f.proof.view() == View::new(6)
-        ));
-        assert!(indexer.get_block(&index_query(4)).is_none());
-        assert!(indexer.get_block(&index_query(6)).is_some());
-
-        // Blocks keep twice the view budget before eviction.
-        let digest_query =
-            |f: &Finalized<VrfScheme>| commonware_formatting::hex(&f.block.digest().encode());
-        assert!(indexer.get_block(&digest_query(&finalized[1])).is_none());
-        assert!(indexer.get_block(&digest_query(&finalized[2])).is_some());
-
-        // Re-uploading a pruned view is re-verified and inserted, then immediately pruned again
-        // rather than resurrected ahead of newer state.
-        indexer.submit_finalization(finalized[0].clone()).unwrap();
-        assert!(indexer.get_finalization(&index_query(1)).is_none());
-        assert!(indexer.get_block(&digest_query(&finalized[0])).is_none());
-    }
-
-    #[test]
-    fn retained_certificates_serve_blocks_after_cache_eviction() {
-        let (schemes, _) = fixture(0);
-        let indexer = Indexer::new(schemes[0].clone(), Sequential)
-            .with_max_views(NonZeroUsize::new(1).unwrap());
-        let finalized = finalized_at(&schemes, 10);
-        let other = finalized_at(&schemes, 11);
-        let notarized = Notarized::new(
-            create_notarization(&schemes, other.proof.proposal),
-            other.block,
-        );
-        indexer.submit_finalization(finalized.clone()).unwrap();
-        indexer.submit_notarization(notarized.clone()).unwrap();
-
-        // Later raw uploads can evict both blocks from the bounded digest cache
-        for view in 12..16 {
-            indexer.submit_block(finalized_at(&schemes, view).block);
-        }
-        assert_eq!(indexer.get_finalization(LATEST), Some(finalized.clone()));
-        assert_eq!(indexer.get_notarization(LATEST), Some(notarized.clone()));
-
-        // A follower installing a retained certificate must be able to resolve its anchor
-        let blocks = [finalized.block.clone(), notarized.block.clone()];
-        for block in &blocks {
-            let query = commonware_formatting::hex(&block.digest().encode());
-            assert!(matches!(
-                indexer.get_block(&query),
-                Some(BlockResult::Block(found)) if &found == block
-            ));
-        }
-
-        // Duplicates need no new cache entry, and expired certificate owners release their blocks
-        indexer.submit_finalization(finalized).unwrap();
-        indexer.submit_notarization(notarized).unwrap();
-        assert_eq!(indexer.state.read().unwrap().blocks_by_digest.len(), 2);
-        let replacement = finalized_at(&schemes, 20);
-        indexer.submit_finalization(replacement.clone()).unwrap();
-        indexer
-            .submit_notarization(Notarized::new(
-                create_notarization(&schemes, replacement.proof.proposal),
-                replacement.block,
-            ))
-            .unwrap();
-        for block in blocks {
-            let query = commonware_formatting::hex(&block.digest().encode());
-            assert!(indexer.get_block(&query).is_none());
-        }
-    }
-
-    #[test]
-    fn certificate_block_index_follows_retained_certificates() {
-        let (schemes, _) = fixture(0);
-        let indexer = Indexer::new(schemes[0].clone(), Sequential)
-            .with_max_views(NonZeroUsize::new(1).unwrap());
-        let digest_query = |block: &Block| commonware_formatting::hex(&block.digest().encode());
-
-        // A notarization and a finalization for the same view share one index entry
-        let first = finalized_at(&schemes, 10);
-        indexer.submit_finalization(first.clone()).unwrap();
-        indexer
-            .submit_notarization(Notarized::new(
-                create_notarization(&schemes, first.proof.proposal),
-                first.block.clone(),
-            ))
-            .unwrap();
-        assert_eq!(indexer.state.read().unwrap().certificate_blocks.len(), 1);
-        for view in 12..16 {
-            indexer.submit_block(finalized_at(&schemes, view).block);
-        }
-
-        // The block stays available while either certificate is retained
-        let second = finalized_at(&schemes, 11);
-        indexer.submit_finalization(second.clone()).unwrap();
-        assert!(indexer.get_finalization(&index_query(10)).is_none());
-        assert!(indexer.get_block(&digest_query(&first.block)).is_some());
-        assert_eq!(indexer.state.read().unwrap().certificate_blocks.len(), 2);
-
-        // Once both certificates are pruned the index releases the block
-        indexer
-            .submit_notarization(Notarized::new(
-                create_notarization(&schemes, second.proof.proposal),
-                second.block.clone(),
-            ))
-            .unwrap();
-        assert!(indexer.get_block(&digest_query(&first.block)).is_none());
-        assert!(indexer.get_block(&digest_query(&second.block)).is_some());
-        let state = indexer.state.read().unwrap();
-        assert_eq!(state.certificate_blocks.len(), 1);
-        assert_eq!(
-            state.certificate_blocks.get(&second.block.digest()),
-            Some(&View::new(11))
-        );
-    }
-
-    #[test]
-    fn future_raw_blocks_do_not_pin_the_cache() {
-        let (schemes, _) = fixture(0);
-        let indexer = Indexer::new(schemes[0].clone(), Sequential)
-            .with_max_views(NonZeroUsize::new(1).unwrap());
-
-        // Unsigned uploads cannot reserve the cache by claiming arbitrarily high views
-        for height in 1..=2 {
-            let block = Block::new(
-                Context {
-                    round: Round::new(EPOCH, View::new(u64::MAX)),
-                    leader: ed25519::PrivateKey::from_seed(0).public_key(),
-                    parent: (View::new(0), sha256::Digest::EMPTY),
-                },
-                sha256::Digest::EMPTY,
-                Height::new(height),
-                0,
-                Bytes::new(),
-            );
-            indexer.submit_block(block);
-        }
-
-        // Honest raw backfills must remain available after the finite flood stops
-        for view in 10..14 {
-            let block = finalized_at(&schemes, view).block;
-            let query = commonware_formatting::hex(&block.digest().encode());
-            indexer.submit_block(block.clone());
-            assert!(matches!(
-                indexer.get_block(&query),
-                Some(BlockResult::Block(found)) if found == block
-            ));
-            assert_eq!(indexer.state.read().unwrap().blocks_by_digest.len(), 2);
-        }
-    }
-
-    #[test]
-    fn late_historical_blocks_do_not_evict_recent_ones() {
-        let (schemes, _) = fixture(0);
-        let indexer = Indexer::new(schemes[0].clone(), Sequential)
-            .with_max_views(NonZeroUsize::new(2).unwrap());
-        let digest_query =
-            |f: &Finalized<VrfScheme>| commonware_formatting::hex(&f.block.digest().encode());
-
-        // Retain views 10 and 11 (and their blocks).
-        let recent: Vec<_> = (10..12).map(|view| finalized_at(&schemes, view)).collect();
-        for finalized in &recent {
-            indexer.submit_finalization(finalized.clone()).unwrap();
-        }
-
-        // A burst of historical blocks (a validator catching up) must not push out the blocks that
-        // retained certificates still reference.
-        for view in 1..9 {
-            indexer.submit_block(finalized_at(&schemes, view).block);
-        }
-        for finalized in &recent {
-            assert!(indexer.get_block(&digest_query(finalized)).is_some());
-        }
-        assert!(indexer
-            .get_block(&digest_query(&finalized_at(&schemes, 1)))
-            .is_none());
     }
 
     #[test]
@@ -1136,9 +819,7 @@ mod tests {
     async fn large_block_uploads_stream_to_rust_clients() {
         let (schemes, identity) = fixture(0);
         let indexer = Arc::new(
-            Indexer::new(schemes[0].clone(), Sequential)
-                .with_block_size(64 * 1024 * 1024)
-                .with_max_views(NonZeroUsize::new(1).unwrap()),
+            Indexer::new(schemes[0].clone(), Sequential).with_block_size(64 * 1024 * 1024),
         );
         let app = Api::new(indexer.clone()).router();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -88,16 +88,16 @@ struct ConfiguredIndexer {
 }
 
 #[derive(serde::Serialize)]
-struct DeployedIndexerConfig {
+struct IndexerConfig {
     port: u16,
     identity: String,
     certificate_mode: CertificateMode,
     block_size: u32,
-    explorer: DeployedExplorerConfig,
+    explorer: ExplorerConfig,
 }
 
 #[derive(serde::Serialize)]
-struct DeployedExplorerConfig {
+struct ExplorerConfig {
     name: String,
     description: String,
     participants: Vec<String>,
@@ -890,7 +890,7 @@ fn generate_remote(
         info!(assignments = ?assigned_regions, "configured indexers");
     }
 
-    let deployed_indexer_config = deploy_indexer.then(|| {
+    let indexer_config = deploy_indexer.then(|| {
         let (participants, locations) = instance_configs
             .iter()
             .map(|instance| {
@@ -902,12 +902,12 @@ fn generate_remote(
             })
             .unzip();
 
-        DeployedIndexerConfig {
+        IndexerConfig {
             port: INDEXER_PORT,
             identity: hex(&identity.encode()),
             certificate_mode: leader.certificate_mode(),
             block_size,
-            explorer: DeployedExplorerConfig {
+            explorer: ExplorerConfig {
                 name: "Live Global Cluster".to_string(),
                 description: format!(
                     "A live cluster of <strong>{peers} validators</strong> running {instance_type} nodes on AWS in <strong>{} regions</strong> ({}).",
@@ -970,7 +970,7 @@ fn generate_remote(
         format!("{output}/{DASHBOARD_FILE}"),
     )
     .unwrap();
-    if let Some(indexer_config) = deployed_indexer_config {
+    if let Some(indexer_config) = indexer_config {
         let path = format!("{output}/{INDEXER_CONFIG_FILE}");
         let file = fs::File::create(&path).unwrap();
         serde_yaml::to_writer(file, &indexer_config).unwrap();
@@ -1057,13 +1057,13 @@ fn explorer_remote(dir: String, backend_url: String) {
     let config_content = fs::read_to_string(&config_path).expect("failed to read config.yaml");
     let config: aws::Config =
         serde_yaml::from_str(&config_content).expect("failed to parse config.yaml");
-    let validator_instances = config
+    let validators = config
         .instances
         .iter()
         .filter(|instance| instance.binary == BINARY_NAME)
         .collect::<Vec<_>>();
     let mut participants = BTreeMap::new();
-    for instance in &validator_instances {
+    for instance in &validators {
         let region = &instance.region;
         let public_key = from_hex(&instance.name).expect("invalid public key");
         let public_key = PublicKey::decode(public_key.as_ref()).expect("invalid public key");
@@ -1089,7 +1089,7 @@ fn explorer_remote(dir: String, backend_url: String) {
     // Generate config.ts
     let participants_str = keys.join(",\n");
     let locations_str = locations.join(",\n");
-    let first_instance = validator_instances.first().expect("no validators found");
+    let first_instance = validators.first().expect("no validators found");
     let peer_config_path = format!("{}/{}", dir, first_instance.config);
     let peer_config_content =
         fs::read_to_string(&peer_config_path).expect("failed to read peer config");

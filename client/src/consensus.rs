@@ -85,7 +85,7 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
         let seed = Seed::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if self.verify && !self.certificate_verifier.verify_seed(&seed) {
+        if self.verify && !self.verifier.verify_seed(&seed) {
             return Err(Error::InvalidSignature);
         }
 
@@ -130,7 +130,7 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
         let notarized =
             Notarized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
                 .map_err(Error::InvalidData)?;
-        if self.verify && !notarized.verify(&self.certificate_verifier, &self.strategy) {
+        if self.verify && !notarized.verify(&self.verifier, &self.strategy) {
             return Err(Error::InvalidSignature);
         }
 
@@ -175,7 +175,7 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
         let finalized =
             Finalized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
                 .map_err(Error::InvalidData)?;
-        if self.verify && !finalized.verify(&self.certificate_verifier, &self.strategy) {
+        if self.verify && !finalized.verify(&self.verifier, &self.strategy) {
             return Err(Error::InvalidSignature);
         }
 
@@ -225,7 +225,7 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
                 let result =
                     Finalized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
                         .map_err(Error::InvalidData)?;
-                if self.verify && !result.verify(&self.certificate_verifier, &self.strategy) {
+                if self.verify && !result.verify(&self.verifier, &self.strategy) {
                     return Err(Error::InvalidSignature);
                 }
                 Payload::Finalized(Box::new(result))
@@ -234,7 +234,7 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
                 let result =
                     Finalized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
                         .map_err(Error::InvalidData)?;
-                if self.verify && !result.verify(&self.certificate_verifier, &self.strategy) {
+                if self.verify && !result.verify(&self.verifier, &self.strategy) {
                     return Err(Error::InvalidSignature);
                 }
                 if result.block.height.get() != index {
@@ -273,7 +273,7 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
         // Create an unbounded channel for streaming consensus messages
         let (sender, receiver) = unbounded();
         tokio::spawn({
-            let certificate_verifier = self.certificate_verifier.clone();
+            let verifier = self.verifier.clone();
             let strategy = self.strategy.clone();
             let verify = self.verify;
             async move {
@@ -294,7 +294,7 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
                                     let result = Seed::decode(data);
                                     match result {
                                         Ok(seed) => {
-                                            if verify && !certificate_verifier.verify_seed(&seed) {
+                                            if verify && !verifier.verify_seed(&seed) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;
@@ -314,10 +314,7 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
                                     );
                                     match result {
                                         Ok(notarized) => {
-                                            if verify
-                                                && !notarized
-                                                    .verify(&certificate_verifier, &strategy)
-                                            {
+                                            if verify && !notarized.verify(&verifier, &strategy) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;
@@ -339,10 +336,7 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
                                     );
                                     match result {
                                         Ok(finalized) => {
-                                            if verify
-                                                && !finalized
-                                                    .verify(&certificate_verifier, &strategy)
-                                            {
+                                            if verify && !finalized.verify(&verifier, &strategy) {
                                                 let _ = sender
                                                     .unbounded_send(Err(Error::InvalidSignature));
                                                 return;

@@ -65,7 +65,7 @@ type WsConnector = tokio_tungstenite::Connector;
 pub struct ClientBuilder<S: Strategy, C: Scheme> {
     uri: String,
     ws_uri: String,
-    certificate_verifier: C,
+    verifier: C,
     tls_certs: Vec<Vec<u8>>,
     strategy: S,
     verify: bool,
@@ -75,7 +75,7 @@ impl<S: Strategy, C: Scheme> ClientBuilder<S, C> {
     /// Create a builder with an already initialized concrete certificate verifier.
     ///
     /// TLS uses the system's root certificates. Add private roots with [`Self::with_tls_cert`].
-    pub fn new(uri: &str, certificate_verifier: C, strategy: S) -> Self {
+    pub fn new(uri: &str, verifier: C, strategy: S) -> Self {
         let uri = uri.to_string();
         let ws_uri = if let Some(rest) = uri.strip_prefix("https://") {
             format!("wss://{rest}")
@@ -87,7 +87,7 @@ impl<S: Strategy, C: Scheme> ClientBuilder<S, C> {
         Self {
             uri,
             ws_uri,
-            certificate_verifier,
+            verifier,
             tls_certs: Vec::new(),
             strategy,
             verify: true,
@@ -149,7 +149,7 @@ impl<S: Strategy, C: Scheme> ClientBuilder<S, C> {
         Client {
             uri: self.uri,
             ws_uri: self.ws_uri,
-            certificate_verifier: self.certificate_verifier,
+            verifier: self.verifier,
             verify: self.verify,
             http_client,
             ws_connector,
@@ -162,7 +162,7 @@ impl<S: Strategy, C: Scheme> ClientBuilder<S, C> {
 pub struct Client<S: Strategy, C: Scheme> {
     uri: String,
     ws_uri: String,
-    certificate_verifier: C,
+    verifier: C,
     verify: bool,
 
     http_client: reqwest::Client,
