@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './SearchModal.css';
 import { ClusterConfig, getHttpBackendUrl } from './config';
-import { SearchType, SearchResult } from './types';
+import { BlockJs, SearchType, SearchResult } from './types';
 import { hexToUint8Array, hexUint8Array, formatAge } from './utils';
 import init, { parse_seed, parse_notarized, parse_finalized, parse_block } from "./alto_types/alto_types.js";
 
@@ -76,7 +76,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
             if (!/^[0-9a-fA-F]{64}$/.test(hexValue)) {
                 return null;
             }
-            return hexValue;
+            return hexValue.toLowerCase();
         }
         const num = parseInt(query, 10);
         if (isNaN(num) || num < 0) {
@@ -174,9 +174,15 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
                     result = parse_finalized(PUBLIC_KEY, data, standardCertificates);
                     break;
                 case 'block':
-                    result = query === 'latest' || typeof query === 'number'
-                        ? parse_finalized(PUBLIC_KEY, data, standardCertificates)
-                        : parse_block(data);
+                    if (query === 'latest' || typeof query === 'number') {
+                        result = parse_finalized(PUBLIC_KEY, data, standardCertificates);
+                    } else {
+                        const block: BlockJs | null = parse_block(data);
+                        if (block && hexUint8Array(block.digest, 64) !== query) {
+                            throw new Error('Block digest does not match query');
+                        }
+                        result = block;
+                    }
                     break;
             }
         } catch (parseError) {

@@ -23,6 +23,13 @@ const withoutSeedSignature = (encoded) => {
   ]);
 };
 
+// Flipping the sign bit keeps the G1 point validly encoded and in its subgroup
+const invalidateSignature = (bytes, offset) => {
+  const altered = bytes.slice();
+  altered[offset] ^= 0x20;
+  return altered;
+};
+
 const identity = fromHex(
   "90577f9eefba4e54f98aa6cda386718e82863d4989b7282f09446bdb408469dc" +
   "3dec0097ef3dc9359d88b04d700290e902628bc56fe9295ad92794114a65b2ee" +
@@ -108,13 +115,36 @@ for (const [name, parse, encoded] of artifacts) {
       digest: Array.from(fromHex(fixture.block.digest)),
     };
   }
-  assert.deepEqual(parse(identity, fromHex(encoded)), value, name);
-  if (name !== "seed") {
+  const bytes = fromHex(encoded);
+  assert.deepEqual(parse(identity, bytes), value, name);
+  if (name === "seed") {
+    assert.equal(
+      parse(identity, invalidateSignature(bytes, bytes.length - signatureSize)),
+      null,
+      "rejects an incorrect seed signature",
+    );
+  } else {
+    assert.equal(
+      parse(identity, invalidateSignature(bytes, proposalSize)),
+      null,
+      `rejects an incorrect VRF ${name} vote signature`,
+    );
+    assert.equal(
+      parse(identity, invalidateSignature(bytes, proposalSize + signatureSize)),
+      null,
+      `rejects an incorrect VRF ${name} seed signature`,
+    );
     // Standard certificates omit the second, 48-byte seed signature
+    const standardBytes = withoutSeedSignature(encoded);
     assert.deepEqual(
-      parse(identity, withoutSeedSignature(encoded), true),
+      parse(identity, standardBytes, true),
       value,
       `standard ${name}`,
+    );
+    assert.equal(
+      parse(identity, invalidateSignature(standardBytes, proposalSize), true),
+      null,
+      `rejects an incorrect standard ${name} vote signature`,
     );
     assert.deepEqual(altoTypes.parse_block(fromHex(encoded).slice(proposalSize + 2 * signatureSize)), value.block);
   }
