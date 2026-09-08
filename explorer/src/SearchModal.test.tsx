@@ -42,6 +42,9 @@ beforeEach(() => {
         arrayBuffer: async () => new ArrayBuffer(1),
     } as Response);
     jest.mocked(parse_block).mockReturnValue(block);
+    jest.mocked(parse_finalized).mockReturnValue(null);
+    jest.mocked(parse_notarized).mockReturnValue(null);
+    jest.mocked(parse_seed).mockReturnValue(null);
 });
 
 afterEach(async () => {
@@ -49,6 +52,7 @@ afterEach(async () => {
     container.remove();
     globalThis.fetch = originalFetch;
     jest.clearAllMocks();
+    jest.restoreAllMocks();
 });
 
 async function search(query: string, mode: CertificateMode, type: SearchType = 'block') {
@@ -94,7 +98,7 @@ test.each([digest, digest.toUpperCase(), `0x${digest}`, `0x${digest.toUpperCase(
     },
 );
 
-const rejectedSearches: [SearchType, CertificateMode][] = [
+const indexedSearches: [SearchType, CertificateMode][] = [
     ['notarization', 'standard'],
     ['finalization', 'standard'],
     ['block', 'standard'],
@@ -104,7 +108,7 @@ const rejectedSearches: [SearchType, CertificateMode][] = [
     ['block', 'vrf'],
 ];
 
-test.each(rejectedSearches)('does not display a %s rejected by verification in %s mode', async (type, mode) => {
+test.each(indexedSearches)('does not display a %s rejected by verification in %s mode', async (type, mode) => {
     await search('latest', mode, type);
 
     expect(container.querySelector('.search-result-item')).toBeNull();
@@ -117,4 +121,81 @@ test.each(rejectedSearches)('does not display a %s rejected by verification in %
         const parse = type === 'notarization' ? parse_notarized : parse_finalized;
         expect(parse).toHaveBeenCalledWith(publicKey, payload, mode === 'standard');
     }
+});
+
+function returnArtifact(type: SearchType) {
+    const artifact = type === 'seed'
+        ? { view: 42, signature: [] }
+        : { view: 42, signature: [], block };
+    const parse = type === 'seed' ? parse_seed : type === 'notarization' ? parse_notarized : parse_finalized;
+    jest.mocked(parse).mockReturnValue(artifact);
+    return type === 'block' ? block.height : artifact.view;
+}
+
+test.each(indexedSearches)('rejects a %s for a different index in %s mode', async (type, mode) => {
+    const index = returnArtifact(type);
+    await search(String(index + 1), mode, type);
+
+    expect(container.querySelector('.search-result-item')).toBeNull();
+    expect(container.querySelector('.search-error')?.textContent).toContain('Response does not match query');
+});
+
+test.each(indexedSearches)('accepts a %s for the requested index in %s mode', async (type, mode) => {
+    const index = returnArtifact(type);
+    await search(String(index), mode, type);
+
+    expect(container.querySelector('.search-error')).toBeNull();
+    expect(container.querySelectorAll('.search-result-item')).toHaveLength(1);
+});
+
+test.each(indexedSearches)('accepts the latest %s in %s mode', async (type, mode) => {
+    returnArtifact(type);
+    await search('latest', mode, type);
+
+    expect(container.querySelector('.search-error')).toBeNull();
+    expect(container.querySelectorAll('.search-result-item')).toHaveLength(1);
+});
+
+test.each([
+    '', '12junk', '1.5', '-1', '1e3', 'Infinity',
+    '-1..1', '1..-1', '1..2junk', '1.5..2', '1..2..3', '..2', '1..', '2..1',
+    '9007199254740992', '9007199254740992..9007199254740992',
+    '0..9007199254740992', '9007199254740991..9007199254740992',
+])('rejects invalid numeric query %s without fetching', async query => {
+    // A pending response prevents an invalid range from issuing repeated requests
+    jest.mocked(globalThis.fetch).mockImplementation(() => new Promise<Response>(() => {}));
+    await search(query, 'standard');
+
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(container.querySelector('.search-error')?.textContent).toContain('Invalid query');
+});
+
+test.each([
+    { start: 0, end: 100, count: 20 },
+    { start: Number.MAX_SAFE_INTEGER - 1, end: Number.MAX_SAFE_INTEGER, count: 2 },
+])('fetches only the bounded inclusive range $start..$end', async ({ start, end, count }) => {
+    let height = start;
+    jest.mocked(parse_finalized).mockImplementation(() => ({
+        view: 42,
+        signature: [],
+        block: { ...block, height: height++ },
+    }));
+    await search(`${start}..${end}`, 'standard');
+
+    expect(container.querySelector('.search-error')).toBeNull();
+    expect(container.querySelectorAll('.search-result-item')).toHaveLength(count);
+    expect(jest.mocked(globalThis.fetch).mock.calls.map(([url]) => url)).toEqual(
+        Array.from({ length: count }, (_, offset) =>
+            `${window.location.origin}/block/${BigInt(start + offset).toString(16).padStart(16, '0')}`),
+    );
+});
+
+test('does not display a repeated block for other heights in a range', async () => {
+    returnArtifact('block');
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    await search('11..12', 'standard');
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('.search-result-item')).toBeNull();
+    expect(container.querySelector('.search-error')?.textContent).toContain('No results found for range 11..12');
 });

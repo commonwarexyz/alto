@@ -38,8 +38,8 @@ consensus artifacts. Use `standard` for a stable-leader network and `vrf` for a 
 network.
 
 `--block-size` is the payload size of the network's blocks. When set, uploads carrying a larger block
-are rejected and the request body limit is derived from it. Without it, blocks up to a fixed limit
-are accepted. The indexer retains all accepted artifacts in memory until restart.
+are rejected and the request body limit is that size plus 1 MiB. Without it, upload request bodies
+are limited to 5 MiB. The indexer retains all accepted artifacts in memory until restart.
 
 ## API Endpoints
 

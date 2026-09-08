@@ -20,7 +20,10 @@
 //!
 //! # Usage
 //!
-//! _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement). Use `--certificate-mode standard` for a stable-leader network. The default matches the default indexer's network (see `DEFAULT_CERTIFICATE_MODE`)._
+//! _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
+//!
+//! _The default certificate mode is `vrf` for rotating leaders. Use `--certificate-mode standard` for
+//! a stable-leader network. Stable networks do not publish seed artifacts._
 //!
 //! ## Get the latest seed
 //!
@@ -196,7 +199,6 @@ async fn main() {
     }
 }
 
-/// Build a client for the `--indexer` and `--identity` arguments shared by every subcommand.
 fn client<C: Scheme>(matches: &ArgMatches) -> Client<Sequential, C> {
     let indexer = matches.get_one::<String>("indexer").unwrap();
     let identity = matches.get_one::<String>("identity").unwrap();

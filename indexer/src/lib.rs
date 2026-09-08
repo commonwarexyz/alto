@@ -24,7 +24,7 @@ use tower_http::cors::CorsLayer;
 /// Bytes of certificate, block header, and framing an upload may carry beyond the block payload.
 pub const UPLOAD_OVERHEAD: usize = 1024 * 1024;
 
-/// Largest block payload accepted when the network's block size is unknown.
+/// Payload allowance used to size the default request body limit.
 pub const DEFAULT_MAX_BLOCK_SIZE: usize = 4 * 1024 * 1024;
 
 /// Capacity of the consensus broadcast channel feeding WebSocket subscribers.

@@ -62,15 +62,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
         if (query === 'latest') {
             return 'latest';
         }
-        if (query.includes('..')) {
-            const [start, end] = query.split('..');
-            const startNum = parseInt(start, 10);
-            const endNum = parseInt(end, 10);
-            if (isNaN(startNum) || isNaN(endNum) || startNum > endNum) {
-                return null;
-            }
-            return [startNum, endNum];
-        }
         if (type === 'block' && (query.startsWith('0x') || /^[0-9a-fA-F]{64}$/.test(query))) {
             const hexValue = query.startsWith('0x') ? query.slice(2) : query;
             if (!/^[0-9a-fA-F]{64}$/.test(hexValue)) {
@@ -78,11 +69,19 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
             }
             return hexValue.toLowerCase();
         }
-        const num = parseInt(query, 10);
-        if (isNaN(num) || num < 0) {
+        const parts = query.split('..');
+        if (parts.length > 2 || parts.some(part => !/^\d+$/.test(part))) {
             return null;
         }
-        return num;
+        const indices = parts.map(Number);
+        if (indices.some(index => !Number.isSafeInteger(index))) {
+            return null;
+        }
+        const [start, end] = indices;
+        if (end === undefined) {
+            return start;
+        }
+        return start <= end ? [start, end] : null;
     };
 
     const fetchData = async () => {
@@ -102,7 +101,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
             if (Array.isArray(parsedQuery)) {
                 const [start, end] = parsedQuery;
                 const maxRangeSize = 20;
-                const actualEnd = Math.min(end, start + maxRangeSize - 1);
+                const actualEnd = start + Math.min(end - start, maxRangeSize - 1);
                 setResults([]);
                 let foundAnyResults = false;
 
@@ -190,6 +189,14 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
             throw new Error(`Failed to parse ${searchType} data: ${errorMessage}`);
         }
         if (!result) throw new Error(`Failed to parse ${searchType} data`);
+        if (typeof query === 'number') {
+            const index = searchType === 'block'
+                ? ('block' in result ? result.block.height : undefined)
+                : ('view' in result ? result.view : undefined);
+            if (index !== query) {
+                throw new Error('Response does not match query');
+            }
+        }
         return result;
     };
 

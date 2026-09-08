@@ -27,9 +27,8 @@ cargo install alto-inspector
 
 _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
 
-_Use `--certificate-mode standard` when inspecting a stable-leader network. The default matches the
-default indexer's network (see `DEFAULT_CERTIFICATE_MODE` in `src/main.rs`). Stable networks do not
-publish seed artifacts._
+_The default certificate mode is `vrf` for rotating leaders. Use `--certificate-mode standard` for
+a stable-leader network. Stable networks do not publish seed artifacts._
 
 ### Get the latest seed
 

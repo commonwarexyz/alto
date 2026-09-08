@@ -29,8 +29,8 @@ export const PUBLIC_KEY_HEX = "92b050b6...";
 // Certificate construction: standard for stable leaders, vrf for rotating leaders
 export const CERTIFICATE_MODE = "standard" as const;
 
-// Validator public keys (hex, sorted) used to place each block's leader on the map.
-// Required for stable-leader networks, which have no seeds to derive the leader from.
+// Validator public keys (hex, sorted) used to place leaders on the map
+// Required for stable-leader networks
 export const PARTICIPANTS: string[] = [
     "0ba766c9...",
     "34bc98b6...",

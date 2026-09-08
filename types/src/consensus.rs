@@ -18,10 +18,10 @@ use commonware_cryptography::{
 };
 use serde::{Deserialize, Serialize};
 
-/// Native one-signature threshold certificates used by stable leaders.
+/// Threshold certificates with one vote signature for stable leaders.
 pub type StandardScheme = standard::Scheme<PublicKey, MinSig>;
 
-/// Vote-and-seed threshold certificates used by rotating leaders.
+/// Threshold certificates with vote and seed signatures for rotating leaders.
 pub type VrfScheme = vrf::Scheme<PublicKey, MinSig>;
 
 /// Certificate-seeded leader election used with [VrfScheme].
@@ -29,19 +29,16 @@ pub type RotatingElector = Random<Sha256>;
 
 /// Leader election configuration for rotating leaders.
 ///
-/// The seed-to-leader mapping is consensus-critical: every validator and the explorer (which
-/// derives the leader of each view from the seed) must use this exact configuration.
-/// [RandomVersion::V1] hashes the seed signature before reduction and therefore produces a
-/// different schedule than the elector shipped before commonware v2026.9.0 (now
-/// [RandomVersion::V0]), so a rotating-leader network must be redeployed rather than upgraded in
-/// place.
+/// Validators and explorers must use the same seed-to-leader mapping. [RandomVersion::V1]
+/// hashes the seed signature before selecting a leader. Changing this configuration requires
+/// a fresh network deployment.
 pub const ROTATING_ELECTOR: RotatingElector = Random::new(RandomVersion::V1);
 
 /// Certificate construction used by a consensus network.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CertificateMode {
-    /// One threshold signature over each vote. Stable round-robin does not require a VRF.
+    /// One threshold signature over each vote.
     Standard,
     /// Vote and round-seed threshold signatures for certificate-seeded rotating leaders.
     Vrf,
@@ -51,7 +48,7 @@ impl CertificateMode {
     /// Every mode, in the order offered on the command line.
     pub const ALL: [Self; 2] = [Self::Standard, Self::Vrf];
 
-    /// Name used on the command line and in configuration files (the serde spelling).
+    /// Name used on the command line and in configuration files.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Standard => "standard",
@@ -71,10 +68,7 @@ impl std::str::FromStr for CertificateMode {
     }
 }
 
-/// Alto's common surface over its two statically selected consensus schemes.
-///
-/// Consensus engines remain monomorphized over the concrete implementation. This trait only
-/// centralizes construction and optional seed extraction used by shared Alto components.
+/// Consensus schemes with certificate verification and optional round seeds.
 pub trait Scheme:
     SimplexScheme<Digest, PublicKey = PublicKey>
     + CertificateVerifier<Certificate: Read<Cfg = ()>>
@@ -152,7 +146,7 @@ pub type Identity = <MinSig as Variant>::Public;
 pub type Signature = <MinSig as Variant>::Signature;
 
 pub trait Seedable {
-    /// Returns the certificate-derived round seed when the selected scheme carries one.
+    /// Returns the round seed if the certificate contains one.
     fn seed(&self) -> Option<Seed>;
 }
 
