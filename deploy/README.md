@@ -143,16 +143,19 @@ indexer: https://your-indexer.example.com
 ##### Global (scripted)
 
 ```bash
-./deploy.sh
+./deploy.sh stable
+./deploy.sh rotating
 ```
 
-`deploy.sh` generates the configuration, tests and builds the explorer, builds the validator and
-indexer binaries, creates the Global cluster, and prints the explorer URL. The remaining deployment
-steps describe the manual flow used for the USA cluster.
+`deploy.sh` takes the leader mode as its only argument. It generates the configuration, tests and
+builds the explorer, builds the validator and indexer binaries, creates the Global cluster, and
+prints the explorer URL. The remaining deployment steps describe the manual flow used for the USA
+cluster.
 
 The script deploys 50 validators and one indexer on `c7gd.4xlarge` instances. Each validator uses
-8 worker threads, 16 signature threads, a 5 ms proposal interval, and 100,000-view stable terms.
-Deployment concurrency is 50.
+8 worker threads, 16 signature threads, and a 5 ms proposal interval. Stable mode runs 100,000-view
+terms with 48 optimistic views. Rotating mode elects a VRF-seeded leader every view. Deployment
+concurrency is 50.
 
 _C7gd provides a 950GB ephemeral NVMe instance store, which the deployer mounts at `/home/ubuntu`
 for validator data. The 25GB storage setting sizes the gp3 root volume. Terminating or replacing an

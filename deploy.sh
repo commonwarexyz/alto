@@ -1,7 +1,26 @@
 #!/usr/bin/env bash
-# Generate, build, and deploy the global Alto cluster.
+# Generate, build, and deploy the global Alto cluster in the given leader mode.
 set -euo pipefail
 cd "$(dirname "$0")"
+
+usage() {
+    echo "usage: $0 <stable|rotating>" >&2
+    exit 1
+}
+[ $# -eq 1 ] || usage
+case "$1" in
+    stable)
+        # One round-robin leader per term, proposing up to 48 views ahead of certified ancestry.
+        leader_flags=(--leader-mode stable --leader-term-length 100000 --leader-optimistic-views 48)
+        ;;
+    rotating)
+        # A VRF-seeded leader for every view.
+        leader_flags=(--leader-mode rotating)
+        ;;
+    *)
+        usage
+        ;;
+esac
 
 for tool in cargo file just docker deployer npm wasm-pack; do
     if ! command -v "$tool" >/dev/null 2>&1; then
@@ -64,10 +83,8 @@ cargo run --locked --bin deploy -- generate \
     --deque-size 256 \
     --block-size 0 \
     --signature-threads 16 \
-    --leader-mode stable \
     --leader-delay-ms 5 \
-    --leader-term-length 100000 \
-    --leader-optimistic-views 48 \
+    "${leader_flags[@]}" \
     --output assets \
     remote \
     --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,eu-north-1,ap-south-1,sa-east-1,eu-central-1,ap-northeast-2,ap-southeast-2 \
