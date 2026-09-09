@@ -39,6 +39,7 @@ use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use std::{
     num::{NonZero, NonZeroUsize},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{error, info, warn};
@@ -138,7 +139,7 @@ where
         Standard<Block>,
         ConstantProvider<CS, Epoch>,
         immutable::Archive<E, Digest, Finalization<CS>>,
-        immutable::Archive<E, Digest, Block>,
+        immutable::Archive<E, Digest, Arc<Block>>,
         FixedEpocher,
         S,
     >,
@@ -290,7 +291,7 @@ where
                         .get()
                         .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
                 ),
-                start: marshal::Start::Genesis(genesis),
+                start: marshal::Start::Genesis(genesis.into()),
                 prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
                 replay_buffer: REPLAY_BUFFER,
                 key_write_buffer: WRITE_BUFFER,

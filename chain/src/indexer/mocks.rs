@@ -1,4 +1,4 @@
-use super::{Block, Client as IndexerClient, Finalized, Notarized, Scheme, Seed};
+use super::{Block, Client as IndexerClient, Finalization, Notarization, Scheme, Seed};
 use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_utils::{channel::oneshot, sync::Mutex};
 use std::sync::{
@@ -94,12 +94,12 @@ impl Default for Client {
 impl<C: Scheme> IndexerClient<C> for Client {
     type Error = std::io::Error;
 
-    async fn seed_upload(&self, _: Seed) -> Result<(), Self::Error> {
+    async fn seed_upload(&self, _: &Seed) -> Result<(), Self::Error> {
         self.seed_seen.store(true, Ordering::Relaxed);
         Ok(())
     }
 
-    async fn notarized_upload(&self, _: Notarized<C>) -> Result<(), Self::Error> {
+    async fn notarized_upload(&self, _: &Notarization<C>, _: &Block) -> Result<(), Self::Error> {
         if self.fail_certs {
             return Err(std::io::Error::other("cert upload disabled"));
         }
@@ -108,7 +108,7 @@ impl<C: Scheme> IndexerClient<C> for Client {
         Ok(())
     }
 
-    async fn finalized_upload(&self, _: Finalized<C>) -> Result<(), Self::Error> {
+    async fn finalized_upload(&self, _: &Finalization<C>, _: &Block) -> Result<(), Self::Error> {
         if self.fail_certs {
             return Err(std::io::Error::other("cert upload disabled"));
         }
@@ -117,7 +117,7 @@ impl<C: Scheme> IndexerClient<C> for Client {
         Ok(())
     }
 
-    async fn block_upload(&self, block: Block) -> Result<(), Self::Error> {
+    async fn block_upload(&self, block: &Block) -> Result<(), Self::Error> {
         let digest = block.digest();
         self.block_upload_started.fetch_add(1, Ordering::SeqCst);
         self.block_upload_started_digests.lock().push(digest);

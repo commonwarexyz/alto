@@ -80,7 +80,7 @@ impl<E: Clock + Storage + Metrics + Spawner + BufferPooler> Actor<E> {
         }
     }
 
-    async fn record(&mut self, block: &Block) {
+    async fn record(&mut self, block: &Arc<Block>) {
         let Some(entry) = self.uploads.lock().record(block) else {
             return;
         };

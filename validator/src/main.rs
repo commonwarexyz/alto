@@ -1,7 +1,9 @@
 use alto_chain::{engine, Config, Leader, Peers, LEADER_TIMEOUT};
-use alto_types::{Scheme, StandardScheme, VrfScheme, EPOCH, NAMESPACE, ROTATING_ELECTOR};
+use alto_types::{
+    Block, CertificateMode, Scheme, StandardScheme, VrfScheme, EPOCH, NAMESPACE, ROTATING_ELECTOR,
+};
 use clap::{Arg, Command};
-use commonware_codec::{varint::UInt, Decode, DecodeExt, EncodeSize};
+use commonware_codec::{Decode, DecodeExt};
 use commonware_consensus::{marshal, types::ViewDelta};
 use commonware_cryptography::{
     bls12381::primitives::{
@@ -9,7 +11,9 @@ use commonware_cryptography::{
         sharing::{ModeVersion, Sharing},
         variant::MinSig,
     },
+    certificate::Verifier,
     ed25519::{PrivateKey, PublicKey},
+    sha256::Digest,
     Signer,
 };
 use commonware_deployer::aws::Hosts;
@@ -57,14 +61,13 @@ const BASE_MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
-fn configured_max_message_size(block_size: u32) -> u32 {
-    // Block data contributes its bytes and the codec's variable-length prefix to each message.
-    // The total must remain within the authenticated transport payload limit.
-    let size = u64::from(BASE_MAX_MESSAGE_SIZE)
-        + u64::from(block_size)
-        + UInt(block_size).encode_size() as u64;
-    u32::try_from(size)
-        .ok()
+fn configured_max_message_size<S: Verifier>(block_size: u32, scheme: &S) -> u32 {
+    let recovery_overhead = marshal::max_recovery_overhead::<_, Digest>(scheme)
+        .expect("could not bound marshal recovery overhead");
+    block_size
+        .checked_add(Block::max_overhead(block_size))
+        .and_then(|size| size.checked_add(recovery_overhead))
+        .map(|size| size.max(BASE_MAX_MESSAGE_SIZE))
         .filter(|size| *size <= authenticated::MAX_SIZE)
         .expect("block size exceeds authenticated transport maximum")
 }
@@ -117,7 +120,6 @@ fn main() {
     let config_file = std::fs::read_to_string(config_file).expect("Could not read config file");
     let mut config: Config =
         serde_yaml::from_str(&config_file).expect("Could not parse config file");
-    let max_message_size = configured_max_message_size(config.block_size);
     let key = from_hex(&config.private_key).expect("Could not parse private key");
     let signer = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
     let public_key = signer.public_key();
@@ -286,6 +288,16 @@ fn main() {
         );
 
         // Configure network
+        let max_message_size = match config.leader.certificate_mode() {
+            CertificateMode::Standard => configured_max_message_size(
+                config.block_size,
+                &StandardScheme::certificate_verifier(NAMESPACE, identity),
+            ),
+            CertificateMode::Vrf => configured_max_message_size(
+                config.block_size,
+                &VrfScheme::certificate_verifier(NAMESPACE, identity),
+            ),
+        };
         let p2p_namespace = union_unique(NAMESPACE, b"_P2P");
         let max_peers_per_set = peer_set_limit(&peers, &public_key);
         let mut p2p_cfg = if config.local {
@@ -435,20 +447,104 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alto_types::{Block, Finalization, Notarization};
+    use commonware_codec::Encode;
+    use commonware_consensus::{
+        simplex::{
+            scheme::bls12381_threshold::{standard, vrf},
+            types::{Finalize, Notarize, Proposal},
+        },
+        types::{Epoch, Height, Round, View},
+    };
+    use commonware_cryptography::Digestible;
+    use commonware_parallel::Sequential;
+    use commonware_utils::{non_empty, test_rng};
 
-    #[test]
-    fn max_message_size_includes_block_data() {
-        assert_eq!(configured_max_message_size(0), BASE_MAX_MESSAGE_SIZE + 1);
-        assert_eq!(
-            configured_max_message_size(2 * 1024 * 1024),
-            BASE_MAX_MESSAGE_SIZE + 2 * 1024 * 1024 + 4
-        );
+    fn recovery_messages_fit<S: Scheme>(schemes: &[S]) {
+        for block_size in [0, 127, 128, 16_383, 16_384, 2_097_151, 2_097_152] {
+            let mut block = Block::genesis();
+            block.context.round = Round::new(Epoch::new(u64::MAX), View::new(u64::MAX));
+            block.context.parent.0 = View::new(u64::MAX - 1);
+            block = Block::new(
+                block.context,
+                block.parent,
+                Height::new(u64::MAX),
+                u64::MAX,
+                vec![0; block_size as usize].into(),
+            );
+            let proposal =
+                Proposal::new(block.context.round, block.context.parent.0, block.digest());
+            let notarizes: Vec<_> = schemes
+                .iter()
+                .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
+                .collect();
+            let finalizes: Vec<_> = schemes
+                .iter()
+                .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
+                .collect();
+            let notarization =
+                Notarization::from_notarizes(&schemes[0], non_empty![@&notarizes], &Sequential)
+                    .unwrap();
+            let finalization =
+                Finalization::from_finalizes(&schemes[0], non_empty![@&finalizes], &Sequential)
+                    .unwrap();
+            let limit = configured_max_message_size(block_size, &schemes[0]) as usize;
+
+            // Resolver responses encode an ID, response tag, and length-prefixed value.
+            for value in [
+                block.encode(),
+                (notarization, block.clone()).encode(),
+                (finalization, block).encode(),
+            ] {
+                let response = (u64::MAX, 1u8, value).encode();
+                assert!(response.len() <= limit);
+            }
+        }
     }
 
     #[test]
-    #[should_panic(expected = "block size exceeds authenticated transport maximum")]
-    fn max_message_size_rejects_unsupported_block_size() {
-        configured_max_message_size(u32::MAX);
+    fn max_message_size_includes_encoded_recovery() {
+        let mut rng = test_rng();
+        recovery_messages_fit(&standard::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4).schemes);
+        recovery_messages_fit(&vrf::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4).schemes);
+    }
+
+    fn message_size_limits<S: Verifier + std::panic::RefUnwindSafe>(scheme: &S, max_overhead: u32) {
+        assert_eq!(
+            configured_max_message_size(0, scheme),
+            BASE_MAX_MESSAGE_SIZE
+        );
+        assert_eq!(
+            configured_max_message_size(2 * 1024 * 1024, scheme),
+            2 * 1024 * 1024 + max_overhead - 1
+        );
+        let block_size = authenticated::MAX_SIZE - max_overhead;
+        assert_eq!(
+            configured_max_message_size(block_size, scheme),
+            authenticated::MAX_SIZE
+        );
+        for oversized in [block_size + 1, u32::MAX] {
+            assert!(
+                std::panic::catch_unwind(|| configured_max_message_size(oversized, scheme))
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn max_message_size_limits() {
+        let mut rng = test_rng();
+        let identity = *standard::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4)
+            .verifier
+            .identity();
+
+        // A maximum-width Alto block and proof need 275 or 323 bytes beyond the payload,
+        // including both length prefixes and the resolver response envelope.
+        message_size_limits(
+            &StandardScheme::certificate_verifier(NAMESPACE, identity),
+            275,
+        );
+        message_size_limits(&VrfScheme::certificate_verifier(NAMESPACE, identity), 323);
     }
 
     #[test]

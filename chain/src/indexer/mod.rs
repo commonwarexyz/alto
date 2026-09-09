@@ -10,7 +10,7 @@
 //! The live and backfiller actors share upload state to deduplicate uploads,
 //! cache blocks, and coordinate ownership across both paths.
 
-use alto_types::{Block, Finalized, Notarized, Scheme, Seed};
+use alto_types::{Block, Finalization, Notarization, Scheme, Seed};
 use commonware_consensus::marshal::{core::Mailbox as MarshalMailbox, standard::Standard};
 use commonware_parallel::Strategy;
 use commonware_runtime::{BufferPooler, Clock, Metrics, Spawner, Storage};
@@ -32,46 +32,50 @@ pub trait Client<C: Scheme>: Clone + Send + Sync + 'static {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Upload a seed to the indexer.
-    fn seed_upload(&self, seed: Seed) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn seed_upload(&self, seed: &Seed) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Upload a notarization to the indexer.
     fn notarized_upload(
         &self,
-        notarized: Notarized<C>,
+        proof: &Notarization<C>,
+        block: &Block,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Upload a finalization to the indexer.
     fn finalized_upload(
         &self,
-        finalized: Finalized<C>,
+        proof: &Finalization<C>,
+        block: &Block,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Upload a block (without certificate) to the indexer.
-    fn block_upload(&self, block: Block) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn block_upload(&self, block: &Block) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 impl<S: Strategy, C: Scheme> Client<C> for alto_client::Client<S, C> {
     type Error = alto_client::Error;
 
-    fn seed_upload(&self, seed: Seed) -> impl Future<Output = Result<(), Self::Error>> + Send {
+    fn seed_upload(&self, seed: &Seed) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.seed_upload(seed)
     }
 
     fn notarized_upload(
         &self,
-        notarized: Notarized<C>,
+        proof: &Notarization<C>,
+        block: &Block,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.notarized_upload(notarized)
+        self.notarized_upload(proof, block)
     }
 
     fn finalized_upload(
         &self,
-        finalized: Finalized<C>,
+        proof: &Finalization<C>,
+        block: &Block,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.finalized_upload(finalized)
+        self.finalized_upload(proof, block)
     }
 
-    fn block_upload(&self, block: Block) -> impl Future<Output = Result<(), Self::Error>> + Send {
+    fn block_upload(&self, block: &Block) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.block_upload(block)
     }
 }

@@ -61,7 +61,7 @@ pub struct State {
     // Highest finalized height observed from the live application stream.
     latest_finalized: u64,
     // Blocks cached for the live certificate upload path and the backfiller.
-    cached_blocks: BTreeMap<Digest, Block>,
+    cached_blocks: BTreeMap<Digest, Arc<Block>>,
     // Number of in-flight certificate uploads per digest so the backfiller can
     // wait for the live path instead of racing it.
     certificate_uploads: BTreeMap<Digest, usize>,
@@ -82,7 +82,7 @@ impl State {
         self.uploaded.contains(digest)
     }
 
-    pub fn record(&mut self, block: &Block) -> Option<Entry> {
+    pub fn record(&mut self, block: &Arc<Block>) -> Option<Entry> {
         let entry = Entry {
             height: block.height.get(),
             digest: block.digest(),
@@ -106,11 +106,11 @@ impl State {
         self.prune();
     }
 
-    pub fn cache_block(&mut self, block: Block) {
+    pub fn cache_block(&mut self, block: Arc<Block>) {
         self.cached_blocks.entry(block.digest()).or_insert(block);
     }
 
-    pub fn cached_block(&self, digest: &Digest) -> Option<Block> {
+    pub fn cached_block(&self, digest: &Digest) -> Option<Arc<Block>> {
         self.cached_blocks.get(digest).cloned()
     }
 
@@ -180,7 +180,7 @@ mod tests {
     use commonware_consensus::types::{Height, Round, View};
     use commonware_cryptography::{ed25519, Digestible, Hasher, Sha256, Signer};
 
-    fn test_block(view: u64, height: u64, label: &[u8]) -> Block {
+    fn test_block(view: u64, height: u64, label: &[u8]) -> Arc<Block> {
         Block::new(
             Context {
                 round: Round::new(EPOCH, View::new(view)),
@@ -195,6 +195,7 @@ mod tests {
             height,
             Bytes::new(),
         )
+        .into()
     }
 
     #[test]

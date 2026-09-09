@@ -1,9 +1,11 @@
 //! Interact with an `alto` indexer.
 
-use alto_types::Scheme;
+use alto_types::{Block, Scheme};
+use commonware_consensus::marshal;
 use commonware_cryptography::sha256::Digest;
 use commonware_formatting::hex;
 use commonware_parallel::Strategy;
+use commonware_resolver::p2p::MAX_RESPONSE_OVERHEAD;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -12,8 +14,25 @@ pub mod utils;
 
 pub const LATEST: &str = "latest";
 
-/// Bytes of certificate and block encoding an HTTP upload may carry beyond the block payload.
-pub const UPLOAD_OVERHEAD: usize = 1024 * 1024;
+/// Maximum upload encoding size for the configured block payload and certificate scheme.
+///
+/// Covers blocks, notarized and finalized blocks, and round seeds.
+///
+/// # Panics
+///
+/// Panics if Marshal cannot bound the recovery overhead or the size exceeds this platform's limit.
+pub fn max_upload_size<C: Scheme>(block_size: u32, scheme: &C) -> usize {
+    // Marshal's bound is the proposal and certificate maximum plus resolver framing.
+    // An upload carries the same proof and block without the resolver envelope.
+    let proof_overhead = marshal::max_recovery_overhead::<_, Digest>(scheme)
+        .expect("could not bound marshal recovery overhead")
+        - MAX_RESPONSE_OVERHEAD;
+    usize::try_from(block_size)
+        .expect("block size is unsupported on this platform")
+        .checked_add(Block::max_overhead(block_size) as usize)
+        .and_then(|size| size.checked_add(usize::try_from(proof_overhead).ok()?))
+        .expect("upload size is unsupported on this platform")
+}
 
 /// Payload allowance used when the network's block size is not configured.
 pub const DEFAULT_MAX_BLOCK_SIZE: usize = 4 * 1024 * 1024;
@@ -97,7 +116,12 @@ impl<S: Strategy, C: Scheme> ClientBuilder<S, C> {
         Self {
             uri,
             ws_uri,
-            max_message_size: DEFAULT_MAX_BLOCK_SIZE + UPLOAD_OVERHEAD + 1,
+            max_message_size: max_upload_size(
+                u32::try_from(DEFAULT_MAX_BLOCK_SIZE).expect("default block size exceeds u32"),
+                &verifier,
+            )
+            .checked_add(1)
+            .expect("message size is unsupported on this platform"),
             verifier,
             tls_certs: Vec::new(),
             strategy,
@@ -107,14 +131,13 @@ impl<S: Strategy, C: Scheme> ClientBuilder<S, C> {
 
     /// Set the network's block payload size for WebSocket receiving.
     ///
-    /// Frames and complete messages are limited to this size plus the indexer's 1 MiB upload
-    /// allowance and one message-kind byte. HTTP retrieval is unaffected.
+    /// Frames and complete messages include the maximum block and certificate encoding overhead
+    /// and one message-kind byte. HTTP retrieval is unaffected.
     ///
     /// Panics if the receive limit cannot be represented on this platform.
     pub fn with_block_size(mut self, block_size: u32) -> Self {
-        self.max_message_size = usize::try_from(block_size)
-            .expect("block size is unsupported on this platform")
-            .checked_add(UPLOAD_OVERHEAD + 1)
+        self.max_message_size = max_upload_size(block_size, &self.verifier)
+            .checked_add(1)
             .expect("message size is unsupported on this platform");
         self
     }
@@ -200,7 +223,7 @@ pub struct Client<S: Strategy, C: Scheme> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClientBuilder, Error};
+    use super::{max_upload_size, ClientBuilder, Error, DEFAULT_MAX_BLOCK_SIZE};
     use alto_types::{Identity, StandardScheme, NAMESPACE};
     use commonware_math::algebra::CryptoGroup;
     use commonware_parallel::Sequential;
@@ -242,11 +265,10 @@ mod tests {
 
     #[tokio::test]
     async fn oversized_frames_are_rejected_from_the_header() {
-        for (block_size, limit) in [
-            (None, 5 * 1024 * 1024 + 1),
-            (Some(0), 1024 * 1024 + 1),
-            (Some(4096), 1024 * 1024 + 4097),
-        ] {
+        let scheme = StandardScheme::certificate_verifier(NAMESPACE, Identity::generator());
+        for block_size in [None, Some(0), Some(4096)] {
+            let limit =
+                max_upload_size(block_size.unwrap_or(DEFAULT_MAX_BLOCK_SIZE as u32), &scheme) + 1;
             for fragmented in [false, true] {
                 // Announce one byte beyond the receive limit, without sending its payload.
                 let mut frames = Vec::new();
@@ -269,7 +291,8 @@ mod tests {
     #[tokio::test]
     async fn streaming_budget_includes_the_message_kind() {
         // An HTTP artifact can fill the entire encoding allowance. Its stream adds one kind byte.
-        let length = 1024 * 1024 + 1;
+        let scheme = StandardScheme::certificate_verifier(NAMESPACE, Identity::generator());
+        let length = max_upload_size(0, &scheme) + 1;
         let mut frame = vec![0x82, 0x7f];
         frame.extend_from_slice(&(length as u64).to_be_bytes());
         frame.resize(frame.len() + length, 0xff);
@@ -284,7 +307,8 @@ mod tests {
     #[tokio::test]
     async fn fragmented_messages_share_the_receive_budget() {
         // Each frame fits by itself, but their combined payload exceeds the message budget.
-        let length = 1024 * 1024;
+        let scheme = StandardScheme::certificate_verifier(NAMESPACE, Identity::generator());
+        let length = max_upload_size(0, &scheme);
         let mut frames = vec![0x02, 0x7f];
         frames.extend_from_slice(&(length as u64).to_be_bytes());
         frames.resize(frames.len() + length, 0xff);
@@ -296,5 +320,31 @@ mod tests {
                 max_size,
             })) if size == length + 2 && max_size == length + 1
         ));
+    }
+
+    #[test]
+    fn upload_size_supports_the_full_payload_range() {
+        let scheme = StandardScheme::certificate_verifier(NAMESPACE, Identity::generator());
+        for (block_size, overhead) in [
+            (0, 257),
+            (127, 257),
+            (128, 258),
+            (16_383, 258),
+            (16_384, 259),
+            (2_097_151, 259),
+            (2_097_152, 260),
+            (268_435_455, 260),
+            (268_435_456, 261),
+            (u32::MAX, 261),
+        ] {
+            let expected = u64::from(block_size) + overhead;
+            match usize::try_from(expected) {
+                Ok(expected) => assert_eq!(max_upload_size(block_size, &scheme), expected),
+                Err(_) => assert!(std::panic::catch_unwind(|| max_upload_size(
+                    block_size, &scheme
+                ))
+                .is_err()),
+            }
+        }
     }
 }
