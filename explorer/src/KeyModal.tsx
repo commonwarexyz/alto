@@ -33,15 +33,13 @@ const KeyInfoModal: React.FC<KeyInfoModalProps> = ({ isOpen, onClose, publicKeyH
                     <section>
                         <h3>I'm verifying threshold signatures?</h3>
                         <p>
-                            When your browser receives a consensus message (seed, notarization, or finalization)
-                            from the <a href="https://exoware.xyz">exoware::relay</a>:
+                            Consensus messages (notarizations, finalizations, and VRF seeds) carry <i>BLS12-381</i> threshold signatures.
+                            Your browser uses <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> (compiled to WebAssembly)
+                            to verify them against the selected cluster's <strong>Network Key</strong> before updating the timeline.
                         </p>
-                        <ol>
-                            <li>The message arrives containing a <i>BLS12-381</i> signature.</li>
-                            <li>Your browser uses <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> (compiled to WebAssembly) to verify this signature against the static <strong>Network Key</strong>.</li>
-                            <li>If the signature is valid, the message is processed and displayed.</li>
-                            <li>If invalid, the message is rejected.</li>
-                        </ol>
+                        <p>
+                            Messages that fail verification are ignored. If processing falls behind, older messages may be skipped.
+                        </p>
                     </section>
 
                     <section>

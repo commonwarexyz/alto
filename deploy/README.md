@@ -29,6 +29,8 @@ requires a new network identity and matching configurations for every component.
 `--block-size` sets the number of random payload bytes in each proposed block and defaults to `0`.
 All validators must use the same value. Encoded messages must fit the authenticated transport's
 size limit; validators also reject incoming blocks with payloads larger than their configured size.
+Use the same `block_size` for Rust clients so their WebSocket receive limits include the block
+payload and the indexer's encoding allowance.
 
 Use an empty validator or follower `directory` for each new network. Reuse an existing directory
 only when the network and storage format match. The indexer keeps its state in memory and restarts
@@ -115,8 +117,8 @@ _MacOS defaults to 256 open files, which is too low for the default settings (wh
 
 Install [Rust](https://www.rust-lang.org/tools/install), [Node.js with npm](https://nodejs.org/),
 [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/),
-[Docker with Buildx](https://docs.docker.com/build/buildx/install/),
-[just](https://just.systems/man/en/packages.html), and the `file` utility. On macOS, also install
+[Docker with Buildx](https://docs.docker.com/build/buildx/install/), and
+[just](https://just.systems/man/en/packages.html). On macOS, also install
 Homebrew LLVM with `brew install llvm` for the explorer's WebAssembly build.
 
 #### Install `commonware-deployer`
@@ -133,6 +135,9 @@ port 8080 to view the explorer. To use external indexers, pass
 `--indexers '<url>:<count>[;<url>:<count>...]'`, for example,
 `https://idx-a.example.com:2;https://idx-b.example.com:1`. Uploaders are selected round-robin
 across regions.
+
+Deployments also accept regions without map coordinates. Their validators remain in the count
+and have no map marker.
 
 Each selected validator config will contain:
 
@@ -157,9 +162,9 @@ The script deploys 50 validators and one indexer on `c7gd.4xlarge` instances. Ea
 terms with 48 optimistic views. Rotating mode elects a VRF-seeded leader every view. Deployment
 concurrency is 50.
 
-_C7gd provides a 950GB ephemeral NVMe instance store, which the deployer mounts at `/home/ubuntu`
-for validator data. The 25GB storage setting sizes the gp3 root volume. Terminating or replacing an
-instance discards its NVMe data._
+_Each `c7gd.4xlarge` provides a 950GB ephemeral NVMe instance store, which the deployer mounts at
+`/home/ubuntu` for validator data. The 25GB storage setting sizes the gp3 root volume. Terminating
+or replacing an instance discards its NVMe data._
 
 ##### USA
 
@@ -185,12 +190,12 @@ Build and deploy the hosted explorer from the same revision as the validators.
 
 #### [Optional] Configure Followers and Inspector
 
-Use the generated network identity and certificate mode for every client. Deployments with
-`--indexer` store both values in `assets/indexer.yaml`.
+Use the generated network identity, certificate mode, and block size for every client.
+Deployments with `--indexer` store these values in `assets/indexer.yaml`.
 
-Set `source`, `identity`, and `certificate_mode` in the follower configuration. Pass `--indexer`,
-`--identity`, and `--certificate-mode` to the inspector. Use fresh follower data directories when
-connecting to a newly generated network.
+Set `source`, `identity`, `certificate_mode`, and `block_size` in the follower configuration. Pass
+`--indexer`, `--identity`, `--certificate-mode`, and `--block-size` to the inspector. Use fresh
+follower data directories when connecting to a newly generated network.
 
 #### Build the Embedded Explorer
 

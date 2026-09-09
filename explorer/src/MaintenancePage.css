@@ -20,9 +20,11 @@
     user-select: none;
     box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
     max-width: 350px;
-    /* Keep the translate3d animation in MaintenancePage.tsx on its own compositor layer */
+
+    /* Keep the translate3d animation in MaintenancePage.tsx on its own compositor layer. */
     will-change: transform;
-    /* Revealed by MaintenancePage.tsx once its fonts have loaded and it has been positioned. */
+
+    /* MaintenancePage.tsx reveals the logo after measuring and positioning it. */
     visibility: hidden;
     cursor: pointer;
 }

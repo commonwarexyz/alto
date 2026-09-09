@@ -1,4 +1,4 @@
-use alto_client::LATEST;
+use alto_client::{DEFAULT_MAX_BLOCK_SIZE, LATEST, UPLOAD_OVERHEAD};
 use alto_types::{Block, Finalized, Kind, Notarized, Scheme, Seed};
 use axum::{
     body::Bytes,
@@ -20,12 +20,6 @@ use std::{
 };
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
-
-/// Bytes of certificate, block header, and framing an upload may carry beyond the block payload.
-pub const UPLOAD_OVERHEAD: usize = 1024 * 1024;
-
-/// Payload allowance used to size the default request body limit.
-pub const DEFAULT_MAX_BLOCK_SIZE: usize = 4 * 1024 * 1024;
 
 /// Capacity of the consensus broadcast channel feeding WebSocket subscribers.
 const CONSENSUS_CHANNEL_CAPACITY: usize = 1024;
@@ -75,12 +69,14 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         }
     }
 
-    /// Reject blocks whose payload exceeds the network's `block_size` and size the upload limit
-    /// accordingly.
+    /// Configure HTTP upload decoding to reject payloads larger than `block_size` and size the
+    /// request body limit accordingly.
     pub fn with_block_size(mut self, block_size: u32) -> Self {
         self.block_codec_config = Block::codec_config(block_size);
-        self.max_upload_size = UPLOAD_OVERHEAD
-            + usize::try_from(block_size).expect("block size is unsupported on this platform");
+        self.max_upload_size = usize::try_from(block_size)
+            .expect("block size is unsupported on this platform")
+            .checked_add(UPLOAD_OVERHEAD)
+            .expect("upload size is unsupported on this platform");
         self
     }
 
@@ -95,7 +91,7 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
     }
 
     pub fn submit_seed(&self, seed: Seed) -> Result<(), &'static str> {
-        // Skip the signature check for a view we already hold (many validators upload each seed)
+        // Several validators can upload the same seed. Skip signature checks for known views.
         if self.state.read().unwrap().seeds.contains_key(&seed.view()) {
             return Ok(());
         }
@@ -131,8 +127,7 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
     }
 
     pub fn submit_notarization(&self, notarized: Notarized<C>) -> Result<(), &'static str> {
-        // Skip the signature check for a view we already hold (many validators upload each
-        // certificate)
+        // Several validators can upload the same certificate. Skip signature checks for known views.
         let view = notarized.proof.view();
         if self.state.read().unwrap().notarizations.contains_key(&view) {
             return Ok(());
@@ -178,8 +173,7 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
     }
 
     pub fn submit_finalization(&self, finalized: Finalized<C>) -> Result<(), &'static str> {
-        // Skip the signature check for a view we already hold (many validators upload each
-        // certificate)
+        // Several validators can upload the same certificate. Skip signature checks for known views.
         let view = finalized.proof.view();
         if self.state.read().unwrap().finalizations.contains_key(&view) {
             return Ok(());
@@ -424,7 +418,7 @@ async fn handle_consensus_ws<C: Scheme, S: Strategy>(
     loop {
         let data = match consensus.recv().await {
             Ok(data) => data,
-            // Keep streaming from the current position when a slow subscriber misses artifacts
+            // Keep streaming from the current position when a slow subscriber misses artifacts.
             Err(broadcast::error::RecvError::Lagged(skipped)) => {
                 tracing::debug!(skipped, "consensus subscriber lagged");
                 continue;
@@ -539,11 +533,6 @@ mod tests {
         }
     }
 
-    /// Build a finalized block at `view` (height == view).
-    fn finalized_at<C: Scheme>(schemes: &[C], view: u64) -> Finalized<C> {
-        finalized_with_payload(schemes, view, Bytes::new())
-    }
-
     /// Build a finalized block at `view` (height == view) carrying `payload`.
     fn finalized_with_payload<C: Scheme>(schemes: &[C], view: u64, payload: Bytes) -> Finalized<C> {
         let context = Context {
@@ -569,7 +558,7 @@ mod tests {
     #[test]
     fn block_size_bounds_uploads() {
         let (schemes, _) = fixture(0);
-        let finalized = finalized_at(&schemes, 1);
+        let finalized = finalized_with_payload(&schemes, 1, Bytes::new());
         let encoded = finalized.encode();
 
         let unbounded = Indexer::new(schemes[0].clone(), Sequential);
@@ -728,7 +717,7 @@ mod tests {
         .build();
         wait_for_ready(&client).await;
 
-        let finalized = finalized_at(&schemes, 1);
+        let finalized = finalized_with_payload(&schemes, 1, Bytes::new());
         let notarized = Notarized::new(
             create_notarization(&schemes, finalized.proof.proposal.clone()),
             finalized.block.clone(),
@@ -830,13 +819,14 @@ mod tests {
             VrfScheme::certificate_verifier(NAMESPACE, identity),
             Sequential,
         )
+        .with_block_size(64 * 1024 * 1024)
         .build();
         let mut stream = client.listen().await.unwrap();
         while indexer.consensus_tx.receiver_count() == 0 {
             tokio::task::yield_now().await;
         }
 
-        // The encoded artifact exceeds both default WebSocket receive limits
+        // The message includes the certificate and block fields beyond the 64 MiB payload.
         let finalized = finalized_with_payload(&schemes, 1, Bytes::from(vec![7; 64 * 1024 * 1024]));
         client.finalized_upload(finalized.clone()).await.unwrap();
         match stream.next().await.unwrap().unwrap() {

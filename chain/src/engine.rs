@@ -163,9 +163,10 @@ where
     pub async fn new(context: E, cfg: Config<B, P, C, S, CS, L>) -> Self {
         let mailbox_size =
             NonZeroUsize::new(cfg.mailbox_size).expect("mailbox size must be non-zero");
+
+        // Keep the proposal delay below the leader timeout so pacing a recent parent
+        // leaves time to propose.
         let proposal_delay_ms = cfg.proposal_delay_ms;
-        // A leader waits out the proposal delay before building on its parent, so a delay that
-        // reaches the leader timeout would make every view time out before it is proposed.
         assert!(
             Duration::from_millis(proposal_delay_ms.get()) < cfg.leader_timeout,
             "proposal delay must be shorter than the leader timeout"

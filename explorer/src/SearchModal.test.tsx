@@ -162,7 +162,7 @@ test.each([
     '9007199254740992', '9007199254740992..9007199254740992',
     '0..9007199254740992', '9007199254740991..9007199254740992',
 ])('rejects invalid numeric query %s without fetching', async query => {
-    // A pending response prevents an invalid range from issuing repeated requests
+    // A pending response prevents an invalid range from issuing repeated requests.
     jest.mocked(globalThis.fetch).mockImplementation(() => new Promise<Response>(() => {}));
     await search(query, 'standard');
 

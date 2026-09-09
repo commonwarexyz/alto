@@ -13,8 +13,9 @@ let sample: (oracleTime: number) => string;
 const oracleEpoch = 1_000_000;
 const roundTrip = 20;
 const interval = 15_333;
+
 // A burst narrows the estimate to the spacing of the two samples around the oracle's second
-// rollover (the 40 ms pacing) plus one round trip
+// rollover (the 40 ms pacing) plus one round trip.
 const tolerance = Math.ceil((40 + roundTrip) / 2);
 
 // Both trace formats use the same oracle clock. The whole-second format includes a `.000`
@@ -223,7 +224,7 @@ test.each([-400, 400])('retains the estimate on failure, recovers a %s ms clock 
         expect(shown()).toBe(initial);
     }
 
-    // Once a refinement sample contradicts the old estimate, a burst re-acquires the new offset
+    // Once a refinement sample contradicts the old estimate, a burst re-acquires the new offset.
     sample = wholeSecondSample;
     jest.setSystemTime(Date.now() + step);
     const adjusted = 12345 - (200 + step);

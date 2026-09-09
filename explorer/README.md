@@ -10,6 +10,10 @@ Visualize `alto` activity.
 
 The alto explorer can run in two modes: **public** (for deployed clusters) and **local** (for local development).
 
+When the indexer serves the explorer, `/runtime-config.js` supplies the mode, network key, certificate mode, and validator keys and locations for that deployment. Requests use the same origin as the explorer page. This runtime configuration takes precedence over the static files and `REACT_APP_MODE`.
+
+For a standalone explorer, the bundled `runtime-config.js` selects the static configurations below. `REACT_APP_MODE` selects the mode and defaults to `public`. If the configuration script fails to load, startup stops with a refresh prompt.
+
 ### Public Mode (Default)
 
 Public mode is used for deployed clusters (e.g., Global and USA clusters on AWS). It shows:
@@ -17,7 +21,9 @@ Public mode is used for deployed clusters (e.g., Global and USA clusters on AWS)
 - A cluster dropdown to switch between clusters
 - Full documentation about the deployed infrastructure
 
-Populate `src/global_config.ts` and `src/usa_config.ts` with the cluster configurations:
+The bundled Global and USA configurations use [exoware::relay](https://exoware.xyz), which streams consensus artifacts from those clusters to the browser.
+
+For a standalone public explorer, populate `src/global_config.ts` and `src/usa_config.ts`:
 
 ```typescript
 // Backend URL (without protocol - https:// is used automatically)
@@ -29,16 +35,16 @@ export const PUBLIC_KEY_HEX = "92b050b6...";
 // Certificate construction: standard for stable leaders, vrf for rotating leaders
 export const CERTIFICATE_MODE = "standard" as const;
 
-// Validator public keys (hex, sorted) used to place leaders on the map
-// Required for stable-leader networks
+// Validator public keys (hex, sorted) used to place certified block leaders on the map.
+// Required for map placement in stable-leader networks.
 export const PARTICIPANTS: string[] = [
     "0ba766c9...",
     "34bc98b6...",
     // ...
 ];
 
-// Ordered list of validator locations (same order as PARTICIPANTS)
-export const LOCATIONS: [[number, number], string][] = [
+// Locations follow PARTICIPANTS order. Use null for an unmapped validator.
+export const LOCATIONS: ([[number, number], string] | null)[] = [
     [[37.7749, -122.4194], "San Francisco"],
     [[51.5074, -0.1278], "London"],
     // ...
@@ -64,7 +70,7 @@ Local mode is used for local development with a local indexer. It shows:
 - No cluster dropdown
 - Simplified documentation for local usage
 
-Populate `src/local_config.ts`:
+For a standalone local explorer, populate `src/local_config.ts`:
 
 ```typescript
 // Backend URL (http:// is used automatically in local mode)

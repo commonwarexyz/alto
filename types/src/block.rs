@@ -33,6 +33,7 @@ pub struct Block {
     pub timestamp: u64,
 
     /// Opaque data appended to the encoded block.
+    /// Encoding requires a length that fits in `u32`.
     pub data: Bytes,
 
     /// Pre-computed digest of the block.
@@ -103,10 +104,9 @@ impl Block {
         RangeCfg::from(..=block_size)
     }
 
-    /// Codec configuration that accepts any payload size.
+    /// Codec configuration without a network-specific payload bound.
     ///
-    /// For consumers that do not know the network's block size and instead trust the certificate
-    /// that accompanies a block.
+    /// For consumers that verify block certificates without knowing the network's block size.
     pub fn unbounded_codec_config() -> RangeCfg<usize> {
         RangeCfg::from(..)
     }

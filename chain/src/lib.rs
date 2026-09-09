@@ -18,8 +18,9 @@ pub const DEFAULT_BACKFILLER_RETRY_MS: u64 = 1_000;
 pub const DEFAULT_BLOCKING_THREADS: usize = 512;
 pub const DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(16_384);
 pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(4_096);
-/// How long validators wait for a leader's proposal before nullifying the view. The configured
-/// proposal delay must stay below this or a leader could never propose in time.
+
+/// How long validators wait for a leader's proposal before nullifying the view.
+/// Proposal pacing stays below this deadline to leave time to propose.
 pub const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 
 fn default_backfiller_max_active() -> NonZeroUsize {
@@ -137,8 +138,9 @@ pub struct Config {
     #[serde(default)]
     pub network_buffer_pool_parallelism: Option<NonZeroUsize>,
     pub log_level: String,
-    #[serde(default, deserialize_with = "deserialize_traces_sample_rate")]
+
     /// Fraction of traces exported to the configured collector. Zero disables tracing.
+    #[serde(default, deserialize_with = "deserialize_traces_sample_rate")]
     pub traces_sample_rate: f64,
 
     pub local: bool,
@@ -152,8 +154,7 @@ pub struct Config {
 
     pub signature_threads: usize,
 
-    /// Leader election policy. Required: it selects the certificate construction, so every
-    /// validator must state it explicitly rather than fall back to a default.
+    /// Required leader policy, which determines the certificate format.
     pub leader: Leader,
 
     #[serde(default = "default_backfiller_max_active")]
@@ -168,16 +169,16 @@ pub struct Config {
 impl Config {
     /// Fraction of traces exported to the configured collector as a [Probability].
     ///
-    /// `traces_sample_rate` is validated to `[0, 1]` when deserialized. The float is converted
-    /// through a parts-per-billion ratio because [Probability::from_f64] only accepts values that
-    /// are exact multiples of `2^-64` (rejecting common rates such as `0.0001`). A non-zero rate
-    /// never rounds down to zero, so any positive rate keeps tracing enabled.
+    /// The rate is validated to `[0, 1]` when deserialized and rounded to the nearest
+    /// part per billion. Positive rates remain at least one part per billion.
     pub fn traces_sample_probability(&self) -> Probability {
         traces_sample_probability(self.traces_sample_rate)
     }
 }
 
 fn traces_sample_probability(rate: f64) -> Probability {
+    // Use an integer ratio because Probability::from_f64 requires exact multiples of 2^-64
+    // and rejects common rates such as 0.0001. Keep positive rates from rounding to zero.
     const PARTS_PER_BILLION: u64 = 1_000_000_000;
     let mut numerator = (rate * PARTS_PER_BILLION as f64).round() as u64;
     if rate > 0.0 {
@@ -504,11 +505,13 @@ mod tests {
     fn traces_sample_probability_preserves_configured_rate() {
         assert!(traces_sample_probability(0.0).is_zero());
         assert!(traces_sample_probability(1.0).is_one());
+
         // Rates that are not exact multiples of 2^-64 (rejected by `Probability::from_f64`) must
         // still convert.
         assert!(Probability::from_f64(0.0001).is_none());
         let rate = traces_sample_probability(0.0001).as_f64();
         assert!((rate - 0.0001).abs() < 1e-12, "{rate}");
+
         // Positive rates below the ratio's resolution still keep tracing enabled.
         assert!(!traces_sample_probability(1e-12).is_zero());
     }
@@ -930,7 +933,7 @@ mod tests {
 
     #[test_traced]
     fn test_indexer() {
-        // Standard certificates carry no seed
+        // Standard certificates carry no seed.
         indexer_simulation(
             |context, n| bls12381_threshold::fixture::<MinSig, _>(context, NAMESPACE, n),
             stable_elector,
@@ -940,7 +943,7 @@ mod tests {
 
     #[test_traced]
     fn test_indexer_rotating() {
-        // VRF certificates carry seeds, which validators publish to the indexer
+        // VRF certificates carry seeds, which validators publish to the indexer.
         indexer_simulation(
             |context, n| vrf::fixture::<MinSig, _>(context, NAMESPACE, n),
             || alto_types::ROTATING_ELECTOR,

@@ -1,5 +1,4 @@
-# Repository root, so every recipe works from any directory (this file is imported by the root
-# justfile but can also be selected directly from deploy/).
+# Resolve the repository root from this file so recipes work from any directory.
 root := source_directory() / ".."
 source-mounts := "-v '" + root + ":/alto' -v '" + root + "/.docker-cache/cargo:/cargo-home' -v '" + root + "/.docker-cache/target:/alto/target'"
 cache-env := "-e CARGO_HOME=/cargo-home"

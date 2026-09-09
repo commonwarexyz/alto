@@ -77,6 +77,9 @@ impl<S: Strategy, C: Scheme> Client<C> for alto_client::Client<S, C> {
 }
 
 /// Constructs the live and backfiller actors with shared upload state.
+///
+/// The producer receives finalized application blocks, the pusher handles consensus activity,
+/// and the consumer retries queued uploads in the background.
 pub(crate) fn init<E, C, CS>(
     context: E,
     client: C,

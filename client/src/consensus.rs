@@ -254,12 +254,14 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
         Ok(result)
     }
 
+    /// Stream consensus messages within the configured payload allowance.
+    /// See [`crate::ClientBuilder::with_block_size`] for the receive limits.
     pub async fn listen(&self) -> Result<impl Stream<Item = Result<Message<C>, Error>>, Error> {
-        // Match HTTP retrieval and decoding, which accept the indexer's configured block size
+        // Frame limits bound allocation before a payload arrives. The message limit also
+        // bounds fragments assembled across frames.
         let config = WebSocketConfig::default()
-            .max_frame_size(None)
-            .max_message_size(None);
-        // Connect to the websocket endpoint
+            .max_frame_size(Some(self.max_message_size))
+            .max_message_size(Some(self.max_message_size));
         let (stream, _) = connect_async_tls_with_config(
             listen_path(self.ws_uri.clone()),
             Some(config),

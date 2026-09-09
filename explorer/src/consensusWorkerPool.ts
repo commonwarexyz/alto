@@ -13,11 +13,11 @@ export interface VerifiedConsensusArtifact {
 export const consensusWorkerCount = (hardwareConcurrency: number): number =>
   Math.min(16, Math.max(2, hardwareConcurrency - 1));
 
-/// Most artifacts awaiting consumption, including queued, active, and completed work.
-/// Older artifacts are shed so slow verification or rendering cannot hold the live timeline behind.
+/// Maximum number of artifacts retained for consumption.
+/// Older work is shed to keep the timeline current. Active jobs may finish after being shed.
 export const MAX_PENDING_JOBS = 256;
 
-/// Consecutive worker failures without a successful verification before the pool gives up.
+/// Consecutive worker failures before stopping. Any non-error reply resets the count.
 const MAX_CONSECUTIVE_FAILURES = 3;
 
 /// Minimum interval between warnings that artifacts are being shed.
@@ -69,18 +69,16 @@ export class ConsensusWorkerPool {
     worker.onmessage = (
       event: MessageEvent<{ artifact: ConsensusArtifact | null; error?: string }>,
     ) => {
-      if (this.stopped) {
-        return;
-      }
-      const { artifact, error } = event.data;
-      // Each worker has one active job until it replies or is retired
+      // Each worker owns one active job until it replies or is retired.
       const activeJob = this.activeJobs.get(worker);
       if (!activeJob) {
         return;
       }
+
+      // A reply completes the job even when verification failed.
+      const { artifact, error } = event.data;
       const { sequence } = activeJob;
       this.activeJobs.delete(worker);
-      // A reply completes the job even when verification failed
       if (sequence >= this.nextResultSequence) {
         this.completedResults.set(sequence, {
           kind: activeJob.kind,
@@ -88,11 +86,10 @@ export class ConsensusWorkerPool {
           receivedAt: activeJob.receivedAt,
         });
       }
+
+      // Invalid artifacts return null without an error. Initialization failures and panics
+      // require a replacement worker. Repeated failures stop the pool.
       if (error) {
-        // The worker could not verify (its wasm module failed to initialize or panicked). Artifacts
-        // that fail to decode or to verify against the identity arrive as a null artifact without
-        // an error. Replace the worker so a poisoned one does not keep swallowing its share of the
-        // feed, and give up after repeated failures.
         console.error(`consensus artifact verification failed: ${error}`);
         this.handleWorkerFailure(worker, new Error(error));
         return;
@@ -124,13 +121,13 @@ export class ConsensusWorkerPool {
     }
   }
 
-  /// Retire a worker that crashed (`onerror`) or reported a verification error. An in-flight job
-  /// is retried on the replacement. A job whose worker already replied is not.
+  /// Retire a worker that crashed (`onerror`) or reported a verification error. A retained
+  /// in-flight job may be retried on the replacement. A job whose worker replied is complete.
   private handleWorkerFailure(worker: Worker, error: ErrorEvent | Error) {
+    // Retire the worker from both active and idle bookkeeping before replacing it.
     const activeJob = this.activeJobs.get(worker);
     const job = activeJob && activeJob.sequence >= this.nextResultSequence ? activeJob : undefined;
     this.activeJobs.delete(worker);
-    // Remove a failed worker from the available pool even if it was idle
     const availableIndex = this.availableWorkers.indexOf(worker);
     if (availableIndex !== -1) {
       this.availableWorkers.splice(availableIndex, 1);

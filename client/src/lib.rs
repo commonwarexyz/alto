@@ -12,6 +12,12 @@ pub mod utils;
 
 pub const LATEST: &str = "latest";
 
+/// Bytes of certificate and block encoding an HTTP upload may carry beyond the block payload.
+pub const UPLOAD_OVERHEAD: usize = 1024 * 1024;
+
+/// Payload allowance used when the network's block size is not configured.
+pub const DEFAULT_MAX_BLOCK_SIZE: usize = 4 * 1024 * 1024;
+
 pub enum Query {
     Latest,
     Index(u64),
@@ -65,6 +71,8 @@ type WsConnector = tokio_tungstenite::Connector;
 pub struct ClientBuilder<S: Strategy, C: Scheme> {
     uri: String,
     ws_uri: String,
+    /// Largest WebSocket frame or message, including the kind byte.
+    max_message_size: usize,
     verifier: C,
     tls_certs: Vec<Vec<u8>>,
     strategy: S,
@@ -75,6 +83,8 @@ impl<S: Strategy, C: Scheme> ClientBuilder<S, C> {
     /// Create a builder with an already initialized concrete certificate verifier.
     ///
     /// TLS uses the system's root certificates. Add private roots with [`Self::with_tls_cert`].
+    /// Streaming defaults to a 4 MiB payload allowance. Set the network's size with
+    /// [`Self::with_block_size`].
     pub fn new(uri: &str, verifier: C, strategy: S) -> Self {
         let uri = uri.to_string();
         let ws_uri = if let Some(rest) = uri.strip_prefix("https://") {
@@ -87,11 +97,26 @@ impl<S: Strategy, C: Scheme> ClientBuilder<S, C> {
         Self {
             uri,
             ws_uri,
+            max_message_size: DEFAULT_MAX_BLOCK_SIZE + UPLOAD_OVERHEAD + 1,
             verifier,
             tls_certs: Vec::new(),
             strategy,
             verify: true,
         }
+    }
+
+    /// Set the network's block payload size for WebSocket receiving.
+    ///
+    /// Frames and complete messages are limited to this size plus the indexer's 1 MiB upload
+    /// allowance and one message-kind byte. HTTP retrieval is unaffected.
+    ///
+    /// Panics if the receive limit cannot be represented on this platform.
+    pub fn with_block_size(mut self, block_size: u32) -> Self {
+        self.max_message_size = usize::try_from(block_size)
+            .expect("block size is unsupported on this platform")
+            .checked_add(UPLOAD_OVERHEAD + 1)
+            .expect("message size is unsupported on this platform");
+        self
     }
 
     /// Disable signature verification for all returned data.
@@ -149,6 +174,7 @@ impl<S: Strategy, C: Scheme> ClientBuilder<S, C> {
         Client {
             uri: self.uri,
             ws_uri: self.ws_uri,
+            max_message_size: self.max_message_size,
             verifier: self.verifier,
             verify: self.verify,
             http_client,
@@ -162,6 +188,8 @@ impl<S: Strategy, C: Scheme> ClientBuilder<S, C> {
 pub struct Client<S: Strategy, C: Scheme> {
     uri: String,
     ws_uri: String,
+    /// Largest WebSocket frame or message, including the kind byte.
+    max_message_size: usize,
     verifier: C,
     verify: bool,
 

@@ -162,11 +162,9 @@ fn main() {
 
     // Start runtime
     executor.start(|context| async move {
-        // Configure telemetry
         let log_level = Level::from_str(&config.log_level).expect("Invalid log level");
-        // When deployed via `commonware-deployer` (a hosts file is present), export
-        // traces to the monitoring host's OTLP collector (:4318). The deployer opens
-        // the traces ingress from binary to monitoring security groups.
+
+        // Resolve deployed host names for peer discovery and indexer uploads.
         let hosts = hosts_file.map(|hosts_file| {
             let hosts_file =
                 std::fs::read_to_string(hosts_file).expect("Could not read hosts file");
@@ -184,6 +182,9 @@ fn main() {
         {
             config.indexer = Some(resolve_named_http_url(indexer_url, hosts_by_name));
         }
+
+        // Export enabled traces to the deployer's monitoring collector on port 4318.
+        // The deployer allows OTLP traffic from binary hosts to the collector.
         let traces_sample_rate = config.traces_sample_probability();
         let traces = hosts
             .as_ref()
@@ -407,8 +408,8 @@ fn main() {
             }};
         }
 
-        // A validator owns one concrete certificate format for its process lifetime. Every
-        // persistent and wire-facing component is constructed inside the selected branch.
+        // Consensus, certificate storage, and indexer clients share the selected certificate
+        // scheme for the process lifetime.
         let engine = match config.leader {
             Leader::Stable {
                 delay_ms,

@@ -1,4 +1,5 @@
 import { hexUint8Array } from "./utils";
+import type { ClusterConfig } from "./config";
 
 export interface LeaderLocation {
   location: [number, number];
@@ -8,7 +9,7 @@ export interface LeaderLocation {
 export const resolveLeaderLocation = (
   leader: ArrayLike<number>,
   participants: string[] | undefined,
-  locations: [[number, number], string][],
+  locations: ClusterConfig['LOCATIONS'],
 ): LeaderLocation | undefined => {
   if (!participants || participants.length !== locations.length) {
     return undefined;
@@ -20,8 +21,6 @@ export const resolveLeaderLocation = (
     return undefined;
   }
 
-  return {
-    location: locations[index][0],
-    locationName: locations[index][1],
-  };
+  const location = locations[index];
+  return location ? { location: location[0], locationName: location[1] } : undefined;
 };

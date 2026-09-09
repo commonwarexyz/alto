@@ -8,6 +8,7 @@ export type SearchType = 'block' | 'notarization' | 'finalization' | 'seed';
 export interface BlockJs {
     leader: number[];
     height: number;
+    /** Milliseconds since the Unix epoch. */
     timestamp: number;
     digest: number[];
     parent: number[];

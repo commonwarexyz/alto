@@ -41,6 +41,8 @@ pub struct Config {
     pub source: String,
     pub identity: String,
     pub certificate_mode: CertificateMode,
+    /// Network block payload size used to bound the live feed.
+    pub block_size: u32,
     pub directory: String,
     pub worker_threads: NonZero<usize>,
     pub signature_threads: NonZero<usize>,
@@ -168,10 +170,11 @@ fn main() {
 }
 
 async fn run<C: Scheme>(context: tokio::Context, config: Config, identity: Identity) {
-    // The client decodes this concrete format but leaves signature checks to the feeder,
-    // resolver-backed marshal, and checkpoint path so certificates are not verified twice.
+    // The client leaves certificate verification to the feeder for streamed messages,
+    // marshal for resolver deliveries, and the checkpoint path below.
     let scheme = C::certificate_verifier(NAMESPACE, identity);
     let client = ClientBuilder::new(&config.source, scheme.clone(), Sequential)
+        .with_block_size(config.block_size)
         .with_verification_disabled()
         .build();
 
@@ -192,6 +195,8 @@ async fn run<C: Scheme>(context: tokio::Context, config: Config, identity: Ident
     )
     .await;
 
+    // On a fresh follower, tip mode starts near the latest finalized height.
+    // Once a height beyond genesis has been processed, resume from the stored cursor.
     if config.tip && last_processed_height.is_none_or(|height| height == Height::zero()) {
         match client.finalized_get(IndexQuery::Latest).await {
             Ok(finalized) => {
@@ -228,4 +233,20 @@ async fn run<C: Scheme>(context: tokio::Context, config: Config, identity: Ident
         _ = feeder_handle => {},
     };
     error!("follower stopped unexpectedly");
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::Config;
+
+    #[test]
+    fn examples_include_the_network_block_size() {
+        for yaml in [
+            include_str!("../examples/global.yml"),
+            include_str!("../examples/usa.yml"),
+        ] {
+            let config: Config = serde_yaml::from_str(yaml).unwrap();
+            assert_eq!(config.block_size, 0);
+        }
+    }
 }

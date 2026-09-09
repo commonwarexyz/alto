@@ -22,8 +22,7 @@ const MaintenancePage: React.FC = () => {
         window.open("https://x.com/commonwarexyz", "_blank", "noopener,noreferrer");
     };
 
-    // Position the logo with a transform rather than left/top: transforms are composited without
-    // re-running layout and keep sub-pixel positions instead of snapping to whole pixels.
+    // Move the logo with a transform to avoid layout work during animation.
     const applyPosition = () => {
         if (logoRef.current) {
             const { x, y } = positionRef.current;
@@ -40,10 +39,8 @@ const MaintenancePage: React.FC = () => {
         logoDimensionsRef.current = { width: rect.width, height: rect.height };
     };
 
-    // Show the logo once its web font has loaded (or after 1.5s if it has not), so the box is
-    // measured at its final size instead of reflowing when the font arrives. Whichever of the two
-    // fires second re-measures, as does a window resize (the box changes size across the
-    // responsive breakpoint), which keeps the box in bounds.
+    // Reveal after font loading or 1.5 seconds. Re-measure on later font completion and resize
+    // to keep the logo within the container as its font and responsive size change.
     useEffect(() => {
         // Refresh the cached box size and keep the box inside the container.
         const keepInBounds = () => {
@@ -77,8 +74,9 @@ const MaintenancePage: React.FC = () => {
             logoRef.current.style.visibility = 'visible';
             initializedRef.current = true;
         };
-        const fallback = setTimeout(reveal, 1500);
+
         // A rejected load (blocked or failed download) reveals the box in the fallback font.
+        const fallback = setTimeout(reveal, 1500);
         const font: Promise<unknown> = document.fonts
             ? document.fonts.load('bold 32px Inconsolata')
             : Promise.resolve();
@@ -103,8 +101,7 @@ const MaintenancePage: React.FC = () => {
             return filteredColors[Math.floor(Math.random() * filteredColors.length)];
         };
 
-        // Update color function that ensures the color always changes (applied directly to the
-        // element so a bounce does not trigger a React re-render mid-animation)
+        // Apply bounce colors directly to keep animation independent of React renders.
         const updateColor = () => {
             const newColor = getRandomColor();
             currentColorRef.current = newColor;
@@ -121,7 +118,7 @@ const MaintenancePage: React.FC = () => {
             }
 
             // Use elapsed time for smooth motion and cap the step to prevent jumps when a
-            // background tab becomes visible again
+            // background tab becomes visible again.
             const elapsed = lastFrameRef.current === null ? 0 : timestamp - lastFrameRef.current;
             lastFrameRef.current = timestamp;
             const step = speed * Math.min(elapsed, 100) / 1000;
@@ -178,7 +175,6 @@ const MaintenancePage: React.FC = () => {
                 }
             }
 
-            // Update position reference and apply it directly to the DOM element
             positionRef.current = { x: newX, y: newY };
             applyPosition();
 

@@ -14,6 +14,9 @@ identity: "83a93d74819bc17b3f53258216b54ecba1a13e1257a0514241bdd79c7757b7c392145
 # "vrf" for rotating leaders (must match the validators)
 certificate_mode: "vrf"
 
+# Set to the network's configured block payload size in bytes.
+block_size: 0
+
 # Directory for storing finalized blocks and state
 directory: "/tmp/alto-follower-global"
 

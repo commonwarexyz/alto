@@ -10,7 +10,9 @@ export interface ClusterConfig {
     BACKEND_URL: string;
     PUBLIC_KEY_HEX: string;
     CERTIFICATE_MODE: CertificateMode;
-    LOCATIONS: [[number, number], string][];
+    // Validator locations and keys follow consensus public-key order.
+    // Null locations keep unmapped validators in the committee.
+    LOCATIONS: ([[number, number], string] | null)[];
     PARTICIPANTS?: string[];
     name: string;
     description: string;
@@ -22,15 +24,15 @@ interface DeployedClusterConfig extends ClusterConfig {
 
 declare global {
     interface Window {
-        ALTO_DEPLOYMENT?: DeployedClusterConfig;
+        // Null selects standalone hosting after its configuration script loads.
+        ALTO_DEPLOYMENT?: DeployedClusterConfig | null;
     }
 }
 
 const deployedConfig = window.ALTO_DEPLOYMENT;
 
-// Detect mode from environment variable (set at build time)
+// Use the deployed mode, then the build-time environment variable, defaulting to public.
 // Usage: REACT_APP_MODE=local npm start
-// Default to 'public' if not set
 export const MODE: Mode = deployedConfig?.mode || (process.env.REACT_APP_MODE as Mode) || 'public';
 
 // Build configs based on mode

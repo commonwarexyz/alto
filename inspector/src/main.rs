@@ -25,6 +25,9 @@
 //! _The default certificate mode is `vrf` for rotating leaders. Use `--certificate-mode standard` for
 //! a stable-leader network. Stable networks do not publish seed artifacts._
 //!
+//! Use `--block-size` to set the network's block payload size for streaming. The receive limit adds
+//! 1 MiB for encoding and one message-kind byte. The default payload allowance is 4 MiB.
+//!
 //! ## Get the latest seed
 //!
 //! ```bash
@@ -117,6 +120,13 @@ async fn main() {
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
+            Arg::new("block_size")
+                .long("block-size")
+                .value_parser(value_parser!(u32))
+                .global(true)
+                .help("Network block payload size in bytes for streaming (default allowance: 4 MiB)"),
+        )
+        .arg(
             Arg::new("certificate_mode")
                 .long("certificate-mode")
                 .value_parser(CertificateMode::ALL.map(CertificateMode::as_str))
@@ -204,12 +214,15 @@ fn client<C: Scheme>(matches: &ArgMatches) -> Client<Sequential, C> {
     let identity = matches.get_one::<String>("identity").unwrap();
     let identity = from_hex(identity).expect("Failed to decode identity");
     let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
-    ClientBuilder::new(
+    let mut builder = ClientBuilder::new(
         indexer,
         C::certificate_verifier(NAMESPACE, identity),
         Sequential,
-    )
-    .build()
+    );
+    if let Some(block_size) = matches.get_one::<u32>("block_size") {
+        builder = builder.with_block_size(*block_size);
+    }
+    builder.build()
 }
 
 async fn run<C: Scheme>(matches: &ArgMatches) {

@@ -71,7 +71,8 @@ struct ExplorerConfig {
     name: String,
     description: String,
     participants: Vec<String>,
-    locations: Vec<([f64; 2], String)>,
+    /// One location per participant in public-key order, with None for unmapped regions.
+    locations: Vec<Option<([f64; 2], String)>>,
 }
 
 struct Settings {
@@ -81,18 +82,6 @@ struct Settings {
     block_size: Option<u32>,
     explorer: ExplorerConfig,
     explorer_mode: &'static str,
-}
-
-#[derive(Clone)]
-struct ExplorerScript(String);
-
-fn local_explorer_config() -> ExplorerConfig {
-    ExplorerConfig {
-        name: "Local Indexer".to_string(),
-        description: "An Alto indexer running on this machine.".to_string(),
-        participants: Vec::new(),
-        locations: Vec::new(),
-    }
 }
 
 fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
@@ -119,7 +108,12 @@ fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
             .expect("clap requires --certificate-mode when --config is absent")
             .parse()?,
         block_size: args.block_size,
-        explorer: local_explorer_config(),
+        explorer: ExplorerConfig {
+            name: "Local Indexer".to_string(),
+            description: "An Alto indexer running on this machine.".to_string(),
+            participants: Vec::new(),
+            locations: Vec::new(),
+        },
         explorer_mode: "local",
     })
 }
@@ -151,11 +145,8 @@ fn response(body: Body, content_type: &'static str) -> Response {
     response
 }
 
-async fn runtime_explorer_config(Extension(script): Extension<ExplorerScript>) -> Response {
-    response(
-        Body::from(script.0),
-        "application/javascript; charset=utf-8",
-    )
+async fn runtime_explorer_config(Extension(script): Extension<String>) -> Response {
+    response(Body::from(script), "application/javascript; charset=utf-8")
 }
 
 async fn explorer_asset(uri: Uri) -> Response {
@@ -175,7 +166,7 @@ async fn explorer_asset(uri: Uri) -> Response {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse args
     let settings = load_settings(Args::parse())?;
-    let script = ExplorerScript(explorer_script(&settings));
+    let script = explorer_script(&settings);
 
     // Create logger
     tracing_subscriber::fmt()
@@ -196,7 +187,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn serve<C: Scheme>(
     settings: Settings,
     identity: Identity,
-    script: ExplorerScript,
+    script: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let verifier = C::certificate_verifier(NAMESPACE, identity);
     let mut indexer = Indexer::new(verifier, Sequential);
@@ -206,9 +197,11 @@ async fn serve<C: Scheme>(
     let indexer = Arc::new(indexer);
     let app = Api::new(indexer)
         .router()
-        .route("/runtime-config.js", get(runtime_explorer_config))
-        .fallback(explorer_asset)
-        .layer(Extension(script));
+        .route(
+            "/runtime-config.js",
+            get(runtime_explorer_config).layer(Extension(script)),
+        )
+        .fallback(explorer_asset);
 
     // Start server
     let addr = format!("0.0.0.0:{}", settings.port);
@@ -279,20 +272,23 @@ mod tests {
             identity: "abcd".to_string(),
             certificate_mode: CertificateMode::Standard,
             block_size: Some(0),
-            explorer: ExplorerConfig {
-                name: "Live Cluster".to_string(),
-                description: "description".to_string(),
-                participants: vec!["participant".to_string()],
-                locations: vec![([1.0, 2.0], "City".to_string())],
-            },
+            explorer: serde_yaml::from_str::<ExplorerConfig>(
+                r#"
+name: Live Cluster
+description: description
+participants: [first, unmapped, last]
+locations: [[[1.0, 2.0], City], null, [[3.0, 4.0], Other]]
+"#,
+            )
+            .unwrap(),
             explorer_mode: "public",
         };
 
         let script = explorer_script(&settings);
         assert!(script.contains(r#""PUBLIC_KEY_HEX":"abcd""#));
-        assert!(script.contains(r#""PARTICIPANTS":["participant"]"#));
+        assert!(script.contains(r#""PARTICIPANTS":["first","unmapped","last"]"#));
         assert!(script.contains(r#""CERTIFICATE_MODE":"standard""#));
-        assert!(script.contains(r#""LOCATIONS":[[[1.0,2.0],"City"]]"#));
+        assert!(script.contains(r#""LOCATIONS":[[[1.0,2.0],"City"],null,[[3.0,4.0],"Other"]]"#));
         assert!(script.contains("window.location.host"));
     }
 }

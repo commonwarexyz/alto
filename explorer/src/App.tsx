@@ -19,6 +19,7 @@ import {
   ConsensusWorkerPool,
   consensusWorkerCount,
 } from "./consensusWorkerPool";
+import { createConsensusWorker } from "./createConsensusWorker";
 import { scaleTimelineWidth } from "./timeline";
 import { getLeaderIndicator, getTimelineIdentifier } from "./timelineIdentifier";
 import "./App.css";
@@ -108,12 +109,7 @@ const App: React.FC = () => {
 
   const [views, setViews] = useState<ViewData[]>([]);
   const mappedView = useMemo(
-    () => views.reduce<ViewData | undefined>((latest, view) => {
-      if (view.location === undefined || (latest && latest.view >= view.view)) {
-        return latest;
-      }
-      return view;
-    }, undefined),
+    () => views.find(view => view.location !== undefined),
     [views],
   );
   const lastObservedViewRef = useRef<number | null>(null);
@@ -127,7 +123,7 @@ const App: React.FC = () => {
   const [isSearchModalOpen, setIsSearchModalOpen] = useState<boolean>(false);
   const healthCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const adjustTime = useClockSkew();
-  const currentTimeRef = useRef(adjustTime(Date.now()));
+  const [currentTime, setCurrentTime] = useState(() => adjustTime(Date.now()));
   const wsRef = useRef<WebSocket | null>(null);
   const currentPoolRef = useRef<ConsensusWorkerPool | null>(null);
 
@@ -260,20 +256,20 @@ const App: React.FC = () => {
   }, []);
 
   const resolveSeedLocation = useCallback((seed: SeedJs) => {
-    if (MODE !== 'public' || PARTICIPANTS?.length || LOCATIONS.length === 0) {
+    if (MODE !== 'public' || LOCATIONS.length === 0) {
       return { location: undefined, locationName: undefined };
     }
 
     const locationIndex = leader_index(seed, LOCATIONS.length);
+    const location = LOCATIONS[locationIndex];
     return {
-      location: LOCATIONS[locationIndex][0],
-      locationName: LOCATIONS[locationIndex][1],
+      location: location?.[0],
+      locationName: location?.[1],
     };
-  }, [LOCATIONS, PARTICIPANTS]);
+  }, [LOCATIONS]);
 
-  // Record `view` as observed and return the previous maximum. This runs in the handler body, not
-  // inside a `setViews` updater: React StrictMode invokes updaters twice, so an updater that mutated
-  // the ref would see its own update on the second pass and skip the gap fill.
+  // Advance the observed maximum outside React's state updater, which StrictMode may invoke twice.
+  // Return the previous maximum for gap filling.
   const observeView = useCallback((view: number): number | null => {
     const lastObservedView = lastObservedViewRef.current;
     if (lastObservedView === null || view > lastObservedView) {
@@ -282,9 +278,8 @@ const App: React.FC = () => {
     return lastObservedView;
   }, []);
 
-  // Insert placeholders for views skipped between `lastObservedView` and `view`
-  // Seeds trigger this in VRF mode. Standard mode uses notarizations and finalizations because
-  // it has no seeds
+  // Insert bounded placeholders for locally unobserved views between verified observations.
+  // Both modes use certificates. VRF mode also observes seeds for the next view.
   const fillMissedViews = useCallback((
     newViews: ViewData[],
     lastObservedView: number | null,
@@ -294,7 +289,8 @@ const App: React.FC = () => {
     if (lastObservedView === null || view <= lastObservedView + 1) {
       return;
     }
-    // Never backfill more than the timeline can show.
+
+    // Bound gap filling by the number of tracked views.
     const startViewIndex = Math.max(lastObservedView + 1, view - MAX_TRACKED_VIEWS);
     for (let missedView = startViewIndex; missedView < view; missedView++) {
       if (newViews.findIndex((v) => v.view === missedView) !== -1) {
@@ -335,21 +331,18 @@ const App: React.FC = () => {
       const existingIndex = newViews.findIndex(v => v.view === view);
 
       if (existingIndex !== -1) {
-        // If it exists and is already finalized or notarized, just update
-        // the location and signature information without changing timing
-        const existingStatus = newViews[existingIndex].status;
-        if (existingStatus === "finalized" || existingStatus === "notarized") {
+        // Preserve certified timing and status, preferring its known proposer to the seed prediction.
+        const existing = newViews[existingIndex];
+        if (existing.status === "finalized" || existing.status === "notarized") {
           const { location, locationName } = resolveSeedLocation(seed);
-
-          // Only update location and signature info, preserve all timing and status
           newViews[existingIndex] = {
-            ...newViews[existingIndex],
-            location: location ?? newViews[existingIndex].location,
-            locationName: locationName ?? newViews[existingIndex].locationName,
+            ...existing,
+            location: existing.location ?? location,
+            locationName: existing.locationName ?? locationName,
             signature: seed.signature,
           };
 
-          return newViews;
+          return retainNewestViews(newViews);
         }
 
         // If it exists but is in another state, clear its timeout but preserve everything else
@@ -421,9 +414,10 @@ const App: React.FC = () => {
       if (existing && existing.status === "finalized") {
         return prevViews; // No changes needed, preserve finalized state
       }
+
+      // Placeholders are inserted at the front, so locate the view after filling.
       const newViews = [...prevViews];
       fillMissedViews(newViews, lastObservedView, view, currentTime);
-      // Placeholders are inserted at the front, so locate the view after filling.
       const index = newViews.findIndex((v) => v.view === view);
 
       if (index !== -1) {
@@ -474,14 +468,15 @@ const App: React.FC = () => {
       : undefined;
     const lastObservedView = observeView(view);
     setViews((prevViews) => {
-      // If already finalized, don't update
+      // Preserve the first finalization's timing.
       const existing = prevViews.find((v) => v.view === view);
       if (existing && existing.status === "finalized") {
         return prevViews;
       }
+
+      // Placeholders are inserted at the front, so locate the view after filling.
       const newViews = [...prevViews];
       fillMissedViews(newViews, lastObservedView, view, currentTime);
-      // Placeholders are inserted at the front, so locate the view after filling.
       const index = newViews.findIndex((v) => v.view === view);
 
       if (index !== -1) {
@@ -523,15 +518,15 @@ const App: React.FC = () => {
     });
   }, [adjustTime, LOCATIONS, PARTICIPANTS, observeView, fillMissedViews]);
 
-  // Consume verified artifacts in bounded batches while limiting React rendering work
+  // Batch verified updates and advance the display clock even when views are unchanged.
   useEffect(() => {
     const interval = setInterval(() => {
-      currentTimeRef.current = adjustTime(Date.now());
+      setCurrentTime(adjustTime(Date.now()));
       const verified = currentPoolRef.current?.drain() ?? [];
       for (const { kind, artifact, receivedAt, skipped } of verified) {
         if (skipped) {
-          // Processing fell behind and artifacts were shed. The views they covered were never
-          // observed, so forget the last observed view rather than backfilling them as timeouts.
+          // A processing gap starts a new observation baseline. Later verified observations
+          // may still reveal missing views.
           lastObservedViewRef.current = null;
         }
         if (!artifact) {
@@ -548,9 +543,6 @@ const App: React.FC = () => {
             handleFinalization(artifact as CertifiedBlockJs, receivedAt);
             break;
         }
-      }
-      if (verified.length === 0) {
-        setViews(views => [...views]);
       }
     }, VIEW_RENDER_INTERVAL);
     return () => clearInterval(interval);
@@ -579,10 +571,27 @@ const App: React.FC = () => {
     let cancelled = false;
     let verifierPool: ConsensusWorkerPool | undefined;
 
-    const connectWebSocket = () => {
-      if (cancelled) {
-        return;
+    // A stopped verifier cannot serve a new connection. Cancel reconnect work before closing
+    // the socket so queued socket events cannot restart this effect's transport.
+    const stopConnection = () => {
+      cancelled = true;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
+
+      if (wsRef.current) {
+        const ws = wsRef.current;
+        wsRef.current = null;
+        try {
+          ws.close(1000, "Connection stopped");
+        } catch (err) {
+          console.error("Error closing WebSocket:", err);
+        }
+      }
+    };
+
+    const connectWebSocket = () => {
       // Clear any existing reconnection timers
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
@@ -608,7 +617,7 @@ const App: React.FC = () => {
 
       ws.onopen = () => {
         if (cancelled) {
-          ws.close(1000, "Component unmounted");
+          ws.close(1000, "Connection stopped");
           return;
         }
         console.log(`WebSocket connected: ${BACKEND_URL}`);
@@ -654,9 +663,7 @@ const App: React.FC = () => {
         if (wsRef.current === ws) {
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectTimeoutRef.current = null;
-            if (!cancelled) {
-              connectWebSocket();
-            }
+            connectWebSocket();
           }, 11000);
         }
       };
@@ -669,10 +676,11 @@ const App: React.FC = () => {
       }
       verifierPool = new ConsensusWorkerPool(
         consensusWorkerCount(navigator.hardwareConcurrency || 4),
-        () => new Worker(new URL("./consensusWorker.ts", import.meta.url)),
+        createConsensusWorker,
         PUBLIC_KEY,
         standardCertificates,
         () => {
+          stopConnection();
           setErrorMessage("A consensus verifier stopped unexpectedly. Refresh to reconnect.");
           setShowError(true);
         },
@@ -690,28 +698,11 @@ const App: React.FC = () => {
       setShowError(true);
     });
 
-    // Cleanup function when component unmounts
+    // Dispose the connection and verifiers when this effect ends.
     return () => {
-      cancelled = true;
-      // Clear any reconnection timers
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
-
+      stopConnection();
       verifierPool?.terminate();
       currentPoolRef.current = null;
-
-      // Close and clean up the websocket
-      if (wsRef.current) {
-        const ws = wsRef.current;
-        wsRef.current = null; // Clear reference first to prevent reconnection attempts
-        try {
-          ws.close(1000, "Component unmounting");
-        } catch (err) {
-          console.error("Error closing WebSocket during cleanup:", err);
-        }
-      }
     };
   }, [selectedCluster, isLoading, isInMaintenance, BACKEND_URL, PUBLIC_KEY, standardCertificates]);
 
@@ -855,7 +846,7 @@ const App: React.FC = () => {
               <Bar
                 key={viewData.view}
                 viewData={viewData}
-                currentTime={currentTimeRef.current}
+                currentTime={currentTime}
                 isMobile={isMobile}
                 standardCertificates={standardCertificates}
               />
@@ -876,7 +867,7 @@ const App: React.FC = () => {
       <AboutModal
         isOpen={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
-        standardCertificates={standardCertificates}
+        clusterConfig={clusterConfig}
       />
       <KeyInfoModal
         isOpen={isKeyInfoModalOpen}

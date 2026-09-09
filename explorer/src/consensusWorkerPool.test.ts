@@ -98,7 +98,7 @@ test("keeps delivering recent results when an earlier worker stays pending", () 
   expect(delivered).toEqual(Array.from({ length: total - 1 }, (_, i) => i + 1));
   expect(skipped).toEqual([1]);
 
-  // A late response cannot resurrect work already reported as skipped
+  // A late response cannot resurrect work already reported as skipped.
   stalled.completeNext();
   expect(pool.drain()).toEqual([]);
   pool.terminate();
@@ -142,20 +142,20 @@ test("a failed verification still releases later results in order and replaces t
   pool.verify(1, new Uint8Array([0]), 0);
   pool.verify(1, new Uint8Array([1]), 1);
 
-  // Hold the second artifact's result until the first reports
+  // Hold the second artifact's result until the first reports.
   second.completeNext();
   expect(pool.drain()).toEqual([]);
   first.completeNext("wasm panic");
   expect(pool.drain().map(result => result.receivedAt)).toEqual([0, 1]);
 
   // Retire the failed worker (its WASM may be poisoned) and refill its slot without retrying the
-  // released result
+  // released result.
   expect(first.terminated).toBe(true);
   expect(workers).toHaveLength(3);
   expect(workers[2].messages).toHaveLength(0);
   expect(errors).toEqual([]);
 
-  // A successful verification resets the failure count. Repeated failures without one stop the pool
+  // A non-error reply resets the failure count. Repeated failures without one stop the pool.
   pool.verify(1, new Uint8Array([2]), 2);
   second.completeNext();
   expect(pool.drain().map(result => result.receivedAt)).toEqual([2]);
@@ -213,7 +213,7 @@ test("bounds pending work when every worker stalls", () => {
   const total = MAX_PENDING_JOBS * 4;
   const firstRetained = total - MAX_PENDING_JOBS;
 
-  // The pending bound includes work waiting on a worker response
+  // The retained window includes work waiting on a worker response.
   for (let id = 0; id < total; id++) {
     pool.verify(1, new Uint8Array([id]), id);
   }
@@ -246,7 +246,7 @@ test("keeps only recent results when verification outpaces consumption", () => {
   const total = MAX_PENDING_JOBS * 4;
   const firstRetained = total - MAX_PENDING_JOBS;
 
-  // Workers keep making progress while the consumer waits between batches
+  // Workers keep making progress while the consumer waits between batches.
   for (let id = 0; id < total; id++) {
     pool.verify(1, new Uint8Array([id]), id);
     workers[0].completeNext();

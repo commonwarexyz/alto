@@ -67,7 +67,7 @@ where
     ) -> Option<Self::Block> {
         let parent = ancestry.next().await?;
 
-        // Create a new block.
+        // Pace each proposal from its parent's timestamp.
         let min_timestamp = parent
             .timestamp
             .checked_add(self.delay_ms.get())
@@ -86,9 +86,8 @@ where
             "proposed timestamp exceeded maximum",
         );
 
-        // Each proposal carries a fresh opaque payload of the configured size. The payload only
-        // needs to be incompressible, so seed a userspace generator once per proposal instead of
-        // drawing every byte from the operating system on the proposal hot path.
+        // Seed a userspace generator once per proposal to produce an incompressible load payload
+        // without drawing every byte from the runtime's random source.
         let mut data = vec![0; self.block_size];
         if self.block_size > 0 {
             StdRng::from_rng(&mut runtime_context).fill_bytes(&mut data);
@@ -120,7 +119,7 @@ where
             return false;
         }
 
-        // Verify the block (allowing a bounded amount of future clock skew).
+        // Require increasing timestamps within the protocol's fixed range.
         if block.timestamp <= parent.timestamp || block.timestamp > MAX_BLOCK_TIMESTAMP_MS {
             return false;
         }
@@ -421,12 +420,12 @@ mod tests {
                 now,
                 Bytes::new(),
             );
+
+            // Verification rejects timestamps outside the fixed protocol range before sleeping.
             let block = Block::new(
                 test_context(2, (View::new(1), parent.digest())),
                 parent.digest(),
                 parent.height.next(),
-                // Verification should reject timestamps outside the fixed
-                // protocol range before attempting to sleep.
                 MAX_BLOCK_TIMESTAMP_MS + 1,
                 Bytes::new(),
             );
@@ -444,12 +443,11 @@ mod tests {
         runner.start(|context| async move {
             let mut application = Application::new(DELAY_MS, 0);
 
+            // Adding the proposal delay to a parent at the timestamp limit exceeds that limit.
             let parent = Block::new(
                 test_context(1, (View::zero(), sha256::Digest::EMPTY)),
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
-                // Proposing on top of a parent already at the maximum would
-                // require `parent.timestamp + 1`, which must be rejected.
                 MAX_BLOCK_TIMESTAMP_MS,
                 Bytes::new(),
             );

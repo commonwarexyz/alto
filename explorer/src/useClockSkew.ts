@@ -11,7 +11,7 @@ const timeout = 3000;
 // samples fall at different points within the oracle's second instead of at one fixed phase.
 const interval = 15_333;
 
-// A burst samples for just over a second so the oracle's second rolls over within it
+// A burst spans just over a second to sample across the oracle's second rollover.
 const burstDuration = 1100;
 
 // Minimum spacing between burst samples, in milliseconds
@@ -54,7 +54,7 @@ async function sample(): Promise<Bounds> {
         throw new Error('Invalid ts field');
     }
 
-    // Whole seconds, unless the field carries a non-zero fraction and so has millisecond precision
+    // A non-zero fraction indicates millisecond precision. Otherwise use whole seconds.
     const resolution = /\.\d*[1-9]/.test(ts) ? 1 : 1000;
     return {
         lower: localStartTime - serverTime - resolution,
@@ -140,16 +140,16 @@ export const useClockSkew = () => {
             }
         };
 
-        // Estimate skew immediately, then refresh periodically
+        // Estimate skew immediately, then refresh periodically.
         refresh();
         const intervalId = setInterval(refresh, interval);
         return () => {
-            // Stop polling and ignore completions from this effect after cleanup
+            // Stop polling and ignore completions from this effect after cleanup.
             active = false;
             clearInterval(intervalId);
         };
     }, []);
 
-    // Convert browser wall time to the time oracle's clock
+    // Convert browser wall time to the time oracle's clock.
     return (timestamp: number): number => timestamp - clockSkew;
 };

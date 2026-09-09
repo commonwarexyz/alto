@@ -25,3 +25,15 @@ test("does not infer a location when the certified leader is unknown", () => {
     ),
   ).toBeUndefined();
 });
+
+test("preserves participant indices across missing locations", () => {
+  const participants = ["01", "02", "03"];
+  const partialLocations: ([[number, number], string] | null)[] = [
+    locations[0], null, locations[1],
+  ];
+  expect(resolveLeaderLocation([0x02], participants, partialLocations)).toBeUndefined();
+  expect(resolveLeaderLocation([0x03], participants, partialLocations))
+    .toEqual({ location: [3, 4], locationName: "Second" });
+  expect(resolveLeaderLocation([0x01], participants, partialLocations))
+    .toEqual({ location: [1, 2], locationName: "First" });
+});

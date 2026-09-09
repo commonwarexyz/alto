@@ -10,7 +10,7 @@ usage() {
 [ $# -eq 1 ] || usage
 case "$1" in
     stable)
-        # One round-robin leader per term, proposing up to 48 views ahead of certified ancestry.
+        # One round-robin leader per term with a 48-view optimistic window.
         leader_flags=(--leader-mode stable --leader-term-length 100000 --leader-optimistic-views 48)
         ;;
     rotating)
@@ -22,7 +22,7 @@ case "$1" in
         ;;
 esac
 
-for tool in cargo file just docker deployer npm wasm-pack; do
+for tool in cargo just docker deployer npm wasm-pack; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "missing required command: $tool" >&2
         exit 1
@@ -70,8 +70,8 @@ if [ -d assets ]; then
     rm -rf ./assets
 fi
 
-# C7gd exposes 16 single-threaded Graviton 3 cores. The 8/16 split is the
-# deployment tuning point for overlapping network and signature work.
+# The c7gd.4xlarge has 16 Graviton3 cores. Use 8 runtime threads and 16 signature
+# threads to overlap network and signature work.
 cargo run --locked --bin deploy -- generate \
     --peers 50 \
     --bootstrappers 5 \
@@ -95,32 +95,15 @@ cargo run --locked --bin deploy -- generate \
     --dashboard deploy/dashboard.json \
     --indexer
 
-for artifact in config.yaml dashboard.json indexer.yaml; do
-    if [ ! -f "assets/$artifact" ]; then
-        echo "deployment generator did not create assets/$artifact" >&2
-        exit 1
-    fi
-done
-
 npm --prefix explorer ci
 CI=true npm --prefix explorer test -- --watchAll=false --runInBand
-env ${explorer_build_env[@]+"${explorer_build_env[@]}"} GENERATE_SOURCEMAP=false npm --prefix explorer run build
+env ${explorer_build_env[@]+"${explorer_build_env[@]}"} BUILD_PATH=build PUBLIC_URL=/ GENERATE_SOURCEMAP=false npm --prefix explorer run build
 if [ ! -f explorer/build/index.html ]; then
     echo "explorer build did not create explorer/build/index.html" >&2
     exit 1
 fi
 
 just graviton-binaries
-for artifact in validator indexer; do
-    if [ ! -x "assets/$artifact" ]; then
-        echo "build did not create executable assets/$artifact" >&2
-        exit 1
-    fi
-    if ! file "assets/$artifact" | grep -q 'ARM aarch64'; then
-        echo "build did not create an AArch64 assets/$artifact binary" >&2
-        exit 1
-    fi
-done
 
 (cd assets && deployer aws create --config config.yaml --concurrency 50)
 

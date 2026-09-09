@@ -23,7 +23,7 @@ const withoutSeedSignature = (encoded) => {
   ]);
 };
 
-// Flipping the sign bit keeps the G1 point validly encoded and in its subgroup
+// Flipping the sign bit keeps the G1 point validly encoded and in its subgroup.
 const invalidateSignature = (bytes, offset) => {
   const altered = bytes.slice();
   altered[offset] ^= 0x20;
@@ -134,7 +134,8 @@ for (const [name, parse, encoded] of artifacts) {
       null,
       `rejects an incorrect VRF ${name} seed signature`,
     );
-    // Standard certificates omit the second, 48-byte seed signature
+
+    // Standard certificates omit the second, 48-byte seed signature.
     const standardBytes = withoutSeedSignature(encoded);
     assert.deepEqual(
       parse(identity, standardBytes, true),

@@ -12,8 +12,8 @@ const worker = globalThis as unknown as DedicatedWorkerGlobalScope;
 worker.onmessage = async (event: MessageEvent) => {
   const { kind, payload, publicKey, standard } = event.data;
 
-  // Always answer: the pool releases results strictly in sequence order, so a job that never
-  // replies (a failed wasm load or a wasm panic) would block every later artifact.
+  // Always reply, including after WASM initialization failure or panic, so the pool can advance
+  // its ordered results and replace a failed worker.
   let artifact = null;
   let error: string | undefined;
   try {

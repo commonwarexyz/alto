@@ -251,7 +251,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onC
             : 0;
 
     const tooltips = {
-        blockTime: "The median difference between consecutive block timestamps.<br><br><i>This is functionally equivalent to the average validator's time to lock (unlike your browser, validators are connected directly to each other instead of an intermediary streaming layer).</i>",
+        blockTime: "The median difference between consecutive block timestamps.<br><br><i>This measures block production cadence, including proposal pacing. The browser's Locked and Finalized latencies include delivery through the streaming layer.</i>",
         timeToLock: "The median latency from block proposal to receiving 2f+1 votes, as observed by your browser.<br><br><i>Locked blocks must be included in the canonical chain if the view is not nullified.</i>",
         timeToFinalize: "The median latency from block proposal to receiving 2f+1 finalizes, as observed by your browser.<br><br><i>Once finalized, a block is immutable.</i>"
     };

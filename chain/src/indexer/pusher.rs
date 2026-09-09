@@ -116,8 +116,8 @@ impl<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> Pusher<E, C, CS> {
         F: FnOnce(C, Block) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), C::Error>> + Send,
     {
-        // Claim the digest before the marshal reporter can enqueue the same
-        // activity for durable backfill.
+        // Claim the digest before marshal can deliver the corresponding
+        // finalized block to the backfiller.
         let mut guard = CertificateUploadGuard::new(self.uploads.clone(), digest);
         self.context.child(label).spawn({
             let client = self.client.clone();

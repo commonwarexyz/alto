@@ -101,7 +101,8 @@ struct ExplorerConfig {
     name: String,
     description: String,
     participants: Vec<String>,
-    locations: Vec<([f64; 2], String)>,
+    /// One location per participant in public-key order, with None for unmapped regions.
+    locations: Vec<Option<([f64; 2], String)>>,
 }
 
 fn local_indexer_port(url: &str) -> Option<u16> {
@@ -540,7 +541,7 @@ fn generate_local(
     let start_port = *sub_matches.get_one::<u16>("start_port").unwrap();
     let configured_indexers = parse_indexers(sub_matches.get_one::<String>("indexers"));
 
-    // Construct output path (an absolute `--output` is used as-is)
+    // Resolve relative output paths from the working directory.
     let current_dir = std::env::current_dir().unwrap();
     let output = current_dir.join(output).to_str().unwrap().to_string();
     let storage_output = format!("{output}/storage");
@@ -760,7 +761,7 @@ fn generate_remote(
         });
     }
 
-    // Construct output path (absolute `--output` and `--dashboard` paths are used as-is)
+    // Resolve relative output paths from the working directory.
     let current_dir = std::env::current_dir().unwrap();
     let output = current_dir.join(output).to_str().unwrap().to_string();
 
@@ -896,8 +897,7 @@ fn generate_remote(
             .map(|instance| {
                 (
                     instance.name.clone(),
-                    get_aws_location(&instance.region)
-                        .unwrap_or_else(|| panic!("unknown AWS region: {}", instance.region)),
+                    get_aws_location(&instance.region),
                 )
             })
             .unzip();
@@ -1067,18 +1067,15 @@ fn explorer_remote(dir: String, backend_url: String) {
         let region = &instance.region;
         let public_key = from_hex(&instance.name).expect("invalid public key");
         let public_key = PublicKey::decode(public_key.as_ref()).expect("invalid public key");
-        let (coords, city) = get_aws_location(region).expect("unknown region");
-        participants.insert(
-            public_key,
-            (
-                format!("    \"{}\"", instance.name),
-                format!("    [[{}, {}], \"{}\"]", coords[0], coords[1], city),
-            ),
-        );
+        let location = match get_aws_location(region) {
+            Some((coords, city)) => format!("    [[{}, {}], \"{}\"]", coords[0], coords[1], city),
+            None => "    null".to_string(),
+        };
+        participants.insert(public_key, (format!("    \"{}\"", instance.name), location));
     }
 
-    // Order by public key (PARTICIPANTS and LOCATIONS must share one order so the explorer can map
-    // a block's leader to a location, which is the only leader signal in standard mode)
+    // Keep one location slot per participant in public-key order so missing coordinates never
+    // shift another leader's location.
     let mut keys = Vec::new();
     let mut locations = Vec::new();
     for (_, (key, location)) in participants {
@@ -1109,7 +1106,7 @@ fn explorer_remote(dir: String, backend_url: String) {
         export const PUBLIC_KEY_HEX = \"{}\";\n\
         export const CERTIFICATE_MODE = \"{}\" as const;\n\
         export const PARTICIPANTS: string[] = [\n{}\n];\n\
-        export const LOCATIONS: [[number, number], string][] = [\n{}\n];",
+        export const LOCATIONS: ([[number, number], string] | null)[] = [\n{}\n];",
         backend_url,
         hex(&identity.encode()),
         certificate_mode,

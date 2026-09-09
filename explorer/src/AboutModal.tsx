@@ -1,14 +1,15 @@
 import React, { useEffect } from 'react';
-import { MODE } from './config';
+import { ClusterConfig, getHttpBackendUrl, MODE } from './config';
 import { getLeaderIndicator, getTimelineIdentifier } from './timelineIdentifier';
 
 interface AboutModalProps {
     isOpen: boolean;
     onClose: () => void;
-    standardCertificates: boolean;
+    clusterConfig: ClusterConfig;
 }
 
-const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, standardCertificates }) => {
+const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig }) => {
+    const standardCertificates = clusterConfig.CERTIFICATE_MODE === 'standard';
     const timelineIdentifier = getTimelineIdentifier(standardCertificates);
     const leaderIndicator = getLeaderIndicator(standardCertificates);
     // Add effect to handle link targets
@@ -26,6 +27,12 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, standardCertif
     }, [isOpen]);
     if (!isOpen) return null;
 
+    const [certificateMode, indexer, identity] = [
+        clusterConfig.CERTIFICATE_MODE,
+        getHttpBackendUrl(clusterConfig.BACKEND_URL),
+        clusterConfig.PUBLIC_KEY_HEX,
+    ].map(value => `'${value.replace(/'/g, "'\\''")}'`);
+
     return (
         <div className="about-modal-overlay">
             <div className="about-modal">
@@ -36,8 +43,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, standardCertif
                     <section>
                         <h3>About</h3>
                         <p>
-                            This explorer visualizes the performance of <a href="https://github.com/commonwarexyz/alto">alto</a>'s consensus, <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/simplex/index.html">simplex</a>,
-                            {MODE === 'public' ? ' deployed on a cluster of globally distributed nodes.' : ' running on your local machine.'}
+                            This explorer visualizes the performance of <a href="https://github.com/commonwarexyz/alto">alto</a>'s consensus, <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/simplex/index.html">simplex</a>, running on the selected cluster.
                         </p>
                         {MODE === 'public' && (
                             <p>
@@ -53,15 +59,16 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, standardCertif
                             <a href="https://github.com/commonwarexyz/alto">alto</a> is a minimal (and wicked fast) blockchain built with the <a href="https://github.com/commonwarexyz/monorepo">Commonware Library</a>.
                         </p>
                         <p>
-                            By minimal, we mean minimal. alto's state transition function consists of just <strong>3 rules</strong>. Each block must:
+                            alto's state transition function has <strong>4 rules</strong>. Each block after genesis must:
                         </p>
                         <ul>
                             <li>Increase the height by 1</li>
                             <li>Reference the digest of its parent</li>
-                            <li>Propose a new timestamp greater than its parent (<i>but not more than 500ms in the future</i>)</li>
+                            <li>Increase its parent's timestamp without exceeding January 1, 2200 (UTC)</li>
+                            <li>Contain exactly the configured number of opaque payload bytes (zero by default)</li>
                         </ul>
                         <p>
-                            That's it!
+                            Validators wait until a valid block's timestamp is no more than one second ahead of their local clock before certifying it.
                         </p>
                     </section>
 
@@ -71,9 +78,14 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, standardCertif
                             This explorer displays the progression of <i>simplex</i> over time, broken into <strong>views</strong>.
                         </p>
                         <p>
-                            Validators enter a new view whenever they observe either <i>2f+1</i> votes for a block proposal or <i>2f+1</i> nullifies
-                            (to skip this view){standardCertificates ? '.' : ' and a VRF seed used to select the next leader.'} Validators finalize a view whenever they
-                            observe <i>2f+1</i> finalizes for a block proposal.
+                            In stable mode, a <strong>term</strong> groups consecutive views under one round-robin leader. In rotating mode,
+                            each term contains one view and a VRF seed selects its leader.
+                        </p>
+                        <p>
+                            A quorum of <i>2f+1</i> votes for a block forms a <strong>notarization</strong>. After successfully certifying the block,
+                            validators advance to the next view without waiting for finalization. A quorum of <i>2f+1</i> nullifies forms a <strong>nullification</strong>,
+                            which abandons the remaining term and advances to the first view of the next term.
+                            Validators finalize a block when they observe <i>2f+1</i> finalizes for it.
                         </p>
                         <p>
                             We color the phases of a view as follows:
@@ -87,7 +99,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, standardCertif
                                 {standardCertificates
                                     ? 'The stable round-robin leader has proposed a block.'
                                     : 'Some leader has been elected to propose a block.'}
-                                {MODE === 'public' && ' The dot on the map (of the same color) is the region where the leader is located.'}
+                                {MODE === 'public' && " A map dot of the same color shows the leader's region when its location is known."}
                                 {!standardCertificates && ' A new leader is elected for each view.'}
                             </li>
                             <li>
@@ -95,8 +107,8 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, standardCertif
                                     <div className="about-status-indicator" style={{ backgroundColor: "#000" }}></div>
                                     <strong>Locked</strong>
                                 </div>
-                                Some block <i>b</i> has received <i>2f+1</i> votes in a given view <i>v</i>. This means there can never be another locked block
-                                in view <i>v</i> (and block <i>b</i> must be used in the canonical chain if <i>2f+1</i> participants did not move to nullify).
+                                Block <i>b</i> has received <i>2f+1</i> votes in view <i>v</i>, so no other block can be notarized in that view.
+                                It must appear in the canonical chain unless a nullification covers <i>v</i>, from <i>v</i> itself or an earlier view in the same term.
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">
@@ -116,30 +128,15 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, standardCertif
 
                     <section>
                         <h3>Where is the data coming from?</h3>
-                        {MODE === 'public' ? (
-                            <>
-                                <p>
-                                    We deployed alto to a cluster of <strong>50 validators</strong> running c8g.large (2 vCPU, 4GB RAM) nodes on AWS in two separate clusters:
-                                </p>
-                                <ul>
-                                    <li><strong>Global Cluster</strong>: 10 regions (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2).</li>
-                                    <li><strong>USA Cluster</strong>: 4 regions (us-east-1, us-west-1, us-east-2, us-west-2).</li>
-                                </ul>
-                                <p>
-                                    When you visit this page, however, you don't connect to any of those nodes. You connect to custom-built infrastructure (<a href="https://exoware.xyz">exoware::relay</a>) that streams consensus
-                                    artifacts to your browser in real time.
-                                </p>
-                            </>
-                        ) : (
-                            <p>
-                                The data is streamed from your local alto cluster via the <a href="https://github.com/commonwarexyz/alto/tree/main/indexer">alto-indexer</a>.
-                            </p>
-                        )}
+                        <p dangerouslySetInnerHTML={{ __html: clusterConfig.description }} />
                         <p>
-                            Because each consensus artifact is accompanied by a threshold signature, your browser can (and does) verify each inbound message using <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> compiled to WASM.
+                            Consensus artifacts stream to your browser in real time. An <a href="https://github.com/commonwarexyz/alto/tree/main/indexer">alto-indexer</a> can serve both this explorer and its consensus stream from the same address.
                         </p>
                         <p>
-                            That's right, your browser is verifying every message it receives was emitted from consensus in real time. Don't trust an API, trust the open source verifier code running on your computer.
+                            Before using a consensus artifact, your browser verifies its threshold signatures with <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> compiled to WASM.
+                        </p>
+                        <p>
+                            Older artifacts may be skipped when verification falls behind the stream. The open source verifier runs on your computer, so the API's consensus claims are checked locally.
                         </p>
                     </section>
 
@@ -151,9 +148,9 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, standardCertif
                         </p>
                         <p>
                             Using authenticated connections (provided by <a href="https://docs.rs/commonware-p2p/latest/commonware_p2p/authenticated/index.html">p2p::authenticated</a>), each validator
-                            sends consensus messages directly to every other validator (no leader relay or multi-hop gossip). As soon as any validator observes <i>2f+1</i> votes for a block proposal, they broadcast
-                            a threshold signature (again directly) to all other validators and enter the next view immediately (without waiting for finalization or any timeout). If a validator sees a threshold signature
-                            for a view <i>v</i>, they enter view <i>v+1</i> immediately (ensuring validators stay synchronized without using a clock).
+                            sends consensus messages directly to every other validator (no leader relay or multi-hop gossip). A validator that collects <i>2f+1</i> votes broadcasts the resulting notarization.
+                            Validators advance from view <i>v</i> to <i>v+1</i> once they successfully certify the block, without waiting for finalization or a timeout.
+                            This lets successful views progress without a scheduled round boundary.
                         </p>
                         <p>
                             English? <i>simplex</i> moves at <strong>network speed</strong> (and it turns out that's pretty fast in 2025).
@@ -178,7 +175,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, standardCertif
                         </p>
                         <pre className="code-block">
                             <code>
-                                inspector get block 10
+                                {`inspector --certificate-mode ${certificateMode} get block 10 --indexer ${indexer} --identity ${identity}`}
                             </code>
                         </pre>
                     </section>
