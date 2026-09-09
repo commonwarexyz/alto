@@ -18,8 +18,9 @@ least two and `--leader-optimistic-views`, which limits how far proposals and vo
 of directly notarized ancestry. Values above the term length have no further effect. Rotating
 mode rejects both stable-only flags.
 
-`--leader-delay-ms` sets the minimum proposal interval, from 1 through 999 ms. Use 100 ms for
-local stable networks: shorter intervals can cause timeouts and skipped terms.
+`--leader-delay-ms` sets the minimum interval from the parent's timestamp, from 0 through 999 ms.
+Zero disables pacing and allows equal timestamps. Use 100 ms for local stable networks: shorter
+intervals can cause timeouts and skipped terms.
 
 Certificate mode follows leader mode: `standard` for stable and `vrf` for rotating. The generator
 sets it in indexer commands and configurations and in explorer configurations. Set followers'
@@ -57,7 +58,7 @@ Rotating-leader configs carry only the delay:
 ```yaml
 leader:
   mode: rotating
-  delay_ms: 10
+  delay_ms: 0
 ```
 
 ```bash
@@ -67,7 +68,7 @@ cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 
 For a rotating network:
 
 ```bash
-cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode rotating --leader-delay-ms 10 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
+cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode rotating --leader-delay-ms 0 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
 ```
 
 The emitted indexer command includes the network's certificate mode and block size. A deployed
@@ -158,9 +159,9 @@ prints the explorer URL. The remaining deployment steps describe the manual flow
 cluster.
 
 The script deploys 50 validators and one indexer on `c7gd.4xlarge` instances. Each validator uses
-8 worker threads, 16 signature threads, and a 5 ms proposal interval. Stable mode runs 100,000-view
-terms with 48 optimistic views. Rotating mode elects a VRF-seeded leader every view. Deployment
-concurrency is 50.
+8 worker threads and 16 signature threads. Stable mode uses a 5 ms proposal interval and runs
+100,000-view terms with 48 optimistic views. Rotating mode uses zero proposal delay and elects a
+VRF-seeded leader every view. Deployment concurrency is 50.
 
 _Each `c7gd.4xlarge` provides a 950GB ephemeral NVMe instance store, which the deployer mounts at
 `/home/ubuntu` for validator data. The 25GB storage setting sizes the gp3 root volume. Terminating

@@ -64,7 +64,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                         <ul>
                             <li>Increase the height by 1</li>
                             <li>Reference the digest of its parent</li>
-                            <li>Increase its parent's timestamp without exceeding January 1, 2200 (UTC)</li>
+                            <li>Use a timestamp at least as large as its parent's, without exceeding January 1, 2200 (UTC)</li>
                             <li>Contain exactly the configured number of opaque payload bytes (zero by default)</li>
                         </ul>
                         <p>

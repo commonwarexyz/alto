@@ -25,7 +25,7 @@ use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    num::{NonZeroU32, NonZeroU64, NonZeroUsize},
+    num::{NonZeroU32, NonZeroUsize},
 };
 use tracing::{error, info};
 use uuid::Uuid;
@@ -52,7 +52,7 @@ fn leader_args() -> [Arg; 4] {
         Arg::new("leader_delay_ms")
             .long("leader-delay-ms")
             .required(true)
-            .value_parser(value_parser!(u64).range(1..LEADER_TIMEOUT.as_millis() as u64)),
+            .value_parser(value_parser!(u64).range(0..LEADER_TIMEOUT.as_millis() as u64)),
         Arg::new("leader_term_length")
             .long("leader-term-length")
             .required_if_eq("leader_mode", "stable")
@@ -204,8 +204,7 @@ fn parse_backend_url(value: &str) -> Result<String, String> {
 }
 
 fn parse_leader(matches: &ArgMatches) -> Result<Leader, &'static str> {
-    let delay_ms = NonZeroU64::new(*matches.get_one::<u64>("leader_delay_ms").unwrap())
-        .expect("clap bounds the leader delay");
+    let delay_ms = *matches.get_one::<u64>("leader_delay_ms").unwrap();
     match matches.get_one::<String>("leader_mode").unwrap().as_str() {
         "rotating" => {
             if matches.get_one::<u32>("leader_term_length").is_some() {
@@ -1133,7 +1132,7 @@ mod tests {
     use alto_chain::Leader;
     use alto_types::CertificateMode;
     use clap::Command;
-    use commonware_utils::{NZU32, NZU64};
+    use commonware_utils::NZU32;
     use serde_yaml::Value;
     use std::fs;
     use uuid::Uuid;
@@ -1212,22 +1211,24 @@ signature_threads: 1
             .try_get_matches_from(["test", "--leader-mode", "rotating"]);
         assert!(result.is_err());
 
-        let matches = Command::new("test")
-            .args(leader_args())
-            .try_get_matches_from([
-                "test",
-                "--leader-mode",
-                "rotating",
-                "--leader-delay-ms",
-                "7",
-            ])
-            .unwrap();
-        assert_eq!(parse_leader(&matches).unwrap(), Leader::rotating(NZU64!(7)));
+        for delay_ms in [0, 7] {
+            let matches = Command::new("test")
+                .args(leader_args())
+                .try_get_matches_from([
+                    "test",
+                    "--leader-mode",
+                    "rotating",
+                    "--leader-delay-ms",
+                    &delay_ms.to_string(),
+                ])
+                .unwrap();
+            assert_eq!(parse_leader(&matches).unwrap(), Leader::rotating(delay_ms));
+        }
     }
 
     #[test]
     fn leader_delay_must_stay_below_leader_timeout() {
-        for delay in ["0", "1000", "5000"] {
+        for delay in ["1000", "5000"] {
             assert!(Command::new("test")
                 .args(leader_args())
                 .try_get_matches_from([
@@ -1291,7 +1292,7 @@ signature_threads: 1
             .unwrap();
         assert_eq!(
             parse_leader(&matches).unwrap(),
-            Leader::stable(NZU64!(10), NZU32!(1_000), 48)
+            Leader::stable(10, NZU32!(1_000), 48)
         );
     }
 
@@ -1365,8 +1366,10 @@ signature_threads: 1
     #[test]
     fn leader_config_round_trips() {
         for leader in [
-            Leader::rotating(NZU64!(7)),
-            Leader::stable(NZU64!(10), NZU32!(1_000), 48),
+            Leader::rotating(0),
+            Leader::rotating(7),
+            Leader::stable(0, NZU32!(1_000), 48),
+            Leader::stable(10, NZU32!(1_000), 48),
         ] {
             let encoded = serde_yaml::to_string(&leader).unwrap();
             assert_eq!(serde_yaml::from_str::<Leader>(&encoded).unwrap(), leader);
@@ -1437,7 +1440,9 @@ signature_threads: 1
 
     #[test]
     fn indexer_generation_preserves_unmapped_participants() {
-        for (mode, certificate_mode) in [("stable", "standard"), ("rotating", "vrf")] {
+        for (mode, certificate_mode, delay_ms) in
+            [("stable", "standard", "5"), ("rotating", "vrf", "0")]
+        {
             let output =
                 std::env::temp_dir().join(format!("alto-deploy-region-{}", Uuid::new_v4()));
             let mut args = vec![
@@ -1460,7 +1465,7 @@ signature_threads: 1
                 "--leader-mode",
                 mode,
                 "--leader-delay-ms",
-                "10",
+                delay_ms,
             ];
             if mode == "stable" {
                 args.extend([
@@ -1510,6 +1515,17 @@ signature_threads: 1
             assert_eq!(indexer["certificate_mode"], certificate_mode);
             for (participant, validator) in participants.iter().zip(&validators) {
                 assert_eq!(participant, &validator["name"]);
+                let config: alto_chain::Config = serde_yaml::from_str(
+                    &fs::read_to_string(output.join(validator["config"].as_str().unwrap()))
+                        .unwrap(),
+                )
+                .unwrap();
+                let leader = match mode {
+                    "stable" => Leader::stable(5, NZU32!(1_000), 48),
+                    "rotating" => Leader::rotating(0),
+                    _ => unreachable!(),
+                };
+                assert_eq!(config.leader, leader);
             }
 
             // Missing coordinates keep their slot between known participants.
@@ -1543,26 +1559,30 @@ signature_threads: 1
 
     #[cfg(unix)]
     #[test]
-    fn scripted_build_embeds_the_current_frontend() {
+    fn scripted_deployment_uses_mode_settings_and_current_frontend() {
         use std::{os::unix::fs::PermissionsExt, process::Command};
 
-        let tag = format!("alto-build-test-{}", Uuid::new_v4());
-        let output = std::env::temp_dir().join(&tag);
-        for directory in ["bin", "deploy", "explorer/build"] {
-            fs::create_dir_all(output.join(directory)).unwrap();
-        }
-        fs::write(output.join("deploy.sh"), include_str!("../../deploy.sh")).unwrap();
-        fs::write(output.join("deploy/dashboard.json"), "{}").unwrap();
-        fs::write(output.join("explorer/build/index.html"), "old frontend").unwrap();
+        for (mode, delay_ms) in [("stable", 5), ("rotating", 0)] {
+            let tag = format!("alto-build-test-{}", Uuid::new_v4());
+            let output = std::env::temp_dir().join(&tag);
+            for directory in ["bin", "deploy", "explorer/build"] {
+                fs::create_dir_all(output.join(directory)).unwrap();
+            }
+            fs::write(output.join("deploy.sh"), include_str!("../../deploy.sh")).unwrap();
+            fs::write(output.join("deploy/dashboard.json"), "{}").unwrap();
+            fs::write(output.join("explorer/build/index.html"), "old frontend").unwrap();
 
-        // Run the real script with isolated tools that expose its producer/consumer handoff.
-        let stub = r#"#!/bin/sh
+            // Run the real script with isolated tools that expose its producer/consumer handoff.
+            let stub = r#"#!/bin/sh
 set -eu
 case "${0##*/}" in
     uname) echo Linux ;;
     cargo)
         mkdir -p assets
         printf 'tag: %s\n' "$ALTO_BUILD_TEST_TAG" > assets/config.yaml
+        while [ "$1" != -- ]; do shift; done
+        shift
+        printf '%s\n' deploy "$@" > assets/generator-args
         ;;
     npm)
         if [ "$3" = run ] && [ "$4" = build ]; then
@@ -1575,43 +1595,53 @@ case "${0##*/}" in
     *) ;;
 esac
 "#;
-        for tool in [
-            "cargo",
-            "just",
-            "docker",
-            "deployer",
-            "npm",
-            "wasm-pack",
-            "uname",
-        ] {
-            let path = output.join("bin").join(tool);
-            fs::write(&path, stub).unwrap();
-            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
-        }
+            for tool in [
+                "cargo",
+                "just",
+                "docker",
+                "deployer",
+                "npm",
+                "wasm-pack",
+                "uname",
+            ] {
+                let path = output.join("bin").join(tool);
+                fs::write(&path, stub).unwrap();
+                fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+            }
 
-        let result = Command::new("bash")
-            .arg(output.join("deploy.sh"))
-            .arg("rotating")
-            .env(
-                "PATH",
-                format!("{}:/usr/bin:/bin", output.join("bin").display()),
-            )
-            .env("BUILD_PATH", "alternate")
-            .env("PUBLIC_URL", "/alternate")
-            .env("ALTO_BUILD_TEST_TAG", &tag)
-            .output()
-            .unwrap();
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-        let embedded = fs::read_to_string(output.join("assets/embedded.html")).unwrap();
-        assert!(embedded.ends_with("current frontend"), "{embedded}");
-        assert!(
-            embedded.contains(r#"src="/runtime-config.js""#),
-            "{embedded}"
-        );
-        fs::remove_dir_all(output).unwrap();
+            let result = Command::new("bash")
+                .arg(output.join("deploy.sh"))
+                .arg(mode)
+                .env(
+                    "PATH",
+                    format!("{}:/usr/bin:/bin", output.join("bin").display()),
+                )
+                .env("BUILD_PATH", "alternate")
+                .env("PUBLIC_URL", "/alternate")
+                .env("ALTO_BUILD_TEST_TAG", &tag)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let args = fs::read_to_string(output.join("assets/generator-args")).unwrap();
+            let matches = command().try_get_matches_from(args.lines()).unwrap();
+            let generate = matches.subcommand_matches("generate").unwrap();
+            assert_eq!(generate.get_one::<String>("leader_mode").unwrap(), mode);
+            assert_eq!(
+                *generate.get_one::<u64>("leader_delay_ms").unwrap(),
+                delay_ms
+            );
+
+            let embedded = fs::read_to_string(output.join("assets/embedded.html")).unwrap();
+            assert!(embedded.ends_with("current frontend"), "{embedded}");
+            assert!(
+                embedded.contains(r#"src="/runtime-config.js""#),
+                "{embedded}"
+            );
+            fs::remove_dir_all(output).unwrap();
+        }
     }
 }

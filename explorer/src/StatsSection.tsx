@@ -167,7 +167,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onC
 
     const viewsWithBlocks = views
         .filter((view): view is ViewData & { block: BlockJs } =>
-            !!(view.block && view.block.height && view.block.timestamp))
+            !!(view.block && view.block.height))
         .sort((a, b) => a.block.height - b.block.height);
 
     const blockTimes: number[] = [];
@@ -278,7 +278,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onC
                         <div className="metric-container">
                             <div className="stat-label">Block Time</div>
                             <div className="stat-value">
-                                {medianBlockTime > 0 ? `${medianBlockTime}ms` : "N/A"}
+                                {blockTimes.length > 0 ? `${medianBlockTime}ms` : "N/A"}
                             </div>
                         </div>
                     </Tooltip>

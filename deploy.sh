@@ -11,11 +11,11 @@ usage() {
 case "$1" in
     stable)
         # One round-robin leader per term with a 48-view optimistic window.
-        leader_flags=(--leader-mode stable --leader-term-length 100000 --leader-optimistic-views 48)
+        leader_flags=(--leader-mode stable --leader-delay-ms 5 --leader-term-length 100000 --leader-optimistic-views 48)
         ;;
     rotating)
         # A VRF-seeded leader for every view.
-        leader_flags=(--leader-mode rotating)
+        leader_flags=(--leader-mode rotating --leader-delay-ms 0)
         ;;
     *)
         usage
@@ -83,7 +83,6 @@ cargo run --locked --bin deploy -- generate \
     --deque-size 256 \
     --block-size 0 \
     --signature-threads 16 \
-    --leader-delay-ms 5 \
     "${leader_flags[@]}" \
     --output assets \
     remote \

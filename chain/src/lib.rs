@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    num::{NonZeroU32, NonZeroU64, NonZeroUsize},
+    num::{NonZeroU32, NonZeroUsize},
     time::Duration,
 };
 
@@ -70,14 +70,17 @@ where
 }
 
 /// Leader election policy for the consensus engine.
+///
+/// The delay sets the minimum interval from the parent's timestamp in milliseconds.
+/// Zero disables proposal pacing; timestamps may equal the parent's in either mode.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Leader {
     /// Select a new VRF-derived leader for every view.
-    Rotating { delay_ms: NonZeroU64 },
+    Rotating { delay_ms: u64 },
     /// Keep one round-robin leader for a term and pace its proposals.
     Stable {
-        delay_ms: NonZeroU64,
+        delay_ms: u64,
         #[serde(deserialize_with = "deserialize_term_length")]
         term_length: NonZeroU32,
         optimistic_views: u64,
@@ -86,16 +89,12 @@ pub enum Leader {
 
 impl Leader {
     /// Creates a rotating leader configuration.
-    pub const fn rotating(delay_ms: NonZeroU64) -> Self {
+    pub const fn rotating(delay_ms: u64) -> Self {
         Self::Rotating { delay_ms }
     }
 
     /// Creates a stable leader configuration.
-    pub const fn stable(
-        delay_ms: NonZeroU64,
-        term_length: NonZeroU32,
-        optimistic_views: u64,
-    ) -> Self {
+    pub const fn stable(delay_ms: u64, term_length: NonZeroU32, optimistic_views: u64) -> Self {
         assert!(
             term_length.get() > 1,
             "stable leader term length must be greater than 1"
@@ -222,7 +221,7 @@ mod tests {
         deterministic::{self, Runner},
         Clock, Metrics, Runner as _, Spawner, Supervisor as _,
     };
-    use commonware_utils::{channel::oneshot, ordered::Set, probability, NZUsize, NZU32, NZU64};
+    use commonware_utils::{channel::oneshot, ordered::Set, probability, NZUsize, NZU32};
     use engine::Engine;
     use governor::Quota;
     use indexer::mocks;
@@ -238,7 +237,7 @@ mod tests {
     const TEST_QUOTA: Quota = Quota::per_second(NZU32!(u32::MAX));
 
     /// Proposal delay of every simulated validator and the term length of stable leaders.
-    const PROPOSAL_DELAY_MS: NonZeroU64 = NZU64!(10);
+    const PROPOSAL_DELAY_MS: u64 = 10;
     const STABLE_LEADER_TERM_LENGTH: NonZeroU32 = NZU32!(1_000);
 
     /// Registers all validators using the oracle.

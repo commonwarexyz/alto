@@ -12,7 +12,6 @@ use futures::StreamExt;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::{
     marker::PhantomData,
-    num::NonZeroU64,
     time::{Duration, SystemTime},
 };
 use tracing::info;
@@ -27,13 +26,13 @@ const MAX_FUTURE_SKEW_MS: u64 = 1_000;
 #[derive(Clone)]
 pub struct Application<S: Scheme> {
     backfiller: Option<indexer::Producer>,
-    delay_ms: NonZeroU64,
+    delay_ms: u64,
     block_size: usize,
     _scheme: PhantomData<S>,
 }
 
 impl<S: Scheme> Application<S> {
-    pub fn new(delay_ms: NonZeroU64, block_size: u32) -> Self {
+    pub fn new(delay_ms: u64, block_size: u32) -> Self {
         Self {
             backfiller: None,
             delay_ms,
@@ -70,7 +69,7 @@ where
         // Pace each proposal from its parent's timestamp.
         let min_timestamp = parent
             .timestamp
-            .checked_add(self.delay_ms.get())
+            .checked_add(self.delay_ms)
             .expect("parent timestamp overflowed");
         let mut current = runtime_context.current().epoch_millis();
         if current < min_timestamp {
@@ -119,8 +118,8 @@ where
             return false;
         }
 
-        // Require increasing timestamps within the protocol's fixed range.
-        if block.timestamp <= parent.timestamp || block.timestamp > MAX_BLOCK_TIMESTAMP_MS {
+        // Require nondecreasing timestamps within the protocol's fixed range.
+        if block.timestamp < parent.timestamp || block.timestamp > MAX_BLOCK_TIMESTAMP_MS {
             return false;
         }
 
@@ -178,10 +177,9 @@ mod tests {
     };
     use commonware_cryptography::{ed25519, sha256, Digest as _, Hasher, Sha256, Signer};
     use commonware_runtime::{deterministic, Runner as _, Supervisor as _};
-    use commonware_utils::NZU64;
     use std::sync::Arc;
 
-    const DELAY_MS: NonZeroU64 = NZU64!(10);
+    const DELAY_MS: u64 = 10;
 
     fn test_context(view: u64, parent: (View, sha256::Digest)) -> Context {
         Context {
@@ -250,30 +248,38 @@ mod tests {
     }
 
     #[test]
-    fn verify_rejects_equal_parent_timestamp() {
+    fn verify_requires_nondecreasing_timestamps() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(DELAY_MS, 0);
-
             let now = context.current().epoch_millis();
             let parent = Block::new(
                 test_context(1, (View::zero(), sha256::Digest::EMPTY)),
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
-                now,
-                Bytes::new(),
-            );
-            let block = Block::new(
-                test_context(2, (View::new(1), parent.digest())),
-                parent.digest(),
-                parent.height.next(),
-                now,
+                now + 1,
                 Bytes::new(),
             );
 
-            assert!(
-                !verify_block(context.child("verify"), &mut application, &block, &parent).await
-            );
+            // Timestamp validity does not depend on the local proposal delay.
+            for delay_ms in [0, DELAY_MS] {
+                let mut application = Application::new(delay_ms, 0);
+                for (timestamp, valid) in [(now, false), (now + 1, true), (now + 2, true)] {
+                    let block = Block::new(
+                        test_context(2, (View::new(1), parent.digest())),
+                        parent.digest(),
+                        parent.height.next(),
+                        timestamp,
+                        Bytes::new(),
+                    );
+                    assert_eq!(
+                        verify_block(context.child("verify"), &mut application, &block, &parent)
+                            .await,
+                        valid,
+                        "timestamp {timestamp} with parent timestamp {} and delay {delay_ms}",
+                        parent.timestamp,
+                    );
+                }
+            }
         });
     }
 
@@ -352,7 +358,7 @@ mod tests {
     fn propose_uses_configured_delay_when_clock_is_behind() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let delay_ms = NZU64!(37);
+            let delay_ms = 37;
             let mut application = Application::new(delay_ms, 0);
 
             let now = context.current().epoch_millis();
@@ -373,9 +379,51 @@ mod tests {
 
             assert_eq!(proposal.parent, parent.digest());
             assert_eq!(proposal.height, parent.height.next());
-            assert_eq!(proposal.timestamp, parent.timestamp + delay_ms.get());
+            assert_eq!(proposal.timestamp, parent.timestamp + delay_ms);
             assert!(proposal.data.is_empty());
         });
+    }
+
+    #[test]
+    fn propose_without_delay_uses_current_or_parent_timestamp() {
+        for parent_timestamp in [0, 10, 15, MAX_BLOCK_TIMESTAMP_MS] {
+            let runner = deterministic::Runner::default();
+            runner.start(|context| async move {
+                let mut application = Application::new(0, 0);
+
+                // Cover past, equal, and future parents, including the protocol's maximum.
+                context.sleep(Duration::from_millis(10)).await;
+                let now = context.current().epoch_millis();
+                let parent = Block::new(
+                    test_context(1, (View::zero(), sha256::Digest::EMPTY)),
+                    Sha256::hash(&[b"genesis"]),
+                    Height::new(1),
+                    parent_timestamp,
+                    Bytes::new(),
+                );
+                let proposal = propose_child(
+                    context.child("propose"),
+                    &mut application,
+                    test_context(2, (View::new(1), parent.digest())),
+                    &parent,
+                )
+                .await;
+
+                // Zero delay adds no timestamp increment or wait beyond reaching the parent.
+                let expected = now.max(parent_timestamp);
+                assert_eq!(proposal.timestamp, expected);
+                assert_eq!(context.current().epoch_millis(), expected);
+                assert!(
+                    verify_block(
+                        context.child("verify"),
+                        &mut application,
+                        &proposal,
+                        &parent
+                    )
+                    .await
+                );
+            });
+        }
     }
 
     #[test]

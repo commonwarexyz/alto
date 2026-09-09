@@ -98,7 +98,8 @@ pub struct Config<
     pub mailbox_size: usize,
     pub deque_size: usize,
     pub block_size: u32,
-    pub proposal_delay_ms: NonZero<u64>,
+    /// Minimum interval from the parent's timestamp in milliseconds. Zero disables pacing.
+    pub proposal_delay_ms: u64,
 
     pub leader_timeout: Duration,
     pub certification_timeout: Duration,
@@ -168,7 +169,7 @@ where
         // leaves time to propose.
         let proposal_delay_ms = cfg.proposal_delay_ms;
         assert!(
-            Duration::from_millis(proposal_delay_ms.get()) < cfg.leader_timeout,
+            Duration::from_millis(proposal_delay_ms) < cfg.leader_timeout,
             "proposal delay must be shorter than the leader timeout"
         );
 
