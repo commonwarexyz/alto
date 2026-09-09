@@ -9,9 +9,18 @@ const originalFetch = globalThis.fetch;
 const originalTimeout = Object.getOwnPropertyDescriptor(AbortSignal, 'timeout');
 let container: HTMLDivElement;
 let root: Root | null;
-let sample: string | Error | null;
-let elapsed: number;
-let clockSkew: number;
+let sample: (oracleTime: number) => string;
+const oracleEpoch = 1_000_000;
+const roundTrip = 20;
+const interval = 15_333;
+// A burst narrows the estimate to the spacing of the two samples around the oracle's second
+// rollover (the 40 ms pacing) plus one round trip
+const tolerance = Math.ceil((40 + roundTrip) / 2);
+
+// Both trace formats use the same oracle clock. The whole-second format includes a `.000`
+// suffix even though it has no sub-second precision.
+const wholeSecondSample = (oracleTime: number) => `ts=${Math.floor(oracleTime / 1000)}.000\n`;
+const millisecondSample = (oracleTime: number) => `ts=${(oracleTime / 1000).toFixed(3)}\n`;
 
 function Clock() {
     const adjustTime = useClockSkew();
@@ -19,26 +28,25 @@ function Clock() {
 }
 
 beforeEach(() => {
+    // Jest advances timers, wall time, and monotonic time together. A simulated clock step
+    // changes only wall time, preserving elapsed time and scheduled request completions.
     jest.useFakeTimers();
-    elapsed = 0;
-    clockSkew = 200;
-    jest.spyOn(Date, 'now').mockImplementation(() => 1_000_000 + elapsed);
-    jest.spyOn(performance, 'now').mockImplementation(() => elapsed);
+    jest.setSystemTime(oracleEpoch + 200);
+
     jest.spyOn(console, 'log').mockImplementation(() => {});
     jest.spyOn(console, 'error').mockImplementation(() => {});
     Object.defineProperty(AbortSignal, 'timeout', {
         configurable: true,
         value: jest.fn(() => new AbortController().signal),
     });
-    sample = null;
-    globalThis.fetch = jest.fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>().mockImplementation(async (_, options) => {
-        if (options?.method === 'HEAD') {
-            return { ok: true } as Response;
-        }
-        const midpoint = 1_000_000 + elapsed + 50;
-        elapsed += 100;
-        if (sample instanceof Error) throw sample;
-        const text = sample ?? `ts=${(midpoint - clockSkew) / 1000}\n`;
+    sample = wholeSecondSample;
+    globalThis.fetch = jest.fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>().mockImplementation(async () => {
+        // The oracle reads its clock halfway through the request. Its monotonic time source
+        // keeps a local wall-clock step from also moving the oracle.
+        await delay(roundTrip / 2);
+        const oracleTime = oracleEpoch + performance.now();
+        await delay(roundTrip / 2);
+        const text = sample(oracleTime);
         return { ok: true, text: async () => text } as Response;
     });
     container = document.createElement('div');
@@ -59,95 +67,193 @@ afterEach(async () => {
     jest.useRealTimers();
 });
 
-async function mount() {
-    await act(async () => root!.render(<Clock />));
+const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+// Resolve each timer's promises before advancing to the next request or polling deadline.
+async function tick(ms: number) {
+    let done = false;
+    setTimeout(() => { done = true; }, ms);
+    while (!done) {
+        await act(async () => { jest.advanceTimersToNextTimer(); });
+    }
 }
 
-test('warms the connection and measures with uncached GETs when HEAD requests fail CORS', async () => {
-    const fetchSample = jest.mocked(globalThis.fetch).getMockImplementation()!;
-    jest.mocked(globalThis.fetch).mockImplementation((url, options) => {
-        if (options?.method === 'HEAD') return Promise.reject(new TypeError('CORS blocked HEAD'));
-        return fetchSample(url, options);
-    });
+async function mount(ms = 1300) {
+    await act(async () => root!.render(<Clock />));
+    await tick(ms);
+}
+
+const shown = () => Number(container.textContent);
+
+test.each([200, -200])('narrows a whole-second oracle with a %s ms clock offset', async (offset) => {
+    jest.setSystemTime(oracleEpoch + offset);
     await mount();
 
-    expect(container.textContent).toBe('12145');
-    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
-    for (const request of [1, 2]) {
-        expect(globalThis.fetch).toHaveBeenNthCalledWith(request, 'https://1.1.1.1/cdn-cgi/trace', {
+    expect(Math.abs(shown() - (12345 - offset))).toBeLessThanOrEqual(tolerance);
+    for (const call of jest.mocked(globalThis.fetch).mock.calls) {
+        expect(call).toEqual(['https://1.1.1.1/cdn-cgi/trace', {
             cache: 'no-store',
             signal: expect.any(AbortSignal),
-        });
+        }]);
     }
     expect(AbortSignal.timeout).toHaveBeenCalledWith(3000);
 });
 
-test.each([
-    [200, '12145'],
-    [-200, '12545'],
-] as const)('corrects a %s ms clock offset using the request midpoint', async (offset, adjusted) => {
-    clockSkew = offset;
+test('uses a fractional oracle timestamp at full precision', async () => {
+    sample = millisecondSample;
     await mount();
 
-    expect(container.textContent).toBe(adjusted);
+    expect(Math.abs(shown() - 12145)).toBeLessThanOrEqual(roundTrip / 2);
+    expect(Number.isInteger(shown())).toBe(true);
 });
 
-test('excludes cold connection setup from the measured request', async () => {
-    let cold = true;
+test.each(['succeed', 'fail'])('discards the cold warmup when measured requests %s', async (outcome) => {
+    // In the failure case, only the cold warmup succeeds. Later samples cannot narrow away
+    // its setup delay and mask accidental use of the warmup as a measurement.
     const fetchSample = jest.mocked(globalThis.fetch).getMockImplementation()!;
-    jest.mocked(globalThis.fetch).mockImplementation((url, options) => {
-        if (cold) {
-            elapsed += 600;
-            cold = false;
-        }
+    jest.mocked(globalThis.fetch).mockImplementationOnce(async (url, options) => {
+        await delay(600);
         return fetchSample(url, options);
     });
-    await mount();
+    if (outcome === 'fail') {
+        jest.mocked(globalThis.fetch).mockRejectedValue(new TypeError('Network unavailable'));
+    }
+    await mount(2000);
 
-    expect(container.textContent).toBe('12145');
+    if (outcome === 'fail') {
+        expect(shown()).toBe(12345);
+    } else {
+        expect(Math.abs(shown() - 12145)).toBeLessThanOrEqual(tolerance);
+    }
+});
+
+test('warms the connection again when retrying initial acquisition', async () => {
+    // Initial acquisition fails. Its retry pays connection setup before the only successful
+    // measured response, so later samples cannot hide a cold measurement's bias.
+    sample = millisecondSample;
+    const fetchSample = jest.mocked(globalThis.fetch).getMockImplementation()!;
+    jest.mocked(globalThis.fetch)
+        .mockRejectedValueOnce(new TypeError('Network unavailable'))
+        .mockImplementationOnce(async (url, options) => {
+            await delay(600);
+            return fetchSample(url, options);
+        })
+        .mockImplementationOnce((url, options) => fetchSample(url, options))
+        .mockRejectedValue(new TypeError('Network unavailable'));
+    await mount();
+    expect(shown()).toBe(12345);
+    await tick(interval + 2000);
+
+    expect(Math.abs(shown() - 12145)).toBeLessThanOrEqual(roundTrip / 2);
+});
+
+test.each(['warmup', 'burst'])('retains the estimate after a recovery %s failure and retries warm', async (failure) => {
+    // Establish a correction before the clock moves, so failed recovery has a value to retain.
+    sample = millisecondSample;
+    await mount();
+    const initial = shown();
+
+    // The request detecting the clock step is cold. Interrupt acquisition at the chosen stage
+    // and require that detection-only bounds never replace the published correction.
+    jest.setSystemTime(Date.now() + 2000);
+    const fetchSample = jest.mocked(globalThis.fetch).getMockImplementation()!;
+    jest.mocked(globalThis.fetch).mockImplementationOnce(async (url, options) => {
+        await delay(1000);
+        return fetchSample(url, options);
+    });
+    if (failure === 'burst') {
+        jest.mocked(globalThis.fetch).mockImplementationOnce((url, options) => fetchSample(url, options));
+    }
+    jest.mocked(globalThis.fetch).mockRejectedValue(new TypeError('Network unavailable'));
+    await tick(interval + 3000);
+    expect(shown()).toBe(initial);
+
+    // A failed acquisition must retry through warmup, even when its next request is cold too.
+    jest.mocked(globalThis.fetch)
+        .mockImplementationOnce(async (url, options) => {
+            await delay(600);
+            return fetchSample(url, options);
+        })
+        .mockImplementation((url, options) => fetchSample(url, options));
+    await tick(interval);
+
+    expect(Math.abs(shown() - (12345 - 2200))).toBeLessThanOrEqual(roundTrip / 2);
 });
 
 test('excludes response body download time from the measured round trip', async () => {
+    // A precise oracle isolates body-download time from whole-second timestamp uncertainty.
+    sample = millisecondSample;
     const fetchSample = jest.mocked(globalThis.fetch).getMockImplementation()!;
     jest.mocked(globalThis.fetch).mockImplementation(async (url, options) => {
         const response = await fetchSample(url, options);
         return {
             ...response,
             text: async () => {
-                elapsed += 800;
+                await delay(800);
                 return response.text();
             },
         } as Response;
     });
-    await mount();
+    await mount(3000);
 
-    expect(container.textContent).toBe('12145');
+    expect(Math.abs(shown() - 12145)).toBeLessThanOrEqual(roundTrip / 2);
 });
 
-test('retains a valid correction through failed samples, recovers, and stops polling on unmount', async () => {
+test('retains sub-second accuracy in a long-lived tab', async () => {
     await mount();
-    expect(container.textContent).toBe('12145');
+    await tick(70 * interval);
+    expect(Math.abs(shown() - 12145)).toBeLessThanOrEqual(tolerance);
+});
 
+test.each([-400, 400])('retains the estimate on failure, recovers a %s ms clock step, and stops on unmount', async (step) => {
+    await mount();
+    const initial = shown();
+
+    // Network and parsing failures must preserve the last successful correction.
     for (const invalid of [
         new TypeError('Network unavailable'),
         'ip=127.0.0.1\n', 'ts=\n', 'ts=999.850junk\n',
         'ts=NaN\n', 'ts=Infinity\n', 'ts=-Infinity\n', 'ts=1e309\n', 'ts=1e307\n',
     ]) {
-        sample = invalid;
-        await act(async () => jest.advanceTimersByTime(15000));
-        expect(container.textContent).toBe('12145');
+        sample = () => {
+            if (invalid instanceof Error) throw invalid;
+            return invalid;
+        };
+        await tick(interval);
+        expect(shown()).toBe(initial);
     }
 
-    sample = null;
-    clockSkew = -200;
-    await act(async () => jest.advanceTimersByTime(15000));
-    expect(container.textContent).toBe('12545');
+    // Once a refinement sample contradicts the old estimate, a burst re-acquires the new offset
+    sample = wholeSecondSample;
+    jest.setSystemTime(Date.now() + step);
+    const adjusted = 12345 - (200 + step);
+    for (let i = 0; i < 8 && Math.abs(shown() - adjusted) > tolerance; i++) {
+        await tick(interval);
+    }
+    expect(Math.abs(shown() - adjusted)).toBeLessThanOrEqual(tolerance);
 
     await act(async () => {
         root!.unmount();
         root = null;
     });
     const requests = jest.mocked(globalThis.fetch).mock.calls.length;
-    await act(async () => jest.advanceTimersByTime(30000));
+    await tick(2 * interval);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(requests);
+});
+
+test('does not start a warmup when a refinement completes after unmount', async () => {
+    await mount();
+
+    // Stop halfway through a request whose result will contradict the current bounds.
+    // Completing that request after cleanup must not initiate recovery.
+    jest.setSystemTime(Date.now() + 2000);
+    await tick(interval + roundTrip / 2 - performance.now());
+    await act(async () => {
+        root!.unmount();
+        root = null;
+    });
+    const requests = jest.mocked(globalThis.fetch).mock.calls.length;
+    await tick(roundTrip);
+
     expect(globalThis.fetch).toHaveBeenCalledTimes(requests);
 });

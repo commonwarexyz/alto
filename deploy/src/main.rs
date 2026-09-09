@@ -908,7 +908,7 @@ fn generate_remote(
             certificate_mode: leader.certificate_mode(),
             block_size,
             explorer: ExplorerConfig {
-                name: "Live Global Cluster".to_string(),
+                name: "Global Cluster".to_string(),
                 description: format!(
                     "A live cluster of <strong>{peers} validators</strong> running {instance_type} nodes on AWS in <strong>{} regions</strong> ({}).",
                     unique_regions.len(),
