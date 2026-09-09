@@ -93,7 +93,6 @@ const App: React.FC = () => {
   const { BACKEND_URL, PUBLIC_KEY_HEX, LOCATIONS, PARTICIPANTS } = clusterConfig;
   const standardCertificates = clusterConfig.CERTIFICATE_MODE === 'standard';
   const leaderIndicator = getLeaderIndicator(standardCertificates);
-  const timelineIdentifier = getTimelineIdentifier(standardCertificates);
   const markerIcon = useMemo(() => new DivIcon({
     className: "custom-div-icon",
     html: `<div style="
@@ -837,7 +836,6 @@ const App: React.FC = () => {
               <LegendItem color={leaderIndicator.color} label={leaderIndicator.label} />
               <LegendItem color={"#000"} label="Locked" />
               <LegendItem color={"#228B22ff"} label="Finalized" />
-              <LegendItem color={timelineIdentifier.color} label={timelineIdentifier.label} textMarker />
             </div>
           </div>
 
@@ -886,17 +884,12 @@ const App: React.FC = () => {
 interface LegendItemProps {
   color: string;
   label: string;
-  textMarker?: boolean;
 }
 
-const LegendItem: React.FC<LegendItemProps> = ({ color, label, textMarker = false }) => {
+const LegendItem: React.FC<LegendItemProps> = ({ color, label }) => {
   return (
     <div className="legend-item">
-      {textMarker ? (
-        <span className="legend-text-marker" style={{ color }}>abc</span>
-      ) : (
-        <div className="legend-color" style={{ backgroundColor: color }}></div>
-      )}
+      <div className="legend-color" style={{ backgroundColor: color }}></div>
       <span className="legend-label">{label}</span>
     </div>
   );

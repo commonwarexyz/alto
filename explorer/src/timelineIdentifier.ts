@@ -11,14 +11,14 @@ export interface TimelineIdentifier {
 }
 
 export interface LeaderIndicator {
-  label: "Proposed" | "Seeded";
+  label: "Elected";
   color: string;
 }
 
 export const getLeaderIndicator = (
   standardCertificates: boolean,
 ): LeaderIndicator => ({
-  label: standardCertificates ? "Proposed" : "Seeded",
+  label: "Elected",
   color: standardCertificates ? BLOCK_HASH_COLOR : SEED_SIGNATURE_COLOR,
 });
 
@@ -30,7 +30,7 @@ export const getTimelineIdentifier = (
   const bytes = standardCertificates ? blockDigest : seedSignature;
 
   return {
-    label: standardCertificates ? "Block hash" : "Seed signature",
+    label: standardCertificates ? "Proposal" : "Seed",
     color: standardCertificates ? BLOCK_HASH_COLOR : SEED_SIGNATURE_COLOR,
     value: hexUint8Array(bytes),
     fullValue: hexUint8Array(bytes, bytes ? bytes.length * 2 : 0),

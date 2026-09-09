@@ -101,12 +101,6 @@ body {
   white-space: nowrap;
 }
 
-.legend-text-marker {
-  min-width: 20px;
-  font-size: 10px;
-  line-height: 12px;
-}
-
 /* Bars container */
 .bars-header {
   display: flex;

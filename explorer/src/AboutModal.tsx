@@ -119,7 +119,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                             </li>
                         </ul>
                         <p>
-                            The short <span style={{ color: timelineIdentifier.color }}>{timelineIdentifier.label.toLowerCase()}</span> beneath each view number identifies {standardCertificates ? 'the block proposed in that view' : 'the seed used for leader election'}.
+                            The <span style={{ color: timelineIdentifier.color }}>{timelineIdentifier.label}</span> identifier beneath each view number shows {standardCertificates ? 'a shortened hash of the proposed block' : 'a shortened seed signature used for leader election'}.
                         </p>
                         <p>
                             You can read more about the design of <i>simplex</i> <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/simplex/index.html">here</a>.
