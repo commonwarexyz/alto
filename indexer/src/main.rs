@@ -53,7 +53,7 @@ struct Args {
     hosts: Option<PathBuf>,
 
     /// Path to the deployer-provided indexer config YAML.
-    #[clap(long, conflicts_with = "identity")]
+    #[clap(long)]
     config: Option<PathBuf>,
 }
 

@@ -170,6 +170,8 @@ fn main() {
 }
 
 async fn run<C: Scheme>(context: tokio::Context, config: Config, identity: Identity) {
+    // Create scheme and client.
+    //
     // The client leaves certificate verification to the feeder for streamed messages,
     // marshal for resolver deliveries, and the checkpoint path below.
     let scheme = C::certificate_verifier(NAMESPACE, identity);
@@ -178,12 +180,14 @@ async fn run<C: Scheme>(context: tokio::Context, config: Config, identity: Ident
         .with_verification_disabled()
         .build();
 
+    // Wait for certificate source to be available.
     while let Err(e) = client.health().await {
         warn!(error = ?e, "waiting for certificate source to be available...");
         context.sleep(Duration::from_secs(1)).await;
     }
     info!("connected to certificate source");
 
+    // Create engine.
     let strategy = Rayon::new(config.signature_threads).unwrap();
     let (engine, mailbox, last_processed_height) = engine::Engine::new(
         context.child("engine"),
@@ -217,17 +221,22 @@ async fn run<C: Scheme>(context: tokio::Context, config: Config, identity: Ident
         }
     }
 
+    // Create resolver.
     let marshal_resolver = resolver::init(
         context.child("resolver"),
         client.clone(),
         config.mailbox_size,
         Duration::from_millis(config.fetch_retry_timeout_ms),
     );
+
+    // Start engine.
     let engine_handle = engine.start(marshal_resolver);
 
+    // Start certificate feeder.
     let feeder = feeder::Feeder::new(context.child("feeder"), client, scheme, mailbox);
     let feeder_handle = feeder.start();
 
+    // Wait for any task to finish.
     select! {
         _ = engine_handle => {},
         _ = feeder_handle => {},
@@ -236,7 +245,7 @@ async fn run<C: Scheme>(context: tokio::Context, config: Config, identity: Ident
 }
 
 #[cfg(test)]
-mod config_tests {
+mod tests {
     use super::Config;
 
     #[test]

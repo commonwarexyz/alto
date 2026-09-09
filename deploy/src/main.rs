@@ -68,7 +68,7 @@ fn parse_traces_sample_rate(value: &str) -> Result<f64, String> {
     let rate = value
         .parse::<f64>()
         .map_err(|_| "traces sample rate must be a number between 0 and 1".to_string())?;
-    if rate.is_finite() && (0.0..=1.0).contains(&rate) {
+    if (0.0..=1.0).contains(&rate) {
         return Ok(rate);
     }
     Err("traces sample rate must be between 0 and 1".to_string())

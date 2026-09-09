@@ -48,7 +48,7 @@ where
     D: serde::Deserializer<'de>,
 {
     let rate = f64::deserialize(deserializer)?;
-    if rate.is_finite() && (0.0..=1.0).contains(&rate) {
+    if (0.0..=1.0).contains(&rate) {
         return Ok(rate);
     }
     Err(serde::de::Error::custom(

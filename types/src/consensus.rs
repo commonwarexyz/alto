@@ -176,26 +176,12 @@ mod tests {
     use commonware_utils::non_empty;
     use rand::{rngs::StdRng, SeedableRng};
 
-    fn standard_schemes(seed: u64) -> Vec<StandardScheme> {
-        let mut rng = StdRng::seed_from_u64(seed);
-        standard::fixture::<MinSig, _>(&mut rng, b"test", 4).schemes
-    }
-
-    fn vrf_schemes(seed: u64) -> Vec<VrfScheme> {
-        let mut rng = StdRng::seed_from_u64(seed);
-        vrf::fixture::<MinSig, _>(&mut rng, b"test", 4).schemes
-    }
-
-    fn proposal(view: u64) -> Proposal<Digest> {
-        Proposal::new(
+    fn notarization<S: Scheme>(schemes: &[S], view: u64) -> Notarization<S> {
+        let proposal = Proposal::new(
             Round::new(Epoch::new(1), View::new(view)),
             View::new(view - 1),
             sha256::Digest::EMPTY,
-        )
-    }
-
-    fn notarization<S: Scheme>(schemes: &[S], view: u64) -> Notarization<S> {
-        let proposal = proposal(view);
+        );
         let votes: Vec<_> = schemes
             .iter()
             .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
@@ -205,7 +191,8 @@ mod tests {
 
     #[test]
     fn concrete_schemes_verify_and_expose_only_vrf_seeds() {
-        let standard = standard_schemes(15);
+        let standard =
+            standard::fixture::<MinSig, _>(&mut StdRng::seed_from_u64(15), b"test", 4).schemes;
         let standard_notarization = notarization(&standard, 9);
         assert!(standard_notarization.seed().is_none());
         assert!(standard_notarization.verify(
@@ -214,7 +201,7 @@ mod tests {
             &Sequential,
         ));
 
-        let vrf = vrf_schemes(17);
+        let vrf = vrf::fixture::<MinSig, _>(&mut StdRng::seed_from_u64(17), b"test", 4).schemes;
         let vrf_notarization = notarization(&vrf, 9);
         assert!(vrf_notarization.seed().is_some());
         assert!(vrf_notarization.verify(&mut StdRng::seed_from_u64(18), &vrf[0], &Sequential,));

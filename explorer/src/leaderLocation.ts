@@ -17,10 +17,6 @@ export const resolveLeaderLocation = (
 
   const publicKey = hexUint8Array(leader, leader.length * 2);
   const index = participants.indexOf(publicKey);
-  if (index === -1) {
-    return undefined;
-  }
-
   const location = locations[index];
   return location ? { location: location[0], locationName: location[1] } : undefined;
 };
