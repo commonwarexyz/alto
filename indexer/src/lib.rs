@@ -1,14 +1,14 @@
-use alto_client::LATEST;
+use alto_client::{DEFAULT_MAX_BLOCK_SIZE, LATEST, UPLOAD_OVERHEAD};
 use alto_types::{Block, Finalized, Kind, Notarized, Scheme, Seed};
 use axum::{
     body::Bytes,
-    extract::{ws::WebSocketUpgrade, Path, State as AxumState},
+    extract::{ws::WebSocketUpgrade, DefaultBodyLimit, Path, State as AxumState},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
     Router,
 };
-use commonware_codec::{DecodeExt, Encode, EncodeSize, FixedSize, Write};
+use commonware_codec::{Decode, DecodeExt, Encode, EncodeSize, FixedSize, RangeCfg, Write};
 use commonware_consensus::{types::View, Viewable};
 use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_formatting::from_hex;
@@ -21,26 +21,42 @@ use std::{
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 
-#[derive(Default)]
-pub struct State {
+/// Capacity of the consensus broadcast channel feeding WebSocket subscribers.
+const CONSENSUS_CHANNEL_CAPACITY: usize = 1024;
+
+pub struct State<C: Scheme> {
     seeds: BTreeMap<View, Seed>,
-    notarizations: BTreeMap<View, Notarized>,
-    finalizations: BTreeMap<View, Finalized>,
+    notarizations: BTreeMap<View, Notarized<C>>,
+    finalizations: BTreeMap<View, Finalized<C>>,
     finalized_height_to_view: BTreeMap<u64, View>,
     blocks_by_digest: BTreeMap<Digest, Block>,
 }
 
-#[derive(Clone)]
-pub struct Indexer<S: Strategy> {
-    scheme: Scheme,
-    state: Arc<RwLock<State>>,
-    consensus_tx: broadcast::Sender<Vec<u8>>,
-    strategy: S,
+impl<C: Scheme> Default for State<C> {
+    fn default() -> Self {
+        Self {
+            seeds: BTreeMap::new(),
+            notarizations: BTreeMap::new(),
+            finalizations: BTreeMap::new(),
+            finalized_height_to_view: BTreeMap::new(),
+            blocks_by_digest: BTreeMap::new(),
+        }
+    }
 }
 
-impl<S: Strategy> Indexer<S> {
-    pub fn new(scheme: Scheme, strategy: S) -> Self {
-        let (consensus_tx, _) = broadcast::channel(1024);
+#[derive(Clone)]
+pub struct Indexer<C: Scheme, S: Strategy> {
+    scheme: C,
+    state: Arc<RwLock<State<C>>>,
+    consensus_tx: broadcast::Sender<Bytes>,
+    strategy: S,
+    block_codec_config: RangeCfg<usize>,
+    max_upload_size: usize,
+}
+
+impl<C: Scheme, S: Strategy> Indexer<C, S> {
+    pub fn new(scheme: C, strategy: S) -> Self {
+        let (consensus_tx, _) = broadcast::channel(CONSENSUS_CHANNEL_CAPACITY);
         let state = Arc::new(RwLock::new(State::default()));
 
         Self {
@@ -48,12 +64,40 @@ impl<S: Strategy> Indexer<S> {
             state,
             consensus_tx,
             strategy,
+            block_codec_config: Block::unbounded_codec_config(),
+            max_upload_size: UPLOAD_OVERHEAD + DEFAULT_MAX_BLOCK_SIZE,
         }
     }
 
+    /// Configure HTTP upload decoding to reject payloads larger than `block_size` and size the
+    /// request body limit accordingly.
+    pub fn with_block_size(mut self, block_size: u32) -> Self {
+        self.block_codec_config = Block::codec_config(block_size);
+        self.max_upload_size = usize::try_from(block_size)
+            .expect("block size is unsupported on this platform")
+            .checked_add(UPLOAD_OVERHEAD)
+            .expect("upload size is unsupported on this platform");
+        self
+    }
+
+    /// Codec configuration used to decode uploaded blocks.
+    pub fn block_codec_config(&self) -> &RangeCfg<usize> {
+        &self.block_codec_config
+    }
+
+    /// Largest request body accepted by the upload endpoints.
+    pub fn max_upload_size(&self) -> usize {
+        self.max_upload_size
+    }
+
     pub fn submit_seed(&self, seed: Seed) -> Result<(), &'static str> {
+        // Several validators can upload the same seed. Skip signature checks for known views.
+        if self.state.read().unwrap().seeds.contains_key(&seed.view()) {
+            return Ok(());
+        }
+
         // Verify signature with identity
-        if !seed.verify(&self.scheme) {
+        if !self.scheme.verify_seed(&seed) {
             return Err("Invalid seed signature");
         }
 
@@ -66,7 +110,7 @@ impl<S: Strategy> Indexer<S> {
         let mut data = vec![0u8; u8::SIZE + seed.encode_size()];
         data[0] = Kind::Seed as u8;
         seed.write(&mut data[1..].as_mut());
-        let _ = self.consensus_tx.send(data);
+        let _ = self.consensus_tx.send(data.into());
         Ok(())
     }
 
@@ -82,7 +126,13 @@ impl<S: Strategy> Indexer<S> {
         }
     }
 
-    pub fn submit_notarization(&self, notarized: Notarized) -> Result<(), &'static str> {
+    pub fn submit_notarization(&self, notarized: Notarized<C>) -> Result<(), &'static str> {
+        // Several validators can upload the same certificate. Skip signature checks for known views.
+        let view = notarized.proof.view();
+        if self.state.read().unwrap().notarizations.contains_key(&view) {
+            return Ok(());
+        }
+
         // Verify signature with identity
         if !notarized.verify(&self.scheme, &self.strategy) {
             return Err("Invalid notarization signature");
@@ -90,13 +140,7 @@ impl<S: Strategy> Indexer<S> {
 
         let mut state = self.state.write().unwrap();
 
-        // Store block by digest
-        state
-            .blocks_by_digest
-            .insert(notarized.block.digest(), notarized.block.clone());
-
         // Store notarization
-        let view = notarized.proof.view();
         if state
             .notarizations
             .insert(view, notarized.clone())
@@ -104,16 +148,19 @@ impl<S: Strategy> Indexer<S> {
         {
             return Ok(()); // Already exists
         }
+        state
+            .blocks_by_digest
+            .insert(notarized.block.digest(), notarized.block.clone());
 
         // Broadcast notarization
         let mut data = vec![0u8; u8::SIZE + notarized.encode_size()];
         data[0] = Kind::Notarization as u8;
         notarized.write(&mut data[1..].as_mut());
-        let _ = self.consensus_tx.send(data);
+        let _ = self.consensus_tx.send(data.into());
         Ok(())
     }
 
-    pub fn get_notarization(&self, query: &str) -> Option<Notarized> {
+    pub fn get_notarization(&self, query: &str) -> Option<Notarized<C>> {
         let state = self.state.read().unwrap();
         if query == LATEST {
             state.notarizations.last_key_value().map(|(_, n)| n.clone())
@@ -125,7 +172,13 @@ impl<S: Strategy> Indexer<S> {
         }
     }
 
-    pub fn submit_finalization(&self, finalized: Finalized) -> Result<(), &'static str> {
+    pub fn submit_finalization(&self, finalized: Finalized<C>) -> Result<(), &'static str> {
+        // Several validators can upload the same certificate. Skip signature checks for known views.
+        let view = finalized.proof.view();
+        if self.state.read().unwrap().finalizations.contains_key(&view) {
+            return Ok(());
+        }
+
         // Verify signature with identity
         if !finalized.verify(&self.scheme, &self.strategy) {
             return Err("Invalid finalization signature");
@@ -133,13 +186,7 @@ impl<S: Strategy> Indexer<S> {
 
         let mut state = self.state.write().unwrap();
 
-        // Store block by digest
-        state
-            .blocks_by_digest
-            .insert(finalized.block.digest(), finalized.block.clone());
-
         // Store finalization
-        let view = finalized.proof.view();
         if state
             .finalizations
             .insert(view, finalized.clone())
@@ -150,16 +197,19 @@ impl<S: Strategy> Indexer<S> {
         state
             .finalized_height_to_view
             .insert(finalized.block.height.get(), view);
+        state
+            .blocks_by_digest
+            .insert(finalized.block.digest(), finalized.block.clone());
 
         // Broadcast finalization
         let mut data = vec![0u8; u8::SIZE + finalized.encode_size()];
         data[0] = Kind::Finalization as u8;
         finalized.write(&mut data[1..].as_mut());
-        let _ = self.consensus_tx.send(data);
+        let _ = self.consensus_tx.send(data.into());
         Ok(())
     }
 
-    pub fn get_finalization(&self, query: &str) -> Option<Finalized> {
+    pub fn get_finalization(&self, query: &str) -> Option<Finalized<C>> {
         let state = self.state.read().unwrap();
         if query == LATEST {
             state.finalizations.last_key_value().map(|(_, f)| f.clone())
@@ -171,7 +221,7 @@ impl<S: Strategy> Indexer<S> {
         }
     }
 
-    pub fn get_block(&self, query: &str) -> Option<BlockResult> {
+    pub fn get_block(&self, query: &str) -> Option<BlockResult<C>> {
         let state = self.state.read().unwrap();
 
         if query == LATEST {
@@ -211,27 +261,28 @@ impl<S: Strategy> Indexer<S> {
         state.blocks_by_digest.insert(block.digest(), block);
     }
 
-    pub fn consensus_subscriber(&self) -> broadcast::Receiver<Vec<u8>> {
+    pub fn consensus_subscriber(&self) -> broadcast::Receiver<Bytes> {
         self.consensus_tx.subscribe()
     }
 }
 
 #[allow(clippy::large_enum_variant)]
-pub enum BlockResult {
+pub enum BlockResult<C: Scheme> {
     Block(Block),
-    Finalized(Finalized),
+    Finalized(Finalized<C>),
 }
 
-pub struct Api<S: Strategy> {
-    indexer: Arc<Indexer<S>>,
+pub struct Api<C: Scheme, S: Strategy> {
+    indexer: Arc<Indexer<C, S>>,
 }
 
-impl<S: Strategy> Api<S> {
-    pub fn new(indexer: Arc<Indexer<S>>) -> Self {
+impl<C: Scheme, S: Strategy> Api<C, S> {
+    pub fn new(indexer: Arc<Indexer<C, S>>) -> Self {
         Self { indexer }
     }
 
     pub fn router(self) -> Router {
+        let max_upload_size = self.indexer.max_upload_size();
         Router::new()
             .route("/health", get(health_check))
             .route("/seed", post(seed_upload))
@@ -243,6 +294,7 @@ impl<S: Strategy> Api<S> {
             .route("/block", post(block_upload))
             .route("/block/{query}", get(block_get))
             .route("/consensus/ws", get(consensus_ws))
+            .layer(DefaultBodyLimit::max(max_upload_size))
             .layer(CorsLayer::permissive())
             .with_state(self.indexer)
     }
@@ -252,8 +304,8 @@ async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
 
-async fn seed_upload<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn seed_upload<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
     match Seed::decode(&mut body.as_ref()) {
@@ -265,8 +317,8 @@ async fn seed_upload<S: Strategy>(
     }
 }
 
-async fn seed_get<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn seed_get<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
     match indexer.get_seed(&query) {
@@ -275,11 +327,11 @@ async fn seed_get<S: Strategy>(
     }
 }
 
-async fn notarization_upload<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn notarization_upload<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
-    match Notarized::decode(&mut body.as_ref()) {
+    match Notarized::<C>::decode_cfg(body.as_ref(), indexer.block_codec_config()) {
         Ok(notarized) => match indexer.submit_notarization(notarized) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
@@ -288,8 +340,8 @@ async fn notarization_upload<S: Strategy>(
     }
 }
 
-async fn notarization_get<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn notarization_get<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
     match indexer.get_notarization(&query) {
@@ -298,11 +350,11 @@ async fn notarization_get<S: Strategy>(
     }
 }
 
-async fn finalization_upload<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn finalization_upload<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
-    match Finalized::decode(&mut body.as_ref()) {
+    match Finalized::<C>::decode_cfg(body.as_ref(), indexer.block_codec_config()) {
         Ok(finalized) => match indexer.submit_finalization(finalized) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
@@ -311,8 +363,8 @@ async fn finalization_upload<S: Strategy>(
     }
 }
 
-async fn finalization_get<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn finalization_get<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
     match indexer.get_finalization(&query) {
@@ -321,11 +373,11 @@ async fn finalization_get<S: Strategy>(
     }
 }
 
-async fn block_upload<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn block_upload<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
-    match Block::decode(&mut body.as_ref()) {
+    match Block::decode_cfg(body.as_ref(), indexer.block_codec_config()) {
         Ok(block) => {
             indexer.submit_block(block);
             StatusCode::OK
@@ -334,8 +386,8 @@ async fn block_upload<S: Strategy>(
     }
 }
 
-async fn block_get<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn block_get<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     Path(query): Path<String>,
 ) -> impl IntoResponse {
     match indexer.get_block(&query) {
@@ -349,23 +401,32 @@ async fn block_get<S: Strategy>(
     }
 }
 
-async fn consensus_ws<S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<S>>>,
+async fn consensus_ws<C: Scheme, S: Strategy>(
+    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_consensus_ws(socket, indexer))
 }
 
-async fn handle_consensus_ws<S: Strategy>(
+async fn handle_consensus_ws<C: Scheme, S: Strategy>(
     socket: axum::extract::ws::WebSocket,
-    indexer: Arc<Indexer<S>>,
+    indexer: Arc<Indexer<C, S>>,
 ) {
     let (mut sender, _receiver) = socket.split();
     let mut consensus = indexer.consensus_subscriber();
 
-    while let Ok(data) = consensus.recv().await {
+    loop {
+        let data = match consensus.recv().await {
+            Ok(data) => data,
+            // Keep streaming from the current position when a slow subscriber misses artifacts.
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                tracing::debug!(skipped, "consensus subscriber lagged");
+                continue;
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
+        };
         if sender
-            .send(axum::extract::ws::Message::Binary(data.into()))
+            .send(axum::extract::ws::Message::Binary(data))
             .await
             .is_err()
         {
@@ -378,10 +439,10 @@ async fn handle_consensus_ws<S: Strategy>(
 mod tests {
     use super::*;
     use alto_client::{Client, ClientBuilder, IndexQuery, Query};
-    use alto_types::{Context, Identity, Seedable, EPOCH, NAMESPACE};
+    use alto_types::{Context, Identity, Seedable, StandardScheme, VrfScheme, EPOCH, NAMESPACE};
     use commonware_consensus::{
         simplex::{
-            scheme::bls12381_threshold::vrf as bls12381_threshold,
+            scheme::bls12381_threshold::{standard, vrf as bls12381_threshold},
             types::{Finalization, Finalize, Notarization, Notarize, Proposal},
         },
         types::{Height, Round, View},
@@ -392,6 +453,7 @@ mod tests {
         Digest, Digestible, Hasher, Sha256, Signer,
     };
     use commonware_parallel::Sequential;
+    use commonware_utils::non_empty;
     use futures::StreamExt;
     use rand::{rngs::StdRng, SeedableRng};
     use rcgen::{generate_simple_self_signed, CertifiedKey, KeyPair};
@@ -403,20 +465,22 @@ mod tests {
 
     /// Test context containing common setup for indexer tests.
     struct TestContext {
-        schemes: Vec<Scheme>,
-        client: Client<Sequential>,
+        schemes: Vec<VrfScheme>,
+        client: Client<Sequential, VrfScheme>,
     }
 
     impl TestContext {
         /// Create a new test context with a running server and client.
         async fn new() -> Self {
-            let mut rng = StdRng::seed_from_u64(0);
-            let Fixture { schemes, .. } =
-                bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-            let identity = *schemes[0].polynomial().public();
+            let (schemes, identity) = fixture(0);
 
             let (addr, _) = start_server(schemes[0].clone(), Sequential).await;
-            let client = Client::new(&format!("http://{addr}"), identity, Sequential);
+            let client = ClientBuilder::new(
+                &format!("http://{addr}"),
+                VrfScheme::certificate_verifier(NAMESPACE, identity),
+                Sequential,
+            )
+            .build();
             wait_for_ready(&client).await;
 
             Self { schemes, client }
@@ -429,7 +493,13 @@ mod tests {
                 leader: ed25519::PrivateKey::from_seed(0).public_key(),
                 parent: (View::new(0), sha256::Digest::EMPTY),
             };
-            Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000)
+            Block::new(
+                context,
+                Sha256::hash(&[b"genesis"]),
+                Height::new(1),
+                1000,
+                Bytes::new(),
+            )
         }
 
         /// Create a proposal for the given block at view 1.
@@ -445,48 +515,111 @@ mod tests {
         fn seed(&self) -> Seed {
             let block = self.test_block();
             let proposal = self.proposal(&block);
-            create_notarization(&self.schemes, proposal).seed()
+            create_notarization(&self.schemes, proposal).seed().unwrap()
         }
 
         /// Create a notarized block.
-        fn notarized(&self) -> Notarized {
+        fn notarized(&self) -> Notarized<VrfScheme> {
             let block = self.test_block();
             let proposal = self.proposal(&block);
             Notarized::new(create_notarization(&self.schemes, proposal), block)
         }
 
         /// Create a finalized block.
-        fn finalized(&self) -> Finalized {
+        fn finalized(&self) -> Finalized<VrfScheme> {
             let block = self.test_block();
             let proposal = self.proposal(&block);
             Finalized::new(create_finalization(&self.schemes, proposal), block)
         }
     }
 
-    fn create_notarization(
-        schemes: &[Scheme],
+    /// Build a finalized block at `view` (height == view) carrying `payload`.
+    fn finalized_with_payload<C: Scheme>(schemes: &[C], view: u64, payload: Bytes) -> Finalized<C> {
+        let context = Context {
+            round: Round::new(EPOCH, View::new(view)),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::new(view - 1), sha256::Digest::EMPTY),
+        };
+        let block = Block::new(
+            context,
+            Sha256::hash(&[format!("parent-{view}").as_bytes()]),
+            Height::new(view),
+            view * 1_000,
+            payload,
+        );
+        let proposal = Proposal::new(
+            Round::new(EPOCH, View::new(view)),
+            View::new(view - 1),
+            block.digest(),
+        );
+        Finalized::new(create_finalization(schemes, proposal), block)
+    }
+
+    #[test]
+    fn block_size_bounds_uploads() {
+        let (schemes, _) = fixture(0);
+        let finalized = finalized_with_payload(&schemes, 1, Bytes::new());
+        let encoded = finalized.encode();
+
+        let unbounded = Indexer::new(schemes[0].clone(), Sequential);
+        assert!(Finalized::<VrfScheme>::decode_cfg(
+            encoded.clone(),
+            unbounded.block_codec_config()
+        )
+        .is_ok());
+        assert_eq!(
+            unbounded.max_upload_size(),
+            UPLOAD_OVERHEAD + DEFAULT_MAX_BLOCK_SIZE
+        );
+
+        let exact = Indexer::new(schemes[0].clone(), Sequential).with_block_size(0);
+        assert!(
+            Finalized::<VrfScheme>::decode_cfg(encoded.clone(), exact.block_codec_config()).is_ok()
+        );
+        assert_eq!(exact.max_upload_size(), UPLOAD_OVERHEAD);
+
+        // A block larger than the configured size fails to decode, before any verification.
+        let oversized = finalized_with_payload(&schemes, 1, Bytes::from_static(&[1, 2]));
+        let bounded = Indexer::new(schemes[0].clone(), Sequential).with_block_size(1);
+        assert!(Finalized::<VrfScheme>::decode_cfg(
+            oversized.encode(),
+            bounded.block_codec_config()
+        )
+        .is_err());
+        assert!(Finalized::<VrfScheme>::decode_cfg(
+            oversized.encode(),
+            Indexer::new(schemes[0].clone(), Sequential)
+                .with_block_size(2)
+                .block_codec_config()
+        )
+        .is_ok());
+        assert_eq!(bounded.max_upload_size(), UPLOAD_OVERHEAD + 1);
+    }
+
+    fn create_notarization<C: Scheme>(
+        schemes: &[C],
         proposal: Proposal<sha256::Digest>,
-    ) -> alto_types::Notarization {
+    ) -> alto_types::Notarization<C> {
         let notarizes: Vec<_> = schemes
             .iter()
             .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
             .collect();
-        Notarization::from_notarizes(&schemes[0], &notarizes, &Sequential).unwrap()
+        Notarization::from_notarizes(&schemes[0], non_empty![@&notarizes], &Sequential).unwrap()
     }
 
-    fn create_finalization(
-        schemes: &[Scheme],
+    fn create_finalization<C: Scheme>(
+        schemes: &[C],
         proposal: Proposal<sha256::Digest>,
-    ) -> alto_types::Finalization {
+    ) -> alto_types::Finalization<C> {
         let finalizes: Vec<_> = schemes
             .iter()
             .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
             .collect();
-        Finalization::from_finalizes(&schemes[0], &finalizes, &Sequential).unwrap()
+        Finalization::from_finalizes(&schemes[0], non_empty![@&finalizes], &Sequential).unwrap()
     }
 
-    async fn start_server(
-        scheme: Scheme,
+    async fn start_server<C: Scheme>(
+        scheme: C,
         strategy: impl Strategy,
     ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
         let indexer = Arc::new(Indexer::new(scheme, strategy));
@@ -503,7 +636,7 @@ mod tests {
         (addr, handle)
     }
 
-    async fn wait_for_ready(client: &Client<Sequential>) {
+    async fn wait_for_ready<C: Scheme>(client: &Client<Sequential, C>) {
         loop {
             if client.health().await.is_ok() {
                 return;
@@ -512,11 +645,11 @@ mod tests {
         }
     }
 
-    fn fixture(seed: u64) -> (Vec<Scheme>, Identity) {
+    fn fixture(seed: u64) -> (Vec<VrfScheme>, Identity) {
         let mut rng = StdRng::seed_from_u64(seed);
         let Fixture { schemes, .. } =
             bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-        let identity = *schemes[0].polynomial().public();
+        let identity = *schemes[0].identity();
         (schemes, identity)
     }
 
@@ -568,6 +701,50 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(retrieved.proof.view().get(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_standard_certificate_operations() {
+        let mut rng = StdRng::seed_from_u64(2);
+        let Fixture { schemes, .. } = standard::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
+        let identity = *schemes[0].identity();
+        let (addr, _handle) = start_server(schemes[0].clone(), Sequential).await;
+        let client = ClientBuilder::new(
+            &format!("http://{addr}"),
+            StandardScheme::certificate_verifier(NAMESPACE, identity),
+            Sequential,
+        )
+        .build();
+        wait_for_ready(&client).await;
+
+        let finalized = finalized_with_payload(&schemes, 1, Bytes::new());
+        let notarized = Notarized::new(
+            create_notarization(&schemes, finalized.proof.proposal.clone()),
+            finalized.block.clone(),
+        );
+
+        client.notarized_upload(notarized).await.unwrap();
+        client.finalized_upload(finalized).await.unwrap();
+        assert_eq!(
+            client
+                .notarized_get(IndexQuery::Latest)
+                .await
+                .unwrap()
+                .proof
+                .view()
+                .get(),
+            1
+        );
+        assert_eq!(
+            client
+                .finalized_get(IndexQuery::Latest)
+                .await
+                .unwrap()
+                .proof
+                .view()
+                .get(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -628,6 +805,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn large_block_uploads_stream_to_rust_clients() {
+        let (schemes, identity) = fixture(0);
+        let indexer = Arc::new(
+            Indexer::new(schemes[0].clone(), Sequential).with_block_size(64 * 1024 * 1024),
+        );
+        let app = Api::new(indexer.clone()).router();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = ClientBuilder::new(
+            &format!("http://{addr}"),
+            VrfScheme::certificate_verifier(NAMESPACE, identity),
+            Sequential,
+        )
+        .with_block_size(64 * 1024 * 1024)
+        .build();
+        let mut stream = client.listen().await.unwrap();
+        while indexer.consensus_tx.receiver_count() == 0 {
+            tokio::task::yield_now().await;
+        }
+
+        // The message includes the certificate and block fields beyond the 64 MiB payload.
+        let finalized = finalized_with_payload(&schemes, 1, Bytes::from(vec![7; 64 * 1024 * 1024]));
+        client.finalized_upload(finalized.clone()).await.unwrap();
+        match stream.next().await.unwrap().unwrap() {
+            alto_client::consensus::Message::Finalization(received) => {
+                assert_eq!(received, finalized);
+            }
+            _ => panic!("expected finalization"),
+        }
+        server.abort();
+    }
+
+    #[tokio::test]
     async fn test_websocket_streaming() {
         let ctx = TestContext::new().await;
         let seed = ctx.seed();
@@ -664,7 +875,12 @@ mod tests {
 
         // Start server with schemes1, but create client expecting identity2
         let (addr, _handle) = start_server(schemes1[0].clone(), Sequential).await;
-        let client = Client::new(&format!("http://{addr}"), identity2, Sequential);
+        let client = ClientBuilder::new(
+            &format!("http://{addr}"),
+            VrfScheme::certificate_verifier(NAMESPACE, identity2),
+            Sequential,
+        )
+        .build();
         wait_for_ready(&client).await;
 
         // Create a seed signed by schemes1
@@ -673,13 +889,19 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
-        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000);
+        let block = Block::new(
+            context,
+            Sha256::hash(&[b"genesis"]),
+            Height::new(1),
+            1000,
+            Bytes::new(),
+        );
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),
             block.digest(),
         );
-        let seed = create_notarization(&schemes1, proposal).seed();
+        let seed = create_notarization(&schemes1, proposal).seed().unwrap();
 
         // Server accepts it (signed by schemes1, which server uses)
         client.seed_upload(seed).await.unwrap();
@@ -699,7 +921,9 @@ mod tests {
         // Create a seed with wrong schemes
         let block = ctx.test_block();
         let proposal = ctx.proposal(&block);
-        let bad_seed = create_notarization(&wrong_schemes, proposal).seed();
+        let bad_seed = create_notarization(&wrong_schemes, proposal)
+            .seed()
+            .unwrap();
 
         // Server rejects it (signature doesn't match server's identity)
         let result = ctx.client.seed_upload(bad_seed).await;
@@ -712,7 +936,7 @@ mod tests {
     }
 
     async fn start_tls_server(
-        scheme: Scheme,
+        scheme: VrfScheme,
         cert_key: &CertifiedKey<KeyPair>,
         strategy: impl Strategy,
     ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
@@ -770,20 +994,21 @@ mod tests {
         addr: SocketAddr,
         identity: Identity,
         cert_key: &CertifiedKey<KeyPair>,
-    ) -> Client<Sequential> {
-        ClientBuilder::new(&format!("https://{addr}"), identity, Sequential)
-            .with_tls_cert(cert_key.cert.der().to_vec())
-            .build()
+    ) -> Client<Sequential, VrfScheme> {
+        ClientBuilder::new(
+            &format!("https://{addr}"),
+            VrfScheme::certificate_verifier(NAMESPACE, identity),
+            Sequential,
+        )
+        .with_tls_cert(cert_key.cert.der().to_vec())
+        .build()
     }
 
     #[tokio::test]
     async fn test_tls_https_connection() {
         let cert_key = generate_self_signed_cert();
 
-        let mut rng = StdRng::seed_from_u64(0);
-        let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-        let identity = *schemes[0].polynomial().public();
+        let (schemes, identity) = fixture(0);
 
         let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key, Sequential).await;
         let client = create_tls_client(addr, identity, &cert_key);
@@ -795,13 +1020,19 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
-        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000);
+        let block = Block::new(
+            context,
+            Sha256::hash(&[b"genesis"]),
+            Height::new(1),
+            1000,
+            Bytes::new(),
+        );
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),
             block.digest(),
         );
-        let seed = create_notarization(&schemes, proposal).seed();
+        let seed = create_notarization(&schemes, proposal).seed().unwrap();
 
         // Test HTTPS POST
         client.seed_upload(seed.clone()).await.unwrap();
@@ -817,10 +1048,7 @@ mod tests {
     async fn test_tls_websocket_connection() {
         let cert_key = generate_self_signed_cert();
 
-        let mut rng = StdRng::seed_from_u64(0);
-        let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-        let identity = *schemes[0].polynomial().public();
+        let (schemes, identity) = fixture(0);
 
         let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key, Sequential).await;
         let client = create_tls_client(addr, identity, &cert_key);
@@ -832,13 +1060,19 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
-        let block = Block::new(context, Sha256::hash(b"genesis"), Height::new(1), 1000);
+        let block = Block::new(
+            context,
+            Sha256::hash(&[b"genesis"]),
+            Height::new(1),
+            1000,
+            Bytes::new(),
+        );
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(1)),
             View::new(0),
             block.digest(),
         );
-        let seed = create_notarization(&schemes, proposal).seed();
+        let seed = create_notarization(&schemes, proposal).seed().unwrap();
 
         // Connect to WebSocket over TLS
         let mut stream = client.listen().await.unwrap();

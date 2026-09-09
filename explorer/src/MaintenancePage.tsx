@@ -1,18 +1,18 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import './MaintenancePage.css';
 
 const MaintenancePage: React.FC = () => {
     const containerRef = useRef<HTMLDivElement>(null);
     const logoRef = useRef<HTMLDivElement>(null);
-    const positionRef = useRef({ x: 50, y: 50 });
+    const positionRef = useRef({ x: 0, y: 0 });
     const directionRef = useRef({ x: 1, y: 1 });
-    const [color, setColor] = useState('#0000ee');
     const currentColorRef = useRef('#0000ee');
     const animationFrameRef = useRef<number | null>(null);
+    const lastFrameRef = useRef<number | null>(null);
     const initializedRef = useRef(false);
 
-    // Speed in pixels per frame
-    const speed = 0.5;
+    // Speed in CSS pixels per second (independent of the display's refresh rate)
+    const speed = 30;
 
     // Use a ref to store the logo's natural dimensions
     const logoDimensionsRef = useRef({ width: 0, height: 0 });
@@ -22,65 +22,70 @@ const MaintenancePage: React.FC = () => {
         window.open("https://x.com/commonwarexyz", "_blank", "noopener,noreferrer");
     };
 
-    // Measure logo once after initial render
-    useEffect(() => {
-        const measureLogo = () => {
-            if (logoRef.current && containerRef.current) {
-                // Get the natural dimensions of the logo
-                const rect = logoRef.current.getBoundingClientRect();
-                logoDimensionsRef.current = {
-                    width: rect.width,
-                    height: rect.height
-                };
+    // Move the logo with a transform to avoid layout work during animation.
+    const applyPosition = () => {
+        if (logoRef.current) {
+            const { x, y } = positionRef.current;
+            logoRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+        }
+    };
 
-                console.log("Measured logo: ", logoDimensionsRef.current);
+    // Cache the logo's rendered size so the animation loop does not have to re-measure it.
+    const measureLogo = () => {
+        if (!logoRef.current) {
+            return;
+        }
+        const rect = logoRef.current.getBoundingClientRect();
+        logoDimensionsRef.current = { width: rect.width, height: rect.height };
+    };
+
+    // Reveal after font loading or 1.5 seconds. Re-measure on later font completion and resize
+    // to keep the logo within the container as its font and responsive size change.
+    useEffect(() => {
+        // Refresh the cached box size and keep the box inside the container.
+        const keepInBounds = () => {
+            if (!containerRef.current || !logoRef.current) {
+                return;
             }
+            measureLogo();
+            const maxX = Math.max(0, containerRef.current.clientWidth - logoDimensionsRef.current.width);
+            const maxY = Math.max(0, containerRef.current.clientHeight - logoDimensionsRef.current.height);
+            positionRef.current = {
+                x: Math.min(positionRef.current.x, maxX),
+                y: Math.min(positionRef.current.y, maxY),
+            };
+            applyPosition();
+        };
+        const reveal = () => {
+            if (!containerRef.current || !logoRef.current) {
+                return;
+            }
+            if (initializedRef.current) {
+                keepInBounds();
+                return;
+            }
+            measureLogo();
+            const { width, height } = logoDimensionsRef.current;
+            positionRef.current = {
+                x: Math.random() * Math.max(0, containerRef.current.clientWidth - width),
+                y: Math.random() * Math.max(0, containerRef.current.clientHeight - height),
+            };
+            applyPosition();
+            logoRef.current.style.visibility = 'visible';
+            initializedRef.current = true;
         };
 
-        // Measure immediately and after a short delay to ensure accuracy
-        measureLogo();
-        const timer = setTimeout(measureLogo, 200);
-
-        return () => clearTimeout(timer);
-    }, []);
-
-    useEffect(() => {
-        // Wait a short time to ensure logo has been properly measured
-        const initTimeout = setTimeout(() => {
-            if (!initializedRef.current && containerRef.current && logoRef.current) {
-                const containerWidth = containerRef.current.clientWidth;
-                const containerHeight = containerRef.current.clientHeight;
-
-                // Make sure we have measured the logo
-                if (logoDimensionsRef.current.width === 0) {
-                    const rect = logoRef.current.getBoundingClientRect();
-                    logoDimensionsRef.current = {
-                        width: rect.width,
-                        height: rect.height
-                    };
-                }
-
-                const logoWidth = logoDimensionsRef.current.width;
-                const logoHeight = logoDimensionsRef.current.height;
-
-                console.log("Container size: ", containerWidth, containerHeight);
-                console.log("Logo size: ", logoWidth, logoHeight);
-
-                // Set initial position
-                positionRef.current = {
-                    x: Math.random() * (containerWidth - logoWidth),
-                    y: Math.random() * (containerHeight - logoHeight)
-                };
-
-                initializedRef.current = true;
-
-                // Force a re-render to show initial position
-                logoRef.current.style.left = `${positionRef.current.x}px`;
-                logoRef.current.style.top = `${positionRef.current.y}px`;
-            }
-        }, 100); // Short delay to ensure measurements
-
-        return () => clearTimeout(initTimeout);
+        // A rejected load (blocked or failed download) reveals the box in the fallback font.
+        const fallback = setTimeout(reveal, 1500);
+        const font: Promise<unknown> = document.fonts
+            ? document.fonts.load('bold 32px Inconsolata')
+            : Promise.resolve();
+        font.then(reveal, reveal);
+        window.addEventListener('resize', keepInBounds);
+        return () => {
+            clearTimeout(fallback);
+            window.removeEventListener('resize', keepInBounds);
+        };
     }, []);
 
     useEffect(() => {
@@ -96,19 +101,27 @@ const MaintenancePage: React.FC = () => {
             return filteredColors[Math.floor(Math.random() * filteredColors.length)];
         };
 
-        // Update color function that ensures the color always changes
+        // Apply bounce colors directly to keep animation independent of React renders.
         const updateColor = () => {
             const newColor = getRandomColor();
             currentColorRef.current = newColor;
-            setColor(newColor);
+            if (logoRef.current) {
+                logoRef.current.style.color = newColor;
+            }
         };
 
         // Animation function that doesn't depend on React state for positioning
-        const animate = () => {
-            if (!containerRef.current || !logoRef.current) {
+        const animate = (timestamp: number) => {
+            if (!initializedRef.current || !containerRef.current || !logoRef.current) {
                 animationFrameRef.current = requestAnimationFrame(animate);
                 return;
             }
+
+            // Use elapsed time for smooth motion and cap the step to prevent jumps when a
+            // background tab becomes visible again.
+            const elapsed = lastFrameRef.current === null ? 0 : timestamp - lastFrameRef.current;
+            lastFrameRef.current = timestamp;
+            const step = speed * Math.min(elapsed, 100) / 1000;
 
             const containerWidth = containerRef.current.clientWidth;
             const containerHeight = containerRef.current.clientHeight;
@@ -118,8 +131,8 @@ const MaintenancePage: React.FC = () => {
             const logoHeight = logoDimensionsRef.current.height;
 
             // Update position based on current direction
-            let newX = positionRef.current.x + speed * directionRef.current.x;
-            let newY = positionRef.current.y + speed * directionRef.current.y;
+            let newX = positionRef.current.x + step * directionRef.current.x;
+            let newY = positionRef.current.y + step * directionRef.current.y;
             let colorChanged = false;
 
             // Handle horizontal boundaries with a small buffer
@@ -162,12 +175,8 @@ const MaintenancePage: React.FC = () => {
                 }
             }
 
-            // Update position reference
             positionRef.current = { x: newX, y: newY };
-
-            // Apply the position directly to the DOM element
-            logoRef.current.style.left = `${newX}px`;
-            logoRef.current.style.top = `${newY}px`;
+            applyPosition();
 
             // Continue animation
             animationFrameRef.current = requestAnimationFrame(animate);
@@ -184,48 +193,11 @@ const MaintenancePage: React.FC = () => {
         };
     }, []);
 
-    // Handle window resize to keep logo in bounds
-    useEffect(() => {
-        const handleResize = () => {
-            if (containerRef.current && logoRef.current) {
-                const containerWidth = containerRef.current.clientWidth;
-                const containerHeight = containerRef.current.clientHeight;
-                const logoWidth = logoRef.current.clientWidth;
-                const logoHeight = logoRef.current.clientHeight;
-
-                // Keep logo within bounds after resize
-                let newX = positionRef.current.x;
-                let newY = positionRef.current.y;
-
-                if (newX + logoWidth > containerWidth) {
-                    newX = containerWidth - logoWidth;
-                }
-
-                if (newY + logoHeight > containerHeight) {
-                    newY = containerHeight - logoHeight;
-                }
-
-                positionRef.current = { x: newX, y: newY };
-                logoRef.current.style.left = `${newX}px`;
-                logoRef.current.style.top = `${newY}px`;
-            }
-        };
-
-        window.addEventListener('resize', handleResize);
-        return () => {
-            window.removeEventListener('resize', handleResize);
-        };
-    }, []);
-
     return (
         <div className="dvd-container" ref={containerRef}>
             <div
                 className="dvd-logo"
                 ref={logoRef}
-                style={{
-                    color: color,
-                    borderColor: color
-                }}
                 onClick={handleLogoClick}
             >
                 <div className="logo-content">

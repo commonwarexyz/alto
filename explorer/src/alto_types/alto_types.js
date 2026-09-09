@@ -1,6 +1,8 @@
 /* @ts-self-types="./alto_types.d.ts" */
 
 /**
+ * Returns the index of the leader elected by `seed`, i.e. the leader of the view after the
+ * seed's view.
  * @param {any} seed
  * @param {number} participants
  * @returns {number}
@@ -24,28 +26,30 @@ export function parse_block(bytes) {
 /**
  * @param {Uint8Array} identity
  * @param {Uint8Array} bytes
+ * @param {boolean} standard
  * @returns {any}
  */
-export function parse_finalized(identity, bytes) {
+export function parse_finalized(identity, bytes, standard) {
     const ptr0 = passArray8ToWasm0(identity, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.parse_finalized(ptr0, len0, ptr1, len1);
+    const ret = wasm.parse_finalized(ptr0, len0, ptr1, len1, standard);
     return ret;
 }
 
 /**
  * @param {Uint8Array} identity
  * @param {Uint8Array} bytes
+ * @param {boolean} standard
  * @returns {any}
  */
-export function parse_notarized(identity, bytes) {
+export function parse_notarized(identity, bytes, standard) {
     const ptr0 = passArray8ToWasm0(identity, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.parse_notarized(ptr0, len0, ptr1, len1);
+    const ret = wasm.parse_notarized(ptr0, len0, ptr1, len1, standard);
     return ret;
 }
 

@@ -37,6 +37,8 @@ _To deploy your own instance of `alto`, read the guide in [deploy](../deploy/REA
 |-------|-------------|
 | `source` | URL of the indexer to fetch blocks and stream certificates from |
 | `identity` | Hex-encoded BLS12-381 threshold public key used to verify consensus signatures |
+| `certificate_mode` | Required certificate construction used by the source: `standard` for stable leaders or `vrf` for rotating leaders |
+| `block_size` | Required network block payload size in bytes, used to bound the live feed |
 | `directory` | Path to store finalized blocks and state |
 | `worker_threads` | Number of runtime worker threads |
 | `signature_threads` | Number of threads for signature verification |
@@ -49,6 +51,9 @@ _To deploy your own instance of `alto`, read the guide in [deploy](../deploy/REA
 | `pruning_depth` | Number of finalized blocks to retain before pruning (null to keep all) |
 
 _See [examples/](./examples/) for sample configuration files._
+
+Set `block_size` to the same value as the validators and indexer. The live feed includes the
+encoding allowance described in the [Rust client](../client/README.md).
 
 ## Certificate Validation Policy
 

@@ -6,35 +6,24 @@ export type SearchType = 'block' | 'notarization' | 'finalization' | 'seed';
 
 // Block data
 export interface BlockJs {
+    leader: number[];
     height: number;
+    /** Milliseconds since the Unix epoch. */
     timestamp: number;
-    digest: Uint8Array;
-    parent: Uint8Array;
+    digest: number[];
+    parent: number[];
 }
 
 // Seed (for leader election)
 export interface SeedJs {
     view: number;
-    signature: Uint8Array;
+    signature: number[];
 }
 
-// Proof for notarizations and finalizations
-export interface ProofJs {
+// Verified notarized or finalized block
+export interface CertifiedBlockJs {
     view: number;
-    threshold?: number;
-    signature?: Uint8Array;
-}
-
-// Notarized block
-export interface NotarizedJs {
-    proof: ProofJs;
-    block: BlockJs;
-}
-
-// Finalized block
-export interface FinalizedJs {
-    proof: ProofJs;
-    quorum: boolean;
+    signature: number[];
     block: BlockJs;
 }
 
@@ -47,7 +36,7 @@ export interface ViewData {
     startTime: number;
     notarizationTime?: number;
     finalizationTime?: number;
-    signature?: Uint8Array;
+    signature?: number[];
     block?: BlockJs;
     timeoutId?: NodeJS.Timeout;
     actualNotarizationLatency?: number;
@@ -55,7 +44,7 @@ export interface ViewData {
 }
 
 // Type for search results
-export type SearchResult = SeedJs | NotarizedJs | FinalizedJs | BlockJs | null;
+export type SearchResult = SeedJs | CertifiedBlockJs | BlockJs;
 
 // Time constants
 export const MS_PER_SECOND = 1000;

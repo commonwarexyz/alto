@@ -1,6 +1,6 @@
 //! Interact with an `alto` indexer.
 
-use alto_types::{Identity, Scheme, NAMESPACE};
+use alto_types::Scheme;
 use commonware_cryptography::sha256::Digest;
 use commonware_formatting::hex;
 use commonware_parallel::Strategy;
@@ -11,6 +11,12 @@ pub mod consensus;
 pub mod utils;
 
 pub const LATEST: &str = "latest";
+
+/// Bytes of certificate and block encoding an HTTP upload may carry beyond the block payload.
+pub const UPLOAD_OVERHEAD: usize = 1024 * 1024;
+
+/// Payload allowance used when the network's block size is not configured.
+pub const DEFAULT_MAX_BLOCK_SIZE: usize = 4 * 1024 * 1024;
 
 pub enum Query {
     Latest,
@@ -62,18 +68,24 @@ pub enum Error {
 type WsConnector = tokio_tungstenite::Connector;
 
 /// Builder for creating a [`Client`].
-pub struct ClientBuilder<S: Strategy> {
+pub struct ClientBuilder<S: Strategy, C: Scheme> {
     uri: String,
     ws_uri: String,
-    identity: Identity,
+    /// Largest WebSocket frame or message, including the kind byte.
+    max_message_size: usize,
+    verifier: C,
     tls_certs: Vec<Vec<u8>>,
     strategy: S,
     verify: bool,
 }
 
-impl<S: Strategy> ClientBuilder<S> {
-    /// Create a new builder for the given indexer URI.
-    pub fn new(uri: &str, identity: Identity, strategy: S) -> Self {
+impl<S: Strategy, C: Scheme> ClientBuilder<S, C> {
+    /// Create a builder with an already initialized concrete certificate verifier.
+    ///
+    /// TLS uses the system's root certificates. Add private roots with [`Self::with_tls_cert`].
+    /// Streaming defaults to a 4 MiB payload allowance. Set the network's size with
+    /// [`Self::with_block_size`].
+    pub fn new(uri: &str, verifier: C, strategy: S) -> Self {
         let uri = uri.to_string();
         let ws_uri = if let Some(rest) = uri.strip_prefix("https://") {
             format!("wss://{rest}")
@@ -85,11 +97,26 @@ impl<S: Strategy> ClientBuilder<S> {
         Self {
             uri,
             ws_uri,
-            identity,
+            max_message_size: DEFAULT_MAX_BLOCK_SIZE + UPLOAD_OVERHEAD + 1,
+            verifier,
             tls_certs: Vec::new(),
             strategy,
             verify: true,
         }
+    }
+
+    /// Set the network's block payload size for WebSocket receiving.
+    ///
+    /// Frames and complete messages are limited to this size plus the indexer's 1 MiB upload
+    /// allowance and one message-kind byte. HTTP retrieval is unaffected.
+    ///
+    /// Panics if the receive limit cannot be represented on this platform.
+    pub fn with_block_size(mut self, block_size: u32) -> Self {
+        self.max_message_size = usize::try_from(block_size)
+            .expect("block size is unsupported on this platform")
+            .checked_add(UPLOAD_OVERHEAD + 1)
+            .expect("message size is unsupported on this platform");
+        self
     }
 
     /// Disable signature verification for all returned data.
@@ -107,9 +134,7 @@ impl<S: Strategy> ClientBuilder<S> {
     }
 
     /// Build the client.
-    pub fn build(self) -> Client<S> {
-        let certificate_verifier = Scheme::certificate_verifier(NAMESPACE, self.identity);
-
+    pub fn build(self) -> Client<S, C> {
         // HTTP/2 multiplexes all requests over a single connection, so
         // DNS is only resolved once on the initial connect.
         let mut http_builder = reqwest::Client::builder()
@@ -149,7 +174,8 @@ impl<S: Strategy> ClientBuilder<S> {
         Client {
             uri: self.uri,
             ws_uri: self.ws_uri,
-            certificate_verifier,
+            max_message_size: self.max_message_size,
+            verifier: self.verifier,
             verify: self.verify,
             http_client,
             ws_connector,
@@ -159,10 +185,12 @@ impl<S: Strategy> ClientBuilder<S> {
 }
 
 #[derive(Clone)]
-pub struct Client<S: Strategy> {
+pub struct Client<S: Strategy, C: Scheme> {
     uri: String,
     ws_uri: String,
-    certificate_verifier: Scheme,
+    /// Largest WebSocket frame or message, including the kind byte.
+    max_message_size: usize,
+    verifier: C,
     verify: bool,
 
     http_client: reqwest::Client,
@@ -170,16 +198,103 @@ pub struct Client<S: Strategy> {
     strategy: S,
 }
 
-impl<S: Strategy> Client<S> {
-    /// Create a new client for the given indexer URI.
-    ///
-    /// TLS is automatically configured using the system's root certificates.
-    /// For HTTPS/WSS endpoints with certificates signed by trusted CAs,
-    /// no additional configuration is needed.
-    ///
-    /// For custom TLS configuration (e.g., self-signed certificates),
-    /// use [`ClientBuilder`] instead.
-    pub fn new(uri: &str, identity: Identity, strategy: S) -> Self {
-        ClientBuilder::new(uri, identity, strategy).build()
+#[cfg(test)]
+mod tests {
+    use super::{ClientBuilder, Error};
+    use alto_types::{Identity, StandardScheme, NAMESPACE};
+    use commonware_math::algebra::CryptoGroup;
+    use commonware_parallel::Sequential;
+    use futures::StreamExt;
+    use std::time::Duration;
+    use tokio::{io::AsyncWriteExt, net::TcpListener};
+    use tokio_tungstenite::tungstenite::{error::CapacityError, Error as WsError};
+
+    /// Send raw frames through a real client and return its transport or artifact error.
+    async fn receive_error(block_size: Option<u32>, frames: Vec<u8>) -> Error {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(socket).await.unwrap();
+            socket.get_mut().write_all(&frames).await.unwrap();
+            socket.get_mut().shutdown().await.unwrap();
+        });
+        let mut builder = ClientBuilder::new(
+            &format!("http://{addr}"),
+            StandardScheme::certificate_verifier(NAMESPACE, Identity::generator()),
+            Sequential,
+        );
+        if let Some(block_size) = block_size {
+            builder = builder.with_block_size(block_size);
+        }
+        let client = builder.build();
+        let mut stream = client.listen().await.unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("frame processing stalled")
+            .expect("frame did not produce a result");
+        server.await.unwrap();
+        match result {
+            Err(error) => error,
+            Ok(_) => panic!("unexpected consensus artifact"),
+        }
+    }
+
+    #[tokio::test]
+    async fn oversized_frames_are_rejected_from_the_header() {
+        for (block_size, limit) in [
+            (None, 5 * 1024 * 1024 + 1),
+            (Some(0), 1024 * 1024 + 1),
+            (Some(4096), 1024 * 1024 + 4097),
+        ] {
+            for fragmented in [false, true] {
+                // Announce one byte beyond the receive limit, without sending its payload.
+                let mut frames = Vec::new();
+                if fragmented {
+                    frames.extend_from_slice(&[0x02, 0x01, 0x00]);
+                }
+                frames.extend_from_slice(&[if fragmented { 0x80 } else { 0x82 }, 0x7f]);
+                frames.extend_from_slice(&((limit + 1) as u64).to_be_bytes());
+                assert!(matches!(
+                    receive_error(block_size, frames).await,
+                    Error::Tungstenite(WsError::Capacity(CapacityError::MessageTooLong {
+                        size,
+                        max_size,
+                    })) if size == limit + 1 && max_size == limit
+                ));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn streaming_budget_includes_the_message_kind() {
+        // An HTTP artifact can fill the entire encoding allowance. Its stream adds one kind byte.
+        let length = 1024 * 1024 + 1;
+        let mut frame = vec![0x82, 0x7f];
+        frame.extend_from_slice(&(length as u64).to_be_bytes());
+        frame.resize(frame.len() + length, 0xff);
+
+        // Reaching kind dispatch proves that the complete message passed the transport limit.
+        assert!(matches!(
+            receive_error(Some(0), frame).await,
+            Error::UnexpectedResponse
+        ));
+    }
+
+    #[tokio::test]
+    async fn fragmented_messages_share_the_receive_budget() {
+        // Each frame fits by itself, but their combined payload exceeds the message budget.
+        let length = 1024 * 1024;
+        let mut frames = vec![0x02, 0x7f];
+        frames.extend_from_slice(&(length as u64).to_be_bytes());
+        frames.resize(frames.len() + length, 0xff);
+        frames.extend_from_slice(&[0x80, 0x02, 0xff, 0xff]);
+        assert!(matches!(
+            receive_error(Some(0), frames).await,
+            Error::Tungstenite(WsError::Capacity(CapacityError::MessageTooLong {
+                size,
+                max_size,
+            })) if size == length + 2 && max_size == length + 1
+        ));
     }
 }

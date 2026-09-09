@@ -1,0 +1,41 @@
+# Resolve the repository root from this file so recipes work from any directory.
+root := source_directory() / ".."
+source-mounts := "-v '" + root + ":/alto' -v '" + root + "/.docker-cache/cargo:/cargo-home' -v '" + root + "/.docker-cache/target:/alto/target'"
+cache-env := "-e CARGO_HOME=/cargo-home"
+bake := "docker buildx bake --load --progress plain -f '" + root + "/deploy/docker-bake.hcl' --set '*.context=" + root + "'"
+
+prepare-docker-cache:
+    mkdir -p '{{root}}/.docker-cache/cargo' '{{root}}/.docker-cache/target'
+
+build-graviton-image:
+    {{bake}} graviton
+
+validator-graviton-binary: build-graviton-image prepare-docker-cache
+    docker run --rm {{source-mounts}} {{cache-env}} -e BINARY_NAME=validator alto-validator-builder:graviton-local
+
+indexer-graviton-binary: build-graviton-image prepare-docker-cache
+    docker run --rm {{source-mounts}} {{cache-env}} -e BINARY_NAME=indexer alto-validator-builder:graviton-local
+
+graviton-binaries: validator-graviton-binary indexer-graviton-binary
+
+build-graviton4-image:
+    {{bake}} graviton4
+
+validator-graviton4-binary: build-graviton4-image prepare-docker-cache
+    docker run --rm {{source-mounts}} {{cache-env}} -e BINARY_NAME=validator alto-validator-builder:graviton4-local
+
+indexer-graviton4-binary: build-graviton4-image prepare-docker-cache
+    docker run --rm {{source-mounts}} {{cache-env}} -e BINARY_NAME=indexer alto-validator-builder:graviton4-local
+
+graviton4-binaries: validator-graviton4-binary indexer-graviton4-binary
+
+build-intel-image:
+    {{bake}} intel
+
+validator-intel-binary: build-intel-image prepare-docker-cache
+    docker run --rm {{source-mounts}} {{cache-env}} -e BINARY_NAME=validator alto-validator-builder:intel-local
+
+indexer-intel-binary: build-intel-image prepare-docker-cache
+    docker run --rm {{source-mounts}} {{cache-env}} -e BINARY_NAME=indexer alto-validator-builder:intel-local
+
+intel-binaries: validator-intel-binary indexer-intel-binary

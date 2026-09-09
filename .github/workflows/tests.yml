@@ -63,6 +63,8 @@ jobs:
       run: cd explorer && npm ci
     - name: Test compilation
       run: cd explorer && CI=true npm run build
+    - name: Test explorer
+      run: cd explorer && CI=true npm test -- --watchAll=false --runInBand
 
   WASM:
     runs-on: ubuntu-latest

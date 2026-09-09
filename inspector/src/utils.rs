@@ -1,5 +1,5 @@
 use alto_client::{IndexQuery, Query};
-use alto_types::{Finalized, Notarized, Seed};
+use alto_types::{Finalized, Notarized, Scheme, Seed};
 use commonware_codec::DecodeExt;
 use commonware_consensus::Viewable;
 use commonware_cryptography::{sha256::Digest, Digestible};
@@ -89,7 +89,7 @@ pub fn log_seed(seed: Seed) {
     info!(view = %seed.view(), signature = ?seed.signature, "seed");
 }
 
-pub fn log_notarization(notarized: Notarized) {
+pub fn log_notarization<C: Scheme>(notarized: Notarized<C>) {
     let now = time::SystemTime::now().epoch_millis();
     let age_ms = now.saturating_sub(notarized.block.timestamp);
     let age_str = format_age(age_ms);
@@ -103,7 +103,7 @@ pub fn log_notarization(notarized: Notarized) {
     );
 }
 
-pub fn log_finalization(finalized: Finalized) {
+pub fn log_finalization<C: Scheme>(finalized: Finalized<C>) {
     let now = time::SystemTime::now().epoch_millis();
     let age_ms = now.saturating_sub(finalized.block.timestamp);
     let age_str = format_age(age_ms);

@@ -8,19 +8,18 @@ const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );
 
-// Only use StrictMode in development, not in production
-if (process.env.NODE_ENV === 'development') {
-  root.render(
-    <React.StrictMode>
-      <ErrorBoundary>
-        <App />
-      </ErrorBoundary>
-    </React.StrictMode>
-  );
-} else {
-  root.render(
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  );
-}
+const content = window.ALTO_DEPLOYMENT === undefined ? (
+  <div className="error-container" role="alert">
+    <h2>Explorer configuration failed to load.</h2>
+    <p>Refresh the page to retry.</p>
+  </div>
+) : (
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);
+
+// Use StrictMode in development.
+root.render(
+  process.env.NODE_ENV === 'development' ? <React.StrictMode>{content}</React.StrictMode> : content
+);

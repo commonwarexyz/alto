@@ -176,6 +176,7 @@ pub type SharedState = Arc<Mutex<State>>;
 mod tests {
     use super::*;
     use alto_types::{Context, EPOCH};
+    use bytes::Bytes;
     use commonware_consensus::types::{Height, Round, View};
     use commonware_cryptography::{ed25519, Digestible, Hasher, Sha256, Signer};
 
@@ -186,12 +187,13 @@ mod tests {
                 leader: ed25519::PrivateKey::from_seed(view).public_key(),
                 parent: (
                     View::new(view.saturating_sub(1)),
-                    Sha256::hash(format!("parent-{view}").as_bytes()),
+                    Sha256::hash(&[format!("parent-{view}").as_bytes()]),
                 ),
             },
-            Sha256::hash(label),
+            Sha256::hash(&[label]),
             Height::new(height),
             height,
+            Bytes::new(),
         )
     }
 
@@ -212,9 +214,9 @@ mod tests {
     fn test_upload_state_prunes_only_after_queue_floor_progress() {
         let mut uploads = State::new();
 
-        let digest_10 = Sha256::hash(b"view-10");
-        let digest_11 = Sha256::hash(b"view-11");
-        let digest_12 = Sha256::hash(b"view-12");
+        let digest_10 = Sha256::hash(&[b"view-10"]);
+        let digest_11 = Sha256::hash(&[b"view-11"]);
+        let digest_12 = Sha256::hash(&[b"view-12"]);
 
         uploads.mark_uploaded(digest_11, 11);
         uploads.mark_uploaded(digest_12, 12);

@@ -154,9 +154,8 @@ body {
   color: black;
 }
 
-.view-signature {
+.view-identifier {
   font-size: 11px;
-  color: #0000eeff;
   text-overflow: ellipsis;
   overflow: hidden;
 }
@@ -437,7 +436,7 @@ body {
     font-size: 12px;
   }
 
-  .view-signature {
+  .view-identifier {
     font-size: 12px;
   }
 
@@ -499,7 +498,7 @@ body {
     font-size: 12px;
   }
 
-  .view-signature {
+  .view-identifier {
     font-size: 9px;
   }
 

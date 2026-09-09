@@ -22,6 +22,12 @@
 //!
 //! _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
 //!
+//! _The default certificate mode is `vrf` for rotating leaders. Use `--certificate-mode standard` for
+//! a stable-leader network. Stable networks do not publish seed artifacts._
+//!
+//! Use `--block-size` to set the network's block payload size for streaming. The receive limit adds
+//! 1 MiB for encoding and one message-kind byte. The default payload allowance is 4 MiB.
+//!
 //! ## Get the latest seed
 //!
 //! ```bash
@@ -67,7 +73,7 @@
 //! ## Get the block with a specific digest
 //!
 //! ```bash
-//! inspector -- get block 0x65016ff40e824e21fffe903953c07b6d604dbcf39f681c62e7b3ed57ab1d1994
+//! inspector get block 0x65016ff40e824e21fffe903953c07b6d604dbcf39f681c62e7b3ed57ab1d1994
 //! ```
 //!
 //! ## Listen for consensus events
@@ -78,10 +84,10 @@
 
 use alto_client::{
     consensus::{Message, Payload},
-    Client, IndexQuery, Query,
+    Client, ClientBuilder, IndexQuery, Query,
 };
-use alto_types::Identity;
-use clap::{value_parser, Arg, Command};
+use alto_types::{CertificateMode, Identity, Scheme, StandardScheme, VrfScheme, NAMESPACE};
+use clap::{value_parser, Arg, ArgMatches, Command};
 use commonware_codec::DecodeExt;
 use commonware_formatting::from_hex;
 use commonware_parallel::Sequential;
@@ -98,7 +104,8 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod utils;
 
 const DEFAULT_INDEXER: &str = "https://global.alto.exoware.xyz";
-const DEFAULT_IDENTITY: &str = "a6ad67a90af5cb7f04015f3df946c0f0f90f3bc3c536cadb3bedbc32eb35de552c2bfce575f69613765b23aaa19524ed06122806decca7be10f1a5709bd77855fc24c20ecb6bdc88320a8526a1f1890704425014a559c2920874f9592faa0c37";
+const DEFAULT_IDENTITY: &str = "83a93d74819bc17b3f53258216b54ecba1a13e1257a0514241bdd79c7757b7c3921451021e7a592d12296076ef58a8b600179a2d006e8d73c337f2f3578a245c286f4af8921e4e4fca0b3375842c81cccd2b4ce7e875a5591fdded49c93a905c";
+const DEFAULT_CERTIFICATE_MODE: &str = "vrf";
 
 #[tokio::main]
 async fn main() {
@@ -111,6 +118,21 @@ async fn main() {
                 .help("Enable debug logging")
                 .global(true)
                 .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("block_size")
+                .long("block-size")
+                .value_parser(value_parser!(u32))
+                .global(true)
+                .help("Network block payload size in bytes for streaming (default allowance: 4 MiB)"),
+        )
+        .arg(
+            Arg::new("certificate_mode")
+                .long("certificate-mode")
+                .value_parser(CertificateMode::ALL.map(CertificateMode::as_str))
+                .default_value(DEFAULT_CERTIFICATE_MODE)
+                .global(true)
+                .help("Threshold certificate construction used by the network"),
         )
         .subcommand(
             Command::new("listen")
@@ -175,13 +197,37 @@ async fn main() {
         Level::INFO
     };
     tracing_subscriber::fmt().with_max_level(log_level).init();
+    let mode: CertificateMode = matches
+        .get_one::<String>("certificate_mode")
+        .expect("certificate mode has a default")
+        .parse()
+        .expect("clap validates certificate mode");
 
+    match mode {
+        CertificateMode::Standard => run::<StandardScheme>(&matches).await,
+        CertificateMode::Vrf => run::<VrfScheme>(&matches).await,
+    }
+}
+
+fn client<C: Scheme>(matches: &ArgMatches) -> Client<Sequential, C> {
+    let indexer = matches.get_one::<String>("indexer").unwrap();
+    let identity = matches.get_one::<String>("identity").unwrap();
+    let identity = from_hex(identity).expect("Failed to decode identity");
+    let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
+    let mut builder = ClientBuilder::new(
+        indexer,
+        C::certificate_verifier(NAMESPACE, identity),
+        Sequential,
+    );
+    if let Some(block_size) = matches.get_one::<u32>("block_size") {
+        builder = builder.with_block_size(*block_size);
+    }
+    builder.build()
+}
+
+async fn run<C: Scheme>(matches: &ArgMatches) {
     if let Some(matches) = matches.subcommand_matches("listen") {
-        let indexer = matches.get_one::<String>("indexer").unwrap();
-        let identity = matches.get_one::<String>("identity").unwrap();
-        let identity = from_hex(identity).expect("Failed to decode identity");
-        let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
-        let client = Client::new(indexer, identity, Sequential);
+        let client = client::<C>(matches);
 
         let mut stream = client.listen().await.expect("Failed to connect to indexer");
         info!("listening for consensus messages...");
@@ -196,11 +242,7 @@ async fn main() {
     } else if let Some(matches) = matches.subcommand_matches("get") {
         let type_ = matches.get_one::<String>("type").unwrap();
         let query_str = matches.get_one::<String>("query").unwrap();
-        let indexer = matches.get_one::<String>("indexer").unwrap();
-        let identity = matches.get_one::<String>("identity").unwrap();
-        let identity = from_hex(identity).expect("Failed to decode identity");
-        let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
-        let client = Client::new(indexer, identity, Sequential);
+        let client = client::<C>(matches);
         let prepare_flag = matches.get_flag("prepare");
 
         if prepare_flag {

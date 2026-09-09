@@ -2,10 +2,26 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { DivIcon, LatLng } from "leaflet";
 import "leaflet/dist/leaflet.css";
-import init, { parse_seed, parse_notarized, parse_finalized, leader_index } from "./alto_types/alto_types.js";
-import { getClusterConfig, getClusters, Cluster, DEFAULT_CLUSTER, MODE } from "./config";
-import { SeedJs, NotarizedJs, FinalizedJs, ViewData } from "./types";
+import init, { leader_index } from "./alto_types/alto_types.js";
+import {
+  getClusterConfig,
+  getClusters,
+  getHttpBackendUrl,
+  getInitialCluster,
+  getWebSocketBackendUrl,
+  Cluster,
+  MODE,
+} from "./config";
+import { SeedJs, CertifiedBlockJs, ViewData } from "./types";
 import { hexToUint8Array, hexUint8Array } from "./utils";
+import { resolveLeaderLocation } from "./leaderLocation";
+import {
+  ConsensusWorkerPool,
+  consensusWorkerCount,
+} from "./consensusWorkerPool";
+import { createConsensusWorker } from "./createConsensusWorker";
+import { scaleTimelineWidth } from "./timeline";
+import { getLeaderIndicator, getTimelineIdentifier } from "./timelineIdentifier";
 import "./App.css";
 import AboutModal from './AboutModal';
 import './AboutModal.css';
@@ -21,38 +37,23 @@ import MaintenancePage from './MaintenancePage';
 import SearchModal from './SearchModal';
 import './SearchModal.css';
 
-const getInitialCluster = (): Cluster => {
-  // Get the cluster from the URL
-  const params = new URLSearchParams(window.location.search);
-  const clusterFromUrl = params.get('cluster');
-  const allClusters = getClusters();
-
-  // If the cluster exists, use it
-  if (clusterFromUrl && (clusterFromUrl in allClusters)) {
-    return clusterFromUrl as Cluster;
-  }
-
-  // Otherwise, use the default cluster
-  return DEFAULT_CLUSTER;
-};
-
-const SCALE_DURATION = 500; // 500ms
 const TIMEOUT_DURATION = 5000; // 5s
 const HEALTH_CHECK_INTERVAL = 60000; // Check health every minute
+const VIEW_RENDER_INTERVAL = 100;
+const MAX_TRACKED_VIEWS = 128;
+const MAX_RENDERED_VIEWS = 50;
+
+const retainNewestViews = (views: ViewData[]): ViewData[] => {
+  const sorted = [...views].sort((a, b) => b.view - a.view);
+  for (const discarded of sorted.slice(MAX_TRACKED_VIEWS)) {
+    if (discarded.timeoutId) {
+      clearTimeout(discarded.timeoutId);
+    }
+  }
+  return sorted.slice(0, MAX_TRACKED_VIEWS);
+};
 
 const center = new LatLng(0, 0);
-const markerIcon = new DivIcon({
-  className: "custom-div-icon",
-  html: `<div style="
-        background-color: #0000eeff;
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        "></div>`,
-  iconSize: [12, 12],
-  iconAnchor: [6, 6],
-});
-
 // ASCII Logo animation logic
 const initializeLogoAnimations = () => {
   const horizontalSymbols = [" ", "*", "+", "-", "~"];
@@ -89,11 +90,28 @@ const App: React.FC = () => {
   const [selectedCluster, setSelectedCluster] = useState<Cluster>(getInitialCluster());
   const clusterConfig = useMemo(() => getClusterConfig(selectedCluster), [selectedCluster]);
   const allConfigs = useMemo(() => getClusters(), []);
-  const { BACKEND_URL, PUBLIC_KEY_HEX, LOCATIONS } = clusterConfig;
+  const { BACKEND_URL, PUBLIC_KEY_HEX, LOCATIONS, PARTICIPANTS } = clusterConfig;
+  const standardCertificates = clusterConfig.CERTIFICATE_MODE === 'standard';
+  const leaderIndicator = getLeaderIndicator(standardCertificates);
+  const markerIcon = useMemo(() => new DivIcon({
+    className: "custom-div-icon",
+    html: `<div style="
+          background-color: ${leaderIndicator.color};
+          width: 16px;
+          height: 16px;
+          border-radius: 50%;
+          "></div>`,
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+  }), [leaderIndicator.color]);
   const PUBLIC_KEY = useMemo(() => hexToUint8Array(PUBLIC_KEY_HEX), [PUBLIC_KEY_HEX]);
 
   const [views, setViews] = useState<ViewData[]>([]);
-  const [lastObservedView, setLastObservedView] = useState<number | null>(null);
+  const mappedView = useMemo(
+    () => views.find(view => view.location !== undefined),
+    [views],
+  );
+  const lastObservedViewRef = useRef<number | null>(null);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
   const [isKeyInfoModalOpen, setIsKeyInfoModalOpen] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
@@ -104,14 +122,11 @@ const App: React.FC = () => {
   const [isSearchModalOpen, setIsSearchModalOpen] = useState<boolean>(false);
   const healthCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const adjustTime = useClockSkew();
-  const currentTimeRef = useRef(adjustTime(Date.now()));
+  const [currentTime, setCurrentTime] = useState(() => adjustTime(Date.now()));
   const wsRef = useRef<WebSocket | null>(null);
+  const currentPoolRef = useRef<ConsensusWorkerPool | null>(null);
 
   // Manage WebSocket lifecycle
-  const handleSeedRef = useRef<typeof handleSeed>(null!);
-  const handleNotarizedRef = useRef<typeof handleNotarization>(null!);
-  const handleFinalizedRef = useRef<typeof handleFinalization>(null!);
-  const isInitializedRef = useRef(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const performClusterSwitch = useCallback((cluster: Cluster) => {
@@ -119,7 +134,6 @@ const App: React.FC = () => {
 
     // When switching, we close the old socket. The `onclose` handler for that socket
     // should not trigger a reconnect or error message.
-    isInitializedRef.current = false;
     if (wsRef.current) {
       // Temporarily disable the onclose handler to prevent side-effects.
       wsRef.current.onclose = null;
@@ -161,7 +175,7 @@ const App: React.FC = () => {
   // Reset state when the cluster changes
   useEffect(() => {
     setViews([]);
-    setLastObservedView(null);
+    lastObservedViewRef.current = null;
     setErrorMessage("");
     setShowError(false);
   }, [selectedCluster]);
@@ -169,8 +183,7 @@ const App: React.FC = () => {
   // Health check function
   const checkHealth = useCallback(async () => {
     try {
-      const protocol = MODE === 'local' ? 'http' : 'https';
-      const response = await fetch(`${protocol}://${BACKEND_URL}/health`, {
+      const response = await fetch(`${getHttpBackendUrl(BACKEND_URL)}/health`, {
         method: "GET",
         headers: {
           "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -241,78 +254,94 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const handleSeed = useCallback((seed: SeedJs) => {
+  const resolveSeedLocation = useCallback((seed: SeedJs) => {
+    if (MODE !== 'public' || LOCATIONS.length === 0) {
+      return { location: undefined, locationName: undefined };
+    }
+
+    const locationIndex = leader_index(seed, LOCATIONS.length);
+    const location = LOCATIONS[locationIndex];
+    return {
+      location: location?.[0],
+      locationName: location?.[1],
+    };
+  }, [LOCATIONS]);
+
+  // Advance the observed maximum outside React's state updater, which StrictMode may invoke twice.
+  // Return the previous maximum for gap filling.
+  const observeView = useCallback((view: number): number | null => {
+    const lastObservedView = lastObservedViewRef.current;
+    if (lastObservedView === null || view > lastObservedView) {
+      lastObservedViewRef.current = view;
+    }
+    return lastObservedView;
+  }, []);
+
+  // Insert bounded placeholders for locally unobserved views between verified observations.
+  // Both modes use certificates. VRF mode also observes seeds for the next view.
+  const fillMissedViews = useCallback((
+    newViews: ViewData[],
+    lastObservedView: number | null,
+    view: number,
+    observedAt: number,
+  ) => {
+    if (lastObservedView === null || view <= lastObservedView + 1) {
+      return;
+    }
+
+    // Bound gap filling by the number of tracked views.
+    const startViewIndex = Math.max(lastObservedView + 1, view - MAX_TRACKED_VIEWS);
+    for (let missedView = startViewIndex; missedView < view; missedView++) {
+      if (newViews.findIndex((v) => v.view === missedView) !== -1) {
+        continue;
+      }
+      const timeoutId = setTimeout(() => {
+        setViews((currentViews) =>
+          currentViews.map((v) =>
+            v.view === missedView && v.status === "unknown"
+              ? { ...v, status: "timed_out", timeoutId: undefined }
+              : v,
+          ),
+        );
+      }, TIMEOUT_DURATION);
+      newViews.unshift({
+        view: missedView,
+        location: undefined,
+        locationName: undefined,
+        status: "unknown",
+        startTime: observedAt,
+        timeoutId,
+      });
+    }
+  }, []);
+
+  const handleSeed = useCallback((seed: SeedJs, receivedAt: number) => {
     const view = seed.view + 1; // Next view is determined by seed - 1
+    const observedAt = adjustTime(receivedAt);
+    const lastObservedView = observeView(view);
 
     setViews((prevViews) => {
       // Create a copy of the current views that we'll modify
       let newViews = [...prevViews];
 
-      // If we haven't observed any views yet, or if the new view is greater than the last observed view + 1,
-      // handle potentially missed views
-      if (lastObservedView === null || view > lastObservedView + 1) {
-        const startViewIndex = lastObservedView !== null ? lastObservedView + 1 : view;
-
-        // Add any missed views as skipped/timed out
-        for (let missedView = startViewIndex; missedView < view; missedView++) {
-          // Check if this view already exists
-          const existingIndex = newViews.findIndex(v => v.view === missedView);
-
-          if (existingIndex === -1) {
-            // Set a timeout for unknown views
-            const timeoutId = setTimeout(() => {
-              setViews((currentViews) => {
-                return currentViews.map((v) => {
-                  // Only time out this specific view if it's still in unknown state
-                  if (v.view === missedView && v.status === "unknown") {
-                    return { ...v, status: "timed_out", timeoutId: undefined };
-                  }
-                  return v;
-                });
-              });
-            }, TIMEOUT_DURATION);
-
-
-            // Only add if it doesn't already exist
-            newViews.unshift({
-              view: missedView,
-              location: undefined,
-              locationName: undefined,
-              status: "unknown",
-              startTime: adjustTime(Date.now()),
-              timeoutId: timeoutId
-            });
-          }
-        }
-      }
+      fillMissedViews(newViews, lastObservedView, view, observedAt);
 
       // Check if this view already exists
       const existingIndex = newViews.findIndex(v => v.view === view);
 
       if (existingIndex !== -1) {
-        // If it exists and is already finalized or notarized, just update
-        // the location and signature information without changing timing
-        const existingStatus = newViews[existingIndex].status;
-        if (existingStatus === "finalized" || existingStatus === "notarized") {
-          // Only update location if in public mode
-          const locationIndex = MODE === 'public' ? leader_index(seed, LOCATIONS.length) : -1;
-          const location = locationIndex >= 0 ? LOCATIONS[locationIndex][0] : undefined;
-          const locationName = locationIndex >= 0 ? LOCATIONS[locationIndex][1] : undefined;
-
-          // Only update location and signature info, preserve all timing and status
+        // Preserve certified timing and status, preferring its known proposer to the seed prediction.
+        const existing = newViews[existingIndex];
+        if (existing.status === "finalized" || existing.status === "notarized") {
+          const { location, locationName } = resolveSeedLocation(seed);
           newViews[existingIndex] = {
-            ...newViews[existingIndex],
-            location,
-            locationName,
+            ...existing,
+            location: existing.location ?? location,
+            locationName: existing.locationName ?? locationName,
             signature: seed.signature,
           };
 
-          return newViews;
-        }
-
-        // Skip processing for views with "unknown" status
-        if (existingStatus === "unknown") {
-          return newViews;
+          return retainNewestViews(newViews);
         }
 
         // If it exists but is in another state, clear its timeout but preserve everything else
@@ -322,15 +351,13 @@ const App: React.FC = () => {
       }
 
       // Create the new view data
-      const locationIndex = MODE === 'public' ? leader_index(seed, LOCATIONS.length) : -1;
-      const location = locationIndex >= 0 ? LOCATIONS[locationIndex][0] : undefined;
-      const locationName = locationIndex >= 0 ? LOCATIONS[locationIndex][1] : undefined;
+      const { location, locationName } = resolveSeedLocation(seed);
       const newView: ViewData = {
         view,
         location,
         locationName,
         status: "growing",
-        startTime: adjustTime(Date.now()),
+        startTime: observedAt,
         signature: seed.signature,
       };
 
@@ -366,64 +393,41 @@ const App: React.FC = () => {
         newViews.unshift(viewWithTimeout);
       }
 
-      // Update the last observed view if this is a new maximum
-      if (lastObservedView === null || view > lastObservedView) {
-        setLastObservedView(view);
-      }
-
-      // Limit the number of views to 50
-      if (newViews.length > 50) {
-        // Clean up any timeouts for views we're about to remove
-        for (let i = 50; i < newViews.length; i++) {
-          if (newViews[i].timeoutId) {
-            clearTimeout(newViews[i].timeoutId);
-          }
-        }
-        newViews = newViews.slice(0, 50);
-      }
-
-      return newViews;
+      return retainNewestViews(newViews);
     });
-  }, [lastObservedView, adjustTime, LOCATIONS]);
+  }, [adjustTime, resolveSeedLocation, observeView, fillMissedViews]);
 
-  const handleNotarization = useCallback((notarized: NotarizedJs) => {
-    const view = notarized.proof.view;
+  const handleNotarization = useCallback((notarized: CertifiedBlockJs, receivedAt: number) => {
+    const view = notarized.view;
+    const leaderLocation = resolveLeaderLocation(notarized.block.leader, PARTICIPANTS, LOCATIONS);
+    const currentTime = adjustTime(receivedAt);
+    const blockTime = notarized.block.timestamp;
+    const calculatedStartTime = blockTime || currentTime;
+    const actualNotarizationLatency = blockTime > 0 && blockTime < currentTime
+      ? currentTime - blockTime
+      : undefined;
+    const lastObservedView = observeView(view);
     setViews((prevViews) => {
-      const index = prevViews.findIndex((v) => v.view === view);
-
       // If the view exists and is already finalized, ignore this notarization completely
-      if (index !== -1 && prevViews[index].status === "finalized") {
+      const existing = prevViews.find((v) => v.view === view);
+      if (existing && existing.status === "finalized") {
         return prevViews; // No changes needed, preserve finalized state
       }
-      let newViews = [...prevViews];
-      const currentTime = adjustTime(Date.now());
 
-      // Calculate a reasonable start time using the block timestamp if available
-      let calculatedStartTime = currentTime;
-      if (notarized.block && notarized.block.timestamp) {
-        // The block timestamp is in milliseconds since epoch
-        const blockTime = Number(notarized.block.timestamp);
-        calculatedStartTime = blockTime;
-      }
+      // Placeholders are inserted at the front, so locate the view after filling.
+      const newViews = [...prevViews];
+      fillMissedViews(newViews, lastObservedView, view, currentTime);
+      const index = newViews.findIndex((v) => v.view === view);
 
       if (index !== -1) {
-        const viewData = prevViews[index];
+        const viewData = newViews[index];
         // Clear timeout if it exists
         if (viewData.timeoutId) {
           clearTimeout(viewData.timeoutId);
         }
 
-        // Calculate actual notarization latency when we receive the notarization message
-        let actualNotarizationLatency: number | undefined = undefined;
-        if (notarized.block && notarized.block.timestamp) {
-          const blockTime = Number(notarized.block.timestamp);
-          if (blockTime > 0 && blockTime < currentTime) {
-            actualNotarizationLatency = currentTime - blockTime;
-          }
-        }
-
         // Update the view with notarization data
-        const updatedView: ViewData = {
+        newViews[index] = {
           ...viewData,
           status: "notarized", // We already checked it's not finalized
           notarizationTime: currentTime,
@@ -432,87 +436,57 @@ const App: React.FC = () => {
           block: viewData.block || notarized.block, // Don't overwrite existing block data
           timeoutId: undefined,
           actualNotarizationLatency,
+          ...leaderLocation,
         };
-
-        newViews = [
-          ...prevViews.slice(0, index),
-          updatedView,
-          ...prevViews.slice(index + 1),
-        ];
       } else {
         // If view doesn't exist, create it with block timestamp as start time
-        let actualNotarizationLatency: number | undefined = undefined;
-        if (notarized.block && notarized.block.timestamp) {
-          const blockTime = Number(notarized.block.timestamp);
-          if (blockTime > 0 && blockTime < currentTime) {
-            actualNotarizationLatency = currentTime - blockTime;
-          }
-        }
-        newViews = [{
+        newViews.unshift({
           view,
-          location: undefined,
-          locationName: undefined,
+          location: leaderLocation?.location,
+          locationName: leaderLocation?.locationName,
           status: "notarized",
           startTime: calculatedStartTime,
           notarizationTime: currentTime,
           block: notarized.block,
           actualNotarizationLatency,
-        }, ...prevViews];
+        });
       }
 
-      // Limit the number of views to 50
-      if (newViews.length > 50) {
-        // Clean up any timeouts for views we're about to remove
-        for (let i = 50; i < newViews.length; i++) {
-          if (newViews[i].timeoutId) {
-            clearTimeout(newViews[i].timeoutId);
-          }
-        }
-        newViews = newViews.slice(0, 50);
-      }
-
-      return newViews;
+      return retainNewestViews(newViews);
     });
-  }, [adjustTime]);
+  }, [adjustTime, LOCATIONS, PARTICIPANTS, observeView, fillMissedViews]);
 
-  const handleFinalization = useCallback((finalized: FinalizedJs) => {
-    const view = finalized.proof.view;
+  const handleFinalization = useCallback((finalized: CertifiedBlockJs, receivedAt: number) => {
+    const view = finalized.view;
+    const leaderLocation = resolveLeaderLocation(finalized.block.leader, PARTICIPANTS, LOCATIONS);
+    const currentTime = adjustTime(receivedAt);
+    const blockTime = finalized.block.timestamp;
+    const calculatedStartTime = blockTime || currentTime;
+    const actualFinalizationLatency = blockTime > 0 && blockTime < currentTime
+      ? currentTime - blockTime
+      : undefined;
+    const lastObservedView = observeView(view);
     setViews((prevViews) => {
-      const index = prevViews.findIndex((v) => v.view === view);
-      let newViews = [...prevViews];
-      const currentTime = adjustTime(Date.now());
-
-      // Calculate a reasonable start time using the block timestamp if available
-      let calculatedStartTime = currentTime;
-      if (finalized.block && finalized.block.timestamp) {
-        // The block timestamp is in milliseconds since epoch
-        const blockTime = Number(finalized.block.timestamp);
-        calculatedStartTime = blockTime;
+      // Preserve the first finalization's timing.
+      const existing = prevViews.find((v) => v.view === view);
+      if (existing && existing.status === "finalized") {
+        return prevViews;
       }
+
+      // Placeholders are inserted at the front, so locate the view after filling.
+      const newViews = [...prevViews];
+      fillMissedViews(newViews, lastObservedView, view, currentTime);
+      const index = newViews.findIndex((v) => v.view === view);
 
       if (index !== -1) {
-        const viewData = prevViews[index];
+        const viewData = newViews[index];
         // Clear timeout if it exists
         if (viewData.timeoutId) {
           clearTimeout(viewData.timeoutId);
         }
 
-        // Calculate actual finalization latency when we receive the finalization message
-        let actualFinalizationLatency: number | undefined = undefined;
-        if (finalized.block && finalized.block.timestamp) {
-          const blockTime = Number(finalized.block.timestamp);
-          if (blockTime > 0 && blockTime < currentTime) {
-            actualFinalizationLatency = currentTime - blockTime;
-          }
-        }
-
-        // If already finalized, don't update
-        if (viewData.status === "finalized") {
-          return prevViews;
-        }
-
         // Use existing data if available, without fabricating missing data
-        const updatedView: ViewData = {
+        newViews[index] = {
           ...viewData,
           status: "finalized",
           finalizationTime: currentTime,
@@ -521,74 +495,57 @@ const App: React.FC = () => {
           startTime: viewData.startTime || calculatedStartTime,
           block: finalized.block,
           timeoutId: undefined,
-          actualNotarizationLatency: viewData.actualNotarizationLatency,
           actualFinalizationLatency,
+          ...leaderLocation,
         };
-
-        newViews = [
-          ...prevViews.slice(0, index),
-          updatedView,
-          ...prevViews.slice(index + 1),
-        ];
       } else {
         // If view doesn't exist, create it with just the data we have
-        let actualFinalizationLatency: number | undefined = undefined;
-        if (finalized.block && finalized.block.timestamp) {
-          const blockTime = Number(finalized.block.timestamp);
-          if (blockTime > 0 && blockTime < currentTime) {
-            actualFinalizationLatency = currentTime - blockTime;
-          }
-        }
-        newViews = [{
+        newViews.unshift({
           view,
-          location: undefined,
-          locationName: undefined,
+          location: leaderLocation?.location,
+          locationName: leaderLocation?.locationName,
           status: "finalized",
           startTime: calculatedStartTime,
           // No notarization time observed yet
           finalizationTime: currentTime,
           block: finalized.block,
           actualFinalizationLatency,
-        }, ...prevViews];
+        });
       }
 
-      // Limit the number of views to 50
-      if (newViews.length > 50) {
-        // Clean up any timeouts for views we're about to remove
-        for (let i = 50; i < newViews.length; i++) {
-          if (newViews[i].timeoutId) {
-            clearTimeout(newViews[i].timeoutId);
-          }
-        }
-        newViews = newViews.slice(0, 50);
-      }
-
-      return newViews;
+      return retainNewestViews(newViews);
     });
-  }, [adjustTime]);
+  }, [adjustTime, LOCATIONS, PARTICIPANTS, observeView, fillMissedViews]);
 
-  // Update current time every 50ms to force re-render for growing bars
+  // Batch verified updates and advance the display clock even when views are unchanged.
   useEffect(() => {
     const interval = setInterval(() => {
-      currentTimeRef.current = adjustTime(Date.now());
-      // Force re-render without relying on state updates
-      setViews(views => [...views]);
-    }, 50);
+      setCurrentTime(adjustTime(Date.now()));
+      const verified = currentPoolRef.current?.drain() ?? [];
+      for (const { kind, artifact, receivedAt, skipped } of verified) {
+        if (skipped) {
+          // A processing gap starts a new observation baseline. Later verified observations
+          // may still reveal missing views.
+          lastObservedViewRef.current = null;
+        }
+        if (!artifact) {
+          continue;
+        }
+        switch (kind) {
+          case 0:
+            handleSeed(artifact as SeedJs, receivedAt);
+            break;
+          case 1:
+            handleNotarization(artifact as CertifiedBlockJs, receivedAt);
+            break;
+          case 2:
+            handleFinalization(artifact as CertifiedBlockJs, receivedAt);
+            break;
+        }
+      }
+    }, VIEW_RENDER_INTERVAL);
     return () => clearInterval(interval);
-  }, [adjustTime]);
-
-  // Update handler refs when the handlers change
-  useEffect(() => {
-    handleSeedRef.current = handleSeed;
-  }, [handleSeed]);
-
-  useEffect(() => {
-    handleNotarizedRef.current = handleNotarization;
-  }, [handleNotarization]);
-
-  useEffect(() => {
-    handleFinalizedRef.current = handleFinalization;
-  }, [handleFinalization]);
+  }, [adjustTime, handleSeed, handleNotarization, handleFinalization]);
 
   // WebSocket connection management with fixed single-connection approach
   useEffect(() => {
@@ -610,9 +567,28 @@ const App: React.FC = () => {
       return;
     }
 
-    // Skip if already initialized to prevent duplicate connections during development mode's double-invocation
-    if (isInitializedRef.current) return;
-    isInitializedRef.current = true;
+    let cancelled = false;
+    let verifierPool: ConsensusWorkerPool | undefined;
+
+    // A stopped verifier cannot serve a new connection. Cancel reconnect work before closing
+    // the socket so queued socket events cannot restart this effect's transport.
+    const stopConnection = () => {
+      cancelled = true;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+
+      if (wsRef.current) {
+        const ws = wsRef.current;
+        wsRef.current = null;
+        try {
+          ws.close(1000, "Connection stopped");
+        } catch (err) {
+          console.error("Error closing WebSocket:", err);
+        }
+      }
+    };
 
     const connectWebSocket = () => {
       // Clear any existing reconnection timers
@@ -634,12 +610,15 @@ const App: React.FC = () => {
 
       // Create new WebSocket connection
       const wsCreationTime = Date.now();
-      const protocol = MODE === 'local' ? 'ws' : 'wss';
-      const ws = new WebSocket(`${protocol}://${BACKEND_URL}/consensus/ws`);
+      const ws = new WebSocket(`${getWebSocketBackendUrl(BACKEND_URL)}/consensus/ws`);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
       ws.onopen = () => {
+        if (cancelled) {
+          ws.close(1000, "Connection stopped");
+          return;
+        }
         console.log(`WebSocket connected: ${BACKEND_URL}`);
         setErrorMessage("");
         setShowError(false);
@@ -648,20 +627,8 @@ const App: React.FC = () => {
       ws.onmessage = (event) => {
         const data = new Uint8Array(event.data);
         const kind = data[0];
-        const payload = data.slice(1);
-        switch (kind) {
-          case 0: // Seed
-            const seed = parse_seed(PUBLIC_KEY, payload);
-            if (seed) handleSeedRef.current(seed);
-            break;
-          case 1: // Notarization
-            const notarized = parse_notarized(PUBLIC_KEY, payload);
-            if (notarized) handleNotarizedRef.current(notarized);
-            break;
-          case 2: // Finalization
-            const finalized = parse_finalized(PUBLIC_KEY, payload);
-            if (finalized) handleFinalizedRef.current(finalized);
-            break;
+        if (kind <= 2) {
+          verifierPool?.verify(kind, data.slice(1), Date.now());
         }
       };
 
@@ -670,6 +637,9 @@ const App: React.FC = () => {
       };
 
       ws.onclose = (event) => {
+        if (cancelled) {
+          return;
+        }
         console.error(`WebSocket closed with code: ${event.code}`);
 
         // Check for potential rate limiting (code 1006 is "Abnormal Closure")
@@ -700,31 +670,40 @@ const App: React.FC = () => {
 
     const setup = async () => {
       await init();
+      if (cancelled) {
+        return;
+      }
+      verifierPool = new ConsensusWorkerPool(
+        consensusWorkerCount(navigator.hardwareConcurrency || 4),
+        createConsensusWorker,
+        PUBLIC_KEY,
+        standardCertificates,
+        () => {
+          stopConnection();
+          setErrorMessage("A consensus verifier stopped unexpectedly. Refresh to reconnect.");
+          setShowError(true);
+        },
+      );
+      currentPoolRef.current = verifierPool;
       connectWebSocket();
     };
 
-    setup();
+    setup().catch((error) => {
+      if (cancelled) {
+        return;
+      }
+      console.error("Unable to initialize consensus verifiers:", error);
+      setErrorMessage("Consensus verification could not start. Refresh to retry.");
+      setShowError(true);
+    });
 
-    // Cleanup function when component unmounts
+    // Dispose the connection and verifiers when this effect ends.
     return () => {
-      // Clear any reconnection timers
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
-
-      // Close and clean up the websocket
-      if (wsRef.current) {
-        const ws = wsRef.current;
-        wsRef.current = null; // Clear reference first to prevent reconnection attempts
-        try {
-          ws.close(1000, "Component unmounting");
-        } catch (err) {
-          console.error("Error closing WebSocket during cleanup:", err);
-        }
-      }
+      stopConnection();
+      verifierPool?.terminate();
+      currentPoolRef.current = null;
     };
-  }, [isLoading, isInMaintenance, BACKEND_URL, PUBLIC_KEY]);
+  }, [selectedCluster, isLoading, isInMaintenance, BACKEND_URL, PUBLIC_KEY, standardCertificates]);
 
   // Loading state - show nothing until we get the result of the health check
   if (isLoading) {
@@ -815,22 +794,22 @@ const App: React.FC = () => {
                 url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png?key=cb1_29si_1_944f50395a982fb974c926e1"
                 attribution='&copy; OSM | &copy; CARTO</a>'
               />
-              {views.length > 0 && views[0].location !== undefined && (
+              {mappedView?.location !== undefined && (
                 <Marker
-                  key={views[0].view}
-                  position={views[0].location}
+                  key={mappedView.view}
+                  position={mappedView.location}
                   icon={markerIcon}
                 >
                   <Popup>
                     <div>
-                      <strong>View: {views[0].view}</strong><br />
-                      Location: {views[0].locationName}<br />
-                      Status: {views[0].status}<br />
-                      {views[0].block && (
-                        <>Block Height: {views[0].block.height}<br /></>
+                      <strong>View: {mappedView.view}</strong><br />
+                      Location: {mappedView.locationName}<br />
+                      Status: {mappedView.status}<br />
+                      {mappedView.block && (
+                        <>Block Height: {mappedView.block.height}<br /></>
                       )}
-                      {views[0].startTime && (
-                        <>Start Time: {new Date(views[0].startTime).toLocaleTimeString()}<br /></>
+                      {mappedView.startTime && (
+                        <>Start Time: {new Date(mappedView.startTime).toLocaleTimeString()}<br /></>
                       )}
                     </div>
                   </Popup>
@@ -854,19 +833,20 @@ const App: React.FC = () => {
           <div className="bars-header">
             <h2 className="bars-title">Timeline</h2>
             <div className="legend-container">
-              <LegendItem color={"#0000eeff"} label="Seeded" />
+              <LegendItem color={leaderIndicator.color} label={leaderIndicator.label} />
               <LegendItem color={"#000"} label="Locked" />
               <LegendItem color={"#228B22ff"} label="Finalized" />
             </div>
           </div>
 
           <div className="bars-list">
-            {views.slice(0, 50).map((viewData) => (
+            {views.slice(0, MAX_RENDERED_VIEWS).map((viewData) => (
               <Bar
                 key={viewData.view}
                 viewData={viewData}
-                currentTime={currentTimeRef.current}
+                currentTime={currentTime}
                 isMobile={isMobile}
+                standardCertificates={standardCertificates}
               />
             ))}
           </div>
@@ -885,6 +865,7 @@ const App: React.FC = () => {
       <AboutModal
         isOpen={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
+        clusterConfig={clusterConfig}
       />
       <KeyInfoModal
         isOpen={isKeyInfoModalOpen}
@@ -918,13 +899,14 @@ interface BarProps {
   viewData: ViewData;
   currentTime: number;
   isMobile: boolean;
-  maxContainerWidth?: number;
+  standardCertificates: boolean;
 }
 
 // Replace the existing Bar component with this updated version
 
-const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
+const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, standardCertificates }) => {
   const { view, status, startTime, notarizationTime, finalizationTime, signature, block, actualNotarizationLatency, actualFinalizationLatency } = viewData;
+  const timelineIdentifier = getTimelineIdentifier(standardCertificates, signature, block?.digest);
   const [measuredWidth, setMeasuredWidth] = useState(isMobile ? 200 : 500); // Reasonable default
   const barContainerRef = useRef<HTMLDivElement>(null);
 
@@ -1010,38 +992,32 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     }
   }
 
-  // Now calculate bar widths based on the actual latency values
-  const calculateScaledWidth = (latency: number) => {
-    // Apply scaling factor to keep bars within reasonable size
-    return Math.min(latency / SCALE_DURATION, 1) * measuredWidth;
-  };
-
   // Calculate the widths for different bar segments
   if (status === "growing" || status === "unknown") {
-    totalWidth = calculateScaledWidth(growingLatency);
+    totalWidth = scaleTimelineWidth(growingLatency, measuredWidth);
     // Ensure growing bars are visible but don't exceed available width
     totalWidth = Math.min(Math.max(totalWidth, growingLatency > 50 ? minSegmentWidth : 0), measuredWidth);
   } else if (status === "notarized") {
-    totalWidth = calculateScaledWidth(notarizedLatency);
+    totalWidth = scaleTimelineWidth(notarizedLatency, measuredWidth);
     // Ensure notarized bars meet minimum width
     totalWidth = Math.max(totalWidth, minBarWidth);
   } else if (status === "finalized") {
     if (notarizationTime) {
       // Calculate notarized segment width
-      notarizedWidth = calculateScaledWidth(notarizedLatency);
+      notarizedWidth = scaleTimelineWidth(notarizedLatency, measuredWidth);
       notarizedWidth = Math.max(notarizedWidth, minSegmentWidth);
 
       // Calculate finalized segment width (difference between finalization and notarization)
       const finalizationDelta = finalizedLatency - notarizedLatency;
       if (finalizationDelta > 0) {
-        finalizedWidth = calculateScaledWidth(finalizationDelta);
+        finalizedWidth = scaleTimelineWidth(finalizationDelta, measuredWidth);
         finalizedWidth = Math.max(finalizedWidth, minSegmentWidth / 2);
       }
 
       totalWidth = notarizedWidth + finalizedWidth;
     } else {
       // Without notarization time, use the entire bar for finalization
-      totalWidth = calculateScaledWidth(finalizedLatency);
+      totalWidth = scaleTimelineWidth(finalizedLatency, measuredWidth);
       totalWidth = Math.max(totalWidth, minBarWidth);
     }
   } else if (status === "timed_out") {
@@ -1108,8 +1084,12 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
     <div className="bar-row">
       <div className="view-info" style={{ width: `${viewInfoWidth}px` }}>
         <div className="view-number">{view}</div>
-        <div className="view-signature">
-          {signature ? hexUint8Array(signature) : ""}
+        <div
+          className="view-identifier"
+          style={{ color: timelineIdentifier.color }}
+          title={timelineIdentifier.fullValue ? `${timelineIdentifier.label}: ${timelineIdentifier.fullValue}` : undefined}
+        >
+          {timelineIdentifier.value}
         </div>
       </div>
 
@@ -1154,7 +1134,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
           {/* Finalized state with notarization */}
           {status === "finalized" && !renderFinalizedWithoutNotarization && (
             <>
-              {/* Base segment (seed to notarization) */}
+              {/* Base segment (proposal or seed to notarization) */}
               <div
                 className="bar-segment growing"
                 style={{ width: `${notarizedWidth}px` }}
@@ -1207,7 +1187,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
         {/* Timing information underneath */}
         <div className="timing-info">
           {/* Show timing for all states that need it */}
-          {(signature || status === "unknown") && (
+          {(standardCertificates || signature || status === "unknown") && (
             <>
               {/* Latency at notarization point - only show if text exists and we have notarization */}
               {!renderFinalizedWithoutNotarization &&

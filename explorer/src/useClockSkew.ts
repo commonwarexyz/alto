@@ -1,100 +1,155 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 
-// The source to use as a time oracle
+// External time oracle for estimating local clock skew.
+// The trace response's `ts` field reports seconds since the Unix epoch.
 const endpoint = 'https://1.1.1.1/cdn-cgi/trace';
 
-// Timeout for any request (in milliseconds)
+// Timeout for each request, in milliseconds
 const timeout = 3000;
 
-// Interval to fetch server time (in milliseconds)
-const interval = 15000;
+// Interval between refinement samples, in milliseconds. Not a multiple of a second, so successive
+// samples fall at different points within the oracle's second instead of at one fixed phase.
+const interval = 15_333;
+
+// A burst spans just over a second to sample across the oracle's second rollover.
+const burstDuration = 1100;
+
+// Minimum spacing between burst samples, in milliseconds
+const burstSpacing = 40;
+
+/** Bounds on the local clock's skew implied by one sample: the skew lies in (lower, upper]. */
+interface Bounds {
+    lower: number;
+    upper: number;
+}
 
 /**
- * Custom hook to detect clock skew between client and server
- * Runs once on mount and then every 15 seconds, using the latest successful measurement as the skew
+ * Bounds local clock skew using a single oracle response. The oracle reads its clock somewhere
+ * between request start and response headers. A reported time S with resolution R, both in
+ * milliseconds, represents an actual oracle time in [S, S + R).
+ *
+ * Skew is therefore greater than the local request start minus (S + R), and at most the local
+ * response arrival minus S. Connection and network delays widen this interval.
+ */
+async function sample(): Promise<Bounds> {
+    // Anchor in wall time and measure duration monotonically. Stop at response headers
+    // so body delivery and parsing do not inflate the measured round trip.
+    const startTime = performance.now();
+    const localStartTime = Date.now();
+    const response = await fetch(endpoint, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(timeout),
+    });
+
+    const elapsed = performance.now() - startTime;
+    if (!response.ok) {
+        throw new Error(`API returned status ${response.status}`);
+    }
+
+    // Trace timestamps are Unix seconds, while browser timestamps and skew bounds use milliseconds.
+    const text = await response.text();
+    const ts = text.split('\n').find(line => line.startsWith('ts='))?.slice(3) ?? '';
+    const serverTime = Number(ts) * 1000;
+    if (!Number.isFinite(serverTime) || serverTime <= 0) {
+        throw new Error('Invalid ts field');
+    }
+
+    // A non-zero fraction indicates millisecond precision. Otherwise use whole seconds.
+    const resolution = /\.\d*[1-9]/.test(ts) ? 1 : 1000;
+    return {
+        lower: localStartTime - serverTime - resolution,
+        upper: localStartTime + elapsed - serverTime,
+    };
+}
+
+/**
+ * Estimates local clock skew against the oracle by intersecting bounds from multiple samples.
+ *
+ * A whole-second timestamp leaves roughly a second of uncertainty. The startup burst seeks
+ * observations on both sides of a rollover. Successful samples on either side narrow the
+ * interval to their spacing plus the request round trip. Periodic samples refine those bounds.
+ *
+ * A contradiction means the stored bounds no longer describe the clock, so acquisition starts
+ * again with a warm connection and fresh samples. The last published correction stays in use
+ * until a new acquisition succeeds, including when requests or timestamp parsing fail.
  */
 export const useClockSkew = () => {
     const [clockSkew, setClockSkew] = useState<number>(0);
-    const isFirstMountRef = useRef(true);
 
     useEffect(() => {
-        const fetchSkew = async () => {
+        let active = true;
+        let lower = -Infinity;
+        let upper = Infinity;
+
+        // Compatible samples narrow the current interval. A contradictory sample replaces it.
+        // Return whether replacement was necessary so a refinement can trigger fresh acquisition.
+        const updateBounds = (bounds: Bounds): boolean => {
+            const reset = bounds.lower > upper || bounds.upper < lower;
+            lower = reset ? bounds.lower : Math.max(lower, bounds.lower);
+            upper = reset ? bounds.upper : Math.min(upper, bounds.upper);
+            return reset;
+        };
+        const report = (err: unknown) => {
+            if (active) console.error('Failed to fetch skew:', err);
+        };
+
+        const refresh = async () => {
             try {
-                // Establish connection with a HEAD request
-                const controller = new AbortController();
-                const connectionTimeoutId = setTimeout(() => {
-                    controller.abort('Connection timeout exceeded');
-                }, timeout);
+                // An uninitialized clock must warm before its first measurement. Once initialized,
+                // a periodic sample can narrow the bounds or trigger a fresh acquisition.
+                if (upper === Infinity || updateBounds(await sample())) {
+                    // A periodic request may finish after cleanup, when it must not start a warmup.
+                    if (!active) return;
 
-                try {
-                    await fetch(endpoint, {
-                        method: 'HEAD',
-                        signal: controller.signal,
+                    // The detection request may include connection setup. Discard its bounds and
+                    // drain an unmeasured warmup before recording fresh samples. If acquisition
+                    // fails, infinite bounds force another warmup while the published skew survives.
+                    lower = -Infinity;
+                    upper = Infinity;
+                    const warmup = await fetch(endpoint, {
+                        cache: 'no-store',
+                        signal: AbortSignal.timeout(timeout),
                     });
-                    clearTimeout(connectionTimeoutId);
-                } catch (error) {
-                    if (!(error instanceof DOMException && error.name === 'AbortError')) {
-                        throw error;
+                    await warmup.text();
+
+                    // Samples just before and after a second rollover constrain opposite sides
+                    // of the skew interval, so acquisition spans slightly more than one second.
+                    const end = performance.now() + burstDuration;
+                    while (active) {
+                        // One failed request must not discard bounds from successful samples.
+                        const next = performance.now() + burstSpacing;
+                        try {
+                            updateBounds(await sample());
+                        } catch (err) {
+                            report(err);
+                        }
+                        if (!active || performance.now() >= end) break;
+                        await new Promise(resolve => setTimeout(resolve, Math.max(0, next - performance.now())));
                     }
-                    clearTimeout(connectionTimeoutId);
                 }
 
-                // Perform the GET request to fetch server time
-                const startTime = performance.now();
-                const localStartTime = Date.now();
-                const response = await fetch(endpoint, {
-                    signal: AbortSignal.timeout(timeout),
-                });
-                if (!response.ok) {
-                    throw new Error(`API returned status ${response.status}`);
+                // Publish only an active, initialized estimate. Its midpoint still has uncertainty
+                // from sampling and network delays. Rounding keeps corrected timestamps integral.
+                if (active && upper < Infinity) {
+                    const skew = Math.round((lower + upper) / 2);
+                    console.log(`Measured clock skew: ${skew}ms (±${Math.round((upper - lower) / 2)}ms)`);
+                    setClockSkew(skew);
                 }
-                const endTime = performance.now();
-                const networkLatency = Math.floor((endTime - startTime) / 4);
-
-                // Parse server time from the response
-                const text = await response.text();
-                const lines = text.split('\n');
-                const tsLine = lines.find(line => line.startsWith('ts='));
-                if (!tsLine) {
-                    throw new Error('ts field not found in response');
-                }
-                const serverTimeStr = tsLine.substring(3);
-                const serverTimeFloat = parseFloat(serverTimeStr);
-                if (isNaN(serverTimeFloat)) {
-                    throw new Error('Invalid ts field format');
-                }
-                const serverTime = Math.floor(serverTimeFloat * 1000); // Convert to ms
-
-                // Calculate skew
-                const adjustedLocalTime = localStartTime + networkLatency;
-                const skew = adjustedLocalTime - serverTime;
-
-                // Update state with the measured skew
-                console.log(`Measured clock skew: ${skew}ms`);
-                setClockSkew(skew);
             } catch (err) {
-                console.error('Failed to fetch skew:', err);
-                // Keep the previous skew if the request fails
+                report(err);
             }
         };
 
-        // Run immediately only on the first mount
-        if (isFirstMountRef.current) {
-            isFirstMountRef.current = false;
-            fetchSkew();
-        }
-
-        // Set up an interval to run every 5 seconds
-        const intervalId = setInterval(fetchSkew, interval);
-
-        // Cleanup interval on unmount
-        return () => clearInterval(intervalId);
+        // Estimate skew immediately, then refresh periodically.
+        refresh();
+        const intervalId = setInterval(refresh, interval);
+        return () => {
+            // Stop polling and ignore completions from this effect after cleanup.
+            active = false;
+            clearInterval(intervalId);
+        };
     }, []);
 
-    // Utility functions
-    const adjustTime = (timestamp: number): number => {
-        return timestamp - clockSkew;
-    };
-
-    return adjustTime;
+    // Convert browser wall time to the time oracle's clock.
+    return (timestamp: number): number => timestamp - clockSkew;
 };

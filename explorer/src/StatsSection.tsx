@@ -1,21 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Cluster, ClusterConfig, MODE } from './config';
-
-// ViewData interface (no changes)
-export interface ViewData {
-    view: number;
-    location?: [number, number];
-    locationName?: string;
-    status: "growing" | "notarized" | "finalized" | "timed_out" | "unknown";
-    startTime: number;
-    notarizationTime?: number;
-    finalizationTime?: number;
-    signature?: Uint8Array;
-    block?: any; // BlockJs
-    timeoutId?: any; // NodeJS.Timeout
-    actualNotarizationLatency?: number;
-    actualFinalizationLatency?: number;
-}
+import { BlockJs, ViewData } from './types';
 
 interface StatsSectionProps {
     views: ViewData[];
@@ -181,7 +166,8 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onC
         .filter((time): time is number => time !== null);
 
     const viewsWithBlocks = views
-        .filter(view => view.block && view.block.height && view.block.timestamp)
+        .filter((view): view is ViewData & { block: BlockJs } =>
+            !!(view.block && view.block.height))
         .sort((a, b) => a.block.height - b.block.height);
 
     const blockTimes: number[] = [];
@@ -265,7 +251,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onC
             : 0;
 
     const tooltips = {
-        blockTime: "The median difference between consecutive block timestamps.<br><br><i>This is functionally equivalent to the average validator's time to lock (unlike your browser, validators are connected directly to each other instead of an intermediary streaming layer).</i>",
+        blockTime: "The median difference between consecutive block timestamps.<br><br><i>This measures block production cadence, including proposal pacing. The browser's Locked and Finalized latencies include delivery through the streaming layer.</i>",
         timeToLock: "The median latency from block proposal to receiving 2f+1 votes, as observed by your browser.<br><br><i>Locked blocks must be included in the canonical chain if the view is not nullified.</i>",
         timeToFinalize: "The median latency from block proposal to receiving 2f+1 finalizes, as observed by your browser.<br><br><i>Once finalized, a block is immutable.</i>"
     };
@@ -292,7 +278,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onC
                         <div className="metric-container">
                             <div className="stat-label">Block Time</div>
                             <div className="stat-value">
-                                {medianBlockTime > 0 ? `${medianBlockTime}ms` : "N/A"}
+                                {blockTimes.length > 0 ? `${medianBlockTime}ms` : "N/A"}
                             </div>
                         </div>
                     </Tooltip>
@@ -324,7 +310,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onC
 
             <div className="stats-disclaimer">
                 All latency measurements made by your browser are only performed after verifying the integrity of incoming artifacts with the network key.
-                Local clock skew is automatically detected and corrected.
+                Local clock skew is estimated from an external time source.
             </div>
         </div >
     );

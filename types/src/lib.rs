@@ -1,7 +1,6 @@
 //! Common types used throughout `alto`.
 
 use commonware_consensus::types::Epoch;
-use commonware_formatting::hex;
 use commonware_utils::NZU64;
 use std::num::NonZero;
 
@@ -10,8 +9,9 @@ pub use block::{Block, Finalized, Notarized};
 
 mod consensus;
 pub use consensus::{
-    Activity, Context, Finalization, Identity, Notarization, PublicKey, Scheme, Seed, Seedable,
-    Signature,
+    Activity, CertificateMode, Context, Finalization, Identity, Notarization, PublicKey,
+    RotatingElector, Scheme, Seed, Seedable, Signature, StandardScheme, VrfScheme,
+    ROTATING_ELECTOR,
 };
 
 pub mod wasm;
@@ -50,20 +50,13 @@ impl Kind {
             _ => None,
         }
     }
-
-    pub fn to_hex(&self) -> String {
-        match self {
-            Self::Seed => hex(&[0]),
-            Self::Notarization => hex(&[1]),
-            Self::Finalization => hex(&[2]),
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use commonware_codec::{DecodeExt, Encode};
+    use bytes::Bytes;
+    use commonware_codec::{Decode, Encode, EncodeSize, Read};
     use commonware_consensus::{
         simplex::{
             scheme::bls12381_threshold::vrf as bls12381_threshold,
@@ -76,7 +69,58 @@ mod tests {
         Digest, Digestible, Hasher, Sha256, Signer,
     };
     use commonware_parallel::Sequential;
+    use commonware_utils::non_empty;
     use rand::{rngs::StdRng, SeedableRng};
+
+    #[test]
+    fn block_data_above_one_mib_round_trips_and_is_committed_by_digest() {
+        let context = Context {
+            round: Round::new(EPOCH, View::new(9)),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::new(8), sha256::Digest::EMPTY),
+        };
+        let parent = Sha256::hash(&[b"parent"]);
+        let empty = Block::new(context.clone(), parent, Height::new(10), 100, Bytes::new());
+        let data = Bytes::from(vec![0xa5; 1024 * 1024 + 1]);
+        let block = Block::new(context, parent, Height::new(10), 100, data.clone());
+
+        assert_eq!(
+            block.encode_size(),
+            empty.encode_size() - Bytes::new().encode_size() + data.encode_size()
+        );
+        assert_eq!(block.encode_inline_size(), block.encode_size() - data.len());
+        assert_ne!(block.digest(), empty.digest());
+        assert_eq!(
+            Block::decode_cfg(block.encode(), &Block::unbounded_codec_config()).unwrap(),
+            block
+        );
+        assert_eq!(
+            Block::decode_cfg(block.encode(), &Block::codec_config(1024 * 1024 + 1)).unwrap(),
+            block
+        );
+
+        // Validators reject payloads larger than the configured block size before caching them.
+        // Smaller payloads (e.g. the empty genesis block) still decode.
+        assert!(Block::decode_cfg(block.encode(), &Block::codec_config(1024 * 1024)).is_err());
+        assert_eq!(
+            Block::decode_cfg(empty.encode(), &Block::codec_config(1024)).unwrap(),
+            empty
+        );
+        assert_eq!(
+            Block::decode_cfg(empty.encode(), &Block::codec_config(0)).unwrap(),
+            empty
+        );
+
+        let mut encoded = block.encode().to_vec();
+        let suffix = [1, 2, 3, 4];
+        encoded.extend_from_slice(&suffix);
+        let mut reader = encoded.as_slice();
+        assert_eq!(
+            Block::read_cfg(&mut reader, &Block::unbounded_codec_config()).unwrap(),
+            block
+        );
+        assert_eq!(reader, suffix);
+    }
 
     #[test]
     fn test_notarized() {
@@ -92,8 +136,14 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(8), sha256::Digest::EMPTY),
         };
-        let digest = Sha256::hash(b"hello world");
-        let block = Block::new(context, digest, Height::new(10), 100);
+        let digest = Sha256::hash(&[b"hello world"]);
+        let block = Block::new(
+            context,
+            digest,
+            Height::new(10),
+            100,
+            Bytes::from_static(b"random junk bytes"),
+        );
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
@@ -106,12 +156,14 @@ mod tests {
             .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
             .collect();
         let notarization =
-            Notarization::from_notarizes(&schemes[0], &notarizes, &Sequential).unwrap();
+            Notarization::from_notarizes(&schemes[0], non_empty![@&notarizes], &Sequential)
+                .unwrap();
         let notarized = Notarized::new(notarization, block.clone());
 
         // Serialize and deserialize
         let encoded = notarized.encode();
-        let decoded = Notarized::decode(encoded).expect("failed to decode notarized");
+        let decoded = Notarized::decode_cfg(encoded, &Block::unbounded_codec_config())
+            .expect("failed to decode notarized");
         assert_eq!(notarized, decoded);
 
         // Verify notarized
@@ -132,8 +184,8 @@ mod tests {
             leader: ed25519::PrivateKey::from_seed(0).public_key(),
             parent: (View::new(8), sha256::Digest::EMPTY),
         };
-        let digest = Sha256::hash(b"hello world");
-        let block = Block::new(context, digest, Height::new(10), 100);
+        let digest = Sha256::hash(&[b"hello world"]);
+        let block = Block::new(context, digest, Height::new(10), 100, Bytes::new());
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(9)),
             View::new(8),
@@ -146,12 +198,14 @@ mod tests {
             .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
             .collect();
         let finalization =
-            Finalization::from_finalizes(&schemes[0], &finalizes, &Sequential).unwrap();
+            Finalization::from_finalizes(&schemes[0], non_empty![@&finalizes], &Sequential)
+                .unwrap();
         let finalized = Finalized::new(finalization, block.clone());
 
         // Serialize and deserialize
         let encoded = finalized.encode();
-        let decoded = Finalized::decode(encoded).expect("failed to decode finalized");
+        let decoded = Finalized::decode_cfg(encoded, &Block::unbounded_codec_config())
+            .expect("failed to decode finalized");
         assert_eq!(finalized, decoded);
 
         // Verify finalized

@@ -5,7 +5,7 @@ use crate::{
     },
     resolver::Resolver,
 };
-use alto_types::{Block, Context, Scheme, EPOCH, EPOCH_LENGTH};
+use alto_types::{Block, Scheme, EPOCH_LENGTH};
 use commonware_consensus::{
     marshal::{
         self,
@@ -15,12 +15,7 @@ use commonware_consensus::{
     },
     types::{FixedEpocher, Height, ViewDelta},
 };
-use commonware_cryptography::{
-    certificate::ConstantProvider,
-    ed25519::PrivateKey,
-    sha256::{self, Digest, Sha256},
-    Digest as _, Hasher, Signer,
-};
+use commonware_cryptography::{certificate::ConstantProvider, sha256::Digest};
 use commonware_parallel::Strategy;
 use commonware_runtime::{
     spawn_cell, BufferPooler, ContextCell, Handle, Metrics, Spawner, Storage,
@@ -34,27 +29,6 @@ use tracing::{error, warn};
 
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
 const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(1024);
-const GENESIS: &[u8] = b"commonware is neat";
-
-fn genesis() -> Block {
-    let genesis_context = Context {
-        round: commonware_consensus::types::Round::new(
-            EPOCH,
-            commonware_consensus::types::View::zero(),
-        ),
-        leader: PrivateKey::from_seed(0).public_key(),
-        parent: (
-            commonware_consensus::types::View::zero(),
-            sha256::Digest::EMPTY,
-        ),
-    };
-    Block::new(
-        genesis_context,
-        Sha256::hash(GENESIS),
-        commonware_consensus::types::Height::zero(),
-        0,
-    )
-}
 
 /// The engine that drives the follower's [MarshalActor].
 ///
@@ -63,7 +37,7 @@ fn genesis() -> Block {
 /// trusted source and a [Resolver] to backfill missing
 /// blocks.
 #[allow(clippy::type_complexity)]
-pub struct Engine<E, T>
+pub struct Engine<E, T, C>
 where
     E: BufferPooler
         + commonware_runtime::Clock
@@ -74,23 +48,24 @@ where
         + Storage
         + Metrics,
     T: Strategy,
+    C: Scheme,
 {
     context: ContextCell<E>,
     marshal: MarshalActor<
         E,
         Standard<Block>,
-        ConstantProvider<Scheme, commonware_consensus::types::Epoch>,
-        Certificates<E>,
+        ConstantProvider<C, commonware_consensus::types::Epoch>,
+        Certificates<E, C>,
         Blocks<E>,
         FixedEpocher,
         T,
     >,
     pruning_depth: Option<u64>,
-    marshal_mailbox: MarshalMailbox<Scheme, Standard<Block>>,
+    marshal_mailbox: MarshalMailbox<C, Standard<Block>>,
     mailbox_size: NonZeroUsize,
 }
 
-impl<E, T> Engine<E, T>
+impl<E, T, C> Engine<E, T, C>
 where
     E: BufferPooler
         + commonware_runtime::Clock
@@ -101,20 +76,17 @@ where
         + Storage
         + Metrics,
     T: Strategy,
+    C: Scheme,
 {
     /// Create a new [Engine].
     pub async fn new(
         mut context: E,
-        scheme: Scheme,
+        scheme: C,
         mailbox_size: NonZeroUsize,
         max_repair: NonZero<usize>,
         strategy: T,
         pruning_depth: Option<u64>,
-    ) -> (
-        Self,
-        MarshalMailbox<Scheme, Standard<Block>>,
-        Option<Height>,
-    ) {
+    ) -> (Self, MarshalMailbox<C, Standard<Block>>, Option<Height>) {
         // Initialize the finalized certificate and block archives. Uses
         // prunable archives when pruning is enabled, immutable otherwise.
         let (finalizations_by_height, finalized_blocks, page_cache) =
@@ -123,22 +95,22 @@ where
         // Create marshal
         let provider = ConstantProvider::new(scheme);
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
-        let (marshal, mailbox, last_processed_height) = MarshalActor::init(
+        let (marshal, mailbox, floor) = MarshalActor::init(
             context.child("marshal"),
             finalizations_by_height,
             finalized_blocks,
             marshal::Config {
                 provider,
                 epocher,
-                start: marshal::Start::Genesis(genesis()),
+                start: marshal::Start::Genesis(Block::genesis()),
                 partition_prefix: "follower-marshal".to_string(),
                 mailbox_size,
-                view_retention_timeout: VIEW_RETENTION_TIMEOUT,
+                view_retention: VIEW_RETENTION_TIMEOUT,
                 prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
                 replay_buffer: REPLAY_BUFFER,
                 key_write_buffer: WRITE_BUFFER,
                 value_write_buffer: WRITE_BUFFER,
-                block_codec_config: (),
+                block_codec_config: Block::unbounded_codec_config(),
                 max_repair,
                 max_pending_acks: MAX_PENDING_ACKS,
                 page_cache,
@@ -155,7 +127,7 @@ where
             marshal_mailbox: mailbox.clone(),
             mailbox_size,
         };
-        (engine, mailbox, last_processed_height)
+        (engine, mailbox, floor.height())
     }
 
     /// Start the [Engine].
@@ -189,6 +161,7 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{MockSource, TestFixture};
+    use alto_types::EPOCH;
     use bytes::Bytes;
     use commonware_codec::Encode;
     use commonware_consensus::types::{Round, View};
@@ -201,7 +174,7 @@ mod tests {
 
     async fn start_engine_with_handler(
         context: commonware_runtime::deterministic::Context,
-        scheme: Scheme,
+        scheme: alto_types::VrfScheme,
     ) -> handler::Handler<Digest> {
         let (engine, _, _) = Engine::new(
             context.child("engine"),

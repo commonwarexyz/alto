@@ -1,8 +1,7 @@
-use alto_chain::{engine, Config, Peers};
-use alto_client::Client;
-use alto_types::{EPOCH, NAMESPACE};
+use alto_chain::{engine, Config, Leader, Peers, LEADER_TIMEOUT};
+use alto_types::{Scheme, StandardScheme, VrfScheme, EPOCH, NAMESPACE, ROTATING_ELECTOR};
 use clap::{Arg, Command};
-use commonware_codec::{Decode, DecodeExt};
+use commonware_codec::{varint::UInt, Decode, DecodeExt, EncodeSize};
 use commonware_consensus::{marshal, types::ViewDelta};
 use commonware_cryptography::{
     bls12381::primitives::{
@@ -15,8 +14,12 @@ use commonware_cryptography::{
 };
 use commonware_deployer::aws::Hosts;
 use commonware_formatting::from_hex;
-use commonware_p2p::{authenticated::discovery as authenticated, Ingress, Manager};
-use commonware_runtime::{tokio, BufferPoolConfig, Runner, Strategizer, Supervisor as _};
+use commonware_p2p::{
+    authenticated::{discovery as authenticated, peer_set_limit},
+    Ingress, Manager,
+};
+use commonware_parallel::Rayon;
+use commonware_runtime::{tokio, BufferPoolConfig, Runner, Supervisor as _};
 use commonware_utils::{ordered::Set, union_unique, NZUsize, NZU32};
 use futures::future::try_join_all;
 use governor::Quota;
@@ -39,18 +42,58 @@ const RESOLVER_CHANNEL: u64 = 2;
 const BROADCASTER_CHANNEL: u64 = 3;
 const MARSHAL_CHANNEL: u64 = 4;
 
-const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
+// Per-peer message quotas: votes, certificates, and resolver traffic use the base quota, while
+// the channels that carry blocks (broadcast and marshal backfill) get a higher one.
+const BASE_CHANNEL_QUOTA_PER_SECOND: u32 = 1_500;
+const BLOCK_CHANNEL_QUOTA_PER_SECOND: u32 = 3_000;
+
 const CERTIFICATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NULLIFY_RETRY: Duration = Duration::from_secs(10);
 const ACTIVITY_TIMEOUT: ViewDelta = ViewDelta::new(256);
-const SKIP_TIMEOUT: ViewDelta = ViewDelta::new(32);
+const SKIP_TIMEOUT: Duration = Duration::from_secs(11);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(2);
-const FETCH_CONCURRENT: usize = 4;
-const MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
-const MAX_FETCH_COUNT: usize = 16;
-const MAX_FETCH_SIZE: usize = 512 * 1024;
+const MARSHAL_RESOLVER_TIMEOUT: Duration = Duration::from_secs(10);
+const BASE_MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
+
+fn configured_max_message_size(block_size: u32) -> u32 {
+    // Block data contributes its bytes and the codec's variable-length prefix to each message.
+    // The total must remain within the authenticated transport payload limit.
+    let size = u64::from(BASE_MAX_MESSAGE_SIZE)
+        + u64::from(block_size)
+        + UInt(block_size).encode_size() as u64;
+    u32::try_from(size)
+        .ok()
+        .filter(|size| *size <= authenticated::MAX_SIZE)
+        .expect("block size exceeds authenticated transport maximum")
+}
+
+fn resolve_named_http_url(url: &str, hosts: &HashMap<String, IpAddr>) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    if !matches!(scheme, "http" | "https") {
+        return url.to_string();
+    }
+
+    let (authority, suffix) = match rest.split_once('/') {
+        Some((authority, suffix)) => (authority, format!("/{suffix}")),
+        None => (rest, String::new()),
+    };
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (authority, None),
+    };
+    let Some(ip) = hosts.get(host) else {
+        return url.to_string();
+    };
+
+    match port {
+        Some(port) => format!("{scheme}://{ip}:{port}{suffix}"),
+        None => format!("{scheme}://{ip}{suffix}"),
+    }
+}
 
 fn main() {
     // Parse arguments
@@ -72,7 +115,9 @@ fn main() {
     // Load config
     let config_file = matches.get_one::<String>("config").unwrap();
     let config_file = std::fs::read_to_string(config_file).expect("Could not read config file");
-    let config: Config = serde_yaml::from_str(&config_file).expect("Could not parse config file");
+    let mut config: Config =
+        serde_yaml::from_str(&config_file).expect("Could not parse config file");
+    let max_message_size = configured_max_message_size(config.block_size);
     let key = from_hex(&config.private_key).expect("Could not parse private key");
     let signer = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
     let public_key = signer.public_key();
@@ -109,7 +154,7 @@ fn main() {
         .with_tcp_nodelay(Some(true))
         .with_worker_threads(config.worker_threads)
         .with_max_blocking_threads(config.blocking_threads)
-        .with_storage_directory(PathBuf::from(config.directory))
+        .with_storage_directory(PathBuf::from(&config.directory))
         .with_storage_buffer_pool_config(storage_buffer_pool_cfg)
         .with_network_buffer_pool_config(network_buffer_pool_cfg)
         .with_catch_panics(false);
@@ -117,8 +162,38 @@ fn main() {
 
     // Start runtime
     executor.start(|context| async move {
-        // Configure telemetry
         let log_level = Level::from_str(&config.log_level).expect("Invalid log level");
+
+        // Resolve deployed host names for peer discovery and indexer uploads.
+        let hosts = hosts_file.map(|hosts_file| {
+            let hosts_file =
+                std::fs::read_to_string(hosts_file).expect("Could not read hosts file");
+            serde_yaml::from_str::<Hosts>(&hosts_file).expect("Could not parse hosts file")
+        });
+        let hosts_by_name: Option<HashMap<String, IpAddr>> = hosts.as_ref().map(|hosts| {
+            hosts
+                .hosts
+                .iter()
+                .map(|host| (host.name.clone(), host.ip))
+                .collect()
+        });
+        if let (Some(hosts_by_name), Some(indexer_url)) =
+            (hosts_by_name.as_ref(), config.indexer.as_deref())
+        {
+            config.indexer = Some(resolve_named_http_url(indexer_url, hosts_by_name));
+        }
+
+        // Export enabled traces to the deployer's monitoring collector on port 4318.
+        // The deployer allows OTLP traffic from binary hosts to the collector.
+        let traces_sample_rate = config.traces_sample_probability();
+        let traces = hosts
+            .as_ref()
+            .filter(|_| !traces_sample_rate.is_zero())
+            .map(|hosts| tokio::tracing::Config {
+                endpoint: format!("http://{}:4318/v1/traces", hosts.monitoring.private),
+                name: public_key.to_string(),
+                rate: traces_sample_rate,
+            });
         tokio::telemetry::init(
             context.child("telemetry"),
             tokio::telemetry::Logs {
@@ -130,21 +205,21 @@ fn main() {
                 IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                 config.metrics_port,
             )),
-            None,
+            traces,
         );
 
         // Load peers
-        let (ip, peers, bootstrappers) = if let Some(hosts_file) = hosts_file {
-            let hosts_file = std::fs::read_to_string(hosts_file).unwrap();
-            let hosts: Hosts =
-                serde_yaml::from_str(&hosts_file).expect("Could not parse peers file");
-            let peers: HashMap<PublicKey, IpAddr> = hosts
-                .hosts
-                .into_iter()
+        let (ip, peers, bootstrappers) = if let Some(hosts_by_name) = hosts_by_name {
+            let peers: HashMap<PublicKey, IpAddr> = config
+                .allowed_peers
+                .iter()
                 .map(|peer| {
-                    let key = from_hex(&peer.name).expect("Could not parse peer key");
+                    let ip = hosts_by_name
+                        .get(peer)
+                        .expect("Could not find peer in hosts file");
+                    let key = from_hex(peer).expect("Could not parse peer key");
                     let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
-                    (key, peer.ip)
+                    (key, *ip)
                 })
                 .collect();
 
@@ -201,7 +276,7 @@ fn main() {
             &(NZU32!(peers_u32), ModeVersion::v0()),
         )
         .expect("polynomial is invalid");
-        let identity = polynomial.public();
+        let identity = *polynomial.public();
         info!(
             ?public_key,
             ?identity,
@@ -212,6 +287,7 @@ fn main() {
 
         // Configure network
         let p2p_namespace = union_unique(NAMESPACE, b"_P2P");
+        let max_peers_per_set = peer_set_limit(&peers, &public_key);
         let mut p2p_cfg = if config.local {
             authenticated::Config::local(
                 signer.clone(),
@@ -219,7 +295,8 @@ fn main() {
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
                 SocketAddr::new(ip, config.port),
                 bootstrappers,
-                MAX_MESSAGE_SIZE,
+                max_peers_per_set,
+                max_message_size,
             )
         } else {
             authenticated::Config::recommended(
@@ -228,10 +305,12 @@ fn main() {
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
                 SocketAddr::new(ip, config.port),
                 bootstrappers,
-                MAX_MESSAGE_SIZE,
+                max_peers_per_set,
+                max_message_size,
             )
         };
         p2p_cfg.mailbox_size = NZUsize!(config.mailbox_size);
+        p2p_cfg.tracked_peer_sets = NZUsize!(1);
 
         // Start p2p
         let (mut network, mut oracle) =
@@ -242,78 +321,41 @@ fn main() {
         oracle.track(EPOCH.get(), participants.clone());
 
         // Register pending channel
-        let pending_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
-        let pending = network.register(PENDING_CHANNEL, pending_limit, config.message_backlog);
+        let pending_limit =
+            Quota::per_second(NonZeroU32::new(BASE_CHANNEL_QUOTA_PER_SECOND).unwrap());
+        let pending = network.register(PENDING_CHANNEL, pending_limit);
 
         // Register recovered channel
-        let recovered_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
-        let recovered =
-            network.register(RECOVERED_CHANNEL, recovered_limit, config.message_backlog);
+        let recovered_limit =
+            Quota::per_second(NonZeroU32::new(BASE_CHANNEL_QUOTA_PER_SECOND).unwrap());
+        let recovered = network.register(RECOVERED_CHANNEL, recovered_limit);
 
         // Register resolver channel
-        let resolver_limit = Quota::per_second(NonZeroU32::new(128).unwrap());
-        let resolver = network.register(RESOLVER_CHANNEL, resolver_limit, config.message_backlog);
+        let resolver_limit =
+            Quota::per_second(NonZeroU32::new(BASE_CHANNEL_QUOTA_PER_SECOND).unwrap());
+        let resolver = network.register(RESOLVER_CHANNEL, resolver_limit);
 
         // Register broadcast channel
-        let broadcaster_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
-        let broadcaster = network.register(
-            BROADCASTER_CHANNEL,
-            broadcaster_limit,
-            config.message_backlog,
-        );
+        let broadcaster_limit =
+            Quota::per_second(NonZeroU32::new(BLOCK_CHANNEL_QUOTA_PER_SECOND).unwrap());
+        let broadcaster = network.register(BROADCASTER_CHANNEL, broadcaster_limit);
 
         // Register marshal channel
-        let marshal_quota = Quota::per_second(NonZeroU32::new(8).unwrap());
-        let marshal = network.register(MARSHAL_CHANNEL, marshal_quota, config.message_backlog);
+        let marshal_quota =
+            Quota::per_second(NonZeroU32::new(BLOCK_CHANNEL_QUOTA_PER_SECOND).unwrap());
+        let marshal = network.register(MARSHAL_CHANNEL, marshal_quota);
 
         // Create network
         let p2p = network.start();
 
-        let strategy = context.strategy(NZUsize!(config.signature_threads));
-
-        // Create indexer
-        let mut indexer = None;
-        if let Some(indexer_url) = config.indexer.as_deref() {
-            indexer = Some(Client::new(indexer_url, *identity, strategy.clone()));
-        }
-
-        // Create engine
-        let engine_cfg = engine::Config {
-            blocker: oracle.clone(),
-            provider: oracle.clone(),
-            partition_prefix: "engine".to_string(),
-            blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
-            finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
-            me: public_key.clone(),
-            participants,
-            mailbox_size: config.mailbox_size,
-            deque_size: config.deque_size,
-            leader_timeout: LEADER_TIMEOUT,
-            certification_timeout: CERTIFICATION_TIMEOUT,
-            nullify_retry: NULLIFY_RETRY,
-            activity_timeout: ACTIVITY_TIMEOUT,
-            skip_timeout: SKIP_TIMEOUT,
-            fetch_timeout: FETCH_TIMEOUT,
-            max_fetch_count: MAX_FETCH_COUNT,
-            max_fetch_size: MAX_FETCH_SIZE,
-            fetch_concurrent: FETCH_CONCURRENT,
-            fetch_rate_per_peer: resolver_limit,
-            backfiller_max_active: config.backfiller_max_active,
-            backfiller_retry: Duration::from_millis(config.backfiller_retry_ms),
-            indexer,
-            polynomial,
-            share,
-            strategy,
-        };
-        let engine = engine::Engine::new(context.child("engine"), engine_cfg).await;
+        let strategy = Rayon::new(NZUsize!(config.signature_threads)).unwrap();
 
         let marshal_resolver_cfg = marshal::resolver::p2p::Config {
             public_key: public_key.clone(),
             peer_provider: oracle.clone(),
-            blocker: oracle,
+            blocker: oracle.clone(),
             mailbox_size: NZUsize!(config.mailbox_size),
-            initial: Duration::from_secs(1),
-            timeout: Duration::from_secs(2),
+            timeout: MARSHAL_RESOLVER_TIMEOUT,
             fetch_retry_timeout: Duration::from_millis(100),
             priority_requests: false,
             priority_responses: false,
@@ -324,12 +366,105 @@ fn main() {
             marshal,
         );
 
-        // Start engine
-        let engine = engine.start(pending, recovered, resolver, broadcaster, marshal_resolver);
+        macro_rules! start_consensus {
+            ($scheme:ty, $elector:expr, $delay_ms:expr) => {{
+                let scheme = <$scheme>::signer(NAMESPACE, participants, polynomial, share)
+                    .expect("failed to create consensus scheme");
+                let indexer = config.indexer.as_deref().map(|indexer_url| {
+                    alto_client::ClientBuilder::new(
+                        indexer_url,
+                        <$scheme as Scheme>::certificate_verifier(NAMESPACE, identity),
+                        strategy.clone(),
+                    )
+                    .build()
+                });
+                let engine_cfg = engine::Config {
+                    blocker: oracle.clone(),
+                    provider: oracle.clone(),
+                    partition_prefix: "engine".to_string(),
+                    blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
+                    finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
+                    me: public_key.clone(),
+                    scheme,
+                    elector: $elector,
+                    mailbox_size: config.mailbox_size,
+                    deque_size: config.deque_size,
+                    block_size: config.block_size,
+                    proposal_delay_ms: $delay_ms,
+                    leader_timeout: LEADER_TIMEOUT,
+                    certification_timeout: CERTIFICATION_TIMEOUT,
+                    nullify_retry: NULLIFY_RETRY,
+                    activity_timeout: ACTIVITY_TIMEOUT,
+                    skip_timeout: SKIP_TIMEOUT,
+                    fetch_timeout: FETCH_TIMEOUT,
+                    backfiller_max_active: config.backfiller_max_active,
+                    backfiller_retry: Duration::from_millis(config.backfiller_retry_ms),
+                    indexer,
+                    strategy,
+                };
+                engine::Engine::new(context.child("engine"), engine_cfg)
+                    .await
+                    .start(pending, recovered, resolver, broadcaster, marshal_resolver)
+            }};
+        }
+
+        // Consensus, certificate storage, and indexer clients share the selected certificate
+        // scheme for the process lifetime.
+        let engine = match config.leader {
+            Leader::Stable {
+                delay_ms,
+                term_length,
+                optimistic_views,
+            } => start_consensus!(
+                StandardScheme,
+                engine::stable_elector(term_length, optimistic_views),
+                delay_ms
+            ),
+            Leader::Rotating { delay_ms } => {
+                start_consensus!(VrfScheme, ROTATING_ELECTOR, delay_ms)
+            }
+        };
 
         // Wait for any task to error
         if let Err(e) = try_join_all(vec![p2p, engine]).await {
             error!(?e, "task failed");
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_message_size_includes_block_data() {
+        assert_eq!(configured_max_message_size(0), BASE_MAX_MESSAGE_SIZE + 1);
+        assert_eq!(
+            configured_max_message_size(2 * 1024 * 1024),
+            BASE_MAX_MESSAGE_SIZE + 2 * 1024 * 1024 + 4
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "block size exceeds authenticated transport maximum")]
+    fn max_message_size_rejects_unsupported_block_size() {
+        configured_max_message_size(u32::MAX);
+    }
+
+    #[test]
+    fn named_http_url_resolves_deployed_indexer() {
+        let hosts = HashMap::from([(
+            "indexer".to_string(),
+            "203.0.113.7".parse::<IpAddr>().unwrap(),
+        )]);
+
+        assert_eq!(
+            resolve_named_http_url("http://indexer:8080/consensus", &hosts),
+            "http://203.0.113.7:8080/consensus"
+        );
+        assert_eq!(
+            resolve_named_http_url("https://external.example.com", &hosts),
+            "https://external.example.com"
+        );
+    }
 }
