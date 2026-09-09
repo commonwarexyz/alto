@@ -6,9 +6,9 @@
 Interact with an `alto` indexer.
 
 Set `ClientBuilder::with_block_size` to the network's configured block payload size. WebSocket
-frames and complete messages are limited to that size plus 1 MiB for the certificate and block
-encoding, and one message-kind byte. Without this setting, the payload allowance is 4 MiB, matching
-the indexer's default. HTTP retrieval is unaffected.
+frames and complete messages are limited to that size plus the maximum block and certificate
+encoding overhead for the configured scheme, and one message-kind byte. Without this setting, the
+payload allowance is 4 MiB, matching the indexer's default. HTTP retrieval is unaffected.
 
 ## Status
 

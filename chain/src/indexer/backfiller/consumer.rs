@@ -13,7 +13,7 @@ use commonware_runtime::{
 };
 use commonware_storage::queue;
 use commonware_utils::futures::{OptionFuture, Pool};
-use std::{num::NonZeroUsize, time::Duration};
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 use tracing::{debug, warn};
 
 /// Final outcome for one backfill queue entry.
@@ -185,7 +185,7 @@ where
                         Decision::Proceed => {}
                     }
 
-                    match client.block_upload(block.clone()).await {
+                    match client.block_upload(&block).await {
                         Ok(()) => {
                             upload_results.inc(status::Status::Success);
                             debug!(?digest, "uploaded block by digest");
@@ -215,7 +215,7 @@ where
         uploads: &SharedState,
         digest: Digest,
         retry: Duration,
-    ) -> Option<Block> {
+    ) -> Option<Arc<Block>> {
         // Prefer the in-process block cache populated by the application and
         // certificate uploaders. On restart that cache is empty, so we fall
         // back to marshal storage. If a certificate upload is still in flight,
@@ -223,7 +223,7 @@ where
         enum NextBlock {
             AlreadyUploaded,
             WaitForCertificate,
-            Ready(Box<Block>),
+            Ready(Arc<Block>),
             FetchFromMarshal,
         }
 
@@ -235,7 +235,7 @@ where
                     Decision::Wait => NextBlock::WaitForCertificate,
                     Decision::Proceed => uploads
                         .cached_block(&digest)
-                        .map(|block| NextBlock::Ready(Box::new(block)))
+                        .map(NextBlock::Ready)
                         .unwrap_or(NextBlock::FetchFromMarshal),
                 }
             };
@@ -245,7 +245,7 @@ where
                 NextBlock::WaitForCertificate => {
                     context.sleep(retry).await;
                 }
-                NextBlock::Ready(block) => return Some(*block),
+                NextBlock::Ready(block) => return Some(block),
                 NextBlock::FetchFromMarshal => {
                     if let Some(block) = marshal.get_block(Identifier::Digest(digest)).await {
                         uploads.lock().cache_block(block.clone());

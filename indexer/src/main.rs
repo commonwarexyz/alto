@@ -44,7 +44,8 @@ struct Args {
     certificate_mode: Option<String>,
 
     /// Payload size of the network's blocks in bytes. Uploads carrying a larger payload are
-    /// rejected. The request body limit is this size plus 1 MiB, or 5 MiB when omitted.
+    /// rejected. Defaults to 4 MiB. The request body limit includes the maximum block and
+    /// certificate encoding overhead for the configured scheme.
     #[clap(long, conflicts_with = "config")]
     block_size: Option<u32>,
 

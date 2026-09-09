@@ -62,7 +62,7 @@ mod tests {
             scheme::bls12381_threshold::vrf as bls12381_threshold,
             types::{Finalization, Finalize, Notarization, Notarize, Proposal},
         },
-        types::{Height, Round, View},
+        types::{Epoch, Height, Round, View},
     };
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519, sha256,
@@ -71,6 +71,31 @@ mod tests {
     use commonware_parallel::Sequential;
     use commonware_utils::non_empty;
     use rand::{rngs::StdRng, SeedableRng};
+
+    #[test]
+    fn block_overhead_bounds_metadata_and_length_prefixes() {
+        let context = Context {
+            round: Round::new(Epoch::new(u64::MAX), View::new(u64::MAX)),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::new(u64::MAX), sha256::Digest::EMPTY),
+        };
+        for block_size in [0, 1, 127, 128, 16_383, 16_384, 2_097_151, 2_097_152] {
+            let block = Block::new(
+                context.clone(),
+                sha256::Digest::EMPTY,
+                Height::new(u64::MAX),
+                u64::MAX,
+                Bytes::from(vec![0; block_size as usize]),
+            );
+            assert_eq!(
+                block.encode().len(),
+                (block_size + Block::max_overhead(block_size)) as usize,
+            );
+        }
+        assert_eq!(Block::max_overhead((1 << 28) - 1), 150);
+        assert_eq!(Block::max_overhead(1 << 28), 151);
+        assert_eq!(Block::max_overhead(u32::MAX), 151);
+    }
 
     #[test]
     fn block_data_above_one_mib_round_trips_and_is_committed_by_digest() {

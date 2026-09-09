@@ -1,4 +1,4 @@
-use alto_client::{DEFAULT_MAX_BLOCK_SIZE, LATEST, UPLOAD_OVERHEAD};
+use alto_client::{max_upload_size, DEFAULT_MAX_BLOCK_SIZE, LATEST};
 use alto_types::{Block, Finalized, Kind, Notarized, Scheme, Seed};
 use axum::{
     body::Bytes,
@@ -58,14 +58,17 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
     pub fn new(scheme: C, strategy: S) -> Self {
         let (consensus_tx, _) = broadcast::channel(CONSENSUS_CHANNEL_CAPACITY);
         let state = Arc::new(RwLock::new(State::default()));
+        let block_size =
+            u32::try_from(DEFAULT_MAX_BLOCK_SIZE).expect("default block size exceeds u32");
+        let max_upload_size = max_upload_size(block_size, &scheme);
 
         Self {
             scheme,
             state,
             consensus_tx,
             strategy,
-            block_codec_config: Block::unbounded_codec_config(),
-            max_upload_size: UPLOAD_OVERHEAD + DEFAULT_MAX_BLOCK_SIZE,
+            block_codec_config: Block::codec_config(block_size),
+            max_upload_size,
         }
     }
 
@@ -73,10 +76,7 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
     /// request body limit accordingly.
     pub fn with_block_size(mut self, block_size: u32) -> Self {
         self.block_codec_config = Block::codec_config(block_size);
-        self.max_upload_size = usize::try_from(block_size)
-            .expect("block size is unsupported on this platform")
-            .checked_add(UPLOAD_OVERHEAD)
-            .expect("upload size is unsupported on this platform");
+        self.max_upload_size = max_upload_size(block_size, &self.scheme);
         self
     }
 
@@ -445,7 +445,7 @@ mod tests {
             scheme::bls12381_threshold::{standard, vrf as bls12381_threshold},
             types::{Finalization, Finalize, Notarization, Notarize, Proposal},
         },
-        types::{Height, Round, View},
+        types::{Epoch, Height, Round, View},
         Viewable,
     };
     use commonware_cryptography::{
@@ -453,7 +453,7 @@ mod tests {
         Digest, Digestible, Hasher, Sha256, Signer,
     };
     use commonware_parallel::Sequential;
-    use commonware_utils::non_empty;
+    use commonware_utils::{non_empty, test_rng};
     use futures::StreamExt;
     use rand::{rngs::StdRng, SeedableRng};
     use rcgen::{generate_simple_self_signed, CertifiedKey, KeyPair};
@@ -556,27 +556,41 @@ mod tests {
     }
 
     #[test]
+    fn default_block_size_bounds_payload_decoding() {
+        let (schemes, _) = fixture(0);
+        let indexer = Indexer::new(schemes[0].clone(), Sequential);
+        for size in [DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_BLOCK_SIZE + 1] {
+            let finalized = finalized_with_payload(&schemes, 1, vec![0; size].into());
+            let encoded = finalized.encode();
+            assert!(encoded.len() <= indexer.max_upload_size());
+            assert_eq!(
+                Finalized::<VrfScheme>::decode_cfg(encoded, indexer.block_codec_config()).is_ok(),
+                size == DEFAULT_MAX_BLOCK_SIZE,
+            );
+        }
+    }
+
+    #[test]
     fn block_size_bounds_uploads() {
         let (schemes, _) = fixture(0);
         let finalized = finalized_with_payload(&schemes, 1, Bytes::new());
         let encoded = finalized.encode();
 
-        let unbounded = Indexer::new(schemes[0].clone(), Sequential);
-        assert!(Finalized::<VrfScheme>::decode_cfg(
-            encoded.clone(),
-            unbounded.block_codec_config()
-        )
-        .is_ok());
+        let default = Indexer::new(schemes[0].clone(), Sequential);
+        assert!(
+            Finalized::<VrfScheme>::decode_cfg(encoded.clone(), default.block_codec_config())
+                .is_ok()
+        );
         assert_eq!(
-            unbounded.max_upload_size(),
-            UPLOAD_OVERHEAD + DEFAULT_MAX_BLOCK_SIZE
+            default.max_upload_size(),
+            max_upload_size(DEFAULT_MAX_BLOCK_SIZE as u32, &schemes[0])
         );
 
         let exact = Indexer::new(schemes[0].clone(), Sequential).with_block_size(0);
         assert!(
             Finalized::<VrfScheme>::decode_cfg(encoded.clone(), exact.block_codec_config()).is_ok()
         );
-        assert_eq!(exact.max_upload_size(), UPLOAD_OVERHEAD);
+        assert_eq!(exact.max_upload_size(), max_upload_size(0, &schemes[0]));
 
         // A block larger than the configured size fails to decode, before any verification.
         let oversized = finalized_with_payload(&schemes, 1, Bytes::from_static(&[1, 2]));
@@ -593,7 +607,7 @@ mod tests {
                 .block_codec_config()
         )
         .is_ok());
-        assert_eq!(bounded.max_upload_size(), UPLOAD_OVERHEAD + 1);
+        assert_eq!(bounded.max_upload_size(), max_upload_size(1, &schemes[0]));
     }
 
     fn create_notarization<C: Scheme>(
@@ -616,6 +630,90 @@ mod tests {
             .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
             .collect();
         Finalization::from_finalizes(&schemes[0], non_empty![@&finalizes], &Sequential).unwrap()
+    }
+
+    async fn maximum_uploads_stream<C: Scheme>(schemes: &[C]) {
+        for block_size in [0, 127, 128, 16_383, 16_384, 2_097_151, 2_097_152] {
+            let mut context = Block::genesis().context;
+            context.round = Round::new(Epoch::new(u64::MAX), View::new(u64::MAX));
+            context.parent.0 = View::new(u64::MAX - 1);
+            let block = Block::new(
+                context,
+                sha256::Digest::EMPTY,
+                Height::new(u64::MAX),
+                u64::MAX,
+                vec![0; block_size as usize].into(),
+            );
+            let proposal =
+                Proposal::new(block.context.round, block.context.parent.0, block.digest());
+            let notarized = Notarized::new(
+                create_notarization(schemes, proposal.clone()),
+                block.clone(),
+            );
+            let finalized = Finalized::new(create_finalization(schemes, proposal), block.clone());
+            let limit = max_upload_size(block_size, &schemes[0]);
+            assert!(block.encode().len() <= limit);
+            assert_eq!(notarized.encode().len(), limit);
+            assert_eq!(finalized.encode().len(), limit);
+            let seed = notarized.proof.seed();
+            if let Some(seed) = &seed {
+                assert_eq!(seed.encode().len(), 68);
+                assert!(seed.encode().len() <= limit);
+            }
+
+            let indexer =
+                Arc::new(Indexer::new(schemes[0].clone(), Sequential).with_block_size(block_size));
+            assert_eq!(indexer.max_upload_size(), limit);
+            let app = Api::new(indexer.clone()).router();
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let client =
+                ClientBuilder::new(&format!("http://{addr}"), schemes[0].clone(), Sequential)
+                    .with_block_size(block_size)
+                    .build();
+            let mut stream = client.listen().await.unwrap();
+            while indexer.consensus_tx.receiver_count() == 0 {
+                tokio::task::yield_now().await;
+            }
+            client.block_upload(&block).await.unwrap();
+            client
+                .notarized_upload(&notarized.proof, &notarized.block)
+                .await
+                .unwrap();
+            assert!(matches!(
+                tokio::time::timeout(std::time::Duration::from_secs(5), stream.next()).await.unwrap().unwrap().unwrap(),
+                alto_client::consensus::Message::Notarization(received) if received == notarized
+            ));
+            client
+                .finalized_upload(&finalized.proof, &finalized.block)
+                .await
+                .unwrap();
+            assert!(matches!(
+                tokio::time::timeout(std::time::Duration::from_secs(5), stream.next()).await.unwrap().unwrap().unwrap(),
+                alto_client::consensus::Message::Finalization(received) if received == finalized
+            ));
+            if let Some(seed) = seed {
+                client.seed_upload(&seed).await.unwrap();
+                assert!(matches!(
+                    tokio::time::timeout(std::time::Duration::from_secs(5), stream.next()).await.unwrap().unwrap().unwrap(),
+                    alto_client::consensus::Message::Seed(received) if received == seed
+                ));
+            }
+            server.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn maximum_standard_uploads_stream() {
+        let fixture = standard::fixture::<MinSig, _>(&mut test_rng(), NAMESPACE, 4);
+        maximum_uploads_stream(&fixture.schemes).await;
+    }
+
+    #[tokio::test]
+    async fn maximum_vrf_uploads_stream() {
+        let fixture = bls12381_threshold::fixture::<MinSig, _>(&mut test_rng(), NAMESPACE, 4);
+        maximum_uploads_stream(&fixture.schemes).await;
     }
 
     async fn start_server<C: Scheme>(
@@ -658,7 +756,7 @@ mod tests {
         let ctx = TestContext::new().await;
         let seed = ctx.seed();
 
-        ctx.client.seed_upload(seed.clone()).await.unwrap();
+        ctx.client.seed_upload(&seed).await.unwrap();
 
         let retrieved = ctx.client.seed_get(IndexQuery::Latest).await.unwrap();
         assert_eq!(retrieved.view(), seed.view());
@@ -672,7 +770,10 @@ mod tests {
         let ctx = TestContext::new().await;
         let notarized = ctx.notarized();
 
-        ctx.client.notarized_upload(notarized).await.unwrap();
+        ctx.client
+            .notarized_upload(&notarized.proof, &notarized.block)
+            .await
+            .unwrap();
 
         let retrieved = ctx.client.notarized_get(IndexQuery::Latest).await.unwrap();
         assert_eq!(retrieved.proof.view().get(), 1);
@@ -690,7 +791,10 @@ mod tests {
         let ctx = TestContext::new().await;
         let finalized = ctx.finalized();
 
-        ctx.client.finalized_upload(finalized).await.unwrap();
+        ctx.client
+            .finalized_upload(&finalized.proof, &finalized.block)
+            .await
+            .unwrap();
 
         let retrieved = ctx.client.finalized_get(IndexQuery::Latest).await.unwrap();
         assert_eq!(retrieved.proof.view().get(), 1);
@@ -723,8 +827,14 @@ mod tests {
             finalized.block.clone(),
         );
 
-        client.notarized_upload(notarized).await.unwrap();
-        client.finalized_upload(finalized).await.unwrap();
+        client
+            .notarized_upload(&notarized.proof, &notarized.block)
+            .await
+            .unwrap();
+        client
+            .finalized_upload(&finalized.proof, &finalized.block)
+            .await
+            .unwrap();
         assert_eq!(
             client
                 .notarized_get(IndexQuery::Latest)
@@ -753,7 +863,10 @@ mod tests {
         let block = ctx.test_block();
         let finalized = ctx.finalized();
 
-        ctx.client.finalized_upload(finalized).await.unwrap();
+        ctx.client
+            .finalized_upload(&finalized.proof, &finalized.block)
+            .await
+            .unwrap();
 
         // Test retrieval by latest
         let payload = ctx.client.block_get(Query::Latest).await.unwrap();
@@ -793,7 +906,7 @@ mod tests {
         let block = ctx.test_block();
         let digest = block.digest();
 
-        ctx.client.block_upload(block).await.unwrap();
+        ctx.client.block_upload(&block).await.unwrap();
 
         let payload = ctx.client.block_get(Query::Digest(digest)).await.unwrap();
         match payload {
@@ -828,7 +941,10 @@ mod tests {
 
         // The message includes the certificate and block fields beyond the 64 MiB payload.
         let finalized = finalized_with_payload(&schemes, 1, Bytes::from(vec![7; 64 * 1024 * 1024]));
-        client.finalized_upload(finalized.clone()).await.unwrap();
+        client
+            .finalized_upload(&finalized.proof, &finalized.block)
+            .await
+            .unwrap();
         match stream.next().await.unwrap().unwrap() {
             alto_client::consensus::Message::Finalization(received) => {
                 assert_eq!(received, finalized);
@@ -850,7 +966,7 @@ mod tests {
         let client = ctx.client.clone();
         tokio::spawn(async move {
             rx.await.unwrap();
-            client.seed_upload(seed).await.unwrap();
+            client.seed_upload(&seed).await.unwrap();
         });
 
         // Signal ready and wait for the seed message
@@ -904,7 +1020,7 @@ mod tests {
         let seed = create_notarization(&schemes1, proposal).seed().unwrap();
 
         // Server accepts it (signed by schemes1, which server uses)
-        client.seed_upload(seed).await.unwrap();
+        client.seed_upload(&seed).await.unwrap();
 
         // Client fails to verify (expects identity2 but seed is signed by schemes1)
         let result = client.seed_get(IndexQuery::Latest).await;
@@ -926,7 +1042,7 @@ mod tests {
             .unwrap();
 
         // Server rejects it (signature doesn't match server's identity)
-        let result = ctx.client.seed_upload(bad_seed).await;
+        let result = ctx.client.seed_upload(&bad_seed).await;
         assert!(result.is_err());
     }
 
@@ -1035,7 +1151,7 @@ mod tests {
         let seed = create_notarization(&schemes, proposal).seed().unwrap();
 
         // Test HTTPS POST
-        client.seed_upload(seed.clone()).await.unwrap();
+        client.seed_upload(&seed).await.unwrap();
 
         // Test HTTPS GET
         let retrieved = client.seed_get(IndexQuery::Latest).await.unwrap();
@@ -1082,7 +1198,7 @@ mod tests {
         let upload_client = client.clone();
         tokio::spawn(async move {
             rx.await.unwrap();
-            upload_client.seed_upload(seed).await.unwrap();
+            upload_client.seed_upload(&seed).await.unwrap();
         });
 
         // Signal ready and wait for the seed message

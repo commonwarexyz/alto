@@ -75,7 +75,7 @@ impl CertificateUploadGuard {
         }
     }
 
-    fn cache_block(&self, block: Block) {
+    fn cache_block(&self, block: Arc<Block>) {
         self.uploads.lock().cache_block(block);
     }
 
@@ -96,7 +96,7 @@ impl<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> Pusher<E, C, CS> {
         self.context.child(label).spawn({
             let client = self.client.clone();
             move |_| async move {
-                if let Err(e) = client.seed_upload(seed).await {
+                if let Err(e) = client.seed_upload(&seed).await {
                     warn!(?e, "failed to upload seed");
                     return;
                 }
@@ -113,7 +113,7 @@ impl<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> Pusher<E, C, CS> {
         digest: Digest,
         upload_fn: F,
     ) where
-        F: FnOnce(C, Block) -> Fut + Send + 'static,
+        F: FnOnce(C, Arc<Block>) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), C::Error>> + Send,
     {
         // Claim the digest before marshal can deliver the corresponding
@@ -130,7 +130,6 @@ impl<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> Pusher<E, C, CS> {
                     warn!(%view, "subscription for block cancelled");
                     return;
                 };
-                let block = Arc::unwrap_or_clone(block);
                 let height = block.height.get();
                 guard.cache_block(block.clone());
                 if let Err(e) = upload_fn(client, block).await {
@@ -161,9 +160,7 @@ impl<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> Reporter for Pusher<E, C, 
                     notarization.round(),
                     notarization.proposal.payload,
                     |indexer, block| async move {
-                        indexer
-                            .notarized_upload(alto_types::Notarized::new(notarization, block))
-                            .await
+                        indexer.notarized_upload(&notarization, &block).await
                     },
                 );
             }
@@ -178,9 +175,7 @@ impl<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> Reporter for Pusher<E, C, 
                     finalization.round(),
                     finalization.proposal.payload,
                     |indexer, block| async move {
-                        indexer
-                            .finalized_upload(alto_types::Finalized::new(finalization, block))
-                            .await
+                        indexer.finalized_upload(&finalization, &block).await
                     },
                 );
             }

@@ -102,7 +102,7 @@ where
             marshal::Config {
                 provider,
                 epocher,
-                start: marshal::Start::Genesis(Block::genesis()),
+                start: marshal::Start::Genesis(Block::genesis().into()),
                 partition_prefix: "follower-marshal".to_string(),
                 mailbox_size,
                 view_retention: VIEW_RETENTION_TIMEOUT,

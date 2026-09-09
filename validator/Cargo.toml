@@ -25,6 +25,9 @@ mimalloc = { workspace = true }
 tracing = { workspace = true }
 serde_yaml = "0.9.34"
 
+[dev-dependencies]
+commonware-consensus = { workspace = true, features = ["mocks"] }
+
 [[bin]]
 name = "validator"
 path = "src/main.rs"

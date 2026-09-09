@@ -1,6 +1,7 @@
 use crate::{Client, Error, IndexQuery, Query};
-use alto_types::{Block, Finalized, Kind, Notarized, Scheme, Seed};
-use commonware_codec::{Decode, DecodeExt, Encode};
+use alto_types::{Block, Finalization, Finalized, Kind, Notarization, Notarized, Scheme, Seed};
+use bytes::BytesMut;
+use commonware_codec::{Decode, DecodeExt, Encode, EncodeSize, Write};
 use commonware_consensus::Viewable;
 use commonware_cryptography::Digestible;
 use commonware_parallel::Strategy;
@@ -58,11 +59,11 @@ pub enum Message<C: Scheme> {
 }
 
 impl<S: Strategy, C: Scheme> Client<S, C> {
-    pub async fn seed_upload(&self, seed: Seed) -> Result<(), Error> {
+    pub async fn seed_upload(&self, seed: &Seed) -> Result<(), Error> {
         let result = self
             .http_client
             .post(seed_upload_path(self.uri.clone()))
-            .body(seed.encode().to_vec())
+            .body(seed.encode())
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -101,11 +102,18 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
         Ok(seed)
     }
 
-    pub async fn notarized_upload(&self, notarized: Notarized<C>) -> Result<(), Error> {
+    pub async fn notarized_upload(
+        &self,
+        proof: &Notarization<C>,
+        block: &Block,
+    ) -> Result<(), Error> {
+        let mut body = BytesMut::with_capacity(proof.encode_size() + block.encode_size());
+        proof.write(&mut body);
+        block.write(&mut body);
         let result = self
             .http_client
             .post(notarization_upload_path(self.uri.clone()))
-            .body(notarized.encode().to_vec())
+            .body(body.freeze())
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -146,11 +154,18 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
         Ok(notarized)
     }
 
-    pub async fn finalized_upload(&self, finalized: Finalized<C>) -> Result<(), Error> {
+    pub async fn finalized_upload(
+        &self,
+        proof: &Finalization<C>,
+        block: &Block,
+    ) -> Result<(), Error> {
+        let mut body = BytesMut::with_capacity(proof.encode_size() + block.encode_size());
+        proof.write(&mut body);
+        block.write(&mut body);
         let result = self
             .http_client
             .post(finalization_upload_path(self.uri.clone()))
-            .body(finalized.encode().to_vec())
+            .body(body.freeze())
             .send()
             .await
             .map_err(Error::Reqwest)?;
@@ -191,12 +206,12 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
         Ok(finalized)
     }
 
-    pub async fn block_upload(&self, block: Block) -> Result<(), Error> {
+    pub async fn block_upload(&self, block: &Block) -> Result<(), Error> {
         // Upload a block (without a certificate)
         let result = self
             .http_client
             .post(block_upload_path(self.uri.clone()))
-            .body(block.encode().to_vec())
+            .body(block.encode())
             .send()
             .await
             .map_err(Error::Reqwest)?;

@@ -295,7 +295,7 @@ mod tests {
             let height = Height::new(1);
 
             assert!(resolver
-                .fetch(handler::Request::certified_block(digest, height))
+                .fetch(handler::Request::certified(digest, height))
                 .accepted());
             let delivery = wait_for_delivery(&context, &consumer).await;
 
@@ -471,7 +471,7 @@ mod tests {
         deterministic::Runner::default().start(|context| async move {
             let consumer = TestConsumer::default();
             let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
-            let request = handler::Request::certified_block(digest, Height::new(1));
+            let request = handler::Request::certified(digest, Height::new(1));
 
             assert!(resolver.fetch(request).accepted());
             assert!(resolver.fetch(request).accepted());
@@ -506,7 +506,7 @@ mod tests {
             let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
 
             assert!(resolver
-                .fetch(handler::Request::certified_block(digest, Height::new(1)))
+                .fetch(handler::Request::certified(digest, Height::new(1)))
                 .accepted());
             let delivery = wait_for_delivery(&context, &consumer).await;
             assert!(matches!(delivery.delivery.key, handler::Key::Block(d) if d == digest));
@@ -538,12 +538,12 @@ mod tests {
             let height = Height::new(1);
 
             assert!(resolver
-                .fetch(handler::Request::certified_block(digest, height))
+                .fetch(handler::Request::certified(digest, height))
                 .accepted());
             let first = wait_for_delivery(&context, &consumer).await;
 
             assert!(resolver
-                .fetch(handler::Request::finalized_block_by_height(digest, height))
+                .fetch(handler::Request::finalized_by_height(digest, height))
                 .accepted());
             context.sleep(Duration::from_millis(100)).await;
             first.response.send(true).expect("response dropped");
@@ -581,12 +581,12 @@ mod tests {
             let height = Height::new(1);
 
             assert!(resolver
-                .fetch(handler::Request::certified_block(digest, height))
+                .fetch(handler::Request::certified(digest, height))
                 .accepted());
             let first = wait_for_delivery(&context, &consumer).await;
 
             assert!(resolver
-                .fetch(handler::Request::finalized_block_by_height(digest, height))
+                .fetch(handler::Request::finalized_by_height(digest, height))
                 .accepted());
             context.sleep(Duration::from_millis(100)).await;
             first.response.send(true).expect("response dropped");
@@ -627,7 +627,7 @@ mod tests {
             };
 
             assert!(resolver
-                .fetch(handler::Request::certified_block(digest, Height::new(2)))
+                .fetch(handler::Request::certified(digest, Height::new(2)))
                 .accepted());
             let delivery = wait_for_delivery(&context, &consumer).await;
             assert!(delivery
@@ -665,7 +665,7 @@ mod tests {
             let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
 
             assert!(resolver
-                .fetch(handler::Request::certified_block(digest, Height::new(2)))
+                .fetch(handler::Request::certified(digest, Height::new(2)))
                 .accepted());
             let delivery = wait_for_delivery(&context, &consumer).await;
 
@@ -688,7 +688,7 @@ mod tests {
             let mut resolver = start_resolver(context.child("resolver"), source, consumer.clone());
 
             assert!(resolver
-                .fetch(handler::Request::certified_block(digest, Height::new(2)))
+                .fetch(handler::Request::certified(digest, Height::new(2)))
                 .accepted());
             started.await.expect("source fetch did not start");
 
@@ -723,7 +723,7 @@ mod tests {
 
             assert!(resolver
                 .fetch_targeted(
-                    handler::Request::certified_block(digest, Height::new(1)),
+                    handler::Request::certified(digest, Height::new(1)),
                     NonEmptyVec::new(target)
                 )
                 .accepted());

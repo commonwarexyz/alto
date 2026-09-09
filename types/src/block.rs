@@ -4,7 +4,8 @@ use crate::{
 };
 use bytes::{Buf, BufMut, Bytes};
 use commonware_codec::{
-    varint::UInt, BufsMut, Encode, EncodeSize, Error, RangeCfg, Read, ReadExt, Write,
+    varint::{UInt, MAX_U64_VARINT_SIZE},
+    BufsMut, Encode, EncodeSize, Error, FixedSize, RangeCfg, Read, ReadExt, Write,
 };
 use commonware_consensus::{
     types::{Height, Round, View},
@@ -41,6 +42,16 @@ pub struct Block {
 }
 
 impl Block {
+    /// Maximum encoded overhead for a payload of at most `block_size` bytes.
+    ///
+    /// Includes block metadata and the payload's length prefix.
+    pub fn max_overhead(block_size: u32) -> u32 {
+        (5 * MAX_U64_VARINT_SIZE
+            + ed25519::PublicKey::SIZE
+            + 2 * Digest::SIZE
+            + UInt(block_size).encode_size()) as u32
+    }
+
     /// The fixed genesis block shared by validators and followers.
     pub fn genesis() -> Self {
         let context = Context {
