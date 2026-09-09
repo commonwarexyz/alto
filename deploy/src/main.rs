@@ -229,8 +229,13 @@ fn main() {
     // Initialize logger
     tracing_subscriber::fmt().init();
 
-    // Define the main command with subcommands
-    let app = Command::new("deploy")
+    // Parse arguments and run the selected subcommand.
+    run(command().get_matches());
+}
+
+/// Define the main command with subcommands.
+fn command() -> Command {
+    Command::new("deploy")
         .about("Manage configuration files for an alto chain.")
         .subcommand(
             Command::new("generate")
@@ -410,12 +415,11 @@ fn main() {
                 )
                 .subcommand(Command::new("local").about("Generate explorer config for local deployment"))
                 .subcommand(Command::new("remote").about("Generate explorer config for remote deployment")),
-        );
+        )
+}
 
-    // Parse arguments
-    let matches = app.get_matches();
-
-    // Handle subcommands
+/// Handle subcommands.
+fn run(matches: ArgMatches) {
     match matches.subcommand() {
         Some(("generate", sub_matches)) => {
             let peers = *sub_matches.get_one::<usize>("peers").unwrap();
@@ -1123,13 +1127,16 @@ fn explorer_remote(dir: String, backend_url: String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        leader_args, parse_indexers, parse_leader, select_regional_peers, traces_sample_rate_arg,
-        ConfiguredIndexer,
+        command, leader_args, parse_indexers, parse_leader, run, select_regional_peers,
+        traces_sample_rate_arg, ConfiguredIndexer,
     };
     use alto_chain::Leader;
     use alto_types::CertificateMode;
     use clap::Command;
     use commonware_utils::{NZU32, NZU64};
+    use serde_yaml::Value;
+    use std::fs;
+    use uuid::Uuid;
 
     #[test]
     fn traces_sample_rate_accepts_only_fractions() {
@@ -1426,5 +1433,185 @@ signature_threads: 1
             assigned.values().copied().collect::<Vec<_>>(),
             vec![1, 1, 1]
         );
+    }
+
+    #[test]
+    fn indexer_generation_preserves_unmapped_participants() {
+        for (mode, certificate_mode) in [("stable", "standard"), ("rotating", "vrf")] {
+            let output =
+                std::env::temp_dir().join(format!("alto-deploy-region-{}", Uuid::new_v4()));
+            let mut args = vec![
+                "deploy",
+                "generate",
+                "--peers",
+                "4",
+                "--bootstrappers",
+                "1",
+                "--worker-threads",
+                "1",
+                "--log-level",
+                "info",
+                "--mailbox-size",
+                "16384",
+                "--deque-size",
+                "256",
+                "--signature-threads",
+                "1",
+                "--leader-mode",
+                mode,
+                "--leader-delay-ms",
+                "10",
+            ];
+            if mode == "stable" {
+                args.extend([
+                    "--leader-term-length",
+                    "1000",
+                    "--leader-optimistic-views",
+                    "48",
+                ]);
+            }
+            args.extend([
+                "--output",
+                output.to_str().unwrap(),
+                "remote",
+                "--regions",
+                "us-east-1,eu-west-2,us-west-1",
+                "--monitoring-instance-type",
+                "c7gd.4xlarge",
+                "--monitoring-storage-size",
+                "100",
+                "--instance-type",
+                "c7gd.4xlarge",
+                "--storage-size",
+                "25",
+                "--dashboard",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/dashboard.json"),
+                "--indexer",
+            ]);
+            run(command().try_get_matches_from(args).unwrap());
+
+            let deployment: Value =
+                serde_yaml::from_str(&fs::read_to_string(output.join("config.yaml")).unwrap())
+                    .unwrap();
+            let indexer: Value =
+                serde_yaml::from_str(&fs::read_to_string(output.join("indexer.yaml")).unwrap())
+                    .unwrap();
+            let validators = deployment["instances"]
+                .as_sequence()
+                .unwrap()
+                .iter()
+                .filter(|instance| instance["binary"] == "validator")
+                .collect::<Vec<_>>();
+            let participants = indexer["explorer"]["participants"].as_sequence().unwrap();
+            let locations = indexer["explorer"]["locations"].as_sequence().unwrap();
+            assert_eq!(validators.len(), 4);
+            assert_eq!(participants.len(), 4);
+            assert_eq!(locations.len(), 4);
+            assert_eq!(indexer["certificate_mode"], certificate_mode);
+            for (participant, validator) in participants.iter().zip(&validators) {
+                assert_eq!(participant, &validator["name"]);
+            }
+
+            // Missing coordinates keep their slot between known participants.
+            assert_eq!(locations[0][1], "Ashburn");
+            assert!(locations[1].is_null());
+            assert_eq!(locations[2][1], "San Francisco");
+            assert_eq!(locations[3][1], "Ashburn");
+
+            run(command()
+                .try_get_matches_from([
+                    "deploy",
+                    "explorer",
+                    "--dir",
+                    output.to_str().unwrap(),
+                    "--backend-url",
+                    "localhost:8080",
+                    "remote",
+                ])
+                .unwrap());
+            let config = fs::read_to_string(output.join("config.ts")).unwrap();
+            for (name, field) in [("PARTICIPANTS", "participants"), ("LOCATIONS", "locations")] {
+                let (_, declaration) = config.split_once(&format!("export const {name}:")).unwrap();
+                let (_, value) = declaration.split_once(" = ").unwrap();
+                let exported: Value =
+                    serde_yaml::from_str(value.split(';').next().unwrap()).unwrap();
+                assert_eq!(exported, indexer["explorer"][field]);
+            }
+            fs::remove_dir_all(output).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scripted_build_embeds_the_current_frontend() {
+        use std::{os::unix::fs::PermissionsExt, process::Command};
+
+        let tag = format!("alto-build-test-{}", Uuid::new_v4());
+        let output = std::env::temp_dir().join(&tag);
+        for directory in ["bin", "deploy", "explorer/build"] {
+            fs::create_dir_all(output.join(directory)).unwrap();
+        }
+        fs::write(output.join("deploy.sh"), include_str!("../../deploy.sh")).unwrap();
+        fs::write(output.join("deploy/dashboard.json"), "{}").unwrap();
+        fs::write(output.join("explorer/build/index.html"), "old frontend").unwrap();
+
+        // Run the real script with isolated tools that expose its producer/consumer handoff.
+        let stub = r#"#!/bin/sh
+set -eu
+case "${0##*/}" in
+    uname) echo Linux ;;
+    cargo)
+        mkdir -p assets
+        printf 'tag: %s\n' "$ALTO_BUILD_TEST_TAG" > assets/config.yaml
+        ;;
+    npm)
+        if [ "$3" = run ] && [ "$4" = build ]; then
+            mkdir -p "explorer/${BUILD_PATH:-build}"
+            frontend_base="${PUBLIC_URL:-}"
+            printf '<script src="%s/runtime-config.js"></script>current frontend' "${frontend_base%/}" > "explorer/${BUILD_PATH:-build}/index.html"
+        fi
+        ;;
+    just) cp explorer/build/index.html assets/embedded.html ;;
+    *) ;;
+esac
+"#;
+        for tool in [
+            "cargo",
+            "just",
+            "docker",
+            "deployer",
+            "npm",
+            "wasm-pack",
+            "uname",
+        ] {
+            let path = output.join("bin").join(tool);
+            fs::write(&path, stub).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let result = Command::new("bash")
+            .arg(output.join("deploy.sh"))
+            .arg("rotating")
+            .env(
+                "PATH",
+                format!("{}:/usr/bin:/bin", output.join("bin").display()),
+            )
+            .env("BUILD_PATH", "alternate")
+            .env("PUBLIC_URL", "/alternate")
+            .env("ALTO_BUILD_TEST_TAG", &tag)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let embedded = fs::read_to_string(output.join("assets/embedded.html")).unwrap();
+        assert!(embedded.ends_with("current frontend"), "{embedded}");
+        assert!(
+            embedded.contains(r#"src="/runtime-config.js""#),
+            "{embedded}"
+        );
+        fs::remove_dir_all(output).unwrap();
     }
 }
