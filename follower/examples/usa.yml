@@ -10,7 +10,7 @@ source: "https://usa.alto.exoware.xyz"
 
 # Hex-encoded BLS12-381 public key of the network identity
 # This is the threshold public key used to verify finalization signatures
-identity: "a156881f2d99ecd30cc7b9550d65765482cf04be7ec740b8ae64abb3ad8630a61619319c3d4abba4b1791bf774424a7f096cf35654524187cafd338f7c89523c68676a80c941ed40c7de045869fb00326df1eadb26b62eb2096318814ee9d080"
+identity: "aa6af77571b1b75d6c202ab59f3e63245e978b0a1fe1d405f7941f215fd14e2fc32b1430da902cfac3f9ddd2d420d1d7171132e4c36ac86858508e5edbf58f7f5b333d652f06f70868fcf83d77172c6921d8f2d06098f5b6372259fa3f6b5ebe"
 
 # Certificate construction used by this network: "standard" for stable leaders,
 # "vrf" for rotating leaders (must match the validators)
@@ -20,7 +20,7 @@ certificate_mode: "vrf"
 block_size: 0
 
 # Directory for storing finalized blocks and state
-directory: "/tmp/alto-follower-usa"
+directory: "/tmp/alto-follower-usa-99b6d0a9-03c1-4e6f-bfe3-0d6987a51bcf"
 
 # Number of worker threads
 worker_threads: 2

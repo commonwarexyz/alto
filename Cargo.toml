@@ -12,14 +12,14 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "2026.9.0"
+version = "2026.9.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-alto-chain = { version = "2026.9.0", path = "chain" }
-alto-client = { version = "2026.9.0", path = "client" }
-alto-types = { version = "2026.9.0", path = "types" }
+alto-chain = { version = "2026.9.1", path = "chain" }
+alto-client = { version = "2026.9.1", path = "client" }
+alto-types = { version = "2026.9.1", path = "types" }
 commonware-actor = "2026.9.0"
 commonware-broadcast = "2026.9.0"
 commonware-codec = "2026.9.0"
