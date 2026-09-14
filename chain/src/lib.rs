@@ -56,19 +56,6 @@ where
     ))
 }
 
-fn deserialize_term_length<'de, D>(deserializer: D) -> Result<NonZeroU32, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let term_length = NonZeroU32::deserialize(deserializer)?;
-    if term_length.get() > 1 {
-        return Ok(term_length);
-    }
-    Err(serde::de::Error::custom(
-        "stable leader term length must be greater than 1",
-    ))
-}
-
 /// Leader election policy for the consensus engine.
 ///
 /// The delay sets the minimum interval from the parent's timestamp in milliseconds.
@@ -81,7 +68,6 @@ pub enum Leader {
     /// Keep one round-robin leader for a term and pace its proposals.
     Stable {
         delay_ms: u64,
-        #[serde(deserialize_with = "deserialize_term_length")]
         term_length: NonZeroU32,
         optimistic_views: u64,
     },
@@ -95,10 +81,6 @@ impl Leader {
 
     /// Creates a stable leader configuration.
     pub const fn stable(delay_ms: u64, term_length: NonZeroU32, optimistic_views: u64) -> Self {
-        assert!(
-            term_length.get() > 1,
-            "stable leader term length must be greater than 1"
-        );
         Self::Stable {
             delay_ms,
             term_length,
@@ -1590,10 +1572,9 @@ mod tests {
         let entry = Entry { height: 42, digest };
 
         let encoded = entry.encode();
-        let decoded = Entry::decode(encoded.as_ref()).unwrap();
+        assert_eq!(encoded.len(), <Entry as commonware_codec::FixedSize>::SIZE);
+        let decoded = Entry::decode(encoded).unwrap();
         assert_eq!(decoded.height, 42);
         assert_eq!(decoded.digest, digest);
-
-        assert_eq!(encoded.len(), <Entry as commonware_codec::FixedSize>::SIZE);
     }
 }

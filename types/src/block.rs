@@ -2,9 +2,9 @@ use crate::{
     consensus::{Context, Finalization, Notarization, Scheme},
     EPOCH,
 };
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{BufMut, Bytes};
 use commonware_codec::{
-    varint::UInt, BufsMut, Encode, EncodeSize, Error, RangeCfg, Read, ReadExt, Write,
+    varint::UInt, Buf, BufsMut, Encode, EncodeSize, Error, RangeCfg, Read, ReadExt, Write,
 };
 use commonware_consensus::{
     types::{Height, Round, View},

@@ -39,6 +39,7 @@ use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use std::{
     num::{NonZero, NonZeroUsize},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{error, info, warn};
@@ -69,13 +70,18 @@ const STABLE_LEADER_STALL_TIMEOUT: Duration = Duration::from_secs(12);
 /// Round-robin leader election used with native standard certificates.
 pub type StableElector = RoundRobin<Sha256>;
 
-/// Builds stable leader election with a bounded optimistic view window.
+/// Builds standard-certificate round-robin election.
 pub fn stable_elector(term_length: NonZero<u32>, optimistic_views: u64) -> StableElector {
-    RoundRobin::default().with_term(
-        TermLength::new(term_length),
-        STABLE_LEADER_STALL_TIMEOUT,
-        ViewDelta::new(optimistic_views),
-    )
+    let elector = RoundRobin::default();
+    if term_length.get() == 1 {
+        elector
+    } else {
+        elector.with_term(
+            TermLength::new(term_length),
+            STABLE_LEADER_STALL_TIMEOUT,
+            ViewDelta::new(optimistic_views),
+        )
+    }
 }
 
 /// Configuration for the [Engine].
@@ -138,7 +144,7 @@ where
         Standard<Block>,
         ConstantProvider<CS, Epoch>,
         immutable::Archive<E, Digest, Finalization<CS>>,
-        immutable::Archive<E, Digest, Block>,
+        immutable::Archive<E, Digest, Arc<Block>>,
         FixedEpocher,
         S,
     >,
@@ -290,7 +296,7 @@ where
                         .get()
                         .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
                 ),
-                start: marshal::Start::Genesis(genesis),
+                start: marshal::Start::Genesis(genesis.into()),
                 prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
                 replay_buffer: REPLAY_BUFFER,
                 key_write_buffer: WRITE_BUFFER,
@@ -514,5 +520,26 @@ mod tests {
         assert_eq!(terms.length(), TermLength::new(term_length));
         assert_eq!(terms.stall_timeout(), Some(STABLE_LEADER_STALL_TIMEOUT));
         assert_eq!(terms.optimistic_views(), ViewDelta::new(37));
+    }
+
+    #[test]
+    fn stable_elector_configures_single_view_terms() {
+        use commonware_consensus::types::{Round, View};
+
+        let Fixture { schemes, .. } =
+            standard::fixture::<MinSig, _>(&mut StdRng::seed_from_u64(1), NAMESPACE, 4);
+        let elector = elector::Config::<StandardScheme>::build(
+            stable_elector(NZU32!(1), 37),
+            schemes[0].participants(),
+        );
+        let terms = elector::Elector::terms(&elector);
+        assert_eq!(terms.length(), TermLength::ONE);
+        assert_eq!(terms.stall_timeout(), None);
+        assert_eq!(terms.optimistic_views(), ViewDelta::zero());
+        assert!(elector::Elector::elect_without_certificate(
+            &elector,
+            Round::new(Epoch::new(0), View::new(2))
+        )
+        .is_some());
     }
 }

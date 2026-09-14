@@ -56,7 +56,7 @@ fn leader_args() -> [Arg; 4] {
         Arg::new("leader_term_length")
             .long("leader-term-length")
             .required_if_eq("leader_mode", "stable")
-            .value_parser(value_parser!(u32).range(2..)),
+            .value_parser(value_parser!(u32).range(1..)),
         Arg::new("leader_optimistic_views")
             .long("leader-optimistic-views")
             .required_if_eq("leader_mode", "stable")
@@ -1030,11 +1030,9 @@ fn explorer_local(dir: String, backend_url: String) {
     let certificate_mode = peer_config.leader.certificate_mode().as_str();
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
-    let polynomial = Sharing::<MinSig>::decode_cfg(
-        polynomial.as_ref(),
-        &(NZU32!(num_peers as u32), ModeVersion::v0()),
-    )
-    .expect("polynomial is invalid");
+    let polynomial =
+        Sharing::<MinSig>::decode_cfg(polynomial, &(NZU32!(num_peers as u32), ModeVersion::v0()))
+            .expect("polynomial is invalid");
     let identity = polynomial.public();
 
     // Generate config.ts with empty locations (explorer will hide map)
@@ -1069,7 +1067,7 @@ fn explorer_remote(dir: String, backend_url: String) {
     for instance in &validators {
         let region = &instance.region;
         let public_key = from_hex(&instance.name).expect("invalid public key");
-        let public_key = PublicKey::decode(public_key.as_ref()).expect("invalid public key");
+        let public_key = PublicKey::decode(public_key).expect("invalid public key");
         let location = match get_aws_location(region) {
             Some((coords, city)) => format!("    [[{}, {}], \"{}\"]", coords[0], coords[1], city),
             None => "    null".to_string(),
@@ -1099,7 +1097,7 @@ fn explorer_remote(dir: String, backend_url: String) {
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
     let polynomial = Sharing::<MinSig>::decode_cfg(
-        polynomial.as_ref(),
+        polynomial,
         &(NZU32!(locations.len() as u32), ModeVersion::v0()),
     )
     .expect("polynomial is invalid");
@@ -1329,7 +1327,7 @@ signature_threads: 1
                 "--leader-optimistic-views",
                 "48",
             ]);
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -1368,6 +1366,7 @@ signature_threads: 1
         for leader in [
             Leader::rotating(0),
             Leader::rotating(7),
+            Leader::stable(5, NZU32!(1), 48),
             Leader::stable(0, NZU32!(1_000), 48),
             Leader::stable(10, NZU32!(1_000), 48),
         ] {
@@ -1383,7 +1382,7 @@ signature_threads: 1
                 .is_err()
         );
         assert!(serde_yaml::from_str::<Leader>(
-            "mode: stable\ndelay_ms: 10\nterm_length: 1\noptimistic_views: 48\n"
+            "mode: stable\ndelay_ms: 10\nterm_length: 0\noptimistic_views: 48\n"
         )
         .is_err());
         assert!(serde_yaml::from_str::<Leader>("mode: rotating\n").is_err());

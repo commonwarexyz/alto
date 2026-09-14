@@ -13,7 +13,7 @@ use commonware_runtime::{
 };
 use commonware_storage::queue;
 use commonware_utils::futures::{OptionFuture, Pool};
-use std::{num::NonZeroUsize, time::Duration};
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 use tracing::{debug, warn};
 
 /// Final outcome for one backfill queue entry.
@@ -248,6 +248,7 @@ where
                 NextBlock::Ready(block) => return Some(*block),
                 NextBlock::FetchFromMarshal => {
                     if let Some(block) = marshal.get_block(Identifier::Digest(digest)).await {
+                        let block = Arc::unwrap_or_clone(block);
                         uploads.lock().cache_block(block.clone());
                         return Some(block);
                     }

@@ -3,7 +3,7 @@ use alto_types::{Block, Context, Scheme};
 use commonware_actor::Feedback;
 use commonware_consensus::{
     marshal::{ancestry::Ancestry, Update},
-    Application as ConsensusApplication, Heightable, Reporter,
+    Application as ConsensusApplication, HandoffPolicy, Heightable, Reporter,
 };
 use commonware_cryptography::Digestible;
 use commonware_runtime::{Clock, Metrics, Spawner, Storage};
@@ -57,6 +57,11 @@ where
     type Context = Context;
     type Block = Block;
     type Input = ();
+
+    async fn handoff_policy(&mut self, _context: (E, Self::Context)) -> HandoffPolicy {
+        // Pipeline through the ordinary proposal path so both cases use the same block builder.
+        HandoffPolicy::Pipeline
+    }
 
     async fn propose(
         &mut self,
@@ -209,6 +214,23 @@ mod tests {
         ConsensusApplication::propose(application, (context, child_context), ancestry, ())
             .await
             .expect("expected proposal")
+    }
+
+    #[test]
+    fn pipelines_handoffs_through_regular_proposer() {
+        deterministic::Runner::default().start(|context| async move {
+            let mut application = Application::<VrfScheme>::new(DELAY_MS, 0);
+            let policy = ConsensusApplication::handoff_policy(
+                &mut application,
+                (
+                    context,
+                    test_context(1, (View::zero(), sha256::Digest::EMPTY)),
+                ),
+            )
+            .await;
+
+            assert_eq!(policy, HandoffPolicy::Pipeline);
+        });
     }
 
     #[test]

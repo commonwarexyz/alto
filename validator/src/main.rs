@@ -119,7 +119,7 @@ fn main() {
         serde_yaml::from_str(&config_file).expect("Could not parse config file");
     let max_message_size = configured_max_message_size(config.block_size);
     let key = from_hex(&config.private_key).expect("Could not parse private key");
-    let signer = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
+    let signer = PrivateKey::decode(key).expect("Private key is invalid");
     let public_key = signer.public_key();
 
     // Initialize runtime
@@ -218,7 +218,7 @@ fn main() {
                         .get(peer)
                         .expect("Could not find peer in hosts file");
                     let key = from_hex(peer).expect("Could not parse peer key");
-                    let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
+                    let key = PublicKey::decode(key).expect("Peer key is invalid");
                     (key, *ip)
                 })
                 .collect();
@@ -227,7 +227,7 @@ fn main() {
             let mut bootstrappers = Vec::new();
             for bootstrapper in &config.bootstrappers {
                 let key = from_hex(bootstrapper).expect("Could not parse bootstrapper key");
-                let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
+                let key = PublicKey::decode(key).expect("Bootstrapper key is invalid");
                 let ip = peers.get(&key).expect("Could not find bootstrapper in IPs");
                 let bootstrapper_socket = format!("{}:{}", ip, config.port);
                 let bootstrapper_socket = SocketAddr::from_str(&bootstrapper_socket)
@@ -245,7 +245,7 @@ fn main() {
                 .into_iter()
                 .map(|peer| {
                     let key = from_hex(&peer.0).expect("Could not parse peer key");
-                    let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
+                    let key = PublicKey::decode(key).expect("Peer key is invalid");
                     (key, peer.1)
                 })
                 .collect();
@@ -254,7 +254,7 @@ fn main() {
             let mut bootstrappers = Vec::new();
             for bootstrapper in &config.bootstrappers {
                 let key = from_hex(bootstrapper).expect("Could not parse bootstrapper key");
-                let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
+                let key = PublicKey::decode(key).expect("Bootstrapper key is invalid");
                 let socket = peers.get(&key).expect("Could not find bootstrapper in IPs");
                 bootstrappers.push((key, Ingress::Socket(*socket)));
             }
@@ -269,13 +269,11 @@ fn main() {
 
         // Parse config
         let share = from_hex(&config.share).expect("Could not parse share");
-        let share = group::Share::decode(share.as_ref()).expect("Share is invalid");
+        let share = group::Share::decode(share).expect("Share is invalid");
         let polynomial = from_hex(&config.polynomial).expect("Could not parse polynomial");
-        let polynomial = Sharing::<MinSig>::decode_cfg(
-            polynomial.as_ref(),
-            &(NZU32!(peers_u32), ModeVersion::v0()),
-        )
-        .expect("polynomial is invalid");
+        let polynomial =
+            Sharing::<MinSig>::decode_cfg(polynomial, &(NZU32!(peers_u32), ModeVersion::v0()))
+                .expect("polynomial is invalid");
         let identity = *polynomial.public();
         info!(
             ?public_key,
