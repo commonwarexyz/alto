@@ -10,8 +10,8 @@ usage() {
 [ $# -eq 1 ] || usage
 case "$1" in
     stable)
-        # Rotate the round-robin leader every view and pipeline every handoff.
-        leader_flags=(--leader-mode stable --leader-delay-ms 5 --leader-term-length 1 --leader-optimistic-views 0)
+        # Rotate the round-robin leader every view and compare all handoff cohorts.
+        leader_flags=(--leader-mode stable --leader-delay-ms 5 --leader-term-length 1 --leader-optimistic-views 0 --handoff-modes await_certification,build_hold,build_prebroadcast)
         ;;
     rotating)
         # A VRF-seeded leader for every view.

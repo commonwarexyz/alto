@@ -388,6 +388,7 @@ fn main() {
                     mailbox_size: config.mailbox_size,
                     deque_size: config.deque_size,
                     block_size: config.block_size,
+                    handoff_mode: config.handoff_mode,
                     proposal_delay_ms: $delay_ms,
                     leader_timeout: LEADER_TIMEOUT,
                     certification_timeout: CERTIFICATION_TIMEOUT,

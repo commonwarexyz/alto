@@ -1,6 +1,7 @@
 use crate::{
     application::Application,
     indexer::{self, Client},
+    HandoffMode,
 };
 use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH};
 use commonware_broadcast::buffered;
@@ -104,6 +105,7 @@ pub struct Config<
     pub mailbox_size: usize,
     pub deque_size: usize,
     pub block_size: u32,
+    pub handoff_mode: HandoffMode,
     /// Minimum interval from the parent's timestamp in milliseconds. Zero disables pacing.
     pub proposal_delay_ms: u64,
 
@@ -313,7 +315,11 @@ where
         // Create the application and, when an indexer is configured, a backfill
         // queue of finalized digests so block uploads can resume after
         // restarts.
-        let mut app = Application::new(proposal_delay_ms, cfg.block_size);
+        let mut app = Application::new(
+            proposal_delay_ms,
+            cfg.block_size,
+            cfg.handoff_mode.application_policy(),
+        );
         let (pusher, consumer) = if let Some(indexer) = cfg.indexer {
             let queue = queue::shared::init(
                 context.child("queue"),
@@ -377,7 +383,7 @@ where
                     timeout: cfg.skip_timeout,
                     budget: simplex::SkipBudget::Participants,
                 },
-                pipelined_handoff: true,
+                pipelined_handoff: cfg.handoff_mode.pipelined_handoff(),
                 forward: simplex::ForwardPolicy::Disabled,
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,

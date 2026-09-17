@@ -1,4 +1,5 @@
 use alto_types::CertificateMode;
+use commonware_consensus::HandoffPolicy;
 use commonware_utils::{NZUsize, Probability, NZU32};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -18,6 +19,29 @@ pub const DEFAULT_BACKFILLER_RETRY_MS: u64 = 1_000;
 pub const DEFAULT_BLOCKING_THREADS: usize = 512;
 pub const DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(16_384);
 pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(4_096);
+
+/// Controls how a validator prepares and broadcasts proposals across leader handoffs.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HandoffMode {
+    AwaitCertification,
+    BuildHold,
+    #[default]
+    BuildPrebroadcast,
+}
+
+impl HandoffMode {
+    pub const fn application_policy(self) -> HandoffPolicy {
+        match self {
+            Self::AwaitCertification => HandoffPolicy::AwaitCertification,
+            Self::BuildHold | Self::BuildPrebroadcast => HandoffPolicy::Build,
+        }
+    }
+
+    pub const fn pipelined_handoff(self) -> bool {
+        matches!(self, Self::BuildPrebroadcast)
+    }
+}
 
 /// How long validators wait for a leader's proposal before nullifying the view.
 /// Proposal pacing stays below this deadline to leave time to propose.
@@ -135,6 +159,9 @@ pub struct Config {
 
     pub signature_threads: usize,
 
+    #[serde(default)]
+    pub handoff_mode: HandoffMode,
+
     /// Required leader policy, which determines the certificate format.
     pub leader: Leader,
 
@@ -188,6 +215,7 @@ mod tests {
             scheme::bls12381_threshold::{standard as bls12381_threshold, vrf},
         },
         types::ViewDelta,
+        HandoffPolicy,
     };
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519::PublicKey,
@@ -221,6 +249,23 @@ mod tests {
     /// Proposal delay of every simulated validator and the term length of stable leaders.
     const PROPOSAL_DELAY_MS: u64 = 10;
     const STABLE_LEADER_TERM_LENGTH: NonZeroU32 = NZU32!(1_000);
+
+    #[test]
+    fn handoff_modes_map_to_consensus_settings() {
+        for (mode, policy, pipelined) in [
+            (
+                HandoffMode::AwaitCertification,
+                HandoffPolicy::AwaitCertification,
+                false,
+            ),
+            (HandoffMode::BuildHold, HandoffPolicy::Build, false),
+            (HandoffMode::BuildPrebroadcast, HandoffPolicy::Build, true),
+        ] {
+            assert_eq!(mode.application_policy(), policy);
+            assert_eq!(mode.pipelined_handoff(), pipelined);
+        }
+        assert_eq!(HandoffMode::default(), HandoffMode::BuildPrebroadcast);
+    }
 
     /// Registers all validators using the oracle.
     async fn register_validators(
@@ -376,6 +421,7 @@ mod tests {
         leader_timeout: Duration,
         certification_timeout: Duration,
         block_size: u32,
+        handoff_mode: HandoffMode,
         backfiller_max_active: NonZeroUsize,
         backfiller_retry: Duration,
         indexer: Option<mocks::Client>,
@@ -387,6 +433,7 @@ mod tests {
                 leader_timeout: Duration::from_secs(1),
                 certification_timeout: Duration::from_secs(2),
                 block_size: 0,
+                handoff_mode: HandoffMode::default(),
                 backfiller_max_active: DEFAULT_BACKFILLER_MAX_ACTIVE,
                 backfiller_retry: Duration::from_millis(DEFAULT_BACKFILLER_RETRY_MS),
                 indexer: None,
@@ -449,6 +496,7 @@ mod tests {
             mailbox_size: 1024,
             deque_size: 10,
             block_size: cfg.block_size,
+            handoff_mode: cfg.handoff_mode,
             proposal_delay_ms: PROPOSAL_DELAY_MS,
             leader_timeout: cfg.leader_timeout,
             certification_timeout: cfg.certification_timeout,

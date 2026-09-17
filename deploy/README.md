@@ -23,6 +23,12 @@ stable-only flags.
 Zero disables pacing and allows equal timestamps. Use 100 ms for local stable networks: shorter
 intervals can cause timeouts and skipped terms.
 
+`--handoff-modes` accepts an ordered, comma-separated list of `await_certification`, `build_hold`,
+and `build_prebroadcast`. Validators are sorted by public key and assigned modes cyclically in that
+order. It defaults to `build_prebroadcast`. Await mode waits for the outgoing certificate before
+building; hold mode builds early but waits to broadcast; prebroadcast mode builds and broadcasts
+early.
+
 Certificate mode follows leader mode: `standard` for stable and `vrf` for rotating. The generator
 sets it in indexer commands and configurations and in explorer configurations. Set followers'
 `certificate_mode` and the inspector's `--certificate-mode` to match. Changing certificate mode
@@ -161,8 +167,8 @@ cluster.
 
 The script deploys 50 validators and one indexer on `c7gd.4xlarge` instances. Each validator uses
 8 worker threads and 16 signature threads. Stable mode uses a 5 ms proposal interval, rotates the
-round-robin leader every view, and pipelines each handoff. Rotating mode uses zero proposal delay
-and elects a VRF-seeded leader every view. Deployment concurrency is 50.
+round-robin leader every view, and cycles validators across the three handoff modes. Rotating mode
+uses zero proposal delay and elects a VRF-seeded leader every view. Deployment concurrency is 50.
 
 _Each `c7gd.4xlarge` provides a 950GB ephemeral NVMe instance store, which the deployer mounts at
 `/home/ubuntu` for validator data. The 25GB storage setting sizes the gp3 root volume. Terminating
