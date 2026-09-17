@@ -377,6 +377,7 @@ where
                     timeout: cfg.skip_timeout,
                     budget: simplex::SkipBudget::Participants,
                 },
+                pipelined_handoff: true,
                 forward: simplex::ForwardPolicy::Disabled,
                 replay_buffer: REPLAY_BUFFER,
                 write_buffer: WRITE_BUFFER,

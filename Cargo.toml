@@ -20,22 +20,22 @@ license = "MIT OR Apache-2.0"
 alto-chain = { version = "2026.9.1", path = "chain" }
 alto-client = { version = "2026.9.1", path = "client" }
 alto-types = { version = "2026.9.1", path = "types" }
-commonware-actor = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
-commonware-broadcast = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
-commonware-codec = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
-commonware-consensus = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
-commonware-cryptography = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
-commonware-deployer = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe", default-features = false }
-commonware-formatting = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
-commonware-macros = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
-commonware-p2p = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
-commonware-resolver = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
-commonware-runtime = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
-commonware-storage = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
-commonware-stream = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
-commonware-utils = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
-commonware-math = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
-commonware-parallel = { git = "https://github.com/commonwarexyz/monorepo", rev = "1f01649e5989888cea11370938e995871bed09fe" }
+commonware-actor = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
+commonware-broadcast = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
+commonware-codec = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
+commonware-consensus = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
+commonware-cryptography = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
+commonware-deployer = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f", default-features = false }
+commonware-formatting = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
+commonware-macros = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
+commonware-p2p = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
+commonware-resolver = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
+commonware-runtime = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
+commonware-storage = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
+commonware-stream = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
+commonware-utils = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
+commonware-math = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
+commonware-parallel = { git = "https://github.com/commonwarexyz/monorepo", rev = "f5586ad652cd5de440d8bb7555771f0adb30349f" }
 mimalloc = "0.1.52"
 thiserror = "2.0.12"
 bytes = "1.7.1"

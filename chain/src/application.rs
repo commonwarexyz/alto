@@ -58,9 +58,9 @@ where
     type Block = Block;
     type Input = ();
 
-    async fn handoff_policy(&mut self, _context: (E, Self::Context)) -> HandoffPolicy {
+    fn handoff_policy(&self, _context: &Self::Context) -> HandoffPolicy {
         // Pipeline through the ordinary proposal path so both cases use the same block builder.
-        HandoffPolicy::Pipeline
+        HandoffPolicy::Build
     }
 
     async fn propose(
@@ -218,19 +218,12 @@ mod tests {
 
     #[test]
     fn pipelines_handoffs_through_regular_proposer() {
-        deterministic::Runner::default().start(|context| async move {
-            let mut application = Application::<VrfScheme>::new(DELAY_MS, 0);
-            let policy = ConsensusApplication::handoff_policy(
-                &mut application,
-                (
-                    context,
-                    test_context(1, (View::zero(), sha256::Digest::EMPTY)),
-                ),
-            )
-            .await;
+        let application = Application::<VrfScheme>::new(DELAY_MS, 0);
+        let context = test_context(1, (View::zero(), sha256::Digest::EMPTY));
+        let policy =
+            ConsensusApplication::<deterministic::Context>::handoff_policy(&application, &context);
 
-            assert_eq!(policy, HandoffPolicy::Pipeline);
-        });
+        assert_eq!(policy, HandoffPolicy::Build);
     }
 
     #[test]
