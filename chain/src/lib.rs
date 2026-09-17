@@ -1,5 +1,5 @@
 use alto_types::CertificateMode;
-use commonware_consensus::HandoffPolicy;
+use commonware_consensus::{simplex::HandoffPublication, HandoffPolicy};
 use commonware_utils::{NZUsize, Probability, NZU32};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -34,12 +34,15 @@ impl HandoffMode {
     pub const fn application_policy(self) -> HandoffPolicy {
         match self {
             Self::AwaitCertification => HandoffPolicy::AwaitCertification,
-            Self::BuildHold | Self::BuildPrebroadcast => HandoffPolicy::Build,
+            Self::BuildHold | Self::BuildPrebroadcast => HandoffPolicy::Prepare,
         }
     }
 
-    pub const fn pipelined_handoff(self) -> bool {
-        matches!(self, Self::BuildPrebroadcast)
+    pub const fn handoff_publication(self) -> HandoffPublication {
+        match self {
+            Self::AwaitCertification | Self::BuildHold => HandoffPublication::AfterCertification,
+            Self::BuildPrebroadcast => HandoffPublication::AllowBeforeCertification,
+        }
     }
 }
 
@@ -252,17 +255,25 @@ mod tests {
 
     #[test]
     fn handoff_modes_map_to_consensus_settings() {
-        for (mode, policy, pipelined) in [
+        for (mode, policy, publication) in [
             (
                 HandoffMode::AwaitCertification,
                 HandoffPolicy::AwaitCertification,
-                false,
+                HandoffPublication::AfterCertification,
             ),
-            (HandoffMode::BuildHold, HandoffPolicy::Build, false),
-            (HandoffMode::BuildPrebroadcast, HandoffPolicy::Build, true),
+            (
+                HandoffMode::BuildHold,
+                HandoffPolicy::Prepare,
+                HandoffPublication::AfterCertification,
+            ),
+            (
+                HandoffMode::BuildPrebroadcast,
+                HandoffPolicy::Prepare,
+                HandoffPublication::AllowBeforeCertification,
+            ),
         ] {
             assert_eq!(mode.application_policy(), policy);
-            assert_eq!(mode.pipelined_handoff(), pipelined);
+            assert_eq!(mode.handoff_publication(), publication);
         }
         assert_eq!(HandoffMode::default(), HandoffMode::BuildPrebroadcast);
     }
