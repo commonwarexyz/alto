@@ -1,5 +1,5 @@
 use alto_types::CertificateMode;
-use commonware_consensus::{simplex::HandoffPublication, HandoffPolicy};
+use commonware_consensus::{HandoffPolicy, HandoffPublication};
 use commonware_utils::{NZUsize, Probability, NZU32};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -34,14 +34,10 @@ impl HandoffMode {
     pub const fn application_policy(self) -> HandoffPolicy {
         match self {
             Self::AwaitCertification => HandoffPolicy::AwaitCertification,
-            Self::BuildHold | Self::BuildPrebroadcast => HandoffPolicy::Prepare,
-        }
-    }
-
-    pub const fn handoff_publication(self) -> HandoffPublication {
-        match self {
-            Self::AwaitCertification | Self::BuildHold => HandoffPublication::AfterCertification,
-            Self::BuildPrebroadcast => HandoffPublication::AllowBeforeCertification,
+            Self::BuildHold => HandoffPolicy::Prepare(HandoffPublication::AfterCertification),
+            Self::BuildPrebroadcast => {
+                HandoffPolicy::Prepare(HandoffPublication::AllowBeforeCertification)
+            }
         }
     }
 }
@@ -255,25 +251,21 @@ mod tests {
 
     #[test]
     fn handoff_modes_map_to_consensus_settings() {
-        for (mode, policy, publication) in [
+        for (mode, policy) in [
             (
                 HandoffMode::AwaitCertification,
                 HandoffPolicy::AwaitCertification,
-                HandoffPublication::AfterCertification,
             ),
             (
                 HandoffMode::BuildHold,
-                HandoffPolicy::Prepare,
-                HandoffPublication::AfterCertification,
+                HandoffPolicy::Prepare(HandoffPublication::AfterCertification),
             ),
             (
                 HandoffMode::BuildPrebroadcast,
-                HandoffPolicy::Prepare,
-                HandoffPublication::AllowBeforeCertification,
+                HandoffPolicy::Prepare(HandoffPublication::AllowBeforeCertification),
             ),
         ] {
             assert_eq!(mode.application_policy(), policy);
-            assert_eq!(mode.handoff_publication(), publication);
         }
         assert_eq!(HandoffMode::default(), HandoffMode::BuildPrebroadcast);
     }
