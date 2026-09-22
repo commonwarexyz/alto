@@ -56,7 +56,7 @@ impl Kind {
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use commonware_codec::{Decode, Encode, EncodeSize, Read};
+    use commonware_codec::{Copying, Decode, Encode, EncodeSize, Read};
     use commonware_consensus::{
         simplex::{
             scheme::bls12381_threshold::vrf as bls12381_threshold,
@@ -114,12 +114,12 @@ mod tests {
         let mut encoded = block.encode().to_vec();
         let suffix = [1, 2, 3, 4];
         encoded.extend_from_slice(&suffix);
-        let mut reader = encoded.as_slice();
+        let mut reader = Copying(&encoded);
         assert_eq!(
             Block::read_cfg(&mut reader, &Block::unbounded_codec_config()).unwrap(),
             block
         );
-        assert_eq!(reader, suffix);
+        assert_eq!(reader.0, suffix);
     }
 
     #[test]

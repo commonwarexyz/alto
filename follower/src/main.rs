@@ -128,8 +128,7 @@ fn main() {
 
     // Parse identity
     let identity_bytes = from_hex(&config.identity).expect("Could not parse identity hex");
-    let identity =
-        Identity::decode(identity_bytes.as_ref()).expect("Could not decode identity public key");
+    let identity = Identity::decode(identity_bytes).expect("Could not decode identity public key");
 
     // Initialize runtime
     let cfg = tokio::Config::default()

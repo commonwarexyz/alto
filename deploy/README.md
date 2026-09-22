@@ -13,14 +13,21 @@ _To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/
 _To configure local indexer upload, add `--indexers '<url>:<count>[;<url>:<count>...]'` to the `generate local` command. For example, `http://localhost:8080:1` assigns one validator to upload to that indexer._
 
 `--leader-mode rotating` selects each view's leader from a VRF seed. Stable mode assigns leaders
-round-robin for terms of `--leader-term-length` views. Stable mode requires a term length of at
-least two and `--leader-optimistic-views`, which limits how far proposals and votes may run ahead
-of directly notarized ancestry. Values above the term length have no further effect. Rotating
-mode rejects both stable-only flags.
+round-robin for terms of `--leader-term-length` views and pipelines handoffs between terms. A term
+length of one rotates the round-robin leader and pipelines every view. For longer terms,
+`--leader-optimistic-views` limits how far proposals and votes may run ahead of directly notarized
+ancestry. Values above the term length have no further effect. Rotating mode rejects both
+stable-only flags.
 
 `--leader-delay-ms` sets the minimum interval from the parent's timestamp, from 0 through 999 ms.
 Zero disables pacing and allows equal timestamps. Use 100 ms for local stable networks: shorter
 intervals can cause timeouts and skipped terms.
+
+`--handoff-modes` accepts an ordered, comma-separated list of `await_certification`, `build_hold`,
+and `build_prebroadcast`. Validators are sorted by public key and assigned modes cyclically in that
+order. It defaults to `build_prebroadcast`. Await mode waits for the outgoing certificate before
+building; hold mode builds early but waits to broadcast; prebroadcast mode builds and broadcasts
+early.
 
 Certificate mode follows leader mode: `standard` for stable and `vrf` for rotating. The generator
 sets it in indexer commands and configurations and in explorer configurations. Set followers'
@@ -159,9 +166,9 @@ prints the explorer URL. The remaining deployment steps describe the manual flow
 cluster.
 
 The script deploys 50 validators and one indexer on `c7gd.4xlarge` instances. Each validator uses
-8 worker threads and 16 signature threads. Stable mode uses a 5 ms proposal interval and runs
-100,000-view terms with 48 optimistic views. Rotating mode uses zero proposal delay and elects a
-VRF-seeded leader every view. Deployment concurrency is 50.
+8 worker threads and 16 signature threads. Stable mode uses a 5 ms proposal interval, rotates the
+round-robin leader every view, and cycles validators across the three handoff modes. Rotating mode
+uses zero proposal delay and elects a VRF-seeded leader every view. Deployment concurrency is 50.
 
 _Each `c7gd.4xlarge` provides a 950GB ephemeral NVMe instance store, which the deployer mounts at
 `/home/ubuntu` for validator data. The 25GB storage setting sizes the gp3 root volume. Terminating

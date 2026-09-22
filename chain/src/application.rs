@@ -3,7 +3,7 @@ use alto_types::{Block, Context, Scheme};
 use commonware_actor::Feedback;
 use commonware_consensus::{
     marshal::{ancestry::Ancestry, Update},
-    Application as ConsensusApplication, Heightable, Reporter,
+    Application as ConsensusApplication, HandoffPolicy, Heightable, Reporter,
 };
 use commonware_cryptography::Digestible;
 use commonware_runtime::{Clock, Metrics, Spawner, Storage};
@@ -28,16 +28,18 @@ pub struct Application<S: Scheme> {
     backfiller: Option<indexer::Producer>,
     delay_ms: u64,
     block_size: usize,
+    handoff_policy: HandoffPolicy,
     _scheme: PhantomData<S>,
 }
 
 impl<S: Scheme> Application<S> {
-    pub fn new(delay_ms: u64, block_size: u32) -> Self {
+    pub fn new(delay_ms: u64, block_size: u32, handoff_policy: HandoffPolicy) -> Self {
         Self {
             backfiller: None,
             delay_ms,
             block_size: usize::try_from(block_size)
                 .expect("configured block size is unsupported on this platform"),
+            handoff_policy,
             _scheme: PhantomData,
         }
     }
@@ -57,6 +59,10 @@ where
     type Context = Context;
     type Block = Block;
     type Input = ();
+
+    fn handoff_policy(&self, _context: &Self::Context) -> HandoffPolicy {
+        self.handoff_policy
+    }
 
     async fn propose(
         &mut self,
@@ -174,12 +180,15 @@ mod tests {
     use commonware_consensus::{
         marshal::ancestry,
         types::{Height, Round, View},
+        HandoffPublication,
     };
     use commonware_cryptography::{ed25519, sha256, Digest as _, Hasher, Sha256, Signer};
     use commonware_runtime::{deterministic, Runner as _, Supervisor as _};
     use std::sync::Arc;
 
     const DELAY_MS: u64 = 10;
+    const PREPARE_HANDOFF: HandoffPolicy =
+        HandoffPolicy::Prepare(HandoffPublication::AfterCertification);
 
     fn test_context(view: u64, parent: (View, sha256::Digest)) -> Context {
         Context {
@@ -212,10 +221,20 @@ mod tests {
     }
 
     #[test]
+    fn pipelines_handoffs_through_regular_proposer() {
+        let application = Application::<VrfScheme>::new(DELAY_MS, 0, PREPARE_HANDOFF);
+        let context = test_context(1, (View::zero(), sha256::Digest::EMPTY));
+        let policy =
+            ConsensusApplication::<deterministic::Context>::handoff_policy(&application, &context);
+
+        assert_eq!(policy, PREPARE_HANDOFF);
+    }
+
+    #[test]
     fn verify_waits_until_future_block_enters_skew_window() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(DELAY_MS, 0);
+            let mut application = Application::new(DELAY_MS, 0, PREPARE_HANDOFF);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -262,7 +281,7 @@ mod tests {
 
             // Timestamp validity does not depend on the local proposal delay.
             for delay_ms in [0, DELAY_MS] {
-                let mut application = Application::new(delay_ms, 0);
+                let mut application = Application::new(delay_ms, 0, PREPARE_HANDOFF);
                 for (timestamp, valid) in [(now, false), (now + 1, true), (now + 2, true)] {
                     let block = Block::new(
                         test_context(2, (View::new(1), parent.digest())),
@@ -288,7 +307,7 @@ mod tests {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
             let block_size = 4;
-            let mut application = Application::new(DELAY_MS, block_size);
+            let mut application = Application::new(DELAY_MS, block_size, PREPARE_HANDOFF);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -328,7 +347,7 @@ mod tests {
     fn verify_returns_immediately_for_mature_block_timestamp() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(DELAY_MS, 0);
+            let mut application = Application::new(DELAY_MS, 0, PREPARE_HANDOFF);
 
             context.sleep(Duration::from_millis(10)).await;
             let now = context.current().epoch_millis();
@@ -359,7 +378,7 @@ mod tests {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
             let delay_ms = 37;
-            let mut application = Application::new(delay_ms, 0);
+            let mut application = Application::new(delay_ms, 0, PREPARE_HANDOFF);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -389,7 +408,7 @@ mod tests {
         for parent_timestamp in [0, 10, 15, MAX_BLOCK_TIMESTAMP_MS] {
             let runner = deterministic::Runner::default();
             runner.start(|context| async move {
-                let mut application = Application::new(0, 0);
+                let mut application = Application::new(0, 0, PREPARE_HANDOFF);
 
                 // Cover past, equal, and future parents, including the protocol's maximum.
                 context.sleep(Duration::from_millis(10)).await;
@@ -431,7 +450,7 @@ mod tests {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
             let block_size = 128;
-            let mut application = Application::new(DELAY_MS, block_size);
+            let mut application = Application::new(DELAY_MS, block_size, PREPARE_HANDOFF);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -458,7 +477,7 @@ mod tests {
     fn verify_rejects_timestamp_above_maximum() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(DELAY_MS, 0);
+            let mut application = Application::new(DELAY_MS, 0, PREPARE_HANDOFF);
 
             let now = context.current().epoch_millis();
             let parent = Block::new(
@@ -489,7 +508,7 @@ mod tests {
     fn propose_panics_when_parent_timestamp_is_maximum() {
         let runner = deterministic::Runner::default();
         runner.start(|context| async move {
-            let mut application = Application::new(DELAY_MS, 0);
+            let mut application = Application::new(DELAY_MS, 0, PREPARE_HANDOFF);
 
             // Adding the proposal delay to a parent at the timestamp limit exceeds that limit.
             let parent = Block::new(

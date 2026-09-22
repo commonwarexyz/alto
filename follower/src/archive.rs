@@ -26,7 +26,7 @@ use commonware_storage::{
     translator::FourCap,
 };
 use commonware_utils::{NZUsize, NZU64};
-use std::num::NonZero;
+use std::{num::NonZero, sync::Arc};
 
 // Shared constants (also used by marshal config in engine.rs)
 pub(crate) const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
@@ -217,7 +217,7 @@ where
         self,
         height: Height,
         commitment: Digest,
-        finalization: Finalization<C>,
+        finalization: &Finalization<C>,
     ) -> Result<Self, Self::Error> {
         match self {
             Self::Immutable(a) => Archive::put(a, height.get(), commitment, finalization)
@@ -286,15 +286,15 @@ where
 /// blocks. Implements [marshal::store::Blocks].
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum Blocks<E: BufferPooler + Storage + Metrics + Clock> {
-    Immutable(immutable::Archive<E, Digest, Block>),
-    Prunable(prunable::Archive<FourCap, E, Digest, Block>),
+    Immutable(immutable::Archive<E, Digest, Arc<Block>>),
+    Prunable(prunable::Archive<FourCap, E, Digest, Arc<Block>>),
 }
 
 impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Blocks for Blocks<E> {
-    type Block = Block;
+    type Block = Arc<Block>;
     type Error = archive::Error;
 
-    async fn put(self, block: Block) -> Result<Self, Self::Error> {
+    async fn put(self, block: &Arc<Block>) -> Result<Self, Self::Error> {
         let height = block.height.get();
         let digest = block.digest();
         match self {
@@ -314,7 +314,7 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Blocks for Blo
         }
     }
 
-    async fn get(&self, id: Identifier<'_, Digest>) -> Result<Option<Block>, Self::Error> {
+    async fn get(&self, id: Identifier<'_, Digest>) -> Result<Option<Arc<Block>>, Self::Error> {
         match self {
             Self::Immutable(a) => Archive::get(a, id).await,
             Self::Prunable(a) => Archive::get(a, id).await,

@@ -1,5 +1,5 @@
 use alto_chain::{
-    Config, Leader, Peers, DEFAULT_BACKFILLER_MAX_ACTIVE, DEFAULT_BACKFILLER_RETRY_MS,
+    Config, HandoffMode, Leader, Peers, DEFAULT_BACKFILLER_MAX_ACTIVE, DEFAULT_BACKFILLER_RETRY_MS,
     DEFAULT_BLOCKING_THREADS, DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS,
     DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS, LEADER_TIMEOUT,
 };
@@ -56,7 +56,7 @@ fn leader_args() -> [Arg; 4] {
         Arg::new("leader_term_length")
             .long("leader-term-length")
             .required_if_eq("leader_mode", "stable")
-            .value_parser(value_parser!(u32).range(2..)),
+            .value_parser(value_parser!(u32).range(1..)),
         Arg::new("leader_optimistic_views")
             .long("leader-optimistic-views")
             .required_if_eq("leader_mode", "stable")
@@ -79,6 +79,21 @@ fn traces_sample_rate_arg() -> Arg {
         .long("traces-sample-rate")
         .default_value("0")
         .value_parser(parse_traces_sample_rate)
+}
+
+fn parse_handoff_mode(value: &str) -> Result<HandoffMode, String> {
+    match value {
+        "await_certification" => Ok(HandoffMode::AwaitCertification),
+        "build_hold" => Ok(HandoffMode::BuildHold),
+        "build_prebroadcast" => Ok(HandoffMode::BuildPrebroadcast),
+        _ => Err(format!(
+            "invalid handoff mode '{value}'; expected await_certification, build_hold, or build_prebroadcast"
+        )),
+    }
+}
+
+fn handoff_mode_for_validator(index: usize, modes: &[HandoffMode]) -> HandoffMode {
+    modes[index % modes.len()]
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -318,6 +333,14 @@ fn command() -> Command {
                         .required(true)
                         .value_parser(value_parser!(usize)),
                 )
+                .arg(
+                    Arg::new("handoff_modes")
+                        .long("handoff-modes")
+                        .default_value("build_prebroadcast")
+                        .value_delimiter(',')
+                        .value_parser(parse_handoff_mode)
+                        .help("Ordered handoff modes assigned cyclically to validators"),
+                )
                 .args(leader_args())
                 .arg(
                     Arg::new("output")
@@ -448,6 +471,11 @@ fn run(matches: ArgMatches) {
             let deque_size = *sub_matches.get_one::<usize>("deque_size").unwrap();
             let block_size = *sub_matches.get_one::<u32>("block_size").unwrap();
             let signature_threads = *sub_matches.get_one::<usize>("signature_threads").unwrap();
+            let handoff_modes = sub_matches
+                .get_many::<HandoffMode>("handoff_modes")
+                .unwrap()
+                .copied()
+                .collect::<Vec<_>>();
             let leader = parse_leader(sub_matches).unwrap_or_else(|message| {
                 error!("{message}");
                 std::process::exit(2);
@@ -470,6 +498,7 @@ fn run(matches: ArgMatches) {
                     deque_size,
                     block_size,
                     signature_threads,
+                    &handoff_modes,
                     leader,
                     output,
                 ),
@@ -489,6 +518,7 @@ fn run(matches: ArgMatches) {
                     deque_size,
                     block_size,
                     signature_threads,
+                    &handoff_modes,
                     leader,
                     output,
                 ),
@@ -537,6 +567,7 @@ fn generate_local(
     deque_size: usize,
     block_size: u32,
     signature_threads: usize,
+    handoff_modes: &[HandoffMode],
     leader: Leader,
     output: String,
 ) {
@@ -587,7 +618,7 @@ fn generate_local(
     let mut port = start_port;
     let mut addresses = HashMap::new();
     let mut configurations = Vec::new();
-    for (signer, scheme) in peer_signers.iter().zip(schemes.iter()) {
+    for (index, (signer, scheme)) in peer_signers.iter().zip(schemes.iter()).enumerate() {
         // Create peer config
         let name = signer.public_key().to_string();
         addresses.insert(
@@ -622,6 +653,7 @@ fn generate_local(
             block_size,
 
             signature_threads,
+            handoff_mode: handoff_mode_for_validator(index, handoff_modes),
             leader,
             backfiller_max_active: DEFAULT_BACKFILLER_MAX_ACTIVE,
             backfiller_retry_ms: DEFAULT_BACKFILLER_RETRY_MS,
@@ -727,6 +759,7 @@ fn generate_remote(
     deque_size: usize,
     block_size: u32,
     signature_threads: usize,
+    handoff_modes: &[HandoffMode],
     leader: Leader,
     output: String,
 ) {
@@ -843,6 +876,7 @@ fn generate_remote(
             block_size,
 
             signature_threads,
+            handoff_mode: handoff_mode_for_validator(index, handoff_modes),
             leader,
             backfiller_max_active: DEFAULT_BACKFILLER_MAX_ACTIVE,
             backfiller_retry_ms: DEFAULT_BACKFILLER_RETRY_MS,
@@ -1030,11 +1064,9 @@ fn explorer_local(dir: String, backend_url: String) {
     let certificate_mode = peer_config.leader.certificate_mode().as_str();
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
-    let polynomial = Sharing::<MinSig>::decode_cfg(
-        polynomial.as_ref(),
-        &(NZU32!(num_peers as u32), ModeVersion::v0()),
-    )
-    .expect("polynomial is invalid");
+    let polynomial =
+        Sharing::<MinSig>::decode_cfg(polynomial, &(NZU32!(num_peers as u32), ModeVersion::v0()))
+            .expect("polynomial is invalid");
     let identity = polynomial.public();
 
     // Generate config.ts with empty locations (explorer will hide map)
@@ -1069,7 +1101,7 @@ fn explorer_remote(dir: String, backend_url: String) {
     for instance in &validators {
         let region = &instance.region;
         let public_key = from_hex(&instance.name).expect("invalid public key");
-        let public_key = PublicKey::decode(public_key.as_ref()).expect("invalid public key");
+        let public_key = PublicKey::decode(public_key).expect("invalid public key");
         let location = match get_aws_location(region) {
             Some((coords, city)) => format!("    [[{}, {}], \"{}\"]", coords[0], coords[1], city),
             None => "    null".to_string(),
@@ -1099,7 +1131,7 @@ fn explorer_remote(dir: String, backend_url: String) {
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
     let polynomial = Sharing::<MinSig>::decode_cfg(
-        polynomial.as_ref(),
+        polynomial,
         &(NZU32!(locations.len() as u32), ModeVersion::v0()),
     )
     .expect("polynomial is invalid");
@@ -1126,10 +1158,10 @@ fn explorer_remote(dir: String, backend_url: String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        command, leader_args, parse_indexers, parse_leader, run, select_regional_peers,
-        traces_sample_rate_arg, ConfiguredIndexer,
+        command, handoff_mode_for_validator, leader_args, parse_indexers, parse_leader, run,
+        select_regional_peers, traces_sample_rate_arg, ConfiguredIndexer,
     };
-    use alto_chain::Leader;
+    use alto_chain::{HandoffMode, Leader};
     use alto_types::CertificateMode;
     use clap::Command;
     use commonware_utils::NZU32;
@@ -1190,6 +1222,7 @@ signature_threads: 1
         let config: alto_chain::Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.block_size, 0);
         assert_eq!(config.traces_sample_rate, 0.0);
+        assert_eq!(config.handoff_mode, HandoffMode::BuildPrebroadcast);
 
         let config: alto_chain::Config = serde_yaml::from_str(&format!(
             "{yaml}\nblock_size: 4096\ntraces_sample_rate: 0.0001\n"
@@ -1202,6 +1235,99 @@ signature_threads: 1
             "{yaml}\ntraces_sample_rate: 1.1\n"
         ))
         .is_err());
+    }
+
+    #[test]
+    fn parses_and_cycles_handoff_modes_in_order() {
+        let defaults = command()
+            .try_get_matches_from([
+                "deploy",
+                "generate",
+                "--peers",
+                "1",
+                "--bootstrappers",
+                "0",
+                "--worker-threads",
+                "1",
+                "--log-level",
+                "info",
+                "--mailbox-size",
+                "1",
+                "--deque-size",
+                "1",
+                "--signature-threads",
+                "1",
+                "--leader-mode",
+                "rotating",
+                "--leader-delay-ms",
+                "0",
+                "--output",
+                "unused",
+                "local",
+                "--start-port",
+                "1",
+            ])
+            .unwrap();
+        let defaults = defaults.subcommand_matches("generate").unwrap();
+        assert_eq!(
+            defaults
+                .get_many::<HandoffMode>("handoff_modes")
+                .unwrap()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![HandoffMode::BuildPrebroadcast]
+        );
+
+        let matches = command()
+            .try_get_matches_from([
+                "deploy",
+                "generate",
+                "--peers",
+                "1",
+                "--bootstrappers",
+                "0",
+                "--worker-threads",
+                "1",
+                "--log-level",
+                "info",
+                "--mailbox-size",
+                "1",
+                "--deque-size",
+                "1",
+                "--signature-threads",
+                "1",
+                "--handoff-modes",
+                "await_certification,build_hold,build_prebroadcast",
+                "--leader-mode",
+                "rotating",
+                "--leader-delay-ms",
+                "0",
+                "--output",
+                "unused",
+                "local",
+                "--start-port",
+                "1",
+            ])
+            .unwrap();
+        let modes = matches
+            .subcommand_matches("generate")
+            .unwrap()
+            .get_many::<HandoffMode>("handoff_modes")
+            .unwrap()
+            .copied()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            (0..5)
+                .map(|index| handoff_mode_for_validator(index, &modes))
+                .collect::<Vec<_>>(),
+            vec![
+                HandoffMode::AwaitCertification,
+                HandoffMode::BuildHold,
+                HandoffMode::BuildPrebroadcast,
+                HandoffMode::AwaitCertification,
+                HandoffMode::BuildHold,
+            ]
+        );
     }
 
     #[test]
@@ -1329,7 +1455,7 @@ signature_threads: 1
                 "--leader-optimistic-views",
                 "48",
             ]);
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -1368,6 +1494,7 @@ signature_threads: 1
         for leader in [
             Leader::rotating(0),
             Leader::rotating(7),
+            Leader::stable(5, NZU32!(1), 48),
             Leader::stable(0, NZU32!(1_000), 48),
             Leader::stable(10, NZU32!(1_000), 48),
         ] {
@@ -1383,7 +1510,7 @@ signature_threads: 1
                 .is_err()
         );
         assert!(serde_yaml::from_str::<Leader>(
-            "mode: stable\ndelay_ms: 10\nterm_length: 1\noptimistic_views: 48\n"
+            "mode: stable\ndelay_ms: 10\nterm_length: 0\noptimistic_views: 48\n"
         )
         .is_err());
         assert!(serde_yaml::from_str::<Leader>("mode: rotating\n").is_err());
@@ -1634,6 +1761,23 @@ esac
                 *generate.get_one::<u64>("leader_delay_ms").unwrap(),
                 delay_ms
             );
+            let handoff_modes = generate
+                .get_many::<HandoffMode>("handoff_modes")
+                .unwrap()
+                .copied()
+                .collect::<Vec<_>>();
+            if mode == "stable" {
+                assert_eq!(
+                    handoff_modes,
+                    vec![
+                        HandoffMode::AwaitCertification,
+                        HandoffMode::BuildHold,
+                        HandoffMode::BuildPrebroadcast,
+                    ]
+                );
+            } else {
+                assert_eq!(handoff_modes, vec![HandoffMode::BuildPrebroadcast]);
+            }
 
             let embedded = fs::read_to_string(output.join("assets/embedded.html")).unwrap();
             assert!(embedded.ends_with("current frontend"), "{embedded}");
