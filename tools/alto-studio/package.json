@@ -1,0 +1,31 @@
+{
+  "name": "alto-node-studio",
+  "version": "1.0.0",
+  "description": "Interactive Alto Reference Blockchain Node Runner & Benchmark Dashboard for Commonware.",
+  "main": "src/index.js",
+  "type": "module",
+  "bin": {
+    "alto-cli": "./bin/alto-cli.js"
+  },
+  "scripts": {
+    "start": "node src/server/app.js",
+    "cli": "node bin/alto-cli.js",
+    "test": "node tests/run-all.js"
+  },
+  "keywords": [
+    "commonware",
+    "alto",
+    "rust-blockchain",
+    "reference-node",
+    "simplex-consensus",
+    "p2p-mesh"
+  ],
+  "author": "Commonware Community",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "ethers": "^6.13.5",
+    "express": "^4.21.2"
+  }
+}
