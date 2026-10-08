@@ -1,18 +1,16 @@
 use crate::{
-    consensus::{Context, Finalization, Notarization, Scheme},
+    consensus::{Context, Finalization, Notarization, PrivateKey, Scheme},
     EPOCH,
 };
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{BufMut, Bytes};
 use commonware_codec::{
-    varint::UInt, BufsMut, Encode, EncodeSize, Error, RangeCfg, Read, ReadExt, Write,
+    varint::UInt, Buf, BufsMut, Encode, EncodeSize, Error, RangeCfg, Read, ReadExt, Write,
 };
 use commonware_consensus::{
     types::{Height, Round, View},
     CertifiableBlock, Heightable,
 };
-use commonware_cryptography::{
-    ed25519, sha256::Digest, Digest as _, Digestible, Hasher, Sha256, Signer,
-};
+use commonware_cryptography::{sha256::Digest, Digest as _, Digestible, Hasher, Sha256, Signer};
 use commonware_parallel::Strategy;
 use commonware_utils::sys_rng;
 
@@ -45,7 +43,7 @@ impl Block {
     pub fn genesis() -> Self {
         let context = Context {
             round: Round::new(EPOCH, View::zero()),
-            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            leader: PrivateKey::from_seed(0).public_key(),
             parent: (View::zero(), Digest::EMPTY),
         };
         Self::new(
@@ -220,7 +218,8 @@ impl<S: Scheme> Read for Notarized<S> {
     type Cfg = RangeCfg<usize>;
 
     fn read_cfg(buf: &mut impl Buf, cfg: &Self::Cfg) -> Result<Self, Error> {
-        let proof = Notarization::<S>::read(buf)?;
+        // Verification checks the certificate's signers against the participant set.
+        let proof = Notarization::<S>::read_cfg(buf, &S::certificate_codec_config_unbounded())?;
         let block = Block::read_cfg(buf, cfg)?;
 
         // Ensure the proof is for the block
@@ -285,7 +284,8 @@ impl<S: Scheme> Read for Finalized<S> {
     type Cfg = RangeCfg<usize>;
 
     fn read_cfg(buf: &mut impl Buf, cfg: &Self::Cfg) -> Result<Self, Error> {
-        let proof = Finalization::<S>::read(buf)?;
+        // Verification checks the certificate's signers against the participant set.
+        let proof = Finalization::<S>::read_cfg(buf, &S::certificate_codec_config_unbounded())?;
         let block = Block::read_cfg(buf, cfg)?;
 
         // Ensure the proof is for the block

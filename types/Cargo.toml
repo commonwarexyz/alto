@@ -17,6 +17,7 @@ crate-type = ["rlib", "cdylib"]
 commonware-codec = { workspace = true }
 commonware-consensus = { workspace = true }
 commonware-cryptography = { workspace = true }
+commonware-formatting = { workspace = true, optional = true }
 commonware-utils = { workspace = true }
 commonware-parallel = { workspace = true }
 bytes =  { workspace = true }
@@ -25,6 +26,10 @@ thiserror = { workspace = true }
 wasm-bindgen = "0.2.100"
 serde = { version = "1.0.219", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
+
+[features]
+# Post-quantum mode: ML-DSA-65 identities and individually verified ML-DSA-65 certificates.
+pq = ["dep:commonware-formatting"]
 
 # Enable "js" feature when WASM is target
 [target.'cfg(target_arch = "wasm32")'.dependencies.getrandom]

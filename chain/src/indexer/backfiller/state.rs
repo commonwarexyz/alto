@@ -1,6 +1,6 @@
 use alto_types::Block;
-use bytes::{Buf, BufMut};
-use commonware_codec::{self, FixedSize, Read, Write};
+use bytes::BufMut;
+use commonware_codec::{self, Buf, FixedSize, Read, Write};
 use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_utils::{sync::Mutex, PrioritySet};
 use std::{collections::BTreeMap, sync::Arc};
@@ -175,16 +175,16 @@ pub type SharedState = Arc<Mutex<State>>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alto_types::{Context, EPOCH};
+    use alto_types::{Context, PrivateKey, EPOCH};
     use bytes::Bytes;
     use commonware_consensus::types::{Height, Round, View};
-    use commonware_cryptography::{ed25519, Digestible, Hasher, Sha256, Signer};
+    use commonware_cryptography::{Digestible, Hasher, Sha256, Signer};
 
     fn test_block(view: u64, height: u64, label: &[u8]) -> Block {
         Block::new(
             Context {
                 round: Round::new(EPOCH, View::new(view)),
-                leader: ed25519::PrivateKey::from_seed(view).public_key(),
+                leader: PrivateKey::from_seed(view).public_key(),
                 parent: (
                     View::new(view.saturating_sub(1)),
                     Sha256::hash(&[format!("parent-{view}").as_bytes()]),

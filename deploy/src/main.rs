@@ -3,23 +3,36 @@ use alto_chain::{
     DEFAULT_BLOCKING_THREADS, DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS,
     DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS, LEADER_TIMEOUT,
 };
-use alto_types::{CertificateMode, NAMESPACE};
+use alto_types::{host_name, CertificateMode, PrivateKey};
+#[cfg(not(feature = "pq"))]
+use alto_types::{PublicKey, NAMESPACE};
 use clap::{value_parser, Arg, ArgAction, ArgMatches, Command};
-use commonware_codec::{Decode, DecodeExt, Encode};
+use commonware_codec::Encode;
+#[cfg(not(feature = "pq"))]
+use commonware_codec::{Decode, DecodeExt};
+#[cfg(not(feature = "pq"))]
 use commonware_consensus::simplex::scheme::bls12381_threshold::vrf as bls12381_threshold;
+use commonware_cryptography::Signer;
+#[cfg(not(feature = "pq"))]
 use commonware_cryptography::{
     bls12381::primitives::{
         sharing::{ModeVersion, Sharing},
         variant::MinSig,
     },
     certificate::mocks::Fixture,
-    ed25519::{PrivateKey, PublicKey},
-    Signer,
 };
+#[cfg(feature = "pq")]
+use commonware_cryptography::{Hasher, Sha256};
 use commonware_deployer::aws::{self, METRICS_PORT};
-use commonware_formatting::{from_hex, hex};
+#[cfg(not(feature = "pq"))]
+use commonware_formatting::from_hex;
+use commonware_formatting::hex;
 use commonware_math::algebra::Random;
-use commonware_utils::{sys_rng, NZU32};
+#[cfg(feature = "pq")]
+use commonware_utils::ordered::Set;
+use commonware_utils::sys_rng;
+#[cfg(not(feature = "pq"))]
+use commonware_utils::NZU32;
 use rand::seq::IteratorRandom;
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -41,6 +54,18 @@ const INDEXER_PORT: u16 = 8080;
 const PORT: u16 = 4545;
 const STORAGE_CLASS: &str = "gp3";
 const DASHBOARD_FILE: &str = "dashboard.json";
+
+/// Cargo arguments that build a validator matching the generated configuration.
+#[cfg(not(feature = "pq"))]
+const VALIDATOR_FEATURES: &str = "";
+/// Cargo arguments that build a validator matching the generated configuration.
+#[cfg(feature = "pq")]
+const VALIDATOR_FEATURES: &str = " --features pq";
+
+/// Reason post-quantum builds reject indexer and explorer options.
+#[cfg(feature = "pq")]
+const CLASSICAL_ONLY: &str =
+    "the indexer and explorer verify threshold certificates and are unavailable in post-quantum builds";
 
 fn leader_args() -> [Arg; 4] {
     [
@@ -205,7 +230,7 @@ fn parse_backend_url(value: &str) -> Result<String, String> {
 
 fn parse_leader(matches: &ArgMatches) -> Result<Leader, &'static str> {
     let delay_ms = *matches.get_one::<u64>("leader_delay_ms").unwrap();
-    match matches.get_one::<String>("leader_mode").unwrap().as_str() {
+    let leader = match matches.get_one::<String>("leader_mode").unwrap().as_str() {
         "rotating" => {
             if matches.get_one::<u32>("leader_term_length").is_some() {
                 return Err("rotating leader mode does not accept --leader-term-length");
@@ -213,15 +238,55 @@ fn parse_leader(matches: &ArgMatches) -> Result<Leader, &'static str> {
             if matches.get_one::<u64>("leader_optimistic_views").is_some() {
                 return Err("rotating leader mode does not accept --leader-optimistic-views");
             }
-            Ok(Leader::rotating(delay_ms))
+            Leader::rotating(delay_ms)
         }
-        "stable" => Ok(Leader::stable(
+        "stable" => Leader::stable(
             delay_ms,
             NonZeroU32::new(*matches.get_one::<u32>("leader_term_length").unwrap()).unwrap(),
             *matches.get_one::<u64>("leader_optimistic_views").unwrap(),
-        )),
+        ),
         _ => unreachable!("clap validates leader mode"),
-    }
+    };
+    leader.check_supported()?;
+    Ok(leader)
+}
+
+/// Generates threshold key material for `signers`.
+///
+/// Returns each validator's hex-encoded share and public polynomial, in participant order, and
+/// the hex-encoded network identity.
+#[cfg(not(feature = "pq"))]
+fn consensus_keys(signers: &[PrivateKey]) -> (Vec<(String, String)>, String) {
+    let Fixture { schemes, .. } =
+        bls12381_threshold::fixture::<MinSig, _>(&mut sys_rng(), NAMESPACE, signers.len() as u32);
+    let identity = schemes[0].polynomial().public();
+    info!(%identity, "generated network key");
+    let keys = schemes
+        .iter()
+        .map(|scheme| {
+            (
+                hex(&scheme.share().unwrap().encode()),
+                hex(&scheme.polynomial().encode()),
+            )
+        })
+        .collect();
+    (keys, hex(&identity.encode()))
+}
+
+/// Validators sign consensus messages with their identity keys, so there is no threshold key
+/// material: every share and polynomial is empty.
+///
+/// Returns the hex-encoded SHA-256 digest of the encoded participant set as the network's
+/// fingerprint.
+#[cfg(feature = "pq")]
+fn consensus_keys(signers: &[PrivateKey]) -> (Vec<(String, String)>, String) {
+    let participants = Set::from_iter_dedup(signers.iter().map(|signer| signer.public_key()));
+    let digest = Sha256::hash(&[participants.encode().as_ref()]);
+    info!(%digest, "generated participant set");
+    (
+        vec![(String::new(), String::new()); signers.len()],
+        hex(&digest),
+    )
 }
 
 fn main() {
@@ -498,6 +563,12 @@ fn run(matches: ArgMatches) {
                 }
             }
         }
+        #[cfg(feature = "pq")]
+        Some(("explorer", _)) => {
+            error!("explorer: {CLASSICAL_ONLY}");
+            std::process::exit(2);
+        }
+        #[cfg(not(feature = "pq"))]
         Some(("explorer", sub_matches)) => {
             let dir = sub_matches.get_one::<String>("dir").unwrap().clone();
             let backend_url = sub_matches
@@ -543,6 +614,11 @@ fn generate_local(
     // Extract arguments
     let start_port = *sub_matches.get_one::<u16>("start_port").unwrap();
     let configured_indexers = parse_indexers(sub_matches.get_one::<String>("indexers"));
+    #[cfg(feature = "pq")]
+    if !configured_indexers.is_empty() {
+        error!("--indexers: {CLASSICAL_ONLY}");
+        std::process::exit(2);
+    }
 
     // Resolve relative output paths from the working directory.
     let current_dir = std::env::current_dir().unwrap();
@@ -576,30 +652,26 @@ fn generate_local(
         .collect::<Vec<_>>();
 
     // Generate consensus key
-    let peers_u32 = peers as u32;
-    let Fixture { schemes, .. } =
-        bls12381_threshold::fixture::<MinSig, _>(&mut sys_rng(), NAMESPACE, peers_u32);
-
-    let identity = schemes[0].polynomial().public();
-    info!(%identity, "generated network key");
+    let (key_material, identity) = consensus_keys(&peer_signers);
 
     // Generate instance configurations
     let mut port = start_port;
     let mut addresses = HashMap::new();
     let mut configurations = Vec::new();
-    for (signer, scheme) in peer_signers.iter().zip(schemes.iter()) {
+    for (signer, (share, polynomial)) in peer_signers.iter().zip(key_material) {
         // Create peer config
-        let name = signer.public_key().to_string();
+        let public_key = signer.public_key();
+        let name = host_name(&public_key);
         addresses.insert(
-            name.clone(),
+            public_key.to_string(),
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
         );
         let peer_config_file = format!("{name}.yaml");
         let directory = format!("{storage_output}/{name}");
         let peer_config = Config {
             private_key: hex(&signer.encode()),
-            share: hex(&scheme.share().unwrap().encode()),
-            polynomial: hex(&scheme.polynomial().encode()),
+            share,
+            polynomial,
 
             port,
             metrics_port: port + 1,
@@ -689,8 +761,9 @@ fn generate_local(
     println!("To start validators, run:");
     for (name, peer_config_file, _) in &configurations {
         let path = format!("{output}/{peer_config_file}");
-        let command =
-            format!("cargo run --bin {BINARY_NAME} -- --peers={peers_path} --config={path}");
+        let command = format!(
+            "cargo run --bin {BINARY_NAME}{VALIDATOR_FEATURES} -- --peers={peers_path} --config={path}"
+        );
         println!("{name}: {command}");
     }
     if !configured_indexers.is_empty() {
@@ -751,6 +824,11 @@ fn generate_remote(
     let dashboard = sub_matches.get_one::<String>("dashboard").unwrap().clone();
     let deploy_indexer = sub_matches.get_flag("indexer");
     let mut configured_indexers = parse_indexers(sub_matches.get_one::<String>("indexers"));
+    #[cfg(feature = "pq")]
+    if deploy_indexer || !configured_indexers.is_empty() {
+        error!("--indexer and --indexers: {CLASSICAL_ONLY}");
+        std::process::exit(2);
+    }
     let unique_regions = regions.iter().fold(Vec::new(), |mut unique, region| {
         if !unique.contains(region) {
             unique.push(region.clone());
@@ -799,12 +877,7 @@ fn generate_remote(
         .collect::<Vec<_>>();
 
     // Generate consensus key
-    let peers_u32 = peers as u32;
-    let Fixture { schemes, .. } =
-        bls12381_threshold::fixture::<MinSig, _>(&mut sys_rng(), NAMESPACE, peers_u32);
-
-    let identity = schemes[0].polynomial().public();
-    info!(%identity, "generated network key");
+    let (key_material, identity) = consensus_keys(&peer_signers);
 
     // Generate instance configurations
     assert!(
@@ -813,14 +886,15 @@ fn generate_remote(
     );
     let mut instance_configs = Vec::new();
     let mut peer_configs = Vec::new();
-    for (index, (signer, scheme)) in peer_signers.iter().zip(schemes.iter()).enumerate() {
+    for (index, (signer, (share, polynomial))) in peer_signers.iter().zip(key_material).enumerate()
+    {
         // Create peer config
-        let name = signer.public_key().to_string();
+        let name = host_name(&signer.public_key());
         let peer_config_file = format!("{name}.yaml");
         let peer_config = Config {
             private_key: hex(&signer.encode()),
-            share: hex(&scheme.share().unwrap().encode()),
-            polynomial: hex(&scheme.polynomial().encode()),
+            share,
+            polynomial,
 
             port: PORT,
             metrics_port: METRICS_PORT,
@@ -907,7 +981,7 @@ fn generate_remote(
 
         IndexerConfig {
             port: INDEXER_PORT,
-            identity: hex(&identity.encode()),
+            identity: identity.clone(),
             certificate_mode: leader.certificate_mode(),
             block_size,
             explorer: ExplorerConfig {
@@ -1013,6 +1087,7 @@ fn get_aws_location(region: &str) -> Option<([f64; 2], String)> {
     }
 }
 
+#[cfg(not(feature = "pq"))]
 fn explorer_local(dir: String, backend_url: String) {
     // Read peers.yaml to get participant count
     let peers_path = format!("{dir}/peers.yaml");
@@ -1030,11 +1105,9 @@ fn explorer_local(dir: String, backend_url: String) {
     let certificate_mode = peer_config.leader.certificate_mode().as_str();
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
-    let polynomial = Sharing::<MinSig>::decode_cfg(
-        polynomial.as_ref(),
-        &(NZU32!(num_peers as u32), ModeVersion::v0()),
-    )
-    .expect("polynomial is invalid");
+    let polynomial =
+        Sharing::<MinSig>::decode_cfg(polynomial, &(NZU32!(num_peers as u32), ModeVersion::v0()))
+            .expect("polynomial is invalid");
     let identity = polynomial.public();
 
     // Generate config.ts with empty locations (explorer will hide map)
@@ -1054,6 +1127,7 @@ fn explorer_local(dir: String, backend_url: String) {
     info!(path = "config.ts", "wrote explorer configuration file");
 }
 
+#[cfg(not(feature = "pq"))]
 fn explorer_remote(dir: String, backend_url: String) {
     // Collect all locations
     let config_path = format!("{dir}/config.yaml");
@@ -1069,7 +1143,7 @@ fn explorer_remote(dir: String, backend_url: String) {
     for instance in &validators {
         let region = &instance.region;
         let public_key = from_hex(&instance.name).expect("invalid public key");
-        let public_key = PublicKey::decode(public_key.as_ref()).expect("invalid public key");
+        let public_key = PublicKey::decode(public_key).expect("invalid public key");
         let location = match get_aws_location(region) {
             Some((coords, city)) => format!("    [[{}, {}], \"{}\"]", coords[0], coords[1], city),
             None => "    null".to_string(),
@@ -1099,7 +1173,7 @@ fn explorer_remote(dir: String, backend_url: String) {
     let polynomial_hex = peer_config.polynomial;
     let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
     let polynomial = Sharing::<MinSig>::decode_cfg(
-        polynomial.as_ref(),
+        polynomial,
         &(NZU32!(locations.len() as u32), ModeVersion::v0()),
     )
     .expect("polynomial is invalid");
@@ -1133,6 +1207,7 @@ mod tests {
     use alto_types::CertificateMode;
     use clap::Command;
     use commonware_utils::NZU32;
+    #[cfg(not(feature = "pq"))]
     use serde_yaml::Value;
     use std::fs;
     use uuid::Uuid;
@@ -1205,6 +1280,7 @@ signature_threads: 1
     }
 
     #[test]
+    #[cfg(not(feature = "pq"))]
     fn parse_rotating_leader() {
         let result = Command::new("test")
             .args(leader_args())
@@ -1294,6 +1370,106 @@ signature_threads: 1
             parse_leader(&matches).unwrap(),
             Leader::stable(10, NZU32!(1_000), 48)
         );
+    }
+
+    #[test]
+    #[cfg(feature = "pq")]
+    fn pq_rejects_rotating_leader() {
+        let matches = Command::new("test")
+            .args(leader_args())
+            .try_get_matches_from([
+                "test",
+                "--leader-mode",
+                "rotating",
+                "--leader-delay-ms",
+                "0",
+            ])
+            .unwrap();
+        assert!(parse_leader(&matches).is_err());
+    }
+
+    #[test]
+    #[cfg(feature = "pq")]
+    fn pq_generation_names_hosts_by_key_digest() {
+        use alto_types::{host_name, PrivateKey};
+        use commonware_codec::DecodeExt;
+        use commonware_cryptography::Signer;
+        use commonware_deployer::aws;
+        use commonware_formatting::from_hex;
+
+        let output = std::env::temp_dir().join(format!("alto-deploy-pq-{}", Uuid::new_v4()));
+        run(command()
+            .try_get_matches_from([
+                "deploy",
+                "generate",
+                "--peers",
+                "4",
+                "--bootstrappers",
+                "1",
+                "--worker-threads",
+                "1",
+                "--log-level",
+                "info",
+                "--mailbox-size",
+                "16384",
+                "--deque-size",
+                "256",
+                "--signature-threads",
+                "1",
+                "--leader-mode",
+                "stable",
+                "--leader-delay-ms",
+                "5",
+                "--leader-term-length",
+                "1000",
+                "--leader-optimistic-views",
+                "48",
+                "--output",
+                output.to_str().unwrap(),
+                "remote",
+                "--regions",
+                "us-east-1,eu-west-1",
+                "--monitoring-instance-type",
+                "c7gd.4xlarge",
+                "--monitoring-storage-size",
+                "100",
+                "--instance-type",
+                "c7gd.4xlarge",
+                "--storage-size",
+                "25",
+                "--dashboard",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/dashboard.json"),
+            ])
+            .unwrap());
+
+        let deployment: aws::Config =
+            serde_yaml::from_str(&fs::read_to_string(output.join("config.yaml")).unwrap()).unwrap();
+        assert_eq!(deployment.instances.len(), 4);
+        assert!(!output.join("indexer.yaml").exists());
+        for instance in &deployment.instances {
+            // Hosts and their configuration files are named by a short digest of the key.
+            assert_eq!(instance.name.len(), 32);
+            assert_eq!(instance.config, format!("{}.yaml", instance.name));
+            let raw = fs::read_to_string(output.join(&instance.config)).unwrap();
+            assert!(!raw.contains("share:") && !raw.contains("polynomial:"));
+            let config: alto_chain::Config = serde_yaml::from_str(&raw).unwrap();
+            let signer = PrivateKey::decode(from_hex(&config.private_key).unwrap()).unwrap();
+            assert_eq!(instance.name, host_name(&signer.public_key()));
+            assert_eq!(config.leader, Leader::stable(5, NZU32!(1_000), 48));
+
+            // Peer lists keep full keys, and every peer resolves to a deployed host.
+            assert!(config
+                .allowed_peers
+                .contains(&signer.public_key().to_string()));
+            for peer in &config.allowed_peers {
+                let key = alto_types::PublicKey::decode(from_hex(peer).unwrap()).unwrap();
+                assert!(deployment
+                    .instances
+                    .iter()
+                    .any(|instance| instance.name == host_name(&key)));
+            }
+        }
+        fs::remove_dir_all(output).unwrap();
     }
 
     #[test]
@@ -1439,6 +1615,7 @@ signature_threads: 1
     }
 
     #[test]
+    #[cfg(not(feature = "pq"))]
     fn indexer_generation_preserves_unmapped_participants() {
         for (mode, certificate_mode, delay_ms) in
             [("stable", "standard", "5"), ("rotating", "vrf", "0")]
@@ -1562,7 +1739,20 @@ signature_threads: 1
     fn scripted_deployment_uses_mode_settings_and_current_frontend() {
         use std::{os::unix::fs::PermissionsExt, process::Command};
 
-        for (mode, delay_ms) in [("stable", 5), ("rotating", 0)] {
+        // Each mode's leader settings, whether it deploys the indexer and explorer, its generator
+        // cargo arguments, and its binary build recipe.
+        for (mode, leader_mode, delay_ms, explorer, cargo_args, recipe) in [
+            ("stable", "stable", 5, true, "", "graviton-binaries"),
+            ("rotating", "rotating", 0, true, "", "graviton-binaries"),
+            (
+                "pq",
+                "stable",
+                5,
+                false,
+                " --features pq",
+                "validator-graviton-pq-binary",
+            ),
+        ] {
             let tag = format!("alto-build-test-{}", Uuid::new_v4());
             let output = std::env::temp_dir().join(&tag);
             for directory in ["bin", "deploy", "explorer/build"] {
@@ -1580,7 +1770,12 @@ case "${0##*/}" in
     cargo)
         mkdir -p assets
         printf 'tag: %s\n' "$ALTO_BUILD_TEST_TAG" > assets/config.yaml
-        while [ "$1" != -- ]; do shift; done
+        cargo_args=
+        while [ "$1" != -- ]; do
+            case "$1" in run|--locked|--bin|deploy) ;; *) cargo_args="$cargo_args $1" ;; esac
+            shift
+        done
+        printf '%s\n' "$cargo_args" > assets/cargo-args
         shift
         printf '%s\n' deploy "$@" > assets/generator-args
         ;;
@@ -1591,19 +1786,19 @@ case "${0##*/}" in
             printf '<script src="%s/runtime-config.js"></script>current frontend' "${frontend_base%/}" > "explorer/${BUILD_PATH:-build}/index.html"
         fi
         ;;
-    just) cp explorer/build/index.html assets/embedded.html ;;
+    just)
+        printf '%s\n' "$1" > assets/just-recipe
+        cp explorer/build/index.html assets/embedded.html
+        ;;
     *) ;;
 esac
 "#;
-            for tool in [
-                "cargo",
-                "just",
-                "docker",
-                "deployer",
-                "npm",
-                "wasm-pack",
-                "uname",
-            ] {
+            // Modes without the explorer must not need its build tools.
+            let mut tools = vec!["cargo", "just", "docker", "deployer", "uname"];
+            if explorer {
+                tools.extend(["npm", "wasm-pack"]);
+            }
+            for tool in tools {
                 let path = output.join("bin").join(tool);
                 fs::write(&path, stub).unwrap();
                 fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
@@ -1629,18 +1824,36 @@ esac
             let args = fs::read_to_string(output.join("assets/generator-args")).unwrap();
             let matches = command().try_get_matches_from(args.lines()).unwrap();
             let generate = matches.subcommand_matches("generate").unwrap();
-            assert_eq!(generate.get_one::<String>("leader_mode").unwrap(), mode);
+            assert_eq!(
+                generate.get_one::<String>("leader_mode").unwrap(),
+                leader_mode
+            );
             assert_eq!(
                 *generate.get_one::<u64>("leader_delay_ms").unwrap(),
                 delay_ms
             );
-
-            let embedded = fs::read_to_string(output.join("assets/embedded.html")).unwrap();
-            assert!(embedded.ends_with("current frontend"), "{embedded}");
-            assert!(
-                embedded.contains(r#"src="/runtime-config.js""#),
-                "{embedded}"
+            let remote = generate.subcommand_matches("remote").unwrap();
+            assert_eq!(remote.get_flag("indexer"), explorer);
+            assert_eq!(
+                fs::read_to_string(output.join("assets/cargo-args")).unwrap(),
+                format!("{cargo_args}\n")
             );
+            assert_eq!(
+                fs::read_to_string(output.join("assets/just-recipe")).unwrap(),
+                format!("{recipe}\n")
+            );
+
+            // Only modes with the explorer rebuild the embedded frontend.
+            let embedded = fs::read_to_string(output.join("assets/embedded.html")).unwrap();
+            if explorer {
+                assert!(embedded.ends_with("current frontend"), "{embedded}");
+                assert!(
+                    embedded.contains(r#"src="/runtime-config.js""#),
+                    "{embedded}"
+                );
+            } else {
+                assert_eq!(embedded, "old frontend");
+            }
             fs::remove_dir_all(output).unwrap();
         }
     }

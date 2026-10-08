@@ -1,17 +1,26 @@
 use alto_chain::{engine, Config, Leader, Peers, LEADER_TIMEOUT};
-use alto_types::{Scheme, StandardScheme, VrfScheme, EPOCH, NAMESPACE, ROTATING_ELECTOR};
+#[cfg(feature = "pq")]
+use alto_types::PqScheme;
+use alto_types::{host_name, PrivateKey, PublicKey, Scheme, EPOCH, NAMESPACE};
+#[cfg(not(feature = "pq"))]
+use alto_types::{StandardScheme, VrfScheme, ROTATING_ELECTOR};
 use clap::{Arg, Command};
-use commonware_codec::{varint::UInt, Decode, DecodeExt, EncodeSize};
+#[cfg(not(feature = "pq"))]
+use commonware_codec::Decode;
+use commonware_codec::{varint::UInt, DecodeExt, EncodeSize};
 use commonware_consensus::{marshal, types::ViewDelta};
+#[cfg(feature = "pq")]
+use commonware_cryptography::ml_kem::MlKem768;
+#[cfg(not(feature = "pq"))]
 use commonware_cryptography::{
     bls12381::primitives::{
         group,
         sharing::{ModeVersion, Sharing},
         variant::MinSig,
     },
-    ed25519::{PrivateKey, PublicKey},
-    Signer,
+    handshake::sake::X25519,
 };
+use commonware_cryptography::{ChaCha20Poly1305, Signer};
 use commonware_deployer::aws::Hosts;
 use commonware_formatting::from_hex;
 use commonware_p2p::{
@@ -20,7 +29,16 @@ use commonware_p2p::{
 };
 use commonware_parallel::Rayon;
 use commonware_runtime::{tokio, BufferPoolConfig, Runner, Supervisor as _};
-use commonware_utils::{ordered::Set, union_unique, NZUsize, NZU32};
+use commonware_stream::{
+    cups::{self, Cups},
+    sake::{self, Sake},
+    SakeCups,
+};
+#[cfg(feature = "pq")]
+use commonware_utils::ordered::BiMap;
+#[cfg(not(feature = "pq"))]
+use commonware_utils::NZU32;
+use commonware_utils::{ordered::Set, union_unique, NZUsize};
 use futures::future::try_join_all;
 use governor::Quota;
 use std::{
@@ -57,6 +75,16 @@ const BASE_MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
+/// Key encapsulation mechanism for the ephemeral key exchange of peer handshakes.
+#[cfg(not(feature = "pq"))]
+type HandshakeKem = X25519;
+/// Key encapsulation mechanism for the ephemeral key exchange of peer handshakes.
+#[cfg(feature = "pq")]
+type HandshakeKem = MlKem768;
+
+/// Authenticated transport upgrade for peer connections.
+type Upgrader = SakeCups<PrivateKey, ChaCha20Poly1305, HandshakeKem>;
+
 fn configured_max_message_size(block_size: u32) -> u32 {
     // Block data contributes its bytes and the codec's variable-length prefix to each message.
     // The total must remain within the authenticated transport payload limit.
@@ -65,7 +93,7 @@ fn configured_max_message_size(block_size: u32) -> u32 {
         + UInt(block_size).encode_size() as u64;
     u32::try_from(size)
         .ok()
-        .filter(|size| *size <= authenticated::MAX_SIZE)
+        .filter(|size| *size <= authenticated::max_size::<Upgrader>())
         .expect("block size exceeds authenticated transport maximum")
 }
 
@@ -117,10 +145,14 @@ fn main() {
     let config_file = std::fs::read_to_string(config_file).expect("Could not read config file");
     let mut config: Config =
         serde_yaml::from_str(&config_file).expect("Could not parse config file");
+    if let Err(message) = config.leader.check_supported() {
+        panic!("{message}");
+    }
     let max_message_size = configured_max_message_size(config.block_size);
     let key = from_hex(&config.private_key).expect("Could not parse private key");
-    let signer = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
+    let signer = PrivateKey::decode(key).expect("Private key is invalid");
     let public_key = signer.public_key();
+    let name = host_name(&public_key);
 
     // Initialize runtime
     let network_buffer_pool_parallelism = config
@@ -191,7 +223,7 @@ fn main() {
             .filter(|_| !traces_sample_rate.is_zero())
             .map(|hosts| tokio::tracing::Config {
                 endpoint: format!("http://{}:4318/v1/traces", hosts.monitoring.private),
-                name: public_key.to_string(),
+                name: name.clone(),
                 rate: traces_sample_rate,
             });
         tokio::telemetry::init(
@@ -214,11 +246,11 @@ fn main() {
                 .allowed_peers
                 .iter()
                 .map(|peer| {
-                    let ip = hosts_by_name
-                        .get(peer)
-                        .expect("Could not find peer in hosts file");
                     let key = from_hex(peer).expect("Could not parse peer key");
-                    let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
+                    let key = PublicKey::decode(key).expect("Peer key is invalid");
+                    let ip = hosts_by_name
+                        .get(&host_name(&key))
+                        .expect("Could not find peer in hosts file");
                     (key, *ip)
                 })
                 .collect();
@@ -227,7 +259,7 @@ fn main() {
             let mut bootstrappers = Vec::new();
             for bootstrapper in &config.bootstrappers {
                 let key = from_hex(bootstrapper).expect("Could not parse bootstrapper key");
-                let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
+                let key = PublicKey::decode(key).expect("Bootstrapper key is invalid");
                 let ip = peers.get(&key).expect("Could not find bootstrapper in IPs");
                 let bootstrapper_socket = format!("{}:{}", ip, config.port);
                 let bootstrapper_socket = SocketAddr::from_str(&bootstrapper_socket)
@@ -245,7 +277,7 @@ fn main() {
                 .into_iter()
                 .map(|peer| {
                     let key = from_hex(&peer.0).expect("Could not parse peer key");
-                    let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
+                    let key = PublicKey::decode(key).expect("Peer key is invalid");
                     (key, peer.1)
                 })
                 .collect();
@@ -254,7 +286,7 @@ fn main() {
             let mut bootstrappers = Vec::new();
             for bootstrapper in &config.bootstrappers {
                 let key = from_hex(bootstrapper).expect("Could not parse bootstrapper key");
-                let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
+                let key = PublicKey::decode(key).expect("Bootstrapper key is invalid");
                 let socket = peers.get(&key).expect("Could not find bootstrapper in IPs");
                 bootstrappers.push((key, Ingress::Socket(*socket)));
             }
@@ -265,32 +297,42 @@ fn main() {
             (ip, peer_keys, bootstrappers)
         };
         info!(peers = peers.len(), "loaded peers");
-        let peers_u32 = peers.len() as u32;
 
-        // Parse config
-        let share = from_hex(&config.share).expect("Could not parse share");
-        let share = group::Share::decode(share.as_ref()).expect("Share is invalid");
-        let polynomial = from_hex(&config.polynomial).expect("Could not parse polynomial");
-        let polynomial = Sharing::<MinSig>::decode_cfg(
-            polynomial.as_ref(),
-            &(NZU32!(peers_u32), ModeVersion::v0()),
-        )
-        .expect("polynomial is invalid");
-        let identity = *polynomial.public();
-        info!(
-            ?public_key,
-            ?identity,
-            ?ip,
-            port = config.port,
-            "loaded config"
-        );
+        // Parse threshold key material
+        #[cfg(not(feature = "pq"))]
+        let (share, polynomial, identity) = {
+            let peers_u32 = peers.len() as u32;
+            let share = from_hex(&config.share).expect("Could not parse share");
+            let share = group::Share::decode(share).expect("Share is invalid");
+            let polynomial = from_hex(&config.polynomial).expect("Could not parse polynomial");
+            let polynomial =
+                Sharing::<MinSig>::decode_cfg(polynomial, &(NZU32!(peers_u32), ModeVersion::v0()))
+                    .expect("polynomial is invalid");
+            let identity = *polynomial.public();
+            (share, polynomial, identity)
+        };
+
+        #[cfg(not(feature = "pq"))]
+        info!(%name, ?identity, ?ip, port = config.port, "loaded config");
+        #[cfg(feature = "pq")]
+        info!(%name, ?ip, port = config.port, "loaded config");
 
         // Configure network
         let p2p_namespace = union_unique(NAMESPACE, b"_P2P");
         let max_peers_per_set = peer_set_limit(&peers, &public_key);
+        let handshake: Upgrader = Cups::new(
+            Sake {
+                signer: signer.clone(),
+                kem: HandshakeKem::default(),
+                synchrony_bound: Duration::from_secs(5),
+                max_handshake_age: Duration::from_secs(10),
+                version: sake::Version::V1,
+            },
+            cups::Version::V1,
+        );
         let mut p2p_cfg = if config.local {
             authenticated::Config::local(
-                signer.clone(),
+                handshake,
                 &p2p_namespace,
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
                 SocketAddr::new(ip, config.port),
@@ -300,7 +342,7 @@ fn main() {
             )
         } else {
             authenticated::Config::recommended(
-                signer.clone(),
+                handshake,
                 &p2p_namespace,
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
                 SocketAddr::new(ip, config.port),
@@ -367,13 +409,12 @@ fn main() {
         );
 
         macro_rules! start_consensus {
-            ($scheme:ty, $elector:expr, $delay_ms:expr) => {{
-                let scheme = <$scheme>::signer(NAMESPACE, participants, polynomial, share)
-                    .expect("failed to create consensus scheme");
+            ($scheme:ty, $signer:expr, $identity:expr, $elector:expr, $delay_ms:expr) => {{
+                let scheme: $scheme = $signer.expect("failed to create consensus scheme");
                 let indexer = config.indexer.as_deref().map(|indexer_url| {
                     alto_client::ClientBuilder::new(
                         indexer_url,
-                        <$scheme as Scheme>::certificate_verifier(NAMESPACE, identity),
+                        <$scheme as Scheme>::certificate_verifier(NAMESPACE, $identity),
                         strategy.clone(),
                     )
                     .build()
@@ -410,6 +451,7 @@ fn main() {
 
         // Consensus, certificate storage, and indexer clients share the selected certificate
         // scheme for the process lifetime.
+        #[cfg(not(feature = "pq"))]
         let engine = match config.leader {
             Leader::Stable {
                 delay_ms,
@@ -417,12 +459,44 @@ fn main() {
                 optimistic_views,
             } => start_consensus!(
                 StandardScheme,
+                StandardScheme::signer(NAMESPACE, participants, polynomial, share),
+                identity,
                 engine::stable_elector(term_length, optimistic_views),
                 delay_ms
             ),
             Leader::Rotating { delay_ms } => {
-                start_consensus!(VrfScheme, ROTATING_ELECTOR, delay_ms)
+                start_consensus!(
+                    VrfScheme,
+                    VrfScheme::signer(NAMESPACE, participants, polynomial, share),
+                    identity,
+                    ROTATING_ELECTOR,
+                    delay_ms
+                )
             }
+        };
+
+        // Each validator's identity key also signs its consensus messages.
+        #[cfg(feature = "pq")]
+        let engine = match config.leader {
+            Leader::Stable {
+                delay_ms,
+                term_length,
+                optimistic_views,
+            } => {
+                let signers: Vec<_> = participants
+                    .iter()
+                    .map(|key| (key.clone(), key.clone()))
+                    .collect();
+                let signers = BiMap::try_from(signers).expect("participant keys are unique");
+                start_consensus!(
+                    PqScheme,
+                    PqScheme::signer(NAMESPACE, signers, signer),
+                    participants,
+                    engine::stable_elector(term_length, optimistic_views),
+                    delay_ms
+                )
+            }
+            Leader::Rotating { .. } => unreachable!("rejected when the config is loaded"),
         };
 
         // Wait for any task to error

@@ -2,7 +2,7 @@ use crate::{
     application::Application,
     indexer::{self, Client},
 };
-use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH};
+use alto_types::{Block, Finalization, PublicKey, Scheme, EPOCH, EPOCH_LENGTH};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
     marshal::{
@@ -21,7 +21,6 @@ use commonware_consensus::{
 };
 use commonware_cryptography::{
     certificate::ConstantProvider,
-    ed25519::PublicKey,
     sha256::{Digest, Sha256},
     Digestible as _,
 };
@@ -39,13 +38,13 @@ use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use std::{
     num::{NonZero, NonZeroUsize},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{error, info, warn};
 
 /// Reporter type for [simplex::Engine].
-type Reporter<E, C, CS> =
-    Reporters<Activity<CS>, Option<indexer::Pusher<E, C, CS>>, MarshalMailbox<CS, Standard<Block>>>;
+type Reporter<E, C, CS> = Reporters<indexer::Pusher<E, C, CS>, MarshalMailbox<CS, Standard<Block>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -66,7 +65,7 @@ const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(16);
 const STABLE_LEADER_STALL_TIMEOUT: Duration = Duration::from_secs(12);
 
-/// Round-robin leader election used with native standard certificates.
+/// Round-robin leader election used for stable leaders.
 pub type StableElector = RoundRobin<Sha256>;
 
 /// Builds stable leader election with a bounded optimistic view window.
@@ -138,7 +137,7 @@ where
         Standard<Block>,
         ConstantProvider<CS, Epoch>,
         immutable::Archive<E, Digest, Finalization<CS>>,
-        immutable::Archive<E, Digest, Block>,
+        immutable::Archive<E, Digest, Arc<Block>>,
         FixedEpocher,
         S,
     >,
@@ -290,7 +289,7 @@ where
                         .get()
                         .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
                 ),
-                start: marshal::Start::Genesis(genesis),
+                start: marshal::Start::Genesis(Arc::new(genesis)),
                 prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
                 replay_buffer: REPLAY_BUFFER,
                 key_write_buffer: WRITE_BUFFER,
@@ -309,7 +308,7 @@ where
         // restarts.
         let mut app = Application::new(proposal_delay_ms, cfg.block_size);
         let (pusher, consumer) = if let Some(indexer) = cfg.indexer {
-            let queue = queue::shared::init(
+            let queue = queue::Queue::init(
                 context.child("queue"),
                 queue::Config {
                     partition: format!("{}-finalized-queue", cfg.partition_prefix),
@@ -492,24 +491,22 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alto_types::{StandardScheme, NAMESPACE};
-    use commonware_consensus::simplex::scheme::bls12381_threshold::standard;
-    use commonware_cryptography::{
-        bls12381::primitives::variant::MinSig,
-        certificate::{mocks::Fixture, Scheme as _},
-    };
-    use commonware_utils::NZU32;
-    use rand::{rngs::StdRng, SeedableRng};
+    use alto_types::PrivateKey;
+    use commonware_cryptography::Signer;
+    use commonware_utils::{ordered::Set, NZU32};
+
+    #[cfg(not(feature = "pq"))]
+    type StableScheme = alto_types::StandardScheme;
+    #[cfg(feature = "pq")]
+    type StableScheme = alto_types::PqScheme;
 
     #[test]
     fn stable_elector_configures_terms() {
         let term_length = NZU32!(9);
-        let Fixture { schemes, .. } =
-            standard::fixture::<MinSig, _>(&mut StdRng::seed_from_u64(1), NAMESPACE, 4);
-        let stable = elector::Config::<StandardScheme>::build(
-            stable_elector(term_length, 37),
-            schemes[0].participants(),
-        );
+        let participants =
+            Set::from_iter_dedup((0..4).map(|seed| PrivateKey::from_seed(seed).public_key()));
+        let stable =
+            elector::Config::<StableScheme>::build(stable_elector(term_length, 37), &participants);
         let terms = elector::Elector::terms(&stable);
         assert_eq!(terms.length(), TermLength::new(term_length));
         assert_eq!(terms.stall_timeout(), Some(STABLE_LEADER_STALL_TIMEOUT));

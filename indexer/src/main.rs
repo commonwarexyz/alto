@@ -175,12 +175,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse identity
     let bytes = from_hex(&settings.identity).ok_or("Invalid identity hex format")?;
-    let identity: Identity =
-        Identity::decode(&mut bytes.as_slice()).map_err(|_| "Failed to decode identity")?;
+    let identity: Identity = Identity::decode(bytes).map_err(|_| "Failed to decode identity")?;
 
     match settings.certificate_mode {
         CertificateMode::Standard => serve::<StandardScheme>(settings, identity, script).await,
         CertificateMode::Vrf => serve::<VrfScheme>(settings, identity, script).await,
+        CertificateMode::MlDsa => {
+            Err("the indexer verifies threshold certificates and does not support ml_dsa".into())
+        }
     }
 }
 

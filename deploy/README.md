@@ -114,6 +114,27 @@ ulimit -n 65536
 
 _MacOS defaults to 256 open files, which is too low for the default settings (where 1 journal file is maintained per recent view)._
 
+#### Post-Quantum Mode
+
+Pass `--features pq` to both the generator and the validators to run a network with ML-DSA-65
+identities and certificates and ML-KEM-768 handshakes:
+
+```bash
+cargo run --bin deploy --features pq -- generate --peers 4 --bootstrappers 1 --worker-threads 2 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 100 --leader-term-length 1000 --leader-optimistic-views 48 --output test local --start-port 3000
+cargo run --release --bin validator --features pq -- --peers test/peers.yaml --config test/<validator-host-name>.yaml
+```
+
+Post-quantum builds support only `--leader-mode stable`: rotating leaders need threshold VRF
+seeds. The indexer and explorer verify threshold certificates, so the generator rejects
+`--indexer`, `--indexers`, and the `explorer` subcommand. Validator configurations contain no
+`share` or `polynomial`; the generator prints a digest of the participant set instead of a
+network identity.
+
+An ML-DSA-65 public key is 1952 bytes, so instances, configuration files, and storage directories
+are named by the first 16 bytes of the SHA-256 digest of the key, in hex. `allowed_peers`,
+`bootstrappers`, and `peers.yaml` keep full hex-encoded keys. Classical builds name hosts by
+the full hex-encoded key.
+
 ### Remote
 
 Install [Rust](https://www.rust-lang.org/tools/install), [Node.js with npm](https://nodejs.org/),
@@ -151,12 +172,15 @@ indexer: https://your-indexer.example.com
 ```bash
 ./deploy.sh stable
 ./deploy.sh rotating
+./deploy.sh pq
 ```
 
-`deploy.sh` takes the leader mode as its only argument. It generates the configuration, tests and
+`deploy.sh` takes the mode as its only argument. It generates the configuration, tests and
 builds the explorer, builds the validator and indexer binaries, creates the Global cluster, and
-prints the explorer URL. The remaining deployment steps describe the manual flow used for the USA
-cluster.
+prints the explorer URL. The `pq` mode uses the stable-mode leader settings and deploys
+[post-quantum](#post-quantum-mode) validators only: it skips the indexer and explorer and builds
+the validator with `just validator-graviton-pq-binary`. The remaining deployment steps describe
+the manual flow used for the USA cluster.
 
 The script deploys 50 validators and one indexer on `c7gd.4xlarge` instances. Each validator uses
 8 worker threads and 16 signature threads. Stable mode uses a 5 ms proposal interval and runs
@@ -232,6 +256,11 @@ Run the recipe for the deployment's instance type from the repository root:
 
 Each recipe writes `assets/validator`, `assets/indexer`, and their debug-symbol variants. Graviton 4
 binaries require CPU features unavailable on earlier Graviton generations.
+
+For [post-quantum](#post-quantum-mode) networks, build only the validator with
+`just validator-graviton-pq-binary`, `just validator-graviton4-pq-binary`, or
+`just validator-intel-pq-binary`. These recipes pass `ALTO_CARGO_ARGS=--features=pq` to the
+builder, which appends `ALTO_CARGO_ARGS` to its `cargo build` command.
 
 The builder runs on the local Docker architecture and cross-compiles the binaries, so no
 `--platform` argument is needed on an ARM64 development machine.

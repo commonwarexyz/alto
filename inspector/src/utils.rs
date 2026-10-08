@@ -42,7 +42,7 @@ pub fn parse_query(query: &str) -> Option<QueryKind> {
         Some(QueryKind::Single(Query::Index(index)))
     } else {
         let bytes = from_hex(query)?;
-        let digest = Digest::decode(bytes.as_ref()).ok()?;
+        let digest = Digest::decode(bytes).ok()?;
         Some(QueryKind::Single(Query::Digest(digest)))
     }
 }

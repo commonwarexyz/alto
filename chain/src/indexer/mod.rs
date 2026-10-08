@@ -84,7 +84,7 @@ pub(crate) fn init<E, C, CS>(
     context: E,
     client: C,
     marshal: MarshalMailbox<CS, Standard<Block>>,
-    backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
+    backfiller: (queue::Queue<E, Entry>, queue::Reader<E, Entry>),
     mailbox_size: NonZeroUsize,
     backfiller_max_active: NonZeroUsize,
     backfiller_retry: Duration,
@@ -101,11 +101,11 @@ where
         marshal.clone(),
         uploads.clone(),
     );
-    let (writer, reader) = backfiller;
+    let (queue, reader) = backfiller;
     let producer = backfiller::producer::init(
         context.child("producer"),
         uploads.clone(),
-        writer.clone(),
+        queue,
         mailbox_size,
     );
     let consumer = Consumer::new(
@@ -113,7 +113,7 @@ where
         client,
         marshal,
         uploads,
-        (writer, reader),
+        (producer.clone(), reader),
         backfiller_max_active,
         backfiller_retry,
     );

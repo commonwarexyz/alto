@@ -30,3 +30,7 @@ tokio = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
 commonware-math = { workspace = true }
+
+[features]
+# Post-quantum mode (see alto-types).
+pq = ["alto-types/pq"]

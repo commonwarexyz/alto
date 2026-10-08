@@ -19,6 +19,16 @@ _Components are designed for deployment in adversarial environments. If you find
 * [types](./types/README.md): Common types used throughout `alto`.
 * [validator](./validator/README.md): Run a validator node for `alto`.
 
+## Post-Quantum Mode
+
+Building with `--features pq` (on `alto-types`, `alto-chain`, `alto-client`, `alto-validator`,
+and `alto-deploy`) replaces Ed25519 identities and BLS12-381 threshold certificates with ML-DSA-65
+identities and certificates, and X25519 with ML-KEM-768 in peer handshakes. Each validator signs
+consensus messages with its identity key, and certificates carry one signature per signer. Only
+stable leaders are supported, and the indexer, explorer, follower, and inspector remain
+classical-only. See [deploy](./deploy/README.md#post-quantum-mode) for local and remote
+deployments.
+
 ## Licensing
 
 This repository is dual-licensed under both the [Apache 2.0](./LICENSE-APACHE) and [MIT](./LICENSE-MIT) licenses. You may choose either license when employing this code.

@@ -24,7 +24,10 @@ use commonware_utils::NZUsize;
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
-use std::num::{NonZero, NonZeroUsize};
+use std::{
+    num::{NonZero, NonZeroUsize},
+    sync::Arc,
+};
 use tracing::{error, warn};
 
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
@@ -102,7 +105,7 @@ where
             marshal::Config {
                 provider,
                 epocher,
-                start: marshal::Start::Genesis(Block::genesis()),
+                start: marshal::Start::Genesis(Arc::new(Block::genesis())),
                 partition_prefix: "follower-marshal".to_string(),
                 mailbox_size,
                 view_retention: VIEW_RETENTION_TIMEOUT,
@@ -127,7 +130,11 @@ where
             marshal_mailbox: mailbox.clone(),
             mailbox_size,
         };
-        (engine, mailbox, floor.height())
+        (
+            engine,
+            mailbox,
+            floor.processed().map(|processed| processed.height()),
+        )
     }
 
     /// Start the [Engine].

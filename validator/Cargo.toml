@@ -17,6 +17,7 @@ commonware-formatting = { workspace = true }
 commonware-p2p = { workspace = true }
 commonware-parallel = { workspace = true }
 commonware-runtime = { workspace = true }
+commonware-stream = { workspace = true }
 commonware-utils = { workspace = true }
 futures = { workspace = true }
 governor = { workspace = true }
@@ -24,6 +25,10 @@ clap = { workspace = true }
 mimalloc = { workspace = true }
 tracing = { workspace = true }
 serde_yaml = "0.9.34"
+
+[features]
+# Post-quantum mode: ML-DSA-65 identities and certificates with ML-KEM-768 transport handshakes.
+pq = ["alto-types/pq", "alto-chain/pq", "alto-client/pq"]
 
 [[bin]]
 name = "validator"

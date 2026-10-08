@@ -128,8 +128,7 @@ fn main() {
 
     // Parse identity
     let identity_bytes = from_hex(&config.identity).expect("Could not parse identity hex");
-    let identity =
-        Identity::decode(identity_bytes.as_ref()).expect("Could not decode identity public key");
+    let identity = Identity::decode(identity_bytes).expect("Could not decode identity public key");
 
     // Initialize runtime
     let cfg = tokio::Config::default()
@@ -165,6 +164,9 @@ fn main() {
         match config.certificate_mode {
             CertificateMode::Standard => run::<StandardScheme>(context, config, identity).await,
             CertificateMode::Vrf => run::<VrfScheme>(context, config, identity).await,
+            CertificateMode::MlDsa => {
+                panic!("the follower verifies threshold certificates and does not support ml_dsa")
+            }
         }
     });
 }
