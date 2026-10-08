@@ -166,7 +166,7 @@ impl Default for ValidatorConfig {
 }
 
 /// Stable-leader election used by every simulation that does not pick its own elector.
-pub(crate) fn stable_elector() -> engine::StableElector {
+pub(crate) fn stable_elector() -> engine::Elector {
     engine::stable_elector(STABLE_LEADER_TERM_LENGTH, 48)
 }
 
@@ -262,8 +262,8 @@ pub(crate) async fn poll_until_height(
     }
 }
 
-/// Runs `n` fully linked stable-leader validators until one processes height `required` and
-/// returns the auditor state, which is identical for runs with the same seed.
+/// Runs `n` fully linked validators with the given leader election until one processes height
+/// `required` and returns the auditor state, which is identical for runs with the same seed.
 ///
 /// `fixture` returns each validator's identity key with its consensus scheme, sorted by key.
 pub(crate) fn all_online<CS: alto_types::Scheme>(
@@ -271,6 +271,7 @@ pub(crate) fn all_online<CS: alto_types::Scheme>(
     seed: u64,
     link: Link,
     required: u64,
+    elector: engine::Elector,
     fixture: impl FnOnce(&mut deterministic::Context, u32) -> Vec<(PrivateKey, CS)> + Send + 'static,
 ) -> String {
     let cfg = deterministic::Config::default().with_seed(seed);
@@ -303,7 +304,7 @@ pub(crate) fn all_online<CS: alto_types::Scheme>(
                 &oracle,
                 signer,
                 scheme,
-                stable_elector(),
+                elector.clone(),
                 registration,
                 ValidatorConfig::default(),
             )

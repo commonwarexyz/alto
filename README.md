@@ -28,7 +28,8 @@ This branch is a proof of concept that runs `alto` on post-quantum cryptography:
   carries one signature from each member of a quorum.
 * Peer handshakes use ML-KEM-768 (FIPS 203) for the ephemeral key exchange, and records are
   encrypted with ChaCha20-Poly1305.
-* Leaders are stable: one round-robin leader per term.
+* Leaders are either rotating (a new round-robin leader every view; there is no threshold VRF) or
+  stable (one round-robin leader per term, with pipelined optimistic views).
 * The network identity is the ordered participant set. The indexer, follower, inspector, and
   explorer verify every certificate signature against it.
 * An encoded FN-DSA-512 public key is 897 bytes, so deployment host names are derived from the

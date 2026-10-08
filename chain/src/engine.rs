@@ -65,11 +65,16 @@ const MAX_REPAIR: NonZero<usize> = NZUsize!(20);
 const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(16);
 const STABLE_LEADER_STALL_TIMEOUT: Duration = Duration::from_secs(12);
 
-/// Round-robin leader election used for stable leaders.
-pub type StableElector = RoundRobin<Sha256>;
+/// Round-robin leader election used for both rotating and stable leaders.
+pub type Elector = RoundRobin<Sha256>;
+
+/// Builds rotating leader election: a new round-robin leader for every view.
+pub fn rotating_elector() -> Elector {
+    RoundRobin::default()
+}
 
 /// Builds stable leader election with a bounded optimistic view window.
-pub fn stable_elector(term_length: NonZero<u32>, optimistic_views: u64) -> StableElector {
+pub fn stable_elector(term_length: NonZero<u32>, optimistic_views: u64) -> Elector {
     RoundRobin::default().with_term(
         TermLength::new(term_length),
         STABLE_LEADER_STALL_TIMEOUT,
@@ -492,8 +497,28 @@ where
 mod tests {
     use super::*;
     use alto_types::PrivateKey;
+    use commonware_consensus::types::{Round, View};
     use commonware_cryptography::Signer;
     use commonware_utils::{ordered::Set, NZU32};
+
+    #[test]
+    fn rotating_elector_changes_leader_every_view() {
+        let participants =
+            Set::from_iter_dedup((0..4).map(|seed| PrivateKey::from_seed(seed).public_key()));
+        let rotating = elector::Config::<alto_types::ConsensusScheme>::build(
+            rotating_elector(),
+            &participants,
+        );
+        let terms = elector::Elector::terms(&rotating);
+        assert_eq!(terms.length(), TermLength::ONE);
+        assert_eq!(terms.stall_timeout(), None);
+        assert_eq!(terms.optimistic_views(), ViewDelta::zero());
+        for view in 1..16 {
+            let leader =
+                |view| elector::Elector::elect(&rotating, Round::new(EPOCH, View::new(view)), None);
+            assert_ne!(leader(view), leader(view + 1));
+        }
+    }
 
     #[test]
     fn stable_elector_configures_terms() {

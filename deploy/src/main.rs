@@ -33,8 +33,12 @@ const PORT: u16 = 4545;
 const STORAGE_CLASS: &str = "gp3";
 const DASHBOARD_FILE: &str = "dashboard.json";
 
-fn leader_args() -> [Arg; 3] {
+fn leader_args() -> [Arg; 4] {
     [
+        Arg::new("leader_mode")
+            .long("leader-mode")
+            .required(true)
+            .value_parser(["rotating", "stable"]),
         // Validators refuse to start with a proposal delay at or above their leader timeout.
         Arg::new("leader_delay_ms")
             .long("leader-delay-ms")
@@ -42,11 +46,11 @@ fn leader_args() -> [Arg; 3] {
             .value_parser(value_parser!(u64).range(0..LEADER_TIMEOUT.as_millis() as u64)),
         Arg::new("leader_term_length")
             .long("leader-term-length")
-            .required(true)
+            .required_if_eq("leader_mode", "stable")
             .value_parser(value_parser!(u32).range(2..)),
         Arg::new("leader_optimistic_views")
             .long("leader-optimistic-views")
-            .required(true)
+            .required_if_eq("leader_mode", "stable")
             .value_parser(value_parser!(u64)),
     ]
 }
@@ -189,12 +193,25 @@ fn parse_backend_url(value: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
-fn parse_leader(matches: &ArgMatches) -> Leader {
-    Leader::new(
-        *matches.get_one::<u64>("leader_delay_ms").unwrap(),
-        NonZeroU32::new(*matches.get_one::<u32>("leader_term_length").unwrap()).unwrap(),
-        *matches.get_one::<u64>("leader_optimistic_views").unwrap(),
-    )
+fn parse_leader(matches: &ArgMatches) -> Result<Leader, &'static str> {
+    let delay_ms = *matches.get_one::<u64>("leader_delay_ms").unwrap();
+    match matches.get_one::<String>("leader_mode").unwrap().as_str() {
+        "rotating" => {
+            if matches.get_one::<u32>("leader_term_length").is_some() {
+                return Err("rotating leader mode does not accept --leader-term-length");
+            }
+            if matches.get_one::<u64>("leader_optimistic_views").is_some() {
+                return Err("rotating leader mode does not accept --leader-optimistic-views");
+            }
+            Ok(Leader::rotating(delay_ms))
+        }
+        "stable" => Ok(Leader::stable(
+            delay_ms,
+            NonZeroU32::new(*matches.get_one::<u32>("leader_term_length").unwrap()).unwrap(),
+            *matches.get_one::<u64>("leader_optimistic_views").unwrap(),
+        )),
+        _ => unreachable!("clap validates leader mode"),
+    }
 }
 
 /// Returns the hex-encoded network identity of `signers`: their encoded participant set.
@@ -428,7 +445,10 @@ fn run(matches: ArgMatches) {
             let deque_size = *sub_matches.get_one::<usize>("deque_size").unwrap();
             let block_size = *sub_matches.get_one::<u32>("block_size").unwrap();
             let signature_threads = *sub_matches.get_one::<usize>("signature_threads").unwrap();
-            let leader = parse_leader(sub_matches);
+            let leader = parse_leader(sub_matches).unwrap_or_else(|message| {
+                error!("{message}");
+                std::process::exit(2);
+            });
             let output = sub_matches.get_one::<String>("output").unwrap().clone();
             match sub_matches.subcommand() {
                 Some(("local", sub_matches)) => generate_local(
@@ -1032,9 +1052,32 @@ mod tests {
     use std::{fs, path::Path};
     use uuid::Uuid;
 
-    /// Generates a four-validator network into `output` with the given deployment target
-    /// arguments.
-    fn generate(output: &Path, target: &[&str]) {
+    /// Generator arguments for 5 ms stable leaders with 1000-view terms.
+    const STABLE: &[&str] = &[
+        "--leader-mode",
+        "stable",
+        "--leader-delay-ms",
+        "5",
+        "--leader-term-length",
+        "1000",
+        "--leader-optimistic-views",
+        "48",
+    ];
+
+    /// Generator arguments for unpaced rotating leaders.
+    const ROTATING: &[&str] = &["--leader-mode", "rotating", "--leader-delay-ms", "0"];
+
+    /// Leader generator arguments with the configuration they produce.
+    fn leader_modes() -> [(&'static [&'static str], Leader); 2] {
+        [
+            (STABLE, Leader::stable(5, NZU32!(1_000), 48)),
+            (ROTATING, Leader::rotating(0)),
+        ]
+    }
+
+    /// Generates a four-validator network into `output` with the given leader and deployment
+    /// target arguments.
+    fn generate(output: &Path, leader: &[&str], target: &[&str]) {
         let mut args = vec![
             "deploy",
             "generate",
@@ -1052,15 +1095,10 @@ mod tests {
             "256",
             "--signature-threads",
             "1",
-            "--leader-delay-ms",
-            "5",
-            "--leader-term-length",
-            "1000",
-            "--leader-optimistic-views",
-            "48",
             "--output",
             output.to_str().unwrap(),
         ];
+        args.extend(leader);
         args.extend(target);
         run(command().try_get_matches_from(args).unwrap());
     }
@@ -1129,7 +1167,7 @@ signature_threads: 1
         // The leader settings are never defaulted.
         assert!(serde_yaml::from_str::<alto_chain::Config>(yaml).is_err());
         let yaml = &format!(
-            "{yaml}\nleader:\n  delay_ms: 10\n  term_length: 1000\n  optimistic_views: 48\n"
+            "{yaml}\nleader:\n  mode: stable\n  delay_ms: 10\n  term_length: 1000\n  optimistic_views: 48\n"
         );
 
         let config: alto_chain::Config = serde_yaml::from_str(yaml).unwrap();
@@ -1150,18 +1188,60 @@ signature_threads: 1
     }
 
     #[test]
+    fn parse_rotating_leader() {
+        assert!(Command::new("test")
+            .args(leader_args())
+            .try_get_matches_from(["test", "--leader-mode", "rotating"])
+            .is_err());
+
+        for delay_ms in [0, 7] {
+            let matches = Command::new("test")
+                .args(leader_args())
+                .try_get_matches_from([
+                    "test",
+                    "--leader-mode",
+                    "rotating",
+                    "--leader-delay-ms",
+                    &delay_ms.to_string(),
+                ])
+                .unwrap();
+            assert_eq!(parse_leader(&matches).unwrap(), Leader::rotating(delay_ms));
+        }
+    }
+
+    #[test]
+    fn rotating_leader_rejects_stable_settings() {
+        for extra in [
+            ["--leader-term-length", "1000"],
+            ["--leader-optimistic-views", "48"],
+        ] {
+            let mut args = vec![
+                "test",
+                "--leader-mode",
+                "rotating",
+                "--leader-delay-ms",
+                "0",
+            ];
+            args.extend(extra);
+            let matches = Command::new("test")
+                .args(leader_args())
+                .try_get_matches_from(args)
+                .unwrap();
+            assert!(parse_leader(&matches).is_err());
+        }
+    }
+
+    #[test]
     fn leader_delay_must_stay_below_leader_timeout() {
         let parse = |delay: &str| {
             Command::new("test")
                 .args(leader_args())
                 .try_get_matches_from([
                     "test",
+                    "--leader-mode",
+                    "rotating",
                     "--leader-delay-ms",
                     delay,
-                    "--leader-term-length",
-                    "1000",
-                    "--leader-optimistic-views",
-                    "48",
                 ])
         };
         for delay in ["1000", "5000"] {
@@ -1185,11 +1265,13 @@ signature_threads: 1
     }
 
     #[test]
-    fn parse_leader_settings() {
+    fn parse_stable_leader() {
         let matches = Command::new("test")
             .args(leader_args())
             .try_get_matches_from([
                 "test",
+                "--leader-mode",
+                "stable",
                 "--leader-delay-ms",
                 "10",
                 "--leader-term-length",
@@ -1198,51 +1280,61 @@ signature_threads: 1
                 "48",
             ])
             .unwrap();
-        assert_eq!(parse_leader(&matches), Leader::new(10, NZU32!(1_000), 48));
+        assert_eq!(
+            parse_leader(&matches).unwrap(),
+            Leader::stable(10, NZU32!(1_000), 48)
+        );
     }
 
     #[test]
     fn generation_names_hosts_by_key_digest() {
         use commonware_deployer::aws;
 
-        let output = std::env::temp_dir().join(format!("alto-deploy-hosts-{}", Uuid::new_v4()));
-        generate(&output, &remote_args("us-east-1,eu-west-1"));
+        for (flags, leader) in leader_modes() {
+            let output = std::env::temp_dir().join(format!("alto-deploy-hosts-{}", Uuid::new_v4()));
+            generate(&output, flags, &remote_args("us-east-1,eu-west-1"));
 
-        let deployment: aws::Config =
-            serde_yaml::from_str(&fs::read_to_string(output.join("config.yaml")).unwrap()).unwrap();
-        assert_eq!(deployment.instances.len(), 4);
-        assert!(!output.join("indexer.yaml").exists());
-        for instance in &deployment.instances {
-            // Hosts and their configuration files are named by a short digest of the key.
-            assert_eq!(instance.name.len(), 32);
-            assert_eq!(instance.config, format!("{}.yaml", instance.name));
-            let raw = fs::read_to_string(output.join(&instance.config)).unwrap();
-            let config: alto_chain::Config = serde_yaml::from_str(&raw).unwrap();
-            let signer = PrivateKey::decode(from_hex(&config.private_key).unwrap()).unwrap();
-            assert_eq!(instance.name, host_name(&signer.public_key()));
-            assert_eq!(config.leader, Leader::new(5, NZU32!(1_000), 48));
+            let deployment: aws::Config =
+                serde_yaml::from_str(&fs::read_to_string(output.join("config.yaml")).unwrap())
+                    .unwrap();
+            assert_eq!(deployment.instances.len(), 4);
+            assert!(!output.join("indexer.yaml").exists());
+            for instance in &deployment.instances {
+                // Hosts and their configuration files are named by a short digest of the key.
+                assert_eq!(instance.name.len(), 32);
+                assert_eq!(instance.config, format!("{}.yaml", instance.name));
+                let raw = fs::read_to_string(output.join(&instance.config)).unwrap();
+                let config: alto_chain::Config = serde_yaml::from_str(&raw).unwrap();
+                let signer = PrivateKey::decode(from_hex(&config.private_key).unwrap()).unwrap();
+                assert_eq!(instance.name, host_name(&signer.public_key()));
+                assert_eq!(config.leader, leader);
 
-            // Peer lists keep full keys, and every peer resolves to a deployed host.
-            assert!(config
-                .allowed_peers
-                .contains(&signer.public_key().to_string()));
-            for peer in &config.allowed_peers {
-                let key = PublicKey::decode(from_hex(peer).unwrap()).unwrap();
-                assert!(deployment
-                    .instances
-                    .iter()
-                    .any(|instance| instance.name == host_name(&key)));
+                // Peer lists keep full keys, and every peer resolves to a deployed host.
+                assert!(config
+                    .allowed_peers
+                    .contains(&signer.public_key().to_string()));
+                for peer in &config.allowed_peers {
+                    let key = PublicKey::decode(from_hex(peer).unwrap()).unwrap();
+                    assert!(deployment
+                        .instances
+                        .iter()
+                        .any(|instance| instance.name == host_name(&key)));
+                }
             }
+            fs::remove_dir_all(output).unwrap();
         }
-        fs::remove_dir_all(output).unwrap();
     }
 
     #[test]
-    fn leader_requires_all_settings() {
+    fn stable_leader_requires_all_settings() {
         for args in [
             &["test"][..],
+            &["test", "--leader-delay-ms", "10"][..],
+            &["test", "--leader-mode", "stable", "--leader-delay-ms", "10"][..],
             &[
                 "test",
+                "--leader-mode",
+                "stable",
                 "--leader-delay-ms",
                 "10",
                 "--leader-term-length",
@@ -1250,6 +1342,8 @@ signature_threads: 1
             ],
             &[
                 "test",
+                "--leader-mode",
+                "stable",
                 "--leader-delay-ms",
                 "10",
                 "--leader-optimistic-views",
@@ -1257,6 +1351,8 @@ signature_threads: 1
             ],
             &[
                 "test",
+                "--leader-mode",
+                "stable",
                 "--leader-term-length",
                 "1000",
                 "--leader-optimistic-views",
@@ -1264,6 +1360,8 @@ signature_threads: 1
             ],
             &[
                 "test",
+                "--leader-mode",
+                "stable",
                 "--leader-delay-ms",
                 "10",
                 "--leader-term-length",
@@ -1282,25 +1380,45 @@ signature_threads: 1
     #[test]
     fn leader_config_round_trips() {
         for leader in [
-            Leader::new(0, NZU32!(1_000), 48),
-            Leader::new(10, NZU32!(1_000), 48),
+            Leader::rotating(0),
+            Leader::rotating(7),
+            Leader::stable(0, NZU32!(1_000), 48),
+            Leader::stable(10, NZU32!(1_000), 48),
         ] {
             let encoded = serde_yaml::to_string(&leader).unwrap();
             assert_eq!(serde_yaml::from_str::<Leader>(&encoded).unwrap(), leader);
         }
+        assert_eq!(
+            serde_yaml::to_string(&Leader::rotating(0)).unwrap(),
+            "mode: rotating\ndelay_ms: 0\n"
+        );
+        assert_eq!(
+            serde_yaml::to_string(&Leader::stable(5, NZU32!(100_000), 48)).unwrap(),
+            "mode: stable\ndelay_ms: 5\nterm_length: 100000\noptimistic_views: 48\n"
+        );
     }
 
     #[test]
     fn leader_config_rejects_invalid_fields() {
-        assert!(serde_yaml::from_str::<Leader>("delay_ms: 10\nterm_length: 1000\n").is_err());
+        // The mode is never defaulted.
         assert!(serde_yaml::from_str::<Leader>(
-            "delay_ms: 10\nterm_length: 1\noptimistic_views: 48\n"
+            "delay_ms: 10\nterm_length: 1000\noptimistic_views: 48\n"
         )
         .is_err());
+        assert!(
+            serde_yaml::from_str::<Leader>("mode: stable\ndelay_ms: 10\nterm_length: 1000\n")
+                .is_err()
+        );
         assert!(serde_yaml::from_str::<Leader>(
-            "mode: stable\ndelay_ms: 10\nterm_length: 1000\noptimistic_views: 48\n"
+            "mode: stable\ndelay_ms: 10\nterm_length: 1\noptimistic_views: 48\n"
         )
         .is_err());
+        assert!(serde_yaml::from_str::<Leader>("mode: rotating\n").is_err());
+        assert!(serde_yaml::from_str::<Leader>(
+            "mode: rotating\ndelay_ms: 10\nterm_length: 1000\n"
+        )
+        .is_err());
+        assert!(serde_yaml::from_str::<Leader>("mode: vrf\ndelay_ms: 10\n").is_err());
     }
 
     #[test]
@@ -1353,7 +1471,7 @@ signature_threads: 1
         let output = std::env::temp_dir().join(format!("alto-deploy-region-{}", Uuid::new_v4()));
         let mut target = remote_args("us-east-1,eu-west-2,us-west-1");
         target.push("--indexer");
-        generate(&output, &target);
+        generate(&output, STABLE, &target);
 
         let deployment: Value =
             serde_yaml::from_str(&fs::read_to_string(output.join("config.yaml")).unwrap()).unwrap();
@@ -1390,7 +1508,7 @@ signature_threads: 1
             assert_eq!(participant.as_str().unwrap(), public_key.to_string());
             assert_eq!(validator["name"].as_str().unwrap(), host_name(&public_key));
             assert_eq!(participants.len(), config.allowed_peers.len());
-            assert_eq!(config.leader, Leader::new(5, NZU32!(1_000), 48));
+            assert_eq!(config.leader, Leader::stable(5, NZU32!(1_000), 48));
         }
 
         // The identity is the encoded participant set.
@@ -1424,6 +1542,7 @@ signature_threads: 1
         let output = std::env::temp_dir().join(format!("alto-deploy-local-{}", Uuid::new_v4()));
         generate(
             &output,
+            ROTATING,
             &[
                 "local",
                 "--start-port",
@@ -1448,6 +1567,9 @@ signature_threads: 1
             })
             .collect::<Vec<_>>();
         assert_eq!(configs.len(), 4);
+        assert!(configs
+            .iter()
+            .all(|config| config.leader == Leader::rotating(0)));
         assert_eq!(
             configs
                 .iter()
@@ -1487,7 +1609,7 @@ signature_threads: 1
 
     #[cfg(unix)]
     #[test]
-    fn scripted_deployment_uses_leader_settings_and_current_frontend() {
+    fn scripted_deployment_uses_mode_settings_and_current_frontend() {
         use std::{os::unix::fs::PermissionsExt, process::Command};
 
         let tag = format!("alto-build-test-{}", Uuid::new_v4());
@@ -1559,45 +1681,51 @@ esac
                 .unwrap()
         };
 
-        // The script takes no arguments.
-        assert!(!script(&["stable"]).status.success());
-        assert!(!output.join("assets").exists());
+        // The script requires exactly one known leader mode.
+        for args in [&[][..], &["vrf"], &["stable", "rotating"]] {
+            assert!(!script(args).status.success());
+            assert!(!output.join("assets").exists());
+        }
 
-        let result = script(&[]);
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-        let args = fs::read_to_string(output.join("assets/generator-args")).unwrap();
-        let matches = command().try_get_matches_from(args.lines()).unwrap();
-        let generate = matches.subcommand_matches("generate").unwrap();
-        assert_eq!(
-            super::parse_leader(generate),
-            Leader::new(5, NZU32!(100_000), 48)
-        );
-        let remote = generate.subcommand_matches("remote").unwrap();
-        assert!(remote.get_flag("indexer"));
-        assert_eq!(
-            fs::read_to_string(output.join("assets/cargo-args")).unwrap(),
-            "\n"
-        );
-        assert_eq!(
-            fs::read_to_string(output.join("assets/just-recipe")).unwrap(),
-            "graviton-binaries\n"
-        );
-        assert_eq!(
-            fs::read_to_string(output.join("explorer/npm-script")).unwrap(),
-            "build\n"
-        );
+        for (mode, leader) in [
+            ("stable", Leader::stable(5, NZU32!(100_000), 48)),
+            ("rotating", Leader::rotating(0)),
+        ] {
+            fs::write(output.join("explorer/build/index.html"), "old frontend").unwrap();
+            let result = script(&[mode]);
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let args = fs::read_to_string(output.join("assets/generator-args")).unwrap();
+            let matches = command().try_get_matches_from(args.lines()).unwrap();
+            let generate = matches.subcommand_matches("generate").unwrap();
+            assert_eq!(super::parse_leader(generate).unwrap(), leader);
+            let remote = generate.subcommand_matches("remote").unwrap();
+            assert!(remote.get_flag("indexer"));
+            assert_eq!(
+                fs::read_to_string(output.join("assets/cargo-args")).unwrap(),
+                "\n"
+            );
+            assert_eq!(
+                fs::read_to_string(output.join("assets/just-recipe")).unwrap(),
+                "graviton-binaries\n"
+            );
+            assert_eq!(
+                fs::read_to_string(output.join("explorer/npm-script")).unwrap(),
+                "build\n"
+            );
 
-        // The binaries embed the freshly built frontend.
-        let embedded = fs::read_to_string(output.join("assets/embedded.html")).unwrap();
-        assert!(embedded.ends_with("current frontend"), "{embedded}");
-        assert!(
-            embedded.contains(r#"src="/runtime-config.js""#),
-            "{embedded}"
-        );
+            // The binaries embed the freshly built frontend.
+            let embedded = fs::read_to_string(output.join("assets/embedded.html")).unwrap();
+            assert!(embedded.ends_with("current frontend"), "{embedded}");
+            assert!(
+                embedded.contains(r#"src="/runtime-config.js""#),
+                "{embedded}"
+            );
+            fs::remove_dir_all(output.join("assets")).unwrap();
+        }
         fs::remove_dir_all(output).unwrap();
     }
 }

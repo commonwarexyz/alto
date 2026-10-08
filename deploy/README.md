@@ -6,7 +6,8 @@ This branch is a post-quantum proof of concept. Validators identify themselves w
 (Falcon-512) keys, authenticate peer handshakes with them, and sign consensus messages with them, so
 every certificate carries one 666-byte FN-DSA-512 signature per signer. Handshakes use ML-KEM-768
 for the ephemeral key exchange, and records are encrypted with ChaCha20-Poly1305. Leaders are
-stable: each serves a term of views in round-robin order.
+either rotating (a new round-robin leader every view, with no VRF) or stable (each serves a term
+of views in round-robin order).
 
 FN-DSA is implemented against the pre-draft standard (FIPS 206 is unpublished), so its key and
 signature encodings may change. Use these networks for experiments only.
@@ -31,13 +32,15 @@ _To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/
 
 _To configure local indexer upload, add `--indexers '<url>:<count>[;<url>:<count>...]'` to the `generate local` command. For example, `http://localhost:8080:1` assigns one validator to upload to that indexer._
 
-Leaders are assigned round-robin for terms of `--leader-term-length` views, which must be at
-least two. `--leader-optimistic-views` limits how far proposals and votes may run ahead of
-directly notarized ancestry. Values above the term length have no further effect. All three leader
-flags are required.
+`--leader-mode rotating` assigns a new round-robin leader to every view. Without threshold
+signatures there is no VRF seed, so the order is fixed by the participant set. Stable mode assigns
+leaders round-robin for terms of `--leader-term-length` views. Stable mode requires a term length
+of at least two and `--leader-optimistic-views`, which limits how far proposals and votes may run
+ahead of directly notarized ancestry. Values above the term length have no further effect.
+Rotating mode rejects both stable-only flags.
 
 `--leader-delay-ms` sets the minimum interval from the parent's timestamp, from 0 through 999 ms.
-Zero disables pacing and allows equal timestamps. Use 100 ms for local networks: shorter
+Zero disables pacing and allows equal timestamps. Use 100 ms for local stable networks: shorter
 intervals can cause timeouts and skipped terms.
 
 `--block-size` sets the number of random payload bytes in each proposed block and defaults to `0`.
@@ -53,10 +56,11 @@ empty.
 `--traces-sample-rate` sets the fraction of traces exported by each validator and accepts values
 from `0` through `1`. It defaults to `0`, which disables trace export.
 
-The local example below writes validator configurations containing:
+The stable local example below writes validator configurations containing:
 
 ```yaml
 leader:
+  mode: stable
   delay_ms: 100
   term_length: 1000
   optimistic_views: 48
@@ -66,7 +70,19 @@ indexer: http://localhost:8080
 ```
 
 ```bash
-cargo run --bin deploy -- generate --peers 4 --bootstrappers 1 --worker-threads 2 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-delay-ms 100 --leader-term-length 1000 --leader-optimistic-views 48 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
+cargo run --bin deploy -- generate --peers 4 --bootstrappers 1 --worker-threads 2 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 100 --leader-term-length 1000 --leader-optimistic-views 48 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
+```
+
+Rotating-leader configurations carry only the delay:
+
+```yaml
+leader:
+  mode: rotating
+  delay_ms: 0
+```
+
+```bash
+cargo run --bin deploy -- generate --peers 4 --bootstrappers 1 --worker-threads 2 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode rotating --leader-delay-ms 0 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
 ```
 
 The generator prints the network identity's digest, startup commands for indexers and validators,
@@ -147,17 +163,19 @@ indexer: https://your-indexer.example.com
 ##### Global (scripted)
 
 ```bash
-./deploy.sh
+./deploy.sh stable
+./deploy.sh rotating
 ```
 
-`deploy.sh` takes no arguments. It generates the configuration, tests and builds the explorer,
-builds the validator and indexer binaries with `just graviton-binaries`, creates the Global
-cluster, and prints the explorer URL. The remaining deployment steps describe the manual flow used
-for the USA cluster.
+`deploy.sh` takes the leader mode as its only argument. It generates the configuration, tests and
+builds the explorer, builds the validator and indexer binaries with `just graviton-binaries`,
+creates the Global cluster, and prints the explorer URL. The remaining deployment steps describe
+the manual flow used for the USA cluster.
 
 The script deploys 50 validators and one indexer on `c7gd.4xlarge` instances. Each validator uses
-8 worker threads and 16 signature threads, a 5 ms proposal interval, and 100,000-view leader terms
-with 48 optimistic views. Deployment concurrency is 50.
+8 worker threads and 16 signature threads. Stable mode uses a 5 ms proposal interval and pipelines
+100,000-view leader terms with 48 optimistic views. Rotating mode uses zero proposal delay and a
+new round-robin leader every view. Deployment concurrency is 50.
 
 _Each `c7gd.4xlarge` provides a 950GB ephemeral NVMe instance store, which the deployer mounts at
 `/home/ubuntu` for validator data. The 25GB storage setting sizes the gp3 root volume. Terminating
@@ -166,7 +184,7 @@ or replacing an instance discards its NVMe data._
 ##### USA
 
 ```bash
-cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-delay-ms 10 --leader-term-length 1000 --leader-optimistic-views 48 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 75 --dashboard deploy/dashboard.json
+cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --leader-optimistic-views 48 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 75 --dashboard deploy/dashboard.json
 ```
 
 _Validators retain finalized blocks. Monitor disk usage as the finalized history grows._

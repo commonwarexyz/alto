@@ -70,30 +70,47 @@ where
     ))
 }
 
-/// Stable leader election policy for the consensus engine: one round-robin leader per term.
+/// Leader election policy for the consensus engine.
 ///
 /// The delay sets the minimum interval from the parent's timestamp in milliseconds.
-/// Zero disables proposal pacing; timestamps may equal the parent's.
+/// Zero disables proposal pacing; timestamps may equal the parent's in either mode.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Leader {
-    pub delay_ms: u64,
-    #[serde(deserialize_with = "deserialize_term_length")]
-    pub term_length: NonZeroU32,
-    pub optimistic_views: u64,
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Leader {
+    /// Select a new round-robin leader for every view.
+    Rotating { delay_ms: u64 },
+    /// Keep one round-robin leader for a term and pipeline its proposals.
+    Stable {
+        delay_ms: u64,
+        #[serde(deserialize_with = "deserialize_term_length")]
+        term_length: NonZeroU32,
+        optimistic_views: u64,
+    },
 }
 
 impl Leader {
+    /// Creates a rotating leader configuration.
+    pub const fn rotating(delay_ms: u64) -> Self {
+        Self::Rotating { delay_ms }
+    }
+
     /// Creates a stable leader configuration.
-    pub const fn new(delay_ms: u64, term_length: NonZeroU32, optimistic_views: u64) -> Self {
+    pub const fn stable(delay_ms: u64, term_length: NonZeroU32, optimistic_views: u64) -> Self {
         assert!(
             term_length.get() > 1,
             "stable leader term length must be greater than 1"
         );
-        Self {
+        Self::Stable {
             delay_ms,
             term_length,
             optimistic_views,
+        }
+    }
+
+    /// Minimum interval from the parent's timestamp in milliseconds.
+    pub const fn delay_ms(self) -> u64 {
+        match self {
+            Self::Rotating { delay_ms } | Self::Stable { delay_ms, .. } => delay_ms,
         }
     }
 }
@@ -306,8 +323,14 @@ mod tests {
         assert!(!traces_sample_probability(1e-12).is_zero());
     }
 
-    fn all_online(n: u32, seed: u64, link: Link, required: u64) -> String {
-        simulation::all_online(n, seed, link, required, |context, n| {
+    fn all_online(
+        n: u32,
+        seed: u64,
+        link: Link,
+        required: u64,
+        elector: engine::Elector,
+    ) -> String {
+        simulation::all_online(n, seed, link, required, elector, |context, n| {
             let Fixture {
                 schemes,
                 private_keys,
@@ -325,8 +348,11 @@ mod tests {
             success_rate: probability!(1.0),
         };
         for seed in 0..5 {
-            let state = all_online(5, seed, link.clone(), 25);
-            assert_eq!(state, all_online(5, seed, link.clone(), 25));
+            let state = all_online(5, seed, link.clone(), 25, stable_elector());
+            assert_eq!(
+                state,
+                all_online(5, seed, link.clone(), 25, stable_elector())
+            );
         }
     }
 
@@ -338,8 +364,11 @@ mod tests {
             success_rate: probability!(0.75),
         };
         for seed in 0..5 {
-            let state = all_online(5, seed, link.clone(), 25);
-            assert_eq!(state, all_online(5, seed, link.clone(), 25));
+            let state = all_online(5, seed, link.clone(), 25, stable_elector());
+            assert_eq!(
+                state,
+                all_online(5, seed, link.clone(), 25, stable_elector())
+            );
         }
     }
 
@@ -350,7 +379,23 @@ mod tests {
             jitter: Duration::from_millis(10),
             success_rate: probability!(0.98),
         };
-        all_online(10, 0, link.clone(), 1000);
+        all_online(10, 0, link.clone(), 1000, stable_elector());
+    }
+
+    #[test_traced]
+    fn test_good_links_rotating() {
+        let link = Link {
+            latency: Duration::from_millis(10),
+            jitter: Duration::from_millis(1),
+            success_rate: probability!(1.0),
+        };
+        for seed in 0..5 {
+            let state = all_online(5, seed, link.clone(), 25, engine::rotating_elector());
+            assert_eq!(
+                state,
+                all_online(5, seed, link.clone(), 25, engine::rotating_elector())
+            );
+        }
     }
 
     #[test_traced]

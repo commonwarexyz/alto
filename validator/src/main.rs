@@ -1,4 +1,4 @@
-use alto_chain::{engine, Config, Peers, LEADER_TIMEOUT};
+use alto_chain::{engine, Config, Leader, Peers, LEADER_TIMEOUT};
 use alto_types::{host_name, ConsensusScheme, PrivateKey, PublicKey, Scheme, EPOCH, NAMESPACE};
 use clap::{Arg, Command};
 use commonware_codec::{varint::UInt, DecodeExt, EncodeSize};
@@ -384,6 +384,14 @@ fn main() {
             .build()
         });
         let leader = config.leader;
+        let elector = match leader {
+            Leader::Rotating { .. } => engine::rotating_elector(),
+            Leader::Stable {
+                term_length,
+                optimistic_views,
+                ..
+            } => engine::stable_elector(term_length, optimistic_views),
+        };
         let engine_cfg = engine::Config {
             blocker: oracle.clone(),
             provider: oracle.clone(),
@@ -392,11 +400,11 @@ fn main() {
             finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
             me: public_key.clone(),
             scheme,
-            elector: engine::stable_elector(leader.term_length, leader.optimistic_views),
+            elector,
             mailbox_size: config.mailbox_size,
             deque_size: config.deque_size,
             block_size: config.block_size,
-            proposal_delay_ms: leader.delay_ms,
+            proposal_delay_ms: leader.delay_ms(),
             leader_timeout: LEADER_TIMEOUT,
             certification_timeout: CERTIFICATION_TIMEOUT,
             nullify_retry: NULLIFY_RETRY,
