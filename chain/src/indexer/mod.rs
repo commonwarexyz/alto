@@ -1,7 +1,7 @@
 //! Indexer upload integration for the chain engine.
 //!
 //! The indexer integration has two cooperating upload paths:
-//! - the live path, where `Pusher` uploads available seeds and certificate-bearing
+//! - the live path, where `Pusher` uploads certificate-bearing
 //!   objects as consensus activity happens;
 //! - the backfiller path, where `Producer` persists finalized block digests and
 //!   `Consumer` retries block uploads from the backfill queue across
@@ -10,7 +10,7 @@
 //! The live and backfiller actors share upload state to deduplicate uploads,
 //! cache blocks, and coordinate ownership across both paths.
 
-use alto_types::{Block, Finalized, Notarized, Scheme, Seed};
+use alto_types::{Block, Finalized, Notarized, Scheme};
 use commonware_consensus::marshal::{core::Mailbox as MarshalMailbox, standard::Standard};
 use commonware_parallel::Strategy;
 use commonware_runtime::{BufferPooler, Clock, Metrics, Spawner, Storage};
@@ -31,9 +31,6 @@ pub(crate) use pusher::Pusher;
 pub trait Client<C: Scheme>: Clone + Send + Sync + 'static {
     type Error: std::error::Error + Send + Sync + 'static;
 
-    /// Upload a seed to the indexer.
-    fn seed_upload(&self, seed: Seed) -> impl Future<Output = Result<(), Self::Error>> + Send;
-
     /// Upload a notarization to the indexer.
     fn notarized_upload(
         &self,
@@ -52,10 +49,6 @@ pub trait Client<C: Scheme>: Clone + Send + Sync + 'static {
 
 impl<S: Strategy, C: Scheme> Client<C> for alto_client::Client<S, C> {
     type Error = alto_client::Error;
-
-    fn seed_upload(&self, seed: Seed) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.seed_upload(seed)
-    }
 
     fn notarized_upload(
         &self,

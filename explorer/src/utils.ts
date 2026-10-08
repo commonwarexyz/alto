@@ -44,6 +44,24 @@ export function hexUint8Array(arr: ArrayLike<number> | undefined, len: number = 
 }
 
 /**
+ * Decodes the LEB128 varint at the start of an encoded sequence, such as the participant count
+ * that prefixes an FN-DSA identity.
+ * @param bytes - The encoded bytes.
+ * @returns The decoded value, or null if the varint is truncated or exceeds 32 bits.
+ */
+export function decodeVarintPrefix(bytes: ArrayLike<number>): number | null {
+    let value = 0;
+    for (let i = 0; i < bytes.length && i < 5; i++) {
+        const byte = bytes[i];
+        value += (byte & 0x7f) * 2 ** (7 * i);
+        if ((byte & 0x80) === 0) {
+            return value <= 0xffffffff ? value : null;
+        }
+    }
+    return null;
+}
+
+/**
  * Format a timestamp age in milliseconds into a human-readable string
  * @param age - Age in milliseconds
  * @returns A formatted string representing the age

@@ -21,21 +21,17 @@ jest.mock('react-dom/client', () => {
 });
 
 const originalDeployment = window.ALTO_DEPLOYMENT;
-const originalMode = process.env.REACT_APP_MODE;
-const originalUrl = window.location.href;
 let unmount = () => {};
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 beforeEach(() => {
   delete window.ALTO_DEPLOYMENT;
-  delete process.env.REACT_APP_MODE;
-  window.history.replaceState(null, '', '/');
   document.body.innerHTML = '<div id="root"></div>';
   mockApp.mockImplementation(() => {
     const React = require('react');
-    const { getClusterConfig, getInitialCluster } = require('./config');
-    const config = getClusterConfig(getInitialCluster());
-    return React.createElement('p', null, [config.name, config.BACKEND_URL, config.CERTIFICATE_MODE].join(' | '));
+    const { getClusterConfig } = require('./config');
+    const config = getClusterConfig();
+    return React.createElement('p', null, [config.name, config.BACKEND_URL, config.PUBLIC_KEY_HEX].join(' | '));
   });
 });
 
@@ -44,9 +40,6 @@ afterEach(() => {
   mockRoot = undefined;
   document.body.innerHTML = '';
   window.ALTO_DEPLOYMENT = originalDeployment;
-  if (originalMode === undefined) delete process.env.REACT_APP_MODE;
-  else process.env.REACT_APP_MODE = originalMode;
-  window.history.replaceState(null, '', originalUrl);
 });
 
 function start() {
@@ -63,23 +56,19 @@ test('a failed configuration load stops startup before the explorer mounts', () 
   expect(document.body.textContent).toMatch(/configuration.*load/i);
 });
 
-test.each(['public', 'local'])('a loaded standalone placeholder selects %s configuration', mode => {
-  process.env.REACT_APP_MODE = mode;
+test('a loaded standalone placeholder selects the local configuration', () => {
   runInNewContext(readFileSync(resolve(__dirname, '../public/runtime-config.js'), 'utf8'), { window });
   start();
   expect(mockApp).toHaveBeenCalled();
-  expect(document.body.textContent).toContain(mode === 'public' ? 'Global Cluster' : 'Local Cluster');
+  expect(document.body.textContent).toBe('Local Cluster | localhost:8080 | 00');
 });
 
 test('loaded deployment settings take precedence over standalone settings', () => {
-  process.env.REACT_APP_MODE = 'local';
-  window.history.replaceState(null, '', '/?cluster=usa');
   window.ALTO_DEPLOYMENT = {
-    mode: 'public', name: 'Fixture deployment', description: '',
-    BACKEND_URL: 'fixture.invalid', PUBLIC_KEY_HEX: '00', CERTIFICATE_MODE: 'standard',
-    PARTICIPANTS: [], LOCATIONS: [],
+    name: 'Fixture deployment', description: '',
+    BACKEND_URL: 'fixture.invalid', PUBLIC_KEY_HEX: 'ab', PARTICIPANTS: [], LOCATIONS: [],
   };
   start();
   expect(mockApp).toHaveBeenCalled();
-  expect(document.body.textContent).toContain('Fixture deployment | fixture.invalid | standard');
+  expect(document.body.textContent).toContain('Fixture deployment | fixture.invalid | ab');
 });

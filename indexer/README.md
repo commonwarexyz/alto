@@ -30,12 +30,11 @@ cargo install alto-indexer
 ### Start the indexer
 
 ```bash
-indexer --port 8080 --identity <hex-encoded BLS12-381 public key> --certificate-mode <standard|vrf> [--block-size <bytes>]
+indexer --port 8080 --identity <hex-encoded participant set> [--block-size <bytes>]
 ```
 
-The identity is the threshold public key of the consensus network. It is used to verify incoming
-consensus artifacts. Use `standard` for a stable-leader network and `vrf` for a rotating-leader
-network.
+The identity is the participant set of the consensus network: the ordered FN-DSA-512 public keys of
+its validators. Every signature in an incoming certificate is verified against its signer's key.
 
 `--block-size` is the payload size of the network's blocks. When set, uploads carrying a larger payload
 are rejected and the request body limit is that size plus 1 MiB. Without it, upload request bodies
@@ -50,14 +49,6 @@ indexer's upload allowance plus one message-kind byte. See the [Rust client](../
 
 ```txt
 GET /health
-```
-
-### Seeds
-
-```txt
-POST /seed          # Upload a seed
-GET /seed/latest    # Get the latest seed
-GET /seed/<view>    # Get the seed for a specific view (hex-encoded)
 ```
 
 ### Notarizations
@@ -87,5 +78,5 @@ GET /block/<digest>     # Get the block with a specific digest (hex-encoded)
 ### WebSocket
 
 ```txt
-WS /consensus/ws    # Stream consensus events (seeds, notarizations, finalizations)
+WS /consensus/ws    # Stream consensus events (notarizations, finalizations)
 ```

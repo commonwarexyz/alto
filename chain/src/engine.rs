@@ -495,18 +495,15 @@ mod tests {
     use commonware_cryptography::Signer;
     use commonware_utils::{ordered::Set, NZU32};
 
-    #[cfg(not(feature = "pq"))]
-    type StableScheme = alto_types::StandardScheme;
-    #[cfg(feature = "pq")]
-    type StableScheme = alto_types::PqScheme;
-
     #[test]
     fn stable_elector_configures_terms() {
         let term_length = NZU32!(9);
         let participants =
             Set::from_iter_dedup((0..4).map(|seed| PrivateKey::from_seed(seed).public_key()));
-        let stable =
-            elector::Config::<StableScheme>::build(stable_elector(term_length, 37), &participants);
+        let stable = elector::Config::<alto_types::ConsensusScheme>::build(
+            stable_elector(term_length, 37),
+            &participants,
+        );
         let terms = elector::Elector::terms(&stable);
         assert_eq!(terms.length(), TermLength::new(term_length));
         assert_eq!(terms.stall_timeout(), Some(STABLE_LEADER_STALL_TIMEOUT));

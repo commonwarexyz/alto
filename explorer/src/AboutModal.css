@@ -85,84 +85,6 @@ ol {
     line-height: 1.5;
 }
 
-/* Cluster Selection Styles */
-.cluster-selection {
-    margin-bottom: 24px;
-}
-
-.cluster-options {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 16px;
-}
-
-.cluster-option {
-    flex: 1;
-    padding: 12px;
-    cursor: pointer;
-    font-family: 'Consolas', monospace;
-    text-align: left;
-    transition: all 0.2s ease;
-    -webkit-tap-highlight-color: transparent;
-}
-
-/* Global Cluster - Black/White theme */
-.cluster-option.global-cluster {
-    background: white;
-    border: 2px solid #ccc;
-    color: black;
-}
-
-.cluster-option.global-cluster:hover {
-    border-color: #000;
-    background-color: #f0f0f0;
-}
-
-.cluster-option.global-cluster.selected {
-    border-color: #000;
-    background-color: #000;
-    color: white;
-}
-
-/* USA Cluster - Red theme */
-.cluster-option.usa-cluster {
-    background: white;
-    border: 2px solid #dc143c;
-    color: #dc143c;
-}
-
-.cluster-option.usa-cluster:hover {
-    border-color: #dc143c;
-    background-color: #ffebee;
-    color: #dc143c;
-}
-
-.cluster-option.usa-cluster.selected {
-    border-color: #dc143c;
-    background-color: #dc143c;
-    color: white;
-    font-weight: bold;
-}
-
-.cluster-option-name {
-    font-size: 14px;
-    font-weight: bold;
-    margin-bottom: 4px;
-}
-
-.cluster-option-summary {
-    font-size: 12px;
-    opacity: 0.8;
-}
-
-.cluster-description {
-    background-color: #f8f8f8;
-    padding: 10px 12px;
-    border-left: 3px solid #2c3e50;
-    font-size: 12px;
-    line-height: 1.4;
-}
-
 /* Status indicator styles */
 .status-indicator-wrapper {
     display: flex;
@@ -230,7 +152,6 @@ ol {
     text-decoration: none;
 }
 
-
 /* Mobile optimizations */
 @media (max-width: 768px) {
     .about-modal {
@@ -248,27 +169,5 @@ ol {
     .about-modal-content p,
     .about-modal-content li {
         font-size: 0.8rem;
-    }
-
-    .cluster-options {
-        flex-direction: column;
-        gap: 8px;
-    }
-
-    .cluster-option {
-        padding: 10px;
-    }
-
-    .cluster-option-name {
-        font-size: 12px;
-    }
-
-    .cluster-option-summary {
-        font-size: 10px;
-    }
-
-    .cluster-description {
-        font-size: 10px;
-        padding: 8px 10px;
     }
 }

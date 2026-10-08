@@ -169,7 +169,7 @@ impl<S: Scheme> Reporter for Application<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alto_types::{PrivateKey, EPOCH};
+    use alto_types::{ConsensusScheme, PrivateKey, EPOCH};
     use bytes::Bytes;
     use commonware_consensus::{
         marshal::ancestry,
@@ -178,11 +178,6 @@ mod tests {
     use commonware_cryptography::{sha256, Digest as _, Hasher, Sha256, Signer};
     use commonware_runtime::{deterministic, Runner as _, Supervisor as _};
     use std::sync::Arc;
-
-    #[cfg(not(feature = "pq"))]
-    type TestScheme = alto_types::VrfScheme;
-    #[cfg(feature = "pq")]
-    type TestScheme = alto_types::PqScheme;
 
     const DELAY_MS: u64 = 10;
 
@@ -196,7 +191,7 @@ mod tests {
 
     async fn verify_block(
         context: deterministic::Context,
-        application: &mut Application<TestScheme>,
+        application: &mut Application<ConsensusScheme>,
         block: &Block,
         parent: &Block,
     ) -> bool {
@@ -206,7 +201,7 @@ mod tests {
 
     async fn propose_child(
         context: deterministic::Context,
-        application: &mut Application<TestScheme>,
+        application: &mut Application<ConsensusScheme>,
         child_context: Context,
         parent: &Block,
     ) -> Block {

@@ -2,9 +2,9 @@ import { afterEach, beforeEach, expect, jest, test } from '@jest/globals';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import SearchModal from './SearchModal';
-import { CertificateMode, ClusterConfig } from './config';
+import { ClusterConfig } from './config';
 import { BlockJs, SearchType } from './types';
-import { parse_block, parse_finalized, parse_notarized, parse_seed } from './alto_types/alto_types.js';
+import { parse_block, parse_finalized, parse_notarized } from './alto_types/alto_types.js';
 import { hexToUint8Array } from './utils';
 
 jest.mock('./alto_types/alto_types.js', () => {
@@ -15,7 +15,6 @@ jest.mock('./alto_types/alto_types.js', () => {
         parse_block: jest.fn(),
         parse_finalized: jest.fn().mockReturnValue(null),
         parse_notarized: jest.fn().mockReturnValue(null),
-        parse_seed: jest.fn().mockReturnValue(null),
     };
 });
 
@@ -44,7 +43,6 @@ beforeEach(() => {
     jest.mocked(parse_block).mockReturnValue(block);
     jest.mocked(parse_finalized).mockReturnValue(null);
     jest.mocked(parse_notarized).mockReturnValue(null);
-    jest.mocked(parse_seed).mockReturnValue(null);
 });
 
 afterEach(async () => {
@@ -55,11 +53,10 @@ afterEach(async () => {
     jest.restoreAllMocks();
 });
 
-async function search(query: string, mode: CertificateMode, type: SearchType = 'block') {
+async function search(query: string, type: SearchType = 'block') {
     const config: ClusterConfig = {
         BACKEND_URL: window.location.host,
         PUBLIC_KEY_HEX: '00',
-        CERTIFICATE_MODE: mode,
         LOCATIONS: [],
         name: 'Test',
         description: '',
@@ -80,8 +77,8 @@ async function search(query: string, mode: CertificateMode, type: SearchType = '
     });
 }
 
-test.each(['standard', 'vrf'] as const)('rejects a different block for a digest query in %s mode', async mode => {
-    await search('cd' + digest.slice(2), mode);
+test('rejects a different block for a digest query', async () => {
+    await search('cd' + digest.slice(2));
 
     expect(container.querySelector('.search-result-item')).toBeNull();
     expect(container.querySelector('.search-error')?.textContent).toContain('Block digest does not match query');
@@ -90,7 +87,7 @@ test.each(['standard', 'vrf'] as const)('rejects a different block for a digest 
 test.each([digest, digest.toUpperCase(), `0x${digest}`, `0x${digest.toUpperCase()}`])(
     'accepts the matching block for digest query %s',
     async query => {
-        await search(query, 'standard');
+        await search(query);
 
         expect(container.querySelector('.search-error')).toBeNull();
         expect(container.querySelector('.search-result-header')?.textContent).toContain('Block');
@@ -98,59 +95,61 @@ test.each([digest, digest.toUpperCase(), `0x${digest}`, `0x${digest.toUpperCase(
     },
 );
 
-const indexedSearches: [SearchType, CertificateMode][] = [
-    ['notarization', 'standard'],
-    ['finalization', 'standard'],
-    ['block', 'standard'],
-    ['seed', 'vrf'],
-    ['notarization', 'vrf'],
-    ['finalization', 'vrf'],
-    ['block', 'vrf'],
-];
+const indexedSearches: SearchType[] = ['notarization', 'finalization', 'block'];
 
-test.each(indexedSearches)('does not display a %s rejected by verification in %s mode', async (type, mode) => {
-    await search('latest', mode, type);
+test.each(indexedSearches)('does not display a %s rejected by verification', async type => {
+    await search('latest', type);
 
     expect(container.querySelector('.search-result-item')).toBeNull();
     expect(container.querySelector('.search-error')?.textContent).toContain(`Failed to parse ${type} data`);
     const publicKey = new Uint8Array([0]);
     const payload = new Uint8Array([0]);
-    if (type === 'seed') {
-        expect(parse_seed).toHaveBeenCalledWith(publicKey, payload);
-    } else {
-        const parse = type === 'notarization' ? parse_notarized : parse_finalized;
-        expect(parse).toHaveBeenCalledWith(publicKey, payload, mode === 'standard');
-    }
+    const parse = type === 'notarization' ? parse_notarized : parse_finalized;
+    expect(parse).toHaveBeenCalledWith(publicKey, payload);
+});
+
+test('offers only certified artifact searches', async () => {
+    await search('latest', 'finalization');
+
+    const options = Array.from(container.querySelectorAll('option'), option => option.value);
+    expect(options).toEqual(['notarization', 'finalization', 'block']);
+});
+
+test('labels the certified block by its certificate digest', async () => {
+    returnArtifact('finalization');
+    await search('latest', 'finalization');
+
+    const keys = Array.from(container.querySelectorAll('.search-result-key'), key => key.textContent);
+    expect(keys).toContain('certificate:');
+    expect(keys).not.toContain('signature:');
 });
 
 function returnArtifact(type: SearchType) {
-    const artifact = type === 'seed'
-        ? { view: 42, signature: [] }
-        : { view: 42, signature: [], block };
-    const parse = type === 'seed' ? parse_seed : type === 'notarization' ? parse_notarized : parse_finalized;
+    const artifact = { view: 42, signature: [], block };
+    const parse = type === 'notarization' ? parse_notarized : parse_finalized;
     jest.mocked(parse).mockReturnValue(artifact);
     return type === 'block' ? block.height : artifact.view;
 }
 
-test.each(indexedSearches)('rejects a %s for a different index in %s mode', async (type, mode) => {
+test.each(indexedSearches)('rejects a %s for a different index', async type => {
     const index = returnArtifact(type);
-    await search(String(index + 1), mode, type);
+    await search(String(index + 1), type);
 
     expect(container.querySelector('.search-result-item')).toBeNull();
     expect(container.querySelector('.search-error')?.textContent).toContain('Response does not match query');
 });
 
-test.each(indexedSearches)('accepts a %s for the requested index in %s mode', async (type, mode) => {
+test.each(indexedSearches)('accepts a %s for the requested index', async type => {
     const index = returnArtifact(type);
-    await search(String(index), mode, type);
+    await search(String(index), type);
 
     expect(container.querySelector('.search-error')).toBeNull();
     expect(container.querySelectorAll('.search-result-item')).toHaveLength(1);
 });
 
-test.each(indexedSearches)('accepts the latest %s in %s mode', async (type, mode) => {
+test.each(indexedSearches)('accepts the latest %s', async type => {
     returnArtifact(type);
-    await search('latest', mode, type);
+    await search('latest', type);
 
     expect(container.querySelector('.search-error')).toBeNull();
     expect(container.querySelectorAll('.search-result-item')).toHaveLength(1);
@@ -164,7 +163,7 @@ test.each([
 ])('rejects invalid numeric query %s without fetching', async query => {
     // A pending response prevents an invalid range from issuing repeated requests.
     jest.mocked(globalThis.fetch).mockImplementation(() => new Promise<Response>(() => {}));
-    await search(query, 'standard');
+    await search(query);
 
     expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(container.querySelector('.search-error')?.textContent).toContain('Invalid query');
@@ -180,7 +179,7 @@ test.each([
         signature: [],
         block: { ...block, height: height++ },
     }));
-    await search(`${start}..${end}`, 'standard');
+    await search(`${start}..${end}`);
 
     expect(container.querySelector('.search-error')).toBeNull();
     expect(container.querySelectorAll('.search-result-item')).toHaveLength(count);
@@ -193,7 +192,7 @@ test.each([
 test('does not display a repeated block for other heights in a range', async () => {
     returnArtifact('block');
     jest.spyOn(console, 'error').mockImplementation(() => {});
-    await search('11..12', 'standard');
+    await search('11..12');
 
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     expect(container.querySelector('.search-result-item')).toBeNull();

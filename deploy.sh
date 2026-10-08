@@ -1,47 +1,15 @@
 #!/usr/bin/env bash
-# Generate, build, and deploy the global Alto cluster in the given mode.
+# Generate, build, and deploy the global Alto cluster.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 usage() {
-    echo "usage: $0 <stable|rotating|pq>" >&2
+    echo "usage: $0" >&2
     exit 1
 }
-[ $# -eq 1 ] || usage
+[ $# -eq 0 ] || usage
 
-# Classical modes deploy an indexer that serves the explorer. The post-quantum mode deploys
-# validators only because the indexer and explorer verify threshold certificates.
-generator_features=()
-indexer_flags=(--indexer)
-binaries_recipe=graviton-binaries
-with_explorer=true
-case "$1" in
-    stable)
-        # One round-robin leader per term with a 48-view optimistic window.
-        leader_flags=(--leader-mode stable --leader-delay-ms 5 --leader-term-length 100000 --leader-optimistic-views 48)
-        ;;
-    rotating)
-        # A VRF-seeded leader for every view.
-        leader_flags=(--leader-mode rotating --leader-delay-ms 0)
-        ;;
-    pq)
-        # Stable leaders with ML-DSA-65 identities and certificates and ML-KEM-768 handshakes.
-        leader_flags=(--leader-mode stable --leader-delay-ms 5 --leader-term-length 100000 --leader-optimistic-views 48)
-        generator_features=(--features pq)
-        indexer_flags=()
-        binaries_recipe=validator-graviton-pq-binary
-        with_explorer=false
-        ;;
-    *)
-        usage
-        ;;
-esac
-
-required_tools=(cargo just docker deployer)
-if [ "$with_explorer" = true ]; then
-    required_tools+=(npm wasm-pack)
-fi
-for tool in "${required_tools[@]}"; do
+for tool in cargo just docker deployer npm wasm-pack; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "missing required command: $tool" >&2
         exit 1
@@ -61,7 +29,7 @@ if [ ! -f deploy/dashboard.json ]; then
 fi
 
 explorer_build_env=()
-if [ "$with_explorer" = true ] && [ "$(uname -s)" = "Darwin" ]; then
+if [ "$(uname -s)" = "Darwin" ]; then
     if ! command -v brew >/dev/null 2>&1; then
         echo "Homebrew LLVM is required to compile the explorer's WebAssembly on macOS" >&2
         exit 1
@@ -90,8 +58,10 @@ if [ -d assets ]; then
 fi
 
 # The c7gd.4xlarge has 16 Graviton3 cores. Use 8 runtime threads and 16 signature
-# threads to overlap network and signature work.
-cargo run --locked --bin deploy ${generator_features[@]+"${generator_features[@]}"} -- generate \
+# threads to overlap network and signature work. Each stable leader holds a term of 100000
+# views with a 48-view optimistic window, and the indexer serves the explorer, which verifies
+# FN-DSA-512 certificates against the generated participant set.
+cargo run --locked --bin deploy -- generate \
     --peers 50 \
     --bootstrappers 5 \
     --worker-threads 8 \
@@ -102,7 +72,9 @@ cargo run --locked --bin deploy ${generator_features[@]+"${generator_features[@]
     --deque-size 256 \
     --block-size 0 \
     --signature-threads 16 \
-    "${leader_flags[@]}" \
+    --leader-delay-ms 5 \
+    --leader-term-length 100000 \
+    --leader-optimistic-views 48 \
     --output assets \
     remote \
     --regions us-west-1,us-east-1,eu-west-1,ap-northeast-1,eu-north-1,ap-south-1,sa-east-1,eu-central-1,ap-northeast-2,ap-southeast-2 \
@@ -111,25 +83,20 @@ cargo run --locked --bin deploy ${generator_features[@]+"${generator_features[@]
     --instance-type c7gd.4xlarge \
     --storage-size 25 \
     --dashboard deploy/dashboard.json \
-    ${indexer_flags[@]+"${indexer_flags[@]}"}
+    --indexer
 
-if [ "$with_explorer" = true ]; then
-    npm --prefix explorer ci
-    CI=true npm --prefix explorer test -- --watchAll=false --runInBand
-    env ${explorer_build_env[@]+"${explorer_build_env[@]}"} BUILD_PATH=build PUBLIC_URL=/ GENERATE_SOURCEMAP=false npm --prefix explorer run build
-    if [ ! -f explorer/build/index.html ]; then
-        echo "explorer build did not create explorer/build/index.html" >&2
-        exit 1
-    fi
+npm --prefix explorer ci
+CI=true npm --prefix explorer test -- --watchAll=false --runInBand
+env ${explorer_build_env[@]+"${explorer_build_env[@]}"} BUILD_PATH=build PUBLIC_URL=/ GENERATE_SOURCEMAP=false npm --prefix explorer run build
+if [ ! -f explorer/build/index.html ]; then
+    echo "explorer build did not create explorer/build/index.html" >&2
+    exit 1
 fi
 
-just "$binaries_recipe"
+just graviton-binaries
 
 (cd assets && deployer aws create --config config.yaml --concurrency 50)
 
-if [ "$with_explorer" != true ]; then
-    exit 0
-fi
 DEPLOY_TAG="$(sed -n 's/^tag: //p' assets/config.yaml)"
 HOSTS_PATH="${HOME}/.commonware_deployer/${DEPLOY_TAG}/hosts.yaml"
 if [ -f "$HOSTS_PATH" ]; then

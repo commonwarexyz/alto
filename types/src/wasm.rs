@@ -1,22 +1,11 @@
-use crate::{
-    Block, Finalized, Identity, Notarized, Scheme, Seed, Signature, StandardScheme, VrfScheme,
-    EPOCH, NAMESPACE, ROTATING_ELECTOR,
-};
-use commonware_codec::{Decode, DecodeExt, Encode};
-use commonware_consensus::{
-    types::{Round, View},
-    Viewable,
-};
-use commonware_cryptography::{bls12381::primitives::variant::MinSig, Digestible};
+use crate::{decode_identity, Block, ConsensusScheme, Finalized, Notarized, Scheme, NAMESPACE};
+use commonware_codec::{Copying, Decode, Encode};
+use commonware_consensus::Viewable;
+use commonware_cryptography::{Digestible, Hasher, Sha256};
 use commonware_parallel::Sequential;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::prelude::*;
-
-#[derive(Deserialize, Serialize)]
-pub struct SeedJs {
-    pub view: u64,
-    pub signature: Vec<u8>,
-}
 
 #[derive(Serialize)]
 pub struct BlockJs {
@@ -39,85 +28,97 @@ impl From<&Block> for BlockJs {
     }
 }
 
+/// A verified notarized or finalized block.
 #[derive(Serialize)]
 pub struct CertifiedBlockJs {
     pub view: u64,
+    /// The SHA-256 digest of the encoded certificate, which carries one FN-DSA-512 signature per
+    /// signer.
     pub signature: Vec<u8>,
     pub block: BlockJs,
 }
 
-#[wasm_bindgen]
-pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
-    let identity = Identity::decode(identity).expect("invalid identity");
-    let verifier = VrfScheme::certificate_verifier(NAMESPACE, identity);
-
-    let Ok(seed) = Seed::decode(bytes) else {
-        return JsValue::NULL;
-    };
-    if !seed.verify(&verifier) {
-        return JsValue::NULL;
-    }
-    let seed_js = SeedJs {
-        view: seed.view().get(),
-        signature: seed.signature.encode().to_vec(),
-    };
-    serde_wasm_bindgen::to_value(&seed_js).unwrap_or(JsValue::NULL)
+/// Returns the SHA-256 digest that identifies a verified certificate.
+fn certificate_digest(
+    certificate: &<ConsensusScheme as commonware_cryptography::certificate::Verifier>::Certificate,
+) -> Vec<u8> {
+    Sha256::hash(&[certificate.encode().as_ref()]).to_vec()
 }
 
-#[wasm_bindgen]
-pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsValue {
-    let identity = Identity::decode(identity).expect("invalid identity");
-    if standard {
-        parse_notarized_with::<StandardScheme>(identity, bytes)
-    } else {
-        parse_notarized_with::<VrfScheme>(identity, bytes)
-    }
+/// A verifier and the encoded identity it was built from.
+struct CachedVerifier {
+    identity: Vec<u8>,
+    verifier: Rc<ConsensusScheme>,
 }
 
-fn parse_notarized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValue {
-    let verifier = S::certificate_verifier(NAMESPACE, identity);
+thread_local! {
+    /// The verifier for the most recently used identity.
+    ///
+    /// The explorer verifies every artifact against the same identity, and building a verifier
+    /// decodes every participant's public key, which can cost more than verifying the
+    /// certificate itself.
+    static VERIFIER: RefCell<Option<CachedVerifier>> = const { RefCell::new(None) };
+}
 
-    let Ok(notarized) = Notarized::<S>::decode_cfg(bytes, &Block::unbounded_codec_config()) else {
+/// Returns the verifier for `identity`, reusing the cached one when it matches.
+///
+/// Panics if `identity` is not a valid encoded identity.
+fn verifier(identity: Vec<u8>) -> Rc<ConsensusScheme> {
+    VERIFIER.with_borrow_mut(|cached| {
+        if let Some(entry) = cached {
+            if entry.identity == identity {
+                return entry.verifier.clone();
+            }
+        }
+        let decoded = decode_identity(Copying(identity.as_slice())).expect("invalid identity");
+        let verifier = Rc::new(ConsensusScheme::certificate_verifier(NAMESPACE, decoded));
+        *cached = Some(CachedVerifier {
+            identity,
+            verifier: verifier.clone(),
+        });
+        verifier
+    })
+}
+
+/// Returns the verified notarized block, or null if it is invalid.
+///
+/// `identity` is the encoded network identity: the ordered participant set.
+#[wasm_bindgen]
+pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
+    let verifier = verifier(identity);
+    let Ok(notarized) =
+        Notarized::<ConsensusScheme>::decode_cfg(bytes, &Block::unbounded_codec_config())
+    else {
         return JsValue::NULL;
     };
-    if !notarized.verify(&verifier, &Sequential) {
+    if !notarized.verify(verifier.as_ref(), &Sequential) {
         return JsValue::NULL;
     }
-    let Some(signature) = S::vote_signature(&notarized.proof.certificate) else {
-        return JsValue::NULL;
-    };
     let notarized_js = CertifiedBlockJs {
         view: notarized.proof.view().get(),
-        signature: signature.encode().to_vec(),
+        signature: certificate_digest(&notarized.proof.certificate),
         block: (&notarized.block).into(),
     };
     serde_wasm_bindgen::to_value(&notarized_js).unwrap_or(JsValue::NULL)
 }
 
+/// Returns the verified finalized block, or null if it is invalid.
+///
+/// Arguments match [parse_notarized].
 #[wasm_bindgen]
-pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsValue {
-    let identity = Identity::decode(identity).expect("invalid identity");
-    if standard {
-        parse_finalized_with::<StandardScheme>(identity, bytes)
-    } else {
-        parse_finalized_with::<VrfScheme>(identity, bytes)
-    }
-}
-
-fn parse_finalized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValue {
-    let verifier = S::certificate_verifier(NAMESPACE, identity);
-    let Ok(finalized) = Finalized::<S>::decode_cfg(bytes, &Block::unbounded_codec_config()) else {
+pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
+    let verifier = verifier(identity);
+    let Ok(finalized) =
+        Finalized::<ConsensusScheme>::decode_cfg(bytes, &Block::unbounded_codec_config())
+    else {
         return JsValue::NULL;
     };
-    if !finalized.verify(&verifier, &Sequential) {
+    if !finalized.verify(verifier.as_ref(), &Sequential) {
         return JsValue::NULL;
     }
-    let Some(signature) = S::vote_signature(&finalized.proof.certificate) else {
-        return JsValue::NULL;
-    };
     let finalized_js = CertifiedBlockJs {
         view: finalized.proof.view().get(),
-        signature: signature.encode().to_vec(),
+        signature: certificate_digest(&finalized.proof.certificate),
         block: (&finalized.block).into(),
     };
     serde_wasm_bindgen::to_value(&finalized_js).unwrap_or(JsValue::NULL)
@@ -132,25 +133,8 @@ pub fn parse_block(bytes: Vec<u8>) -> JsValue {
     serde_wasm_bindgen::to_value(&block_js).unwrap_or(JsValue::NULL)
 }
 
-/// Returns the index of the leader elected by `seed`, i.e. the leader of the view after the
-/// seed's view.
+/// Returns the SHA-256 digest of `bytes`, which the explorer uses to fingerprint an identity.
 #[wasm_bindgen]
-pub fn leader_index(seed: JsValue, participants: usize) -> usize {
-    let Ok(seed) = serde_wasm_bindgen::from_value::<SeedJs>(seed) else {
-        return 0;
-    };
-
-    let Ok(signature) = Signature::decode(seed.signature) else {
-        return 0;
-    };
-
-    // The seed of view `v` selects the leader of view `v + 1`.
-    let elected = Round::new(EPOCH, View::new(seed.view.saturating_add(1)));
-    ROTATING_ELECTOR
-        .select_leader::<MinSig>(
-            elected,
-            u32::try_from(participants).expect("too many participants"),
-            Some(signature),
-        )
-        .get() as usize
+pub fn sha256(bytes: Vec<u8>) -> Vec<u8> {
+    Sha256::hash(&[&bytes]).to_vec()
 }

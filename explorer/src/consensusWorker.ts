@@ -3,14 +3,13 @@
 import init, {
   parse_finalized,
   parse_notarized,
-  parse_seed,
 } from "./alto_types/alto_types.js";
 
 const initialized = init();
 const worker = globalThis as unknown as DedicatedWorkerGlobalScope;
 
 worker.onmessage = async (event: MessageEvent) => {
-  const { kind, payload, publicKey, standard } = event.data;
+  const { kind, payload, publicKey } = event.data;
 
   // Always reply, including after WASM initialization failure or panic, so the pool can advance
   // its ordered results and replace a failed worker.
@@ -19,14 +18,11 @@ worker.onmessage = async (event: MessageEvent) => {
   try {
     await initialized;
     switch (kind) {
-      case 0:
-        artifact = parse_seed(publicKey, payload);
-        break;
       case 1:
-        artifact = parse_notarized(publicKey, payload, standard);
+        artifact = parse_notarized(publicKey, payload);
         break;
       case 2:
-        artifact = parse_finalized(publicKey, payload, standard);
+        artifact = parse_finalized(publicKey, payload);
         break;
     }
   } catch (err) {

@@ -1,4 +1,3 @@
-use alto_types::CertificateMode;
 use commonware_utils::{NZUsize, Probability, NZU32};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -71,68 +70,30 @@ where
     ))
 }
 
-/// Leader election policy for the consensus engine.
+/// Stable leader election policy for the consensus engine: one round-robin leader per term.
 ///
 /// The delay sets the minimum interval from the parent's timestamp in milliseconds.
-/// Zero disables proposal pacing; timestamps may equal the parent's in either mode.
+/// Zero disables proposal pacing; timestamps may equal the parent's.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Leader {
-    /// Select a new VRF-derived leader for every view.
-    Rotating { delay_ms: u64 },
-    /// Keep one round-robin leader for a term and pace its proposals.
-    Stable {
-        delay_ms: u64,
-        #[serde(deserialize_with = "deserialize_term_length")]
-        term_length: NonZeroU32,
-        optimistic_views: u64,
-    },
+#[serde(deny_unknown_fields)]
+pub struct Leader {
+    pub delay_ms: u64,
+    #[serde(deserialize_with = "deserialize_term_length")]
+    pub term_length: NonZeroU32,
+    pub optimistic_views: u64,
 }
 
 impl Leader {
-    /// Creates a rotating leader configuration.
-    pub const fn rotating(delay_ms: u64) -> Self {
-        Self::Rotating { delay_ms }
-    }
-
     /// Creates a stable leader configuration.
-    pub const fn stable(delay_ms: u64, term_length: NonZeroU32, optimistic_views: u64) -> Self {
+    pub const fn new(delay_ms: u64, term_length: NonZeroU32, optimistic_views: u64) -> Self {
         assert!(
             term_length.get() > 1,
             "stable leader term length must be greater than 1"
         );
-        Self::Stable {
+        Self {
             delay_ms,
             term_length,
             optimistic_views,
-        }
-    }
-
-    /// Certificate construction required by this leader policy.
-    ///
-    /// Post-quantum builds have a single construction, ML-DSA-65 certificates.
-    pub const fn certificate_mode(self) -> CertificateMode {
-        match self {
-            #[cfg(not(feature = "pq"))]
-            Self::Rotating { .. } => CertificateMode::Vrf,
-            #[cfg(not(feature = "pq"))]
-            Self::Stable { .. } => CertificateMode::Standard,
-            #[cfg(feature = "pq")]
-            Self::Rotating { .. } | Self::Stable { .. } => CertificateMode::MlDsa,
-        }
-    }
-
-    /// Returns an error if this build cannot run the leader policy.
-    ///
-    /// Rotating leaders are elected from a threshold VRF seed, which post-quantum builds do not
-    /// produce, so those builds support only stable leaders.
-    pub const fn check_supported(self) -> Result<(), &'static str> {
-        match self {
-            #[cfg(feature = "pq")]
-            Self::Rotating { .. } => Err(
-                "rotating leaders require threshold VRF certificates, which post-quantum builds do not support; use the stable leader mode",
-            ),
-            _ => Ok(()),
         }
     }
 }
@@ -141,12 +102,6 @@ impl Leader {
 #[derive(Deserialize, Serialize)]
 pub struct Config {
     pub private_key: String,
-    /// Hex-encoded BLS12-381 threshold share. Post-quantum builds do not use it.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub share: String,
-    /// Hex-encoded BLS12-381 public polynomial. Post-quantum builds do not use it.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub polynomial: String,
 
     pub port: u16,
     pub metrics_port: u16,
@@ -179,7 +134,7 @@ pub struct Config {
 
     pub signature_threads: usize,
 
-    /// Required leader policy, which determines the certificate format.
+    /// Required leader policy.
     pub leader: Leader,
 
     #[serde(default = "default_backfiller_max_active")]
@@ -221,29 +176,58 @@ pub struct Peers {
     pub addresses: HashMap<String, SocketAddr>,
 }
 
-#[cfg(all(test, not(feature = "pq")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::simulation::{self, *};
-    use alto_types::{Block, PublicKey, NAMESPACE};
-    use commonware_consensus::simplex::{
-        elector,
-        scheme::bls12381_threshold::{standard as bls12381_threshold, vrf},
-    };
-    use commonware_cryptography::{
-        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, Digestible, Signer,
-    };
+    use alto_types::{Block, ConsensusScheme, PrivateKey, PublicKey, NAMESPACE};
+    use commonware_cryptography::{Digestible, Signer};
     use commonware_macros::{select, test_traced};
     use commonware_p2p::simulated::{self, Link, Network, Oracle};
     use commonware_runtime::{
         deterministic::{self, Runner},
         Clock, Metrics, Runner as _, Spawner, Supervisor as _,
     };
-    use commonware_utils::{channel::oneshot, probability, NZUsize};
+    use commonware_utils::{channel::oneshot, ordered::BiMap, probability, NZUsize};
     use indexer::mocks;
-    use rand::{rngs::StdRng, RngExt, SeedableRng};
+    use rand::{rngs::StdRng, Rng, RngExt, SeedableRng};
     use std::time::Duration;
     use tracing::info;
+
+    /// Validators sorted by identity key, each signing consensus messages with its identity key.
+    #[derive(Clone)]
+    struct Fixture {
+        private_keys: Vec<PrivateKey>,
+        participants: Vec<PublicKey>,
+        schemes: Vec<ConsensusScheme>,
+    }
+
+    fn fixture(rng: &mut impl Rng, n: u32) -> Fixture {
+        let mut private_keys: Vec<_> = (0..n)
+            .map(|_| PrivateKey::from_seed(rng.next_u64()))
+            .collect();
+        private_keys.sort_by_key(|key| key.public_key());
+        let participants: Vec<_> = private_keys.iter().map(|key| key.public_key()).collect();
+        let signers = BiMap::try_from(
+            participants
+                .iter()
+                .map(|key| (key.clone(), key.clone()))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let schemes = private_keys
+            .iter()
+            .map(|key| {
+                ConsensusScheme::signer(NAMESPACE, signers.clone(), key.clone())
+                    .expect("key is a participant")
+            })
+            .collect();
+        Fixture {
+            private_keys,
+            participants,
+            schemes,
+        }
+    }
 
     fn sum_validator_metric<T: std::str::FromStr + std::iter::Sum>(
         metrics: &str,
@@ -287,8 +271,8 @@ mod tests {
     async fn start_validator(
         context: &deterministic::Context,
         oracle: &Oracle<PublicKey, deterministic::Context>,
-        signer: &commonware_cryptography::ed25519::PrivateKey,
-        scheme: &bls12381_threshold::Scheme<PublicKey, MinSig>,
+        signer: &PrivateKey,
+        scheme: &ConsensusScheme,
         registration: Registration,
         indexer: Option<mocks::Client>,
     ) {
@@ -328,7 +312,7 @@ mod tests {
                 schemes,
                 private_keys,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(context, NAMESPACE, n);
+            } = fixture(context, n);
             private_keys.into_iter().zip(schemes).collect()
         })
     }
@@ -392,7 +376,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = fixture(&mut context, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
 
             // Link all validators (except 0)
@@ -449,9 +433,9 @@ mod tests {
         let n = 5;
         let required_container = 100;
 
-        // Derive threshold
+        // Derive the validator set
         let mut rng = StdRng::seed_from_u64(0);
-        let fixture = bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
+        let fixture = fixture(&mut rng, n);
 
         // Random restarts every x seconds
         let mut runs = 0;
@@ -588,13 +572,10 @@ mod tests {
         info!(runs, "unclean shutdown recovery worked");
     }
 
-    /// Runs validators with an indexer and checks what they upload: certificates always, seeds
-    /// only when the scheme produces them, and bare blocks only for genesis.
-    fn indexer_simulation<CS: alto_types::Scheme, L: elector::Config<CS>>(
-        fixture: impl FnOnce(&mut deterministic::Context, u32) -> Fixture<CS> + Send + 'static,
-        elector: impl Fn() -> L + Send + 'static,
-        expect_seeds: bool,
-    ) {
+    /// Runs validators with an indexer and checks what they upload: certificates always, and bare
+    /// blocks only for genesis.
+    #[test_traced]
+    fn test_indexer() {
         // Create context
         let n = 5;
         let required_container = 10;
@@ -636,17 +617,13 @@ mod tests {
 
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
                 let registration = registrations.remove(&signer.public_key()).unwrap();
-                start_validator_with(
+                start_validator(
                     &context,
                     &oracle,
                     &signer,
                     &scheme,
-                    elector(),
                     registration,
-                    ValidatorConfig {
-                        indexer: Some(indexer.clone()),
-                        ..Default::default()
-                    },
+                    Some(indexer.clone()),
                 )
                 .await;
             }
@@ -654,10 +631,6 @@ mod tests {
             poll_until_height(&context, &oracle, required_container).await;
 
             // Check indexer uploads
-            assert_eq!(
-                indexer.seed_seen.load(std::sync::atomic::Ordering::Relaxed),
-                expect_seeds
-            );
             assert!(indexer
                 .notarization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
@@ -679,26 +652,6 @@ mod tests {
                 "non-genesis block uploads should stay idle when certified uploads succeed",
             );
         });
-    }
-
-    #[test_traced]
-    fn test_indexer() {
-        // Standard certificates carry no seed.
-        indexer_simulation(
-            |context, n| bls12381_threshold::fixture::<MinSig, _>(context, NAMESPACE, n),
-            stable_elector,
-            false,
-        );
-    }
-
-    #[test_traced]
-    fn test_indexer_rotating() {
-        // VRF certificates carry seeds, which validators publish to the indexer.
-        indexer_simulation(
-            |context, n| vrf::fixture::<MinSig, _>(context, NAMESPACE, n),
-            || alto_types::ROTATING_ELECTOR,
-            true,
-        );
     }
 
     #[test_traced]
@@ -725,7 +678,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = fixture(&mut context, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
 
             let link = Link {
@@ -805,7 +758,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = fixture(&mut context, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
 
             let link = Link {
@@ -931,7 +884,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = fixture(&mut context, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
 
             let link = Link {
@@ -1068,7 +1021,7 @@ mod tests {
     fn test_drainer_replays_inflight_uploads_after_restart() {
         let n = 5;
         let mut rng = StdRng::seed_from_u64(7);
-        let fixture = bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
+        let fixture = fixture(&mut rng, n);
 
         // Keep these senders alive for the duration of the first run so the
         // corresponding block uploads remain in flight until shutdown.
@@ -1346,49 +1299,5 @@ mod tests {
         assert_eq!(decoded.digest, digest);
 
         assert_eq!(encoded.len(), <Entry as commonware_codec::FixedSize>::SIZE);
-    }
-}
-
-#[cfg(all(test, feature = "pq"))]
-mod pq_tests {
-    use crate::simulation;
-    use alto_types::{PqScheme, PrivateKey, NAMESPACE};
-    use commonware_cryptography::Signer;
-    use commonware_macros::test_traced;
-    use commonware_p2p::simulated::Link;
-    use commonware_runtime::deterministic;
-    use commonware_utils::{ordered::BiMap, probability};
-    use rand::Rng;
-    use std::time::Duration;
-
-    /// Returns ML-DSA validators sorted by identity key, each signing with its identity key.
-    fn fixture(context: &mut deterministic::Context, n: u32) -> Vec<(PrivateKey, PqScheme)> {
-        let mut keys: Vec<_> = (0..n)
-            .map(|_| PrivateKey::from_seed(context.next_u64()))
-            .collect();
-        keys.sort_by_key(|key| key.public_key());
-        let participants: Vec<_> = keys
-            .iter()
-            .map(|key| (key.public_key(), key.public_key()))
-            .collect();
-        let participants = BiMap::try_from(participants).unwrap();
-        keys.into_iter()
-            .map(|key| {
-                let scheme = PqScheme::signer(NAMESPACE, participants.clone(), key.clone())
-                    .expect("key is a participant");
-                (key, scheme)
-            })
-            .collect()
-    }
-
-    #[test_traced]
-    fn test_good_links() {
-        let link = Link {
-            latency: Duration::from_millis(10),
-            jitter: Duration::from_millis(1),
-            success_rate: probability!(1.0),
-        };
-        let state = simulation::all_online(4, 0, link.clone(), 10, fixture);
-        assert_eq!(state, simulation::all_online(4, 0, link, 10, fixture));
     }
 }

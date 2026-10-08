@@ -373,41 +373,6 @@ body {
   -webkit-text-fill-color: black;
 }
 
-/* Smooth waving animation for patriotic gradient */
-@keyframes smoothWave {
-  0% {
-    background-position: 0% 50%;
-  }
-
-  50% {
-    background-position: 100% 50%;
-  }
-
-  100% {
-    background-position: 0% 50%;
-  }
-}
-
-/* USA Cluster variant for about button */
-.about-header-button.usa-cluster {
-  background: linear-gradient(45deg, #B22234, #3C3B6E, #B22234);
-  background-size: 300% 300%;
-  border: 1px solid #B22234;
-  color: white;
-  -webkit-text-fill-color: white;
-  animation: smoothWave 4s ease-in-out infinite;
-}
-
-.about-header-button.usa-cluster:hover,
-.about-header-button.usa-cluster:focus,
-.about-header-button.usa-cluster:active,
-.about-header-button.usa-cluster:visited {
-  background: #f0f0f0;
-  text-decoration: none;
-  color: #dc143c;
-  -webkit-text-fill-color: #dc143c;
-}
-
 /* Media Queries */
 @media (min-width: 768px) {
   .app-header {
@@ -464,7 +429,6 @@ body {
     font-size: 0.85rem;
   }
 }
-
 
 @media (max-width: 480px) {
   .app-header {

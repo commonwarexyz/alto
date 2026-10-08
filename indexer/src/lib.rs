@@ -1,5 +1,5 @@
 use alto_client::{DEFAULT_MAX_BLOCK_SIZE, LATEST, UPLOAD_OVERHEAD};
-use alto_types::{Block, Finalized, Kind, Notarized, Scheme, Seed};
+use alto_types::{Block, Finalized, Kind, Notarized, Scheme};
 use axum::{
     body::Bytes,
     extract::{ws::WebSocketUpgrade, DefaultBodyLimit, Path, State as AxumState},
@@ -25,7 +25,6 @@ use tower_http::cors::CorsLayer;
 const CONSENSUS_CHANNEL_CAPACITY: usize = 1024;
 
 pub struct State<C: Scheme> {
-    seeds: BTreeMap<View, Seed>,
     notarizations: BTreeMap<View, Notarized<C>>,
     finalizations: BTreeMap<View, Finalized<C>>,
     finalized_height_to_view: BTreeMap<u64, View>,
@@ -35,7 +34,6 @@ pub struct State<C: Scheme> {
 impl<C: Scheme> Default for State<C> {
     fn default() -> Self {
         Self {
-            seeds: BTreeMap::new(),
             notarizations: BTreeMap::new(),
             finalizations: BTreeMap::new(),
             finalized_height_to_view: BTreeMap::new(),
@@ -88,42 +86,6 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
     /// Largest request body accepted by the upload endpoints.
     pub fn max_upload_size(&self) -> usize {
         self.max_upload_size
-    }
-
-    pub fn submit_seed(&self, seed: Seed) -> Result<(), &'static str> {
-        // Several validators can upload the same seed. Skip signature checks for known views.
-        if self.state.read().unwrap().seeds.contains_key(&seed.view()) {
-            return Ok(());
-        }
-
-        // Verify signature with identity
-        if !self.scheme.verify_seed(&seed) {
-            return Err("Invalid seed signature");
-        }
-
-        let mut state = self.state.write().unwrap();
-        if state.seeds.insert(seed.view(), seed.clone()).is_some() {
-            return Ok(()); // Already exists
-        }
-
-        // Broadcast seed
-        let mut data = vec![0u8; u8::SIZE + seed.encode_size()];
-        data[0] = Kind::Seed as u8;
-        seed.write(&mut data[1..].as_mut());
-        let _ = self.consensus_tx.send(data.into());
-        Ok(())
-    }
-
-    pub fn get_seed(&self, query: &str) -> Option<Seed> {
-        let state = self.state.read().unwrap();
-        if query == LATEST {
-            state.seeds.last_key_value().map(|(_, seed)| seed.clone())
-        } else {
-            // Parse as hex-encoded index
-            let raw = from_hex(query)?;
-            let index = u64::decode(raw).ok()?;
-            state.seeds.get(&View::new(index)).cloned()
-        }
     }
 
     pub fn submit_notarization(&self, notarized: Notarized<C>) -> Result<(), &'static str> {
@@ -285,8 +247,6 @@ impl<C: Scheme, S: Strategy> Api<C, S> {
         let max_upload_size = self.indexer.max_upload_size();
         Router::new()
             .route("/health", get(health_check))
-            .route("/seed", post(seed_upload))
-            .route("/seed/{query}", get(seed_get))
             .route("/notarization", post(notarization_upload))
             .route("/notarization/{query}", get(notarization_get))
             .route("/finalization", post(finalization_upload))
@@ -302,29 +262,6 @@ impl<C: Scheme, S: Strategy> Api<C, S> {
 
 async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, "ok")
-}
-
-async fn seed_upload<C: Scheme, S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
-    body: Bytes,
-) -> impl IntoResponse {
-    match Seed::decode(body) {
-        Ok(seed) => match indexer.submit_seed(seed) {
-            Ok(_) => StatusCode::OK,
-            Err(_) => StatusCode::UNAUTHORIZED,
-        },
-        Err(_) => StatusCode::BAD_REQUEST,
-    }
-}
-
-async fn seed_get<C: Scheme, S: Strategy>(
-    AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
-    Path(query): Path<String>,
-) -> impl IntoResponse {
-    match indexer.get_seed(&query) {
-        Some(seed) => (StatusCode::OK, seed.encode().to_vec()).into_response(),
-        None => StatusCode::NOT_FOUND.into_response(),
-    }
 }
 
 async fn notarization_upload<C: Scheme, S: Strategy>(
@@ -439,23 +376,21 @@ async fn handle_consensus_ws<C: Scheme, S: Strategy>(
 mod tests {
     use super::*;
     use alto_client::{Client, ClientBuilder, IndexQuery, Query};
-    use alto_types::{Context, Identity, Seedable, StandardScheme, VrfScheme, EPOCH, NAMESPACE};
+    use alto_types::{
+        decode_identity, ConsensusScheme, Context, Identity, PrivateKey, EPOCH, NAMESPACE,
+    };
     use commonware_consensus::{
-        simplex::{
-            scheme::bls12381_threshold::{standard, vrf as bls12381_threshold},
-            types::{Finalization, Finalize, Notarization, Notarize, Proposal},
-        },
+        simplex::types::{Finalization, Finalize, Notarization, Notarize, Proposal},
         types::{Height, Round, View},
         Viewable,
     };
-    use commonware_cryptography::{
-        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519, sha256,
-        Digest, Digestible, Hasher, Sha256, Signer,
-    };
+    use commonware_cryptography::{sha256, Digest, Digestible, Hasher, Sha256, Signer};
     use commonware_parallel::Sequential;
-    use commonware_utils::non_empty;
+    use commonware_utils::{
+        non_empty,
+        ordered::{BiMap, Set},
+    };
     use futures::StreamExt;
-    use rand::{rngs::StdRng, SeedableRng};
     use rcgen::{generate_simple_self_signed, CertifiedKey, KeyPair};
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use std::net::SocketAddr;
@@ -465,19 +400,19 @@ mod tests {
 
     /// Test context containing common setup for indexer tests.
     struct TestContext {
-        schemes: Vec<VrfScheme>,
-        client: Client<Sequential, VrfScheme>,
+        schemes: Vec<ConsensusScheme>,
+        client: Client<Sequential, ConsensusScheme>,
     }
 
     impl TestContext {
         /// Create a new test context with a running server and client.
         async fn new() -> Self {
-            let (schemes, identity) = fixture(0);
+            let (schemes, identity) = fixture(0, 4);
 
             let (addr, _) = start_server(schemes[0].clone(), Sequential).await;
             let client = ClientBuilder::new(
                 &format!("http://{addr}"),
-                VrfScheme::certificate_verifier(NAMESPACE, identity),
+                ConsensusScheme::certificate_verifier(NAMESPACE, identity),
                 Sequential,
             )
             .build();
@@ -490,7 +425,7 @@ mod tests {
         fn test_block(&self) -> Block {
             let context = Context {
                 round: Round::new(EPOCH, View::new(1)),
-                leader: ed25519::PrivateKey::from_seed(0).public_key(),
+                leader: PrivateKey::from_seed(0).public_key(),
                 parent: (View::new(0), sha256::Digest::EMPTY),
             };
             Block::new(
@@ -511,22 +446,15 @@ mod tests {
             )
         }
 
-        /// Create a seed by first creating a notarization.
-        fn seed(&self) -> Seed {
-            let block = self.test_block();
-            let proposal = self.proposal(&block);
-            create_notarization(&self.schemes, proposal).seed().unwrap()
-        }
-
         /// Create a notarized block.
-        fn notarized(&self) -> Notarized<VrfScheme> {
+        fn notarized(&self) -> Notarized<ConsensusScheme> {
             let block = self.test_block();
             let proposal = self.proposal(&block);
             Notarized::new(create_notarization(&self.schemes, proposal), block)
         }
 
         /// Create a finalized block.
-        fn finalized(&self) -> Finalized<VrfScheme> {
+        fn finalized(&self) -> Finalized<ConsensusScheme> {
             let block = self.test_block();
             let proposal = self.proposal(&block);
             Finalized::new(create_finalization(&self.schemes, proposal), block)
@@ -537,7 +465,7 @@ mod tests {
     fn finalized_with_payload<C: Scheme>(schemes: &[C], view: u64, payload: Bytes) -> Finalized<C> {
         let context = Context {
             round: Round::new(EPOCH, View::new(view)),
-            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            leader: PrivateKey::from_seed(0).public_key(),
             parent: (View::new(view - 1), sha256::Digest::EMPTY),
         };
         let block = Block::new(
@@ -557,12 +485,12 @@ mod tests {
 
     #[test]
     fn block_size_bounds_uploads() {
-        let (schemes, _) = fixture(0);
+        let (schemes, _) = fixture(0, 4);
         let finalized = finalized_with_payload(&schemes, 1, Bytes::new());
         let encoded = finalized.encode();
 
         let unbounded = Indexer::new(schemes[0].clone(), Sequential);
-        assert!(Finalized::<VrfScheme>::decode_cfg(
+        assert!(Finalized::<ConsensusScheme>::decode_cfg(
             encoded.clone(),
             unbounded.block_codec_config()
         )
@@ -573,20 +501,22 @@ mod tests {
         );
 
         let exact = Indexer::new(schemes[0].clone(), Sequential).with_block_size(0);
-        assert!(
-            Finalized::<VrfScheme>::decode_cfg(encoded.clone(), exact.block_codec_config()).is_ok()
-        );
+        assert!(Finalized::<ConsensusScheme>::decode_cfg(
+            encoded.clone(),
+            exact.block_codec_config()
+        )
+        .is_ok());
         assert_eq!(exact.max_upload_size(), UPLOAD_OVERHEAD);
 
         // A block larger than the configured size fails to decode, before any verification.
         let oversized = finalized_with_payload(&schemes, 1, Bytes::from_static(&[1, 2]));
         let bounded = Indexer::new(schemes[0].clone(), Sequential).with_block_size(1);
-        assert!(Finalized::<VrfScheme>::decode_cfg(
+        assert!(Finalized::<ConsensusScheme>::decode_cfg(
             oversized.encode(),
             bounded.block_codec_config()
         )
         .is_err());
-        assert!(Finalized::<VrfScheme>::decode_cfg(
+        assert!(Finalized::<ConsensusScheme>::decode_cfg(
             oversized.encode(),
             Indexer::new(schemes[0].clone(), Sequential)
                 .with_block_size(2)
@@ -645,26 +575,23 @@ mod tests {
         }
     }
 
-    fn fixture(seed: u64) -> (Vec<VrfScheme>, Identity) {
-        let mut rng = StdRng::seed_from_u64(seed);
-        let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-        let identity = *schemes[0].identity();
+    /// Returns one signer per participant (with keys seeded from `first`) and the participant
+    /// set.
+    fn fixture(first: u64, n: u64) -> (Vec<ConsensusScheme>, Identity) {
+        let keys: Vec<PrivateKey> = (first..first + n).map(PrivateKey::from_seed).collect();
+        let identity: Identity = Set::from_iter_dedup(keys.iter().map(|key| key.public_key()));
+        let participants = BiMap::try_from(
+            identity
+                .iter()
+                .map(|key| (key.clone(), key.clone()))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let schemes = keys
+            .into_iter()
+            .map(|key| ConsensusScheme::signer(NAMESPACE, participants.clone(), key).unwrap())
+            .collect();
         (schemes, identity)
-    }
-
-    #[tokio::test]
-    async fn test_seed_operations() {
-        let ctx = TestContext::new().await;
-        let seed = ctx.seed();
-
-        ctx.client.seed_upload(seed.clone()).await.unwrap();
-
-        let retrieved = ctx.client.seed_get(IndexQuery::Latest).await.unwrap();
-        assert_eq!(retrieved.view(), seed.view());
-
-        let retrieved = ctx.client.seed_get(IndexQuery::Index(1)).await.unwrap();
-        assert_eq!(retrieved.view().get(), 1);
     }
 
     #[tokio::test]
@@ -701,50 +628,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(retrieved.proof.view().get(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_standard_certificate_operations() {
-        let mut rng = StdRng::seed_from_u64(2);
-        let Fixture { schemes, .. } = standard::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-        let identity = *schemes[0].identity();
-        let (addr, _handle) = start_server(schemes[0].clone(), Sequential).await;
-        let client = ClientBuilder::new(
-            &format!("http://{addr}"),
-            StandardScheme::certificate_verifier(NAMESPACE, identity),
-            Sequential,
-        )
-        .build();
-        wait_for_ready(&client).await;
-
-        let finalized = finalized_with_payload(&schemes, 1, Bytes::new());
-        let notarized = Notarized::new(
-            create_notarization(&schemes, finalized.proof.proposal.clone()),
-            finalized.block.clone(),
-        );
-
-        client.notarized_upload(notarized).await.unwrap();
-        client.finalized_upload(finalized).await.unwrap();
-        assert_eq!(
-            client
-                .notarized_get(IndexQuery::Latest)
-                .await
-                .unwrap()
-                .proof
-                .view()
-                .get(),
-            1
-        );
-        assert_eq!(
-            client
-                .finalized_get(IndexQuery::Latest)
-                .await
-                .unwrap()
-                .proof
-                .view()
-                .get(),
-            1
-        );
     }
 
     #[tokio::test]
@@ -806,7 +689,7 @@ mod tests {
 
     #[tokio::test]
     async fn large_block_uploads_stream_to_rust_clients() {
-        let (schemes, identity) = fixture(0);
+        let (schemes, identity) = fixture(0, 4);
         let indexer = Arc::new(
             Indexer::new(schemes[0].clone(), Sequential).with_block_size(64 * 1024 * 1024),
         );
@@ -816,7 +699,7 @@ mod tests {
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let client = ClientBuilder::new(
             &format!("http://{addr}"),
-            VrfScheme::certificate_verifier(NAMESPACE, identity),
+            ConsensusScheme::certificate_verifier(NAMESPACE, identity),
             Sequential,
         )
         .with_block_size(64 * 1024 * 1024)
@@ -841,26 +724,26 @@ mod tests {
     #[tokio::test]
     async fn test_websocket_streaming() {
         let ctx = TestContext::new().await;
-        let seed = ctx.seed();
+        let notarized = ctx.notarized();
 
         let mut stream = ctx.client.listen().await.unwrap();
 
-        // Signal that websocket is connected, then upload the seed
+        // Signal that websocket is connected, then upload the notarization
         let (tx, rx) = tokio::sync::oneshot::channel();
         let client = ctx.client.clone();
         tokio::spawn(async move {
             rx.await.unwrap();
-            client.seed_upload(seed).await.unwrap();
+            client.notarized_upload(notarized).await.unwrap();
         });
 
-        // Signal ready and wait for the seed message
+        // Signal ready and wait for the notarization message
         tx.send(()).unwrap();
         if let Some(Ok(msg)) = stream.next().await {
             match msg {
-                alto_client::consensus::Message::Seed(s) => {
-                    assert_eq!(s.view().get(), 1);
+                alto_client::consensus::Message::Notarization(n) => {
+                    assert_eq!(n.proof.view().get(), 1);
                 }
-                _ => panic!("Expected seed message"),
+                _ => panic!("Expected notarization message"),
             }
         } else {
             panic!("Expected to receive a message");
@@ -870,23 +753,23 @@ mod tests {
     #[tokio::test]
     async fn test_identity_verification() {
         // Create two different fixtures
-        let (schemes1, _) = fixture(0);
-        let (_, identity2) = fixture(1);
+        let (schemes1, _) = fixture(0, 4);
+        let (_, identity2) = fixture(4, 4);
 
         // Start server with schemes1, but create client expecting identity2
         let (addr, _handle) = start_server(schemes1[0].clone(), Sequential).await;
         let client = ClientBuilder::new(
             &format!("http://{addr}"),
-            VrfScheme::certificate_verifier(NAMESPACE, identity2),
+            ConsensusScheme::certificate_verifier(NAMESPACE, identity2),
             Sequential,
         )
         .build();
         wait_for_ready(&client).await;
 
-        // Create a seed signed by schemes1
+        // Create a notarization signed by schemes1
         let context = Context {
             round: Round::new(EPOCH, View::new(1)),
-            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            leader: PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
         let block = Block::new(
@@ -901,13 +784,13 @@ mod tests {
             View::new(0),
             block.digest(),
         );
-        let seed = create_notarization(&schemes1, proposal).seed().unwrap();
+        let notarized = Notarized::new(create_notarization(&schemes1, proposal), block);
 
         // Server accepts it (signed by schemes1, which server uses)
-        client.seed_upload(seed).await.unwrap();
+        client.notarized_upload(notarized).await.unwrap();
 
-        // Client fails to verify (expects identity2 but seed is signed by schemes1)
-        let result = client.seed_get(IndexQuery::Latest).await;
+        // Client fails to verify (expects identity2 but the notarization is signed by schemes1)
+        let result = client.notarized_get(IndexQuery::Latest).await;
         assert!(result.is_err());
     }
 
@@ -916,17 +799,15 @@ mod tests {
         let ctx = TestContext::new().await;
 
         // Create different schemes (wrong ones)
-        let (wrong_schemes, _) = fixture(1);
+        let (wrong_schemes, _) = fixture(4, 4);
 
-        // Create a seed with wrong schemes
+        // Create a notarization with wrong schemes
         let block = ctx.test_block();
         let proposal = ctx.proposal(&block);
-        let bad_seed = create_notarization(&wrong_schemes, proposal)
-            .seed()
-            .unwrap();
+        let bad = Notarized::new(create_notarization(&wrong_schemes, proposal), block);
 
-        // Server rejects it (signature doesn't match server's identity)
-        let result = ctx.client.seed_upload(bad_seed).await;
+        // Server rejects it (signatures don't match server's participants)
+        let result = ctx.client.notarized_upload(bad).await;
         assert!(result.is_err());
     }
 
@@ -936,7 +817,7 @@ mod tests {
     }
 
     async fn start_tls_server(
-        scheme: VrfScheme,
+        scheme: ConsensusScheme,
         cert_key: &CertifiedKey<KeyPair>,
         strategy: impl Strategy,
     ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
@@ -994,10 +875,10 @@ mod tests {
         addr: SocketAddr,
         identity: Identity,
         cert_key: &CertifiedKey<KeyPair>,
-    ) -> Client<Sequential, VrfScheme> {
+    ) -> Client<Sequential, ConsensusScheme> {
         ClientBuilder::new(
             &format!("https://{addr}"),
-            VrfScheme::certificate_verifier(NAMESPACE, identity),
+            ConsensusScheme::certificate_verifier(NAMESPACE, identity),
             Sequential,
         )
         .with_tls_cert(cert_key.cert.der().to_vec())
@@ -1008,16 +889,16 @@ mod tests {
     async fn test_tls_https_connection() {
         let cert_key = generate_self_signed_cert();
 
-        let (schemes, identity) = fixture(0);
+        let (schemes, identity) = fixture(0, 4);
 
         let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key, Sequential).await;
         let client = create_tls_client(addr, identity, &cert_key);
         wait_for_ready(&client).await;
 
-        // Create and upload a seed
+        // Create and upload a notarization
         let context = Context {
             round: Round::new(EPOCH, View::new(1)),
-            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            leader: PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
         let block = Block::new(
@@ -1032,14 +913,14 @@ mod tests {
             View::new(0),
             block.digest(),
         );
-        let seed = create_notarization(&schemes, proposal).seed().unwrap();
+        let notarized = Notarized::new(create_notarization(&schemes, proposal), block);
 
         // Test HTTPS POST
-        client.seed_upload(seed.clone()).await.unwrap();
+        client.notarized_upload(notarized.clone()).await.unwrap();
 
         // Test HTTPS GET
-        let retrieved = client.seed_get(IndexQuery::Latest).await.unwrap();
-        assert_eq!(retrieved.view(), seed.view());
+        let retrieved = client.notarized_get(IndexQuery::Latest).await.unwrap();
+        assert_eq!(retrieved, notarized);
 
         handle.abort();
     }
@@ -1048,16 +929,16 @@ mod tests {
     async fn test_tls_websocket_connection() {
         let cert_key = generate_self_signed_cert();
 
-        let (schemes, identity) = fixture(0);
+        let (schemes, identity) = fixture(0, 4);
 
         let (addr, handle) = start_tls_server(schemes[0].clone(), &cert_key, Sequential).await;
         let client = create_tls_client(addr, identity, &cert_key);
         wait_for_ready(&client).await;
 
-        // Create a seed
+        // Create a notarization
         let context = Context {
             round: Round::new(EPOCH, View::new(1)),
-            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            leader: PrivateKey::from_seed(0).public_key(),
             parent: (View::new(0), sha256::Digest::EMPTY),
         };
         let block = Block::new(
@@ -1072,32 +953,124 @@ mod tests {
             View::new(0),
             block.digest(),
         );
-        let seed = create_notarization(&schemes, proposal).seed().unwrap();
+        let notarized = Notarized::new(create_notarization(&schemes, proposal), block);
 
         // Connect to WebSocket over TLS
         let mut stream = client.listen().await.unwrap();
 
-        // Signal that websocket is connected, then upload the seed
+        // Signal that websocket is connected, then upload the notarization
         let (tx, rx) = tokio::sync::oneshot::channel();
         let upload_client = client.clone();
         tokio::spawn(async move {
             rx.await.unwrap();
-            upload_client.seed_upload(seed).await.unwrap();
+            upload_client.notarized_upload(notarized).await.unwrap();
         });
 
-        // Signal ready and wait for the seed message
+        // Signal ready and wait for the notarization message
         tx.send(()).unwrap();
         if let Some(Ok(msg)) = stream.next().await {
             match msg {
-                alto_client::consensus::Message::Seed(s) => {
-                    assert_eq!(s.view().get(), 1);
+                alto_client::consensus::Message::Notarization(n) => {
+                    assert_eq!(n.proof.view().get(), 1);
                 }
-                _ => panic!("Expected seed message"),
+                _ => panic!("Expected notarization message"),
             }
         } else {
             panic!("Expected to receive a message");
         }
 
         handle.abort();
+    }
+
+    fn certified(
+        schemes: &[ConsensusScheme],
+        view: u64,
+    ) -> (Notarized<ConsensusScheme>, Finalized<ConsensusScheme>) {
+        let block = Block::new(
+            Context {
+                round: Round::new(EPOCH, View::new(view)),
+                leader: PrivateKey::from_seed(0).public_key(),
+                parent: (View::new(view - 1), sha256::Digest::EMPTY),
+            },
+            Sha256::hash(&[b"parent"]),
+            Height::new(view),
+            view * 1_000,
+            Bytes::new(),
+        );
+        let proposal = Proposal::new(
+            Round::new(EPOCH, View::new(view)),
+            View::new(view - 1),
+            block.digest(),
+        );
+        let notarizes: Vec<_> = schemes
+            .iter()
+            .map(|scheme| Notarize::sign(scheme, proposal.clone()).unwrap())
+            .collect();
+        let finalizes: Vec<_> = schemes
+            .iter()
+            .map(|scheme| Finalize::sign(scheme, proposal.clone()).unwrap())
+            .collect();
+        (
+            Notarized::new(
+                Notarization::from_notarizes(&schemes[0], non_empty![@&notarizes], &Sequential)
+                    .unwrap(),
+                block.clone(),
+            ),
+            Finalized::new(
+                Finalization::from_finalizes(&schemes[0], non_empty![@&finalizes], &Sequential)
+                    .unwrap(),
+                block,
+            ),
+        )
+    }
+
+    #[tokio::test]
+    async fn serves_fn_dsa_certificates_verified_against_the_participant_set() {
+        let (schemes, identity) = fixture(0, 4);
+        let identity = identity.encode();
+        let verifier = || {
+            ConsensusScheme::certificate_verifier(
+                NAMESPACE,
+                decode_identity(identity.clone()).unwrap(),
+            )
+        };
+        let indexer = Arc::new(Indexer::new(verifier(), Sequential));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Api::new(indexer).router();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = ClientBuilder::new(&format!("http://{addr}"), verifier(), Sequential).build();
+        while client.health().await.is_err() {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+
+        // The quorum's certificates are accepted, served, and verified by the client.
+        let (notarized, finalized) = certified(&schemes[..3], 1);
+        client.notarized_upload(notarized.clone()).await.unwrap();
+        client.finalized_upload(finalized.clone()).await.unwrap();
+        assert_eq!(
+            client.notarized_get(IndexQuery::Latest).await.unwrap(),
+            notarized
+        );
+        assert_eq!(
+            client.finalized_get(IndexQuery::Index(1)).await.unwrap(),
+            finalized
+        );
+        assert!(client.block_get(Query::Index(1)).await.is_ok());
+
+        // Certificates from another participant set are rejected on upload.
+        let (others, _) = fixture(4, 4);
+        let (notarized, finalized) = certified(&others, 2);
+        assert!(client.notarized_upload(notarized).await.is_err());
+        assert!(client.finalized_upload(finalized).await.is_err());
+        assert_eq!(
+            client
+                .finalized_get(IndexQuery::Latest)
+                .await
+                .unwrap()
+                .proof
+                .view(),
+            View::new(1)
+        );
     }
 }

@@ -201,13 +201,7 @@ pub struct Client<S: Strategy, C: Scheme> {
 #[cfg(test)]
 mod tests {
     use super::{ClientBuilder, Error};
-    #[cfg(not(feature = "pq"))]
-    use alto_types::StandardScheme;
-    use alto_types::{Identity, NAMESPACE};
-    #[cfg(feature = "pq")]
-    use alto_types::{PqScheme, Scheme as _};
-    #[cfg(not(feature = "pq"))]
-    use commonware_math::algebra::CryptoGroup;
+    use alto_types::{ConsensusScheme, Identity, Scheme as _, NAMESPACE};
     use commonware_parallel::Sequential;
     use futures::StreamExt;
     use std::time::Duration;
@@ -224,10 +218,7 @@ mod tests {
             socket.get_mut().write_all(&frames).await.unwrap();
             socket.get_mut().shutdown().await.unwrap();
         });
-        #[cfg(not(feature = "pq"))]
-        let verifier = StandardScheme::certificate_verifier(NAMESPACE, Identity::generator());
-        #[cfg(feature = "pq")]
-        let verifier = PqScheme::certificate_verifier(NAMESPACE, Identity::default());
+        let verifier = ConsensusScheme::certificate_verifier(NAMESPACE, Identity::default());
         let mut builder = ClientBuilder::new(&format!("http://{addr}"), verifier, Sequential);
         if let Some(block_size) = block_size {
             builder = builder.with_block_size(block_size);

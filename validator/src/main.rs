@@ -1,26 +1,9 @@
-use alto_chain::{engine, Config, Leader, Peers, LEADER_TIMEOUT};
-#[cfg(feature = "pq")]
-use alto_types::PqScheme;
-use alto_types::{host_name, PrivateKey, PublicKey, Scheme, EPOCH, NAMESPACE};
-#[cfg(not(feature = "pq"))]
-use alto_types::{StandardScheme, VrfScheme, ROTATING_ELECTOR};
+use alto_chain::{engine, Config, Peers, LEADER_TIMEOUT};
+use alto_types::{host_name, ConsensusScheme, PrivateKey, PublicKey, Scheme, EPOCH, NAMESPACE};
 use clap::{Arg, Command};
-#[cfg(not(feature = "pq"))]
-use commonware_codec::Decode;
 use commonware_codec::{varint::UInt, DecodeExt, EncodeSize};
 use commonware_consensus::{marshal, types::ViewDelta};
-#[cfg(feature = "pq")]
-use commonware_cryptography::ml_kem::MlKem768;
-#[cfg(not(feature = "pq"))]
-use commonware_cryptography::{
-    bls12381::primitives::{
-        group,
-        sharing::{ModeVersion, Sharing},
-        variant::MinSig,
-    },
-    handshake::sake::X25519,
-};
-use commonware_cryptography::{ChaCha20Poly1305, Signer};
+use commonware_cryptography::{ml_kem::MlKem768, ChaCha20Poly1305, Signer};
 use commonware_deployer::aws::Hosts;
 use commonware_formatting::from_hex;
 use commonware_p2p::{
@@ -34,11 +17,10 @@ use commonware_stream::{
     sake::{self, Sake},
     SakeCups,
 };
-#[cfg(feature = "pq")]
-use commonware_utils::ordered::BiMap;
-#[cfg(not(feature = "pq"))]
-use commonware_utils::NZU32;
-use commonware_utils::{ordered::Set, union_unique, NZUsize};
+use commonware_utils::{
+    ordered::{BiMap, Set},
+    union_unique, NZUsize,
+};
 use futures::future::try_join_all;
 use governor::Quota;
 use std::{
@@ -76,10 +58,6 @@ const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
 /// Key encapsulation mechanism for the ephemeral key exchange of peer handshakes.
-#[cfg(not(feature = "pq"))]
-type HandshakeKem = X25519;
-/// Key encapsulation mechanism for the ephemeral key exchange of peer handshakes.
-#[cfg(feature = "pq")]
 type HandshakeKem = MlKem768;
 
 /// Authenticated transport upgrade for peer connections.
@@ -145,9 +123,6 @@ fn main() {
     let config_file = std::fs::read_to_string(config_file).expect("Could not read config file");
     let mut config: Config =
         serde_yaml::from_str(&config_file).expect("Could not parse config file");
-    if let Err(message) = config.leader.check_supported() {
-        panic!("{message}");
-    }
     let max_message_size = configured_max_message_size(config.block_size);
     let key = from_hex(&config.private_key).expect("Could not parse private key");
     let signer = PrivateKey::decode(key).expect("Private key is invalid");
@@ -298,23 +273,6 @@ fn main() {
         };
         info!(peers = peers.len(), "loaded peers");
 
-        // Parse threshold key material
-        #[cfg(not(feature = "pq"))]
-        let (share, polynomial, identity) = {
-            let peers_u32 = peers.len() as u32;
-            let share = from_hex(&config.share).expect("Could not parse share");
-            let share = group::Share::decode(share).expect("Share is invalid");
-            let polynomial = from_hex(&config.polynomial).expect("Could not parse polynomial");
-            let polynomial =
-                Sharing::<MinSig>::decode_cfg(polynomial, &(NZU32!(peers_u32), ModeVersion::v0()))
-                    .expect("polynomial is invalid");
-            let identity = *polynomial.public();
-            (share, polynomial, identity)
-        };
-
-        #[cfg(not(feature = "pq"))]
-        info!(%name, ?identity, ?ip, port = config.port, "loaded config");
-        #[cfg(feature = "pq")]
         info!(%name, ?ip, port = config.port, "loaded config");
 
         // Configure network
@@ -408,96 +366,51 @@ fn main() {
             marshal,
         );
 
-        macro_rules! start_consensus {
-            ($scheme:ty, $signer:expr, $identity:expr, $elector:expr, $delay_ms:expr) => {{
-                let scheme: $scheme = $signer.expect("failed to create consensus scheme");
-                let indexer = config.indexer.as_deref().map(|indexer_url| {
-                    alto_client::ClientBuilder::new(
-                        indexer_url,
-                        <$scheme as Scheme>::certificate_verifier(NAMESPACE, $identity),
-                        strategy.clone(),
-                    )
-                    .build()
-                });
-                let engine_cfg = engine::Config {
-                    blocker: oracle.clone(),
-                    provider: oracle.clone(),
-                    partition_prefix: "engine".to_string(),
-                    blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
-                    finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
-                    me: public_key.clone(),
-                    scheme,
-                    elector: $elector,
-                    mailbox_size: config.mailbox_size,
-                    deque_size: config.deque_size,
-                    block_size: config.block_size,
-                    proposal_delay_ms: $delay_ms,
-                    leader_timeout: LEADER_TIMEOUT,
-                    certification_timeout: CERTIFICATION_TIMEOUT,
-                    nullify_retry: NULLIFY_RETRY,
-                    activity_timeout: ACTIVITY_TIMEOUT,
-                    skip_timeout: SKIP_TIMEOUT,
-                    fetch_timeout: FETCH_TIMEOUT,
-                    backfiller_max_active: config.backfiller_max_active,
-                    backfiller_retry: Duration::from_millis(config.backfiller_retry_ms),
-                    indexer,
-                    strategy,
-                };
-                engine::Engine::new(context.child("engine"), engine_cfg)
-                    .await
-                    .start(pending, recovered, resolver, broadcaster, marshal_resolver)
-            }};
-        }
-
-        // Consensus, certificate storage, and indexer clients share the selected certificate
-        // scheme for the process lifetime.
-        #[cfg(not(feature = "pq"))]
-        let engine = match config.leader {
-            Leader::Stable {
-                delay_ms,
-                term_length,
-                optimistic_views,
-            } => start_consensus!(
-                StandardScheme,
-                StandardScheme::signer(NAMESPACE, participants, polynomial, share),
-                identity,
-                engine::stable_elector(term_length, optimistic_views),
-                delay_ms
-            ),
-            Leader::Rotating { delay_ms } => {
-                start_consensus!(
-                    VrfScheme,
-                    VrfScheme::signer(NAMESPACE, participants, polynomial, share),
-                    identity,
-                    ROTATING_ELECTOR,
-                    delay_ms
-                )
-            }
+        // Each validator's identity key also signs its consensus messages, and the indexer
+        // client verifies certificates against the same participant set.
+        let signers: Vec<_> = participants
+            .iter()
+            .map(|key| (key.clone(), key.clone()))
+            .collect();
+        let signers = BiMap::try_from(signers).expect("participant keys are unique");
+        let scheme = ConsensusScheme::signer(NAMESPACE, signers, signer)
+            .expect("failed to create consensus scheme");
+        let indexer = config.indexer.as_deref().map(|indexer_url| {
+            alto_client::ClientBuilder::new(
+                indexer_url,
+                ConsensusScheme::certificate_verifier(NAMESPACE, participants),
+                strategy.clone(),
+            )
+            .build()
+        });
+        let leader = config.leader;
+        let engine_cfg = engine::Config {
+            blocker: oracle.clone(),
+            provider: oracle.clone(),
+            partition_prefix: "engine".to_string(),
+            blocks_freezer_table_initial_size: BLOCKS_FREEZER_TABLE_INITIAL_SIZE,
+            finalized_freezer_table_initial_size: FINALIZED_FREEZER_TABLE_INITIAL_SIZE,
+            me: public_key.clone(),
+            scheme,
+            elector: engine::stable_elector(leader.term_length, leader.optimistic_views),
+            mailbox_size: config.mailbox_size,
+            deque_size: config.deque_size,
+            block_size: config.block_size,
+            proposal_delay_ms: leader.delay_ms,
+            leader_timeout: LEADER_TIMEOUT,
+            certification_timeout: CERTIFICATION_TIMEOUT,
+            nullify_retry: NULLIFY_RETRY,
+            activity_timeout: ACTIVITY_TIMEOUT,
+            skip_timeout: SKIP_TIMEOUT,
+            fetch_timeout: FETCH_TIMEOUT,
+            backfiller_max_active: config.backfiller_max_active,
+            backfiller_retry: Duration::from_millis(config.backfiller_retry_ms),
+            indexer,
+            strategy,
         };
-
-        // Each validator's identity key also signs its consensus messages.
-        #[cfg(feature = "pq")]
-        let engine = match config.leader {
-            Leader::Stable {
-                delay_ms,
-                term_length,
-                optimistic_views,
-            } => {
-                let signers: Vec<_> = participants
-                    .iter()
-                    .map(|key| (key.clone(), key.clone()))
-                    .collect();
-                let signers = BiMap::try_from(signers).expect("participant keys are unique");
-                start_consensus!(
-                    PqScheme,
-                    PqScheme::signer(NAMESPACE, signers, signer),
-                    participants,
-                    engine::stable_elector(term_length, optimistic_views),
-                    delay_ms
-                )
-            }
-            Leader::Rotating { .. } => unreachable!("rejected when the config is loaded"),
-        };
+        let engine = engine::Engine::new(context.child("engine"), engine_cfg)
+            .await
+            .start(pending, recovered, resolver, broadcaster, marshal_resolver);
 
         // Wait for any task to error
         if let Err(e) = try_join_all(vec![p2p, engine]).await {

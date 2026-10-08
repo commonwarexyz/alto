@@ -26,10 +26,6 @@ mimalloc = { workspace = true }
 tracing = { workspace = true }
 serde_yaml = "0.9.34"
 
-[features]
-# Post-quantum mode: ML-DSA-65 identities and certificates with ML-KEM-768 transport handshakes.
-pq = ["alto-types/pq", "alto-chain/pq", "alto-client/pq"]
-
 [[bin]]
 name = "validator"
 path = "src/main.rs"

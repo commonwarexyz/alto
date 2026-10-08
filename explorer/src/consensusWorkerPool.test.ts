@@ -38,15 +38,19 @@ test("dispatches every artifact across the verifier pool without sampling", () =
     3,
     workerFactory(workers),
     new Uint8Array([1, 2, 3]),
-    false,
     (error) => { throw error; },
   );
 
   for (let id = 0; id < 8; id++) {
-    pool.verify(id % 3, new Uint8Array([id]), id);
+    pool.verify(1 + (id % 2), new Uint8Array([id]), id);
   }
 
   expect(workers.map((worker) => worker.messages.length)).toEqual([1, 1, 1]);
+  expect(workers[0].messages[0]).toEqual({
+    kind: 1,
+    payload: new Uint8Array([0]),
+    publicKey: new Uint8Array([1, 2, 3]),
+  });
 
   // A worker that finishes early immediately takes the next queued artifact.
   for (let id = 0; id < 6; id++) {
@@ -81,7 +85,6 @@ test("keeps delivering recent results when an earlier worker stays pending", () 
     2,
     workerFactory(workers),
     new Uint8Array([1]),
-    false,
     (error) => { throw error; },
   );
   const [stalled, healthy] = workers;
@@ -111,7 +114,6 @@ test("retries an in-flight artifact on a replacement worker", () => {
     1,
     workerFactory(workers),
     new Uint8Array([1, 2, 3]),
-    false,
     (error) => errors.push(error),
   );
 
@@ -135,7 +137,6 @@ test("a failed verification still releases later results in order and replaces t
     2,
     workerFactory(workers),
     new Uint8Array([1, 2, 3]),
-    false,
     (error) => errors.push(error),
   );
   const [first, second] = workers;
@@ -178,7 +179,6 @@ test("an idle worker that fails is removed and replaced, and repeated failures s
     1,
     workerFactory(workers),
     new Uint8Array([1, 2, 3]),
-    false,
     (error) => errors.push(error),
   );
   const worker = workers[0];
@@ -206,7 +206,6 @@ test("bounds pending work when every worker stalls", () => {
     1,
     workerFactory(workers),
     new Uint8Array([1, 2, 3]),
-    false,
     (error) => { throw error; },
   );
   const worker = workers[0];
@@ -240,7 +239,6 @@ test("keeps only recent results when verification outpaces consumption", () => {
     1,
     workerFactory(workers),
     new Uint8Array([1]),
-    false,
     (error) => { throw error; },
   );
   const total = MAX_PENDING_JOBS * 4;
@@ -273,7 +271,6 @@ test("terminates created workers when startup fails", () => {
       throw failure;
     },
     new Uint8Array([1]),
-    false,
     (error) => errors.push(error),
   )).toThrow(failure);
   expect(worker.terminated).toBe(true);

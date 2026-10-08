@@ -181,7 +181,7 @@ mod tests {
 
     async fn start_engine_with_handler(
         context: commonware_runtime::deterministic::Context,
-        scheme: alto_types::VrfScheme,
+        scheme: alto_types::ConsensusScheme,
     ) -> handler::Handler<Digest> {
         let (engine, _, _) = Engine::new(
             context.child("engine"),
@@ -204,7 +204,7 @@ mod tests {
     }
 
     /// Verifies that marshal's Deliver handler rejects a finalization whose
-    /// threshold signature does not match the configured scheme. This is
+    /// certificate does not verify against the configured scheme. This is
     /// the resolver path's signature verification, as opposed to the feeder
     /// path tested in feeder::tests.
     #[test_traced]
@@ -238,7 +238,7 @@ mod tests {
     }
 
     /// Verifies that marshal's Deliver handler rejects a notarization whose
-    /// threshold signature does not match the configured scheme.
+    /// certificate does not verify against the configured scheme.
     #[test_traced]
     fn marshal_rejects_invalid_notarization_from_resolver() {
         let fixture = TestFixture::new();

@@ -2,6 +2,25 @@
 
 Deploy an instance of [alto](../README.md).
 
+This branch is a post-quantum proof of concept. Validators identify themselves with FN-DSA-512
+(Falcon-512) keys, authenticate peer handshakes with them, and sign consensus messages with them, so
+every certificate carries one 666-byte FN-DSA-512 signature per signer. Handshakes use ML-KEM-768
+for the ephemeral key exchange, and records are encrypted with ChaCha20-Poly1305. Leaders are
+stable: each serves a term of views in round-robin order.
+
+FN-DSA is implemented against the pre-draft standard (FIPS 206 is unpublished), so its key and
+signature encodings may change. Use these networks for experiments only.
+
+The network identity is the hex-encoded, sorted participant set. Every FN-DSA-512 public key is
+897 bytes (1794 hex characters per participant), so the identity of a 50-validator network is
+about 90 KB of hex. Indexers, explorers, followers, and the inspector verify every certificate
+against this participant set. Deployed indexers and followers read the identity from their
+configuration files because Linux limits a single command-line argument to 128 KiB.
+
+Instances, configuration files, and storage directories are named by the first 16 bytes of the
+SHA-256 digest of each validator's public key, in hex. `allowed_peers`, `bootstrappers`, and
+`peers.yaml` keep full hex-encoded keys.
+
 ## Deploy
 
 ### Local
@@ -12,20 +31,14 @@ _To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/
 
 _To configure local indexer upload, add `--indexers '<url>:<count>[;<url>:<count>...]'` to the `generate local` command. For example, `http://localhost:8080:1` assigns one validator to upload to that indexer._
 
-`--leader-mode rotating` selects each view's leader from a VRF seed. Stable mode assigns leaders
-round-robin for terms of `--leader-term-length` views. Stable mode requires a term length of at
-least two and `--leader-optimistic-views`, which limits how far proposals and votes may run ahead
-of directly notarized ancestry. Values above the term length have no further effect. Rotating
-mode rejects both stable-only flags.
+Leaders are assigned round-robin for terms of `--leader-term-length` views, which must be at
+least two. `--leader-optimistic-views` limits how far proposals and votes may run ahead of
+directly notarized ancestry. Values above the term length have no further effect. All three leader
+flags are required.
 
 `--leader-delay-ms` sets the minimum interval from the parent's timestamp, from 0 through 999 ms.
-Zero disables pacing and allows equal timestamps. Use 100 ms for local stable networks: shorter
+Zero disables pacing and allows equal timestamps. Use 100 ms for local networks: shorter
 intervals can cause timeouts and skipped terms.
-
-Certificate mode follows leader mode: `standard` for stable and `vrf` for rotating. The generator
-sets it in indexer commands and configurations and in explorer configurations. Set followers'
-`certificate_mode` and the inspector's `--certificate-mode` to match. Changing certificate mode
-requires a new network identity and matching configurations for every component.
 
 `--block-size` sets the number of random payload bytes in each proposed block and defaults to `0`.
 All validators must use the same value. Encoded messages must fit the authenticated transport's
@@ -40,11 +53,10 @@ empty.
 `--traces-sample-rate` sets the fraction of traces exported by each validator and accepts values
 from `0` through `1`. It defaults to `0`, which disables trace export.
 
-The stable local example uses:
+The local example below writes validator configurations containing:
 
 ```yaml
 leader:
-  mode: stable
   delay_ms: 100
   term_length: 1000
   optimistic_views: 48
@@ -53,36 +65,22 @@ traces_sample_rate: 0.0
 indexer: http://localhost:8080
 ```
 
-Rotating-leader configs carry only the delay:
-
-```yaml
-leader:
-  mode: rotating
-  delay_ms: 0
-```
-
 ```bash
-cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 100 --leader-term-length 1000 --leader-optimistic-views 48 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
+cargo run --bin deploy -- generate --peers 4 --bootstrappers 1 --worker-threads 2 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-delay-ms 100 --leader-term-length 1000 --leader-optimistic-views 48 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
 ```
 
-For a rotating network:
-
-```bash
-cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode rotating --leader-delay-ms 0 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
-```
-
-The emitted indexer command includes the network's certificate mode and block size. A deployed
-indexer reads these values from `indexer.yaml`.
-
-The generator prints the network identity, startup commands for indexers and validators, and
-commands for reading each validator's metrics.
+The generator prints the network identity's digest, startup commands for indexers and validators,
+and commands for reading each validator's metrics. The emitted indexer command
+(`cargo run --bin indexer -- --port <port> --identity <participant-set-hex> --block-size <size>`)
+passes the identity on the command line, which suits small local networks. A deployed indexer
+reads its identity and block size from `indexer.yaml`.
 
 #### Start Validators
 
 Run the emitted start commands in separate terminals:
 
 ```bash
-cargo run --bin validator -- --peers test/peers.yaml --config test/<validator-public-key>.yaml
+cargo run --release --bin validator -- --peers test/peers.yaml --config test/<validator-host-name>.yaml
 ```
 
 _It is necessary to start at least one bootstrapper for any other peers to connect (used to exchange IPs to dial, not as a relay)._
@@ -92,14 +90,14 @@ _It is necessary to start at least one bootstrapper for any other peers to conne
 The indexer embeds `explorer/build` at compile time. To browse a local network at
 `http://localhost:8080`, first [build the embedded explorer](#build-the-embedded-explorer), then
 compile and start (or restart) the indexer using the emitted `cargo run` command. Its network
-identity and certificate mode are injected automatically. To run the explorer from source,
+identity is injected automatically. To run the explorer from source,
 generate its configuration (pass the indexer as `host:port` without a scheme)
 and copy it over `explorer/src/local_config.ts`:
 
 ```bash
-cargo run --bin deploy -- explorer --dir test --backend-url localhost:8080 local
+cargo run --bin deploy -- explorer --dir test --backend-url localhost:8080
 cp test/config.ts explorer/src/local_config.ts
-cd explorer && REACT_APP_MODE=local npm start
+cd explorer && npm start
 ```
 
 #### Debugging
@@ -113,27 +111,6 @@ ulimit -n 65536
 ```
 
 _MacOS defaults to 256 open files, which is too low for the default settings (where 1 journal file is maintained per recent view)._
-
-#### Post-Quantum Mode
-
-Pass `--features pq` to both the generator and the validators to run a network with ML-DSA-65
-identities and certificates and ML-KEM-768 handshakes:
-
-```bash
-cargo run --bin deploy --features pq -- generate --peers 4 --bootstrappers 1 --worker-threads 2 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 100 --leader-term-length 1000 --leader-optimistic-views 48 --output test local --start-port 3000
-cargo run --release --bin validator --features pq -- --peers test/peers.yaml --config test/<validator-host-name>.yaml
-```
-
-Post-quantum builds support only `--leader-mode stable`: rotating leaders need threshold VRF
-seeds. The indexer and explorer verify threshold certificates, so the generator rejects
-`--indexer`, `--indexers`, and the `explorer` subcommand. Validator configurations contain no
-`share` or `polynomial`; the generator prints a digest of the participant set instead of a
-network identity.
-
-An ML-DSA-65 public key is 1952 bytes, so instances, configuration files, and storage directories
-are named by the first 16 bytes of the SHA-256 digest of the key, in hex. `allowed_peers`,
-`bootstrappers`, and `peers.yaml` keep full hex-encoded keys. Classical builds name hosts by
-the full hex-encoded key.
 
 ### Remote
 
@@ -170,22 +147,17 @@ indexer: https://your-indexer.example.com
 ##### Global (scripted)
 
 ```bash
-./deploy.sh stable
-./deploy.sh rotating
-./deploy.sh pq
+./deploy.sh
 ```
 
-`deploy.sh` takes the mode as its only argument. It generates the configuration, tests and
-builds the explorer, builds the validator and indexer binaries, creates the Global cluster, and
-prints the explorer URL. The `pq` mode uses the stable-mode leader settings and deploys
-[post-quantum](#post-quantum-mode) validators only: it skips the indexer and explorer and builds
-the validator with `just validator-graviton-pq-binary`. The remaining deployment steps describe
-the manual flow used for the USA cluster.
+`deploy.sh` takes no arguments. It generates the configuration, tests and builds the explorer,
+builds the validator and indexer binaries with `just graviton-binaries`, creates the Global
+cluster, and prints the explorer URL. The remaining deployment steps describe the manual flow used
+for the USA cluster.
 
 The script deploys 50 validators and one indexer on `c7gd.4xlarge` instances. Each validator uses
-8 worker threads and 16 signature threads. Stable mode uses a 5 ms proposal interval and runs
-100,000-view terms with 48 optimistic views. Rotating mode uses zero proposal delay and elects a
-VRF-seeded leader every view. Deployment concurrency is 50.
+8 worker threads and 16 signature threads, a 5 ms proposal interval, and 100,000-view leader terms
+with 48 optimistic views. Deployment concurrency is 50.
 
 _Each `c7gd.4xlarge` provides a 950GB ephemeral NVMe instance store, which the deployer mounts at
 `/home/ubuntu` for validator data. The 25GB storage setting sizes the gp3 root volume. Terminating
@@ -194,33 +166,25 @@ or replacing an instance discards its NVMe data._
 ##### USA
 
 ```bash
-cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 10 --leader-term-length 1000 --leader-optimistic-views 48 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 75 --dashboard deploy/dashboard.json
+cargo run --bin deploy -- generate --peers 50 --bootstrappers 5 --worker-threads 2 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-delay-ms 10 --leader-term-length 1000 --leader-optimistic-views 48 --output assets remote --regions us-east-1,us-east-2,us-west-1,us-west-2 --monitoring-instance-type c8g.4xlarge --monitoring-storage-size 100 --instance-type c8g.large --storage-size 75 --dashboard deploy/dashboard.json
 ```
 
 _Validators retain finalized blocks. Monitor disk usage as the finalized history grows._
 
 #### [Optional] Configure Explorer
 
-An indexer deployed with `--indexer` serves an explorer configured for its network. For a separately
-hosted public explorer, expose the indexer through HTTPS and generate `assets/config.ts` with its
-public hostname, without a scheme:
-
-```bash
-cargo run --bin deploy -- explorer --dir assets --backend-url indexer.example.com remote
-```
-
-Copy the generated exports into `explorer/src/global_config.ts` or `explorer/src/usa_config.ts`.
-Keep `PARTICIPANTS` and `LOCATIONS` in their generated order so each validator maps to its location.
-Build and deploy the hosted explorer from the same revision as the validators.
+An indexer deployed with `--indexer` serves an explorer configured for its network at
+`http://<indexer-ip>:8080/`. Build that explorer from the same revision as the validators.
 
 #### [Optional] Configure Followers and Inspector
 
-Use the generated network identity, certificate mode, and block size for every client.
-Deployments with `--indexer` store these values in `assets/indexer.yaml`.
+Use the generated network identity and block size for every client. Deployments with `--indexer`
+store these values in `assets/indexer.yaml`.
 
-Set `source`, `identity`, `certificate_mode`, and `block_size` in the follower configuration. Pass
-`--indexer`, `--identity`, `--certificate-mode`, and `--block-size` to the inspector. Use fresh
-follower data directories when connecting to a newly generated network.
+Set `source`, `identity`, and `block_size` in the follower configuration. Pass `--indexer`,
+`--identity`, and `--block-size` to the inspector. Use fresh follower data directories when
+connecting to a newly generated network. The inspector's `--identity` must fit the platform's
+argument limit: on Linux, 128 KiB holds the identity of at most 73 participants.
 
 #### Build the Embedded Explorer
 
@@ -256,11 +220,6 @@ Run the recipe for the deployment's instance type from the repository root:
 
 Each recipe writes `assets/validator`, `assets/indexer`, and their debug-symbol variants. Graviton 4
 binaries require CPU features unavailable on earlier Graviton generations.
-
-For [post-quantum](#post-quantum-mode) networks, build only the validator with
-`just validator-graviton-pq-binary`, `just validator-graviton4-pq-binary`, or
-`just validator-intel-pq-binary`. These recipes pass `ALTO_CARGO_ARGS=--features=pq` to the
-builder, which appends `ALTO_CARGO_ARGS` to its `cargo build` command.
 
 The builder runs on the local Docker architecture and cross-compiles the binaries, so no
 `--platform` argument is needed on an ARM64 development machine.

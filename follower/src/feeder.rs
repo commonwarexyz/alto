@@ -11,7 +11,7 @@ use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Spawner};
 use futures::StreamExt;
 use std::time::Duration;
 use thiserror::Error;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, warn};
 
 /// Errors that can occur while feeding certificates from the source stream.
 #[derive(Debug, Error)]
@@ -25,7 +25,7 @@ pub enum Error {
 /// Feeds certificates from a [Source] stream into [MarshalActor](commonware_consensus::marshal::core::Actor)
 /// via its [MarshalMailbox].
 ///
-/// Listens for seed, notarization, and finalization messages, verifies their threshold
+/// Listens for notarization and finalization messages, verifies their certificate
 /// signatures, caches the associated blocks, and reports the proofs to marshal.
 /// Automatically reconnects on stream disconnection.
 ///
@@ -96,18 +96,15 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
 
     /// Process a single message from the certificate stream.
     ///
-    /// Seed messages are ignored. Notarization and finalization messages
-    /// have their threshold signatures verified before being reported to
-    /// marshal along with their associated blocks.
+    /// Notarization and finalization messages have their certificate
+    /// signatures verified before being reported to marshal along with their
+    /// associated blocks.
     async fn handle_message(&mut self, message: Message<C::Scheme>) -> Result<(), Error> {
         match message {
-            Message::Seed(seed) => {
-                trace!(view = seed.view().get(), "received seed");
-            }
             Message::Notarization(notarized) => {
                 let round = notarized.proof.round();
 
-                // Verify threshold signature (panics on invalid)
+                // Verify certificate signatures (panics on invalid)
                 assert!(
                     notarized.verify(&self.scheme, &Sequential),
                     "invalid notarization signature for height {}",
@@ -149,7 +146,7 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
                 let height = finalized.block.height;
                 let view = finalized.proof.view();
 
-                // Verify threshold signature (panics on invalid)
+                // Verify certificate signatures (panics on invalid)
                 assert!(
                     finalized.verify(&self.scheme, &Sequential),
                     "invalid finalization signature for height {}",
@@ -192,7 +189,7 @@ mod tests {
     use commonware_utils::NZUsize;
     use std::time::Duration;
 
-    /// Verifies that a finalization with a valid threshold signature is
+    /// Verifies that a finalization with a valid certificate is
     /// accepted by handle_message without error.
     #[test_traced]
     fn accepts_valid_finalization() {
@@ -229,15 +226,15 @@ mod tests {
         });
     }
 
-    /// Verifies that a finalization with an invalid threshold signature
+    /// Verifies that a finalization with an invalid certificate
     /// causes handle_message to panic (assertion failure).
     #[test_traced]
     #[should_panic(expected = "invalid finalization signature for height 1")]
     fn rejects_invalid_finalization() {
         let fixture = TestFixture::new();
         let finalized = fixture.create_finalized(1, 1);
-        // Use a scheme derived from a different polynomial to force
-        // threshold signature verification to fail.
+        // Use a scheme with a different participant set to force
+        // certificate verification to fail.
         let wrong_verifier = fixture.wrong_verifier_scheme();
 
         Runner::default().start(|context| async move {
@@ -262,7 +259,7 @@ mod tests {
         });
     }
 
-    /// Verifies that a notarization with a valid threshold signature is
+    /// Verifies that a notarization with a valid certificate is
     /// accepted by handle_message without error.
     #[test_traced]
     fn accepts_valid_notarization() {
@@ -298,7 +295,7 @@ mod tests {
         });
     }
 
-    /// Verifies that a notarization with an invalid threshold signature
+    /// Verifies that a notarization with an invalid certificate
     /// causes handle_message to panic (assertion failure).
     #[test_traced]
     #[should_panic(expected = "invalid notarization signature for height 1")]

@@ -1,12 +1,13 @@
 use crate::Source;
 use alto_client::{consensus::Payload, IndexQuery, Query};
+use alto_types::PublicKey;
 use bytes::Bytes;
 use commonware_codec::Encode;
 use commonware_consensus::{
     marshal::resolver::handler,
     types::{Height, Round},
 };
-use commonware_cryptography::{ed25519::PublicKey, sha256::Digest};
+use commonware_cryptography::sha256::Digest;
 use commonware_resolver::opaque;
 use commonware_runtime::{Clock, Metrics, Spawner};
 use std::{future::Future, num::NonZeroUsize, time::Duration};
@@ -129,8 +130,8 @@ mod tests {
     use super::*;
     use crate::test_utils::{MockError, MockSource, TestFixture};
     use alto_client::Query;
-    use alto_types::VrfScheme;
-    use commonware_cryptography::{ed25519::PrivateKey, Digestible, Signer};
+    use alto_types::{ConsensusScheme, PrivateKey};
+    use commonware_cryptography::{Digestible, Signer};
     use commonware_macros::test_traced;
     use commonware_resolver::{Consumer, Delivery, Resolver as _, TargetedResolver as _};
     use commonware_runtime::{deterministic, Clock, Runner as _, Supervisor as _};
@@ -220,21 +221,21 @@ mod tests {
     }
 
     impl Source for BlockingSource {
-        type Scheme = VrfScheme;
+        type Scheme = ConsensusScheme;
         type Error = MockError;
 
-        async fn block(&self, _query: Query) -> Result<Payload<VrfScheme>, Self::Error> {
+        async fn block(&self, _query: Query) -> Result<Payload<ConsensusScheme>, Self::Error> {
             if let Some(sender) = self.started.lock().take() {
                 let _ = sender.send(());
             }
             let _drop_signal = DropSignal(self.dropped.clone());
-            std::future::pending::<Result<Payload<VrfScheme>, Self::Error>>().await
+            std::future::pending::<Result<Payload<ConsensusScheme>, Self::Error>>().await
         }
 
         async fn notarized(
             &self,
             _query: IndexQuery,
-        ) -> Result<alto_types::Notarized<VrfScheme>, Self::Error> {
+        ) -> Result<alto_types::Notarized<ConsensusScheme>, Self::Error> {
             Err(MockError("notarized not supported".to_string()))
         }
 
@@ -242,7 +243,7 @@ mod tests {
             &self,
         ) -> Result<
             impl futures::Stream<
-                    Item = Result<alto_client::consensus::Message<VrfScheme>, Self::Error>,
+                    Item = Result<alto_client::consensus::Message<ConsensusScheme>, Self::Error>,
                 > + Send
                 + Unpin,
             Self::Error,
@@ -251,7 +252,7 @@ mod tests {
         }
     }
 
-    fn start_resolver<C: Source<Scheme = VrfScheme>>(
+    fn start_resolver<C: Source<Scheme = ConsensusScheme>>(
         context: deterministic::Context,
         source: C,
         consumer: TestConsumer,

@@ -27,17 +27,12 @@ cargo install alto-inspector
 
 _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
 
-_The default certificate mode is `vrf` for rotating leaders. Use `--certificate-mode standard` for
-a stable-leader network. Stable networks do not publish seed artifacts._
+Every command takes `--indexer <URL>` and `--identity <HEX>`, the hex-encoded participant set
+of the network (the ordered FN-DSA-512 public keys of its validators). Certificates are verified
+against that set; the examples below omit both flags.
 
 Use `--block-size` to set the network's block payload size for streaming. The receive limit adds
 1 MiB for encoding and one message-kind byte. The default payload allowance is 4 MiB.
-
-### Get the latest seed
-
-```bash
-inspector get seed latest
-```
 
 ### Get the notarization for view 100
 

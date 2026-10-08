@@ -1,71 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Cluster, ClusterConfig, MODE } from './config';
 import { BlockJs, ViewData } from './types';
 
 interface StatsSectionProps {
     views: ViewData[];
-    selectedCluster: Cluster;
-    onClusterChange: (cluster: Cluster) => void;
-    configs: Record<Cluster, ClusterConfig>;
 }
-
-interface DropdownProps {
-    selectedCluster: Cluster;
-    onClusterChange: (cluster: Cluster) => void;
-    configs: Record<Cluster, ClusterConfig>;
-}
-
-const Dropdown: React.FC<DropdownProps> = ({ selectedCluster, onClusterChange, configs }) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const dropdownRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-                setIsOpen(false);
-            }
-        };
-
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
-    }, []);
-
-    const handleSelect = (cluster: Cluster) => {
-        onClusterChange(cluster);
-        setIsOpen(false);
-    };
-
-    return (
-        <div className="custom-dropdown" ref={dropdownRef}>
-            <button
-                className={`dropdown-trigger ${selectedCluster === 'global' ? 'global-cluster' : 'usa-cluster'}`}
-                onClick={() => setIsOpen(!isOpen)}
-                aria-expanded={isOpen}
-                aria-haspopup="listbox"
-            >
-                <span className="dropdown-label">{configs[selectedCluster].name}</span>
-                <span className="dropdown-arrow">{isOpen ? '▲' : '▼'}</span>
-            </button>
-
-            {isOpen && (
-                <div className="dropdown-menu">
-                    {Object.entries(configs).map(([clusterId, config]) => (
-                        <button
-                            key={clusterId}
-                            className={`dropdown-option ${selectedCluster === clusterId ? 'selected' : ''} ${clusterId === 'global' ? 'global-option' : 'usa-option'}`}
-                            onClick={() => handleSelect(clusterId as Cluster)}
-                        >
-                            <div className="option-name">{config.name}</div>
-                            <div className="option-description" dangerouslySetInnerHTML={{ __html: config.description }} />
-                        </button>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-};
 
 interface TooltipProps {
     content: string;
@@ -137,7 +75,7 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
     );
 };
 
-const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onClusterChange, configs }) => {
+const StatsSection: React.FC<StatsSectionProps> = ({ views }) => {
     // Calculation logic (unchanged from original)
     const notarizationTimes = views
         .filter(view => (view.status === "notarized" || view.status === "finalized"))
@@ -260,15 +198,6 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onC
         <div className="stats-card">
             <div className="stats-header">
                 <h2 className="stats-title">Latency</h2>
-                {MODE === 'public' && (
-                    <div className="cluster-toggle">
-                        <Dropdown
-                            selectedCluster={selectedCluster}
-                            onClusterChange={onClusterChange}
-                            configs={configs}
-                        />
-                    </div>
-                )}
             </div>
 
             <div className="stats-grid">
@@ -309,7 +238,7 @@ const StatsSection: React.FC<StatsSectionProps> = ({ views, selectedCluster, onC
             </div>
 
             <div className="stats-disclaimer">
-                All latency measurements made by your browser are only performed after verifying the integrity of incoming artifacts with the network key.
+                All latency measurements made by your browser are only performed after verifying the integrity of incoming artifacts with the participant set.
                 Local clock skew is estimated from an external time source.
             </div>
         </div >

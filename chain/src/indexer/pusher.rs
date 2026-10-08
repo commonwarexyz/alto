@@ -1,5 +1,5 @@
 use super::{Client, SharedState};
-use alto_types::{Activity, Block, Scheme, Seed, Seedable};
+use alto_types::{Activity, Block, Scheme};
 use commonware_actor::Feedback;
 use commonware_consensus::{
     marshal::{core::DigestFallback, core::Mailbox as MarshalMailbox, standard::Standard},
@@ -11,7 +11,7 @@ use commonware_runtime::{Metrics, Spawner};
 use std::{future::Future, sync::Arc};
 use tracing::{debug, warn};
 
-/// Uploads live seeds and certificate-bearing objects to the indexer.
+/// Uploads live certificate-bearing objects to the indexer.
 ///
 /// This is the live upload path. It reacts directly to consensus activity,
 /// waits for marshal to make the corresponding block available, caches that
@@ -92,19 +92,6 @@ impl Drop for CertificateUploadGuard {
 }
 
 impl<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> Pusher<E, C, CS> {
-    fn spawn_seed_upload(&self, label: &'static str, seed: Seed, view: View) {
-        self.context.child(label).spawn({
-            let client = self.client.clone();
-            move |_| async move {
-                if let Err(e) = client.seed_upload(seed).await {
-                    warn!(?e, "failed to upload seed");
-                    return;
-                }
-                debug!(%view, "seed uploaded to indexer");
-            }
-        });
-    }
-
     fn spawn_certificate_upload<F, Fut>(
         &self,
         label: &'static str,
@@ -152,9 +139,6 @@ impl<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> Reporter for Pusher<E, C, 
         match activity {
             Activity::Notarization(notarization) => {
                 let view = notarization.view();
-                if let Some(seed) = notarization.seed() {
-                    self.spawn_seed_upload("notarized_seed", seed, view);
-                }
                 self.spawn_certificate_upload(
                     "notarized_block",
                     view,
@@ -169,9 +153,6 @@ impl<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> Reporter for Pusher<E, C, 
             }
             Activity::Finalization(finalization) => {
                 let view = finalization.view();
-                if let Some(seed) = finalization.seed() {
-                    self.spawn_seed_upload("finalized_seed", seed, view);
-                }
                 self.spawn_certificate_upload(
                     "finalized_block",
                     view,

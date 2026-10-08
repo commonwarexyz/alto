@@ -1,4 +1,4 @@
-//! Deterministic multi-validator simulations shared by the classical and post-quantum test suites.
+//! Deterministic multi-validator simulations shared by the chain tests.
 
 use crate::{
     engine::{self, Engine},

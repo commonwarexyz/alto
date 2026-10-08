@@ -3,22 +3,22 @@
 use crate::Source;
 use alto_client::consensus::{Message, Payload};
 use alto_client::{IndexQuery, Query};
-use alto_types::{Block, Context, Finalized, Notarized, VrfScheme, EPOCH, NAMESPACE};
+use alto_types::{
+    Block, ConsensusScheme, Context, Finalized, Identity, Notarized, PrivateKey, Scheme, EPOCH,
+    NAMESPACE,
+};
 use bytes::Bytes;
 use commonware_consensus::{
-    simplex::{
-        scheme::bls12381_threshold::vrf as bls12381_threshold,
-        types::{Finalize, Notarize, Proposal},
-    },
+    simplex::types::{Finalize, Notarize, Proposal},
     types::{Height, Round, View},
 };
-use commonware_cryptography::{
-    bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519, sha256, Digest,
-    Digestible, Hasher, Sha256, Signer,
-};
+use commonware_cryptography::{sha256, Digest, Digestible, Hasher, Sha256, Signer};
 use commonware_parallel::Sequential;
-use commonware_utils::{non_empty, sync::Mutex};
-use rand::{rngs::StdRng, SeedableRng};
+use commonware_utils::{
+    non_empty,
+    ordered::{BiMap, Set},
+    sync::Mutex,
+};
 use std::{future::Future, sync::Arc};
 use thiserror::Error;
 
@@ -27,15 +27,15 @@ use thiserror::Error;
 pub struct MockError(pub String);
 
 pub type BlockHandler =
-    Arc<Mutex<Option<Box<dyn Fn(Query) -> Option<Payload<VrfScheme>> + Send + Sync>>>>;
+    Arc<Mutex<Option<Box<dyn Fn(Query) -> Option<Payload<ConsensusScheme>> + Send + Sync>>>>;
 pub type NotarizedHandler =
-    Arc<Mutex<Option<Box<dyn Fn(IndexQuery) -> Option<Notarized<VrfScheme>> + Send + Sync>>>>;
+    Arc<Mutex<Option<Box<dyn Fn(IndexQuery) -> Option<Notarized<ConsensusScheme>> + Send + Sync>>>>;
 
 #[derive(Clone)]
 pub struct MockSource {
     pub block_handler: BlockHandler,
     pub notarized_handler: NotarizedHandler,
-    pub messages: Arc<Mutex<Vec<Message<VrfScheme>>>>,
+    pub messages: Arc<Mutex<Vec<Message<ConsensusScheme>>>>,
 }
 
 impl MockSource {
@@ -49,10 +49,10 @@ impl MockSource {
 }
 
 impl Source for MockSource {
-    type Scheme = VrfScheme;
+    type Scheme = ConsensusScheme;
     type Error = MockError;
 
-    async fn block(&self, query: Query) -> Result<Payload<VrfScheme>, Self::Error> {
+    async fn block(&self, query: Query) -> Result<Payload<ConsensusScheme>, Self::Error> {
         let handler = self.block_handler.clone();
         let guard = handler.lock();
         match guard.as_ref().and_then(|f| f(query)) {
@@ -61,7 +61,10 @@ impl Source for MockSource {
         }
     }
 
-    async fn notarized(&self, query: IndexQuery) -> Result<Notarized<VrfScheme>, Self::Error> {
+    async fn notarized(
+        &self,
+        query: IndexQuery,
+    ) -> Result<Notarized<ConsensusScheme>, Self::Error> {
         let handler = self.notarized_handler.clone();
         let guard = handler.lock();
         match guard.as_ref().and_then(|f| f(query)) {
@@ -74,7 +77,7 @@ impl Source for MockSource {
         &self,
     ) -> impl Future<
         Output = Result<
-            impl futures::Stream<Item = Result<Message<VrfScheme>, Self::Error>> + Send + Unpin,
+            impl futures::Stream<Item = Result<Message<ConsensusScheme>, Self::Error>> + Send + Unpin,
             Self::Error,
         >,
     > + Send {
@@ -86,22 +89,39 @@ impl Source for MockSource {
     }
 }
 
+/// Returns the participant set of four validators whose keys are seeded from `first`.
+fn participants(first: u64) -> (Vec<PrivateKey>, Identity) {
+    let keys: Vec<_> = (first..first + 4).map(PrivateKey::from_seed).collect();
+    let identity = Set::from_iter_dedup(keys.iter().map(|key| key.public_key()));
+    (keys, identity)
+}
+
 pub struct TestFixture {
-    pub schemes: Vec<VrfScheme>,
+    pub schemes: Vec<ConsensusScheme>,
+    identity: Identity,
 }
 
 impl TestFixture {
     pub fn new() -> Self {
-        let mut rng = StdRng::seed_from_u64(0);
-        let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-        Self { schemes }
+        let (keys, identity) = participants(0);
+        let signers = BiMap::try_from(
+            identity
+                .iter()
+                .map(|key| (key.clone(), key.clone()))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let schemes = keys
+            .into_iter()
+            .map(|key| ConsensusScheme::signer(NAMESPACE, signers.clone(), key).unwrap())
+            .collect();
+        Self { schemes, identity }
     }
 
     pub fn create_block(&self, height: u64, view: u64) -> Block {
         let context = Context {
             round: Round::new(EPOCH, View::new(view)),
-            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            leader: PrivateKey::from_seed(0).public_key(),
             parent: (View::new(view.saturating_sub(1)), sha256::Digest::EMPTY),
         };
         let parent_digest = Sha256::hash(&[format!("parent-{height}").as_bytes()]);
@@ -114,7 +134,7 @@ impl TestFixture {
         )
     }
 
-    pub fn create_finalized(&self, height: u64, view: u64) -> Finalized<VrfScheme> {
+    pub fn create_finalized(&self, height: u64, view: u64) -> Finalized<ConsensusScheme> {
         let block = self.create_block(height, view);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(view)),
@@ -135,7 +155,7 @@ impl TestFixture {
         Finalized::new(finalization, block)
     }
 
-    pub fn create_notarized(&self, height: u64, view: u64) -> Notarized<VrfScheme> {
+    pub fn create_notarized(&self, height: u64, view: u64) -> Notarized<ConsensusScheme> {
         let block = self.create_block(height, view);
         let proposal = Proposal::new(
             Round::new(EPOCH, View::new(view)),
@@ -156,16 +176,12 @@ impl TestFixture {
         Notarized::new(notarization, block)
     }
 
-    pub fn verifier_scheme(&self) -> VrfScheme {
-        let identity = *self.schemes[0].identity();
-        VrfScheme::certificate_verifier(NAMESPACE, identity)
+    pub fn verifier_scheme(&self) -> ConsensusScheme {
+        ConsensusScheme::certificate_verifier(NAMESPACE, self.identity.clone())
     }
 
-    pub fn wrong_verifier_scheme(&self) -> VrfScheme {
-        let mut rng = StdRng::seed_from_u64(42);
-        let Fixture { schemes, .. } =
-            bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, 4);
-        let wrong_identity = *schemes[0].polynomial().public();
-        VrfScheme::certificate_verifier(NAMESPACE, wrong_identity)
+    pub fn wrong_verifier_scheme(&self) -> ConsensusScheme {
+        let (_, wrong_identity) = participants(42);
+        ConsensusScheme::certificate_verifier(NAMESPACE, wrong_identity)
     }
 }

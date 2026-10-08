@@ -19,15 +19,25 @@ _Components are designed for deployment in adversarial environments. If you find
 * [types](./types/README.md): Common types used throughout `alto`.
 * [validator](./validator/README.md): Run a validator node for `alto`.
 
-## Post-Quantum Mode
+## Post-Quantum Proof of Concept
 
-Building with `--features pq` (on `alto-types`, `alto-chain`, `alto-client`, `alto-validator`,
-and `alto-deploy`) replaces Ed25519 identities and BLS12-381 threshold certificates with ML-DSA-65
-identities and certificates, and X25519 with ML-KEM-768 in peer handshakes. Each validator signs
-consensus messages with its identity key, and certificates carry one signature per signer. Only
-stable leaders are supported, and the indexer, explorer, follower, and inspector remain
-classical-only. See [deploy](./deploy/README.md#post-quantum-mode) for local and remote
-deployments.
+This branch is a proof of concept that runs `alto` on post-quantum cryptography:
+
+* Validator identities, peer handshake signatures, and consensus certificates use FN-DSA-512
+  (Falcon-512). Each validator signs consensus messages with its identity key, and a certificate
+  carries one signature from each member of a quorum.
+* Peer handshakes use ML-KEM-768 (FIPS 203) for the ephemeral key exchange, and records are
+  encrypted with ChaCha20-Poly1305.
+* Leaders are stable: one round-robin leader per term.
+* The network identity is the ordered participant set. The indexer, follower, inspector, and
+  explorer verify every certificate signature against it.
+* An encoded FN-DSA-512 public key is 897 bytes, so deployment host names are derived from the
+  SHA-256 digest of the key.
+
+FN-DSA is implemented against the pre-draft standard (FIPS 206 is unpublished), so its key and
+signature encodings may change. This branch is for experiments only.
+
+See [deploy](./deploy/README.md) for local and remote deployments.
 
 ## Licensing
 
