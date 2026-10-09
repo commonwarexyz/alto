@@ -259,7 +259,7 @@ describe.each([false, true])('connection lifecycle (StrictMode: %s)', strict => 
     expect(modal.textContent).toContain('c7gd.4xlarge in 1 region (us-west-2)');
     expect(modal.textContent).not.toContain('commonware_deployer::aws');
     expect(modal.querySelector('a[href="https://github.com/commonwarexyz/alto/tree/main/indexer"]')).not.toBeNull();
-    expect(modal.querySelector('a[href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/fn_dsa/index.html"]')).not.toBeNull();
+    expect(modal.querySelector('a[href="https://github.com/commonwarexyz/monorepo/blob/1950760f8bc64f6d0c45bef3d68c0947c94284b2/cryptography/src/fn_dsa/mod.rs"]')).not.toBeNull();
 
     await act(async () => { modal.querySelector<HTMLButtonElement>('.about-button')!.click(); });
     expect(container.querySelector('.about-modal')).toBeNull();
@@ -277,7 +277,7 @@ describe.each([false, true])('connection lifecycle (StrictMode: %s)', strict => 
     expect(modal.textContent).not.toContain(fnDsaIdentityHex.slice(0, 64));
     const download = modal.querySelector<HTMLAnchorElement>('a[download="identity.hex"]')!;
     expect(download.getAttribute('href')).toBe(`data:text/plain;charset=utf-8,${fnDsaIdentityHex}`);
-    expect(modal.querySelector('a[href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/fn_dsa/index.html"]')).not.toBeNull();
+    expect(modal.querySelector('a[href="https://github.com/commonwarexyz/monorepo/blob/1950760f8bc64f6d0c45bef3d68c0947c94284b2/cryptography/src/fn_dsa/mod.rs"]')).not.toBeNull();
   });
 
   test.each(['idle', 'rejected', 'duplicate'])(

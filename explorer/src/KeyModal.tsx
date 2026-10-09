@@ -68,7 +68,7 @@ const KeyInfoModal: React.FC<KeyInfoModalProps> = ({ isOpen, onClose, clusterCon
                 <h3>I'm verifying post-quantum signatures?</h3>
                 <p>
                     Consensus messages (notarizations and finalizations) carry <i>FN-DSA-512</i> (Falcon) signatures, one from each of
-                    the <strong>2f+1</strong> validators in the quorum. Your browser uses <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/fn_dsa/index.html">cryptography::fn_dsa</a> (compiled
+                    the <strong>2f+1</strong> validators in the quorum. Your browser uses <a href="https://github.com/commonwarexyz/monorepo/blob/1950760f8bc64f6d0c45bef3d68c0947c94284b2/cryptography/src/fn_dsa/mod.rs">cryptography::fn_dsa</a> (compiled
                     to WebAssembly) to verify every signature against this cluster's <strong>Participant Set</strong> before updating the timeline.
                 </p>
                 <p>
@@ -95,7 +95,7 @@ const KeyInfoModal: React.FC<KeyInfoModalProps> = ({ isOpen, onClose, clusterCon
                 <p>
                     <i>
                         In a production environment, you would hardcode this in your binary or store it locally rather than relying
-                        on a website to provide it (like with <a href="https://docs.rs/alto-inspector/latest/alto_inspector">alto-inspector</a>).
+                        on a website to provide it (like with <a href="https://github.com/commonwarexyz/alto/tree/pq/inspector">alto-inspector</a>).
                     </i>
                 </p>
             </section>
