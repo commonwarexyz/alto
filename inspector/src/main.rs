@@ -23,7 +23,7 @@
 //! _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
 //!
 //! Every command takes `--indexer <URL>` and `--identity <HEX>`, the hex-encoded participant set
-//! of the network (the ordered FN-DSA-512 public keys of its validators). Certificates are verified
+//! of the network (the ordered ellipsoidal Falcon-512 public keys of its validators). Certificates are verified
 //! against that set; the examples below omit both flags.
 //!
 //! Use `--block-size` to set the network's block payload size for streaming. The receive limit adds

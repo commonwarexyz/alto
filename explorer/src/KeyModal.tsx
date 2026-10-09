@@ -67,8 +67,8 @@ const KeyInfoModal: React.FC<KeyInfoModalProps> = ({ isOpen, onClose, clusterCon
             <section>
                 <h3>I'm verifying post-quantum signatures?</h3>
                 <p>
-                    Consensus messages (notarizations and finalizations) carry <i>FN-DSA-512</i> (Falcon) signatures, one from each of
-                    the <strong>2f+1</strong> validators in the quorum. Your browser uses <a href="https://github.com/commonwarexyz/monorepo/blob/1950760f8bc64f6d0c45bef3d68c0947c94284b2/cryptography/src/fn_dsa/mod.rs">cryptography::fn_dsa</a> (compiled
+                    Consensus messages (notarizations and finalizations) carry experimental <i>ellipsoidal Falcon-512</i> signatures, one from each of
+                    the validators in the quorum. Your browser uses <a href="https://github.com/commonwarexyz/monorepo/blob/5471199891843d23658619191ec5f4daf423889f/cryptography/src/fn_dsa/mod.rs">cryptography::fn_dsa</a> (compiled
                     to WebAssembly) to verify every signature against this cluster's <strong>Participant Set</strong> before updating the timeline.
                 </p>
                 <p>
@@ -79,7 +79,7 @@ const KeyInfoModal: React.FC<KeyInfoModalProps> = ({ isOpen, onClose, clusterCon
             <section>
                 <h3>What is a Participant Set?</h3>
                 <p>
-                    The Participant Set is the ordered list of validator identity keys: the same <i>FN-DSA-512</i> public keys validators
+                    The Participant Set is the ordered list of validator identity keys: the same <i>ellipsoidal Falcon-512</i> public keys validators
                     use to sign consensus messages. There is no shared Network Key and no DKG.
                 </p>
                 <p>
@@ -95,7 +95,7 @@ const KeyInfoModal: React.FC<KeyInfoModalProps> = ({ isOpen, onClose, clusterCon
                 <p>
                     <i>
                         In a production environment, you would hardcode this in your binary or store it locally rather than relying
-                        on a website to provide it (like with <a href="https://github.com/commonwarexyz/alto/tree/pq/inspector">alto-inspector</a>).
+                        on a website to provide it (like with <a href="https://github.com/commonwarexyz/alto/tree/pq-ellipsoidal/inspector">alto-inspector</a>).
                     </i>
                 </p>
             </section>

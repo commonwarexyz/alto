@@ -32,8 +32,8 @@ impl From<&Block> for BlockJs {
 #[derive(Serialize)]
 pub struct CertifiedBlockJs {
     pub view: u64,
-    /// The SHA-256 digest of the encoded certificate, which carries one FN-DSA-512 signature per
-    /// signer.
+    /// The SHA-256 digest of the encoded certificate, which carries one ellipsoidal Falcon-512
+    /// signature per signer.
     pub signature: Vec<u8>,
     pub block: BlockJs,
 }

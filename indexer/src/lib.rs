@@ -1025,7 +1025,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn serves_fn_dsa_certificates_verified_against_the_participant_set() {
+    async fn serves_ellipsoidal_falcon_certificates_verified_against_the_participant_set() {
         let (schemes, identity) = fixture(0, 4);
         let identity = identity.encode();
         let verifier = || {

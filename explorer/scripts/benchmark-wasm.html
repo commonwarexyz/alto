@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8">
+  <title>Alto certificate verification benchmark</title>
+  <h1>Alto certificate verification benchmark</h1>
+  <p>Serve the explorer directory over HTTP and open this page in a browser. Each sample verifies a complete certificate.</p>
+  <pre id="result">Running...</pre>
+  <script type="module">
+    import init, { parse_notarized, parse_finalized } from "../src/alto_types/alto_types.js";
+
+    const fromHex = (hex) => Uint8Array.from(hex.match(/../g), (byte) => Number.parseInt(byte, 16));
+    const resultElement = document.getElementById("result");
+    const batches = 15;
+    const callsPerBatch = 100;
+
+    try {
+      const fixtureName = new URL(location.href).searchParams.get("fixture")
+        ?? "ellipsoidal_falcon_50_fixture.json";
+      const [fixture, binary] = await Promise.all([
+        fetch(fixtureName).then((response) => response.json()),
+        fetch("../src/alto_types/alto_types_bg.wasm").then((response) => response.arrayBuffer()),
+      ]);
+      const start = performance.now();
+      const wasm = await init({ module_or_path: binary });
+      const moduleInitMs = performance.now() - start;
+      const identity = fromHex(fixture.identity);
+      const notarized = fromHex(fixture.notarization.bytes);
+      const finalized = fromHex(fixture.finalization.bytes);
+      const check = (value) => {
+        if (value?.view !== fixture.notarization.view
+            || value.block.digest.length !== 32) {
+          throw new Error("Certificate verification failed");
+        }
+      };
+
+      const firstStart = performance.now();
+      check(parse_notarized(identity, notarized));
+      const firstVerificationMs = performance.now() - firstStart;
+      const measure = (parse, bytes) => {
+        for (let index = 0; index < 100; index += 1) check(parse(identity, bytes));
+        const times = [];
+        for (let index = 0; index < batches; index += 1) {
+          const before = performance.now();
+          for (let call = 0; call < callsPerBatch; call += 1) {
+            check(parse(identity, bytes));
+          }
+          times.push((performance.now() - before) / callsPerBatch);
+        }
+        times.sort((a, b) => a - b);
+        return {
+          meanMs: times.reduce((sum, time) => sum + time, 0) / batches,
+          medianMs: times[Math.floor(batches / 2)],
+          p95BatchMeanMs: times[Math.ceil(batches * 0.95) - 1],
+        };
+      };
+      const result = {
+        profile: fixture.profile,
+        userAgent: navigator.userAgent,
+        hardwareConcurrency: navigator.hardwareConcurrency,
+        participants: fixture.participantCount,
+        signers: fixture.signerCount,
+        batches,
+        callsPerBatch,
+        wasmBytes: binary.byteLength,
+        identityBytes: identity.byteLength,
+        signatureBytes: fixture.signatureSize,
+        proofBytes: fixture.blockOffset,
+        artifactBytes: notarized.byteLength,
+        moduleInitMs,
+        firstVerificationMs,
+        notarization: measure(parse_notarized, notarized),
+        finalization: measure(parse_finalized, finalized),
+        wasmMemoryBytes: wasm.memory.buffer.byteLength,
+      };
+      window.benchmarkResult = result;
+      resultElement.textContent = JSON.stringify(result, null, 2);
+    } catch (error) {
+      window.benchmarkError = String(error);
+      resultElement.textContent = String(error);
+    }
+  </script>
+</html>

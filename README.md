@@ -23,20 +23,29 @@ _Components are designed for deployment in adversarial environments. If you find
 
 This branch is a proof of concept that runs `alto` on post-quantum cryptography:
 
-* Validator identities, peer handshake signatures, and consensus certificates use FN-DSA-512
-  (Falcon-512). Each validator signs consensus messages with its identity key, and a certificate
-  carries one signature from each member of a quorum.
+* Validator identities, peer handshake signatures, and consensus certificates use experimental
+  ellipsoidal Falcon-512. Each validator signs consensus messages with its identity key, and a
+  certificate carries one signature from each member of a quorum.
 * Peer handshakes use ML-KEM-768 (FIPS 203) for the ephemeral key exchange, and records are
   encrypted with ChaCha20-Poly1305.
 * Leaders are either rotating (a new round-robin leader every view; there is no threshold VRF) or
   stable (one round-robin leader per term, with pipelined optimistic views).
 * The network identity is the ordered participant set. The indexer, follower, inspector, and
   explorer verify every certificate signature against it.
-* An encoded FN-DSA-512 public key is 897 bytes, so deployment host names are derived from the
-  SHA-256 digest of the key.
+* An encoded ellipsoidal Falcon-512 public key is 897 bytes, so deployment host names are derived from
+  the SHA-256 digest of the key.
 
-FN-DSA is implemented against the pre-draft standard (FIPS 206 is unpublished), so its key and
-signature encodings may change. This branch is for experiments only.
+Ellipsoidal Falcon changes key generation, sampling, and verification using the construction in
+[Shorter Hash-and-Sign Lattice-Based Signatures](https://eprint.iacr.org/2022/785).
+It is a research scheme with experimental parameters and encodings, not standard FN-DSA. This
+profile has no assigned NIST security category.
+
+See the [comparison results](./ELLIPSOIDAL_FALCON.md) for certificate sizes, browser
+verification measurements, security limitations, and reproduction commands.
+
+The browser verification benchmark is in `explorer/scripts/benchmark-wasm.html`. After building
+the explorer's WASM, serve `explorer/` over HTTP and open that page. It measures complete
+34-signature certificates against 50 registered keys, including decoding and JS result conversion.
 
 See [deploy](./deploy/README.md) for local and remote deployments.
 

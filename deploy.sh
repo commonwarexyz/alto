@@ -72,7 +72,7 @@ fi
 
 # The c7gd.4xlarge has 16 Graviton3 cores. Use 8 runtime threads and 16 signature
 # threads to overlap network and signature work. The indexer serves the explorer, which
-# verifies FN-DSA-512 certificates against the generated participant set.
+# verifies ellipsoidal Falcon certificates against the generated participant set.
 cargo run --locked --bin deploy -- generate \
     --peers 50 \
     --bootstrappers 5 \

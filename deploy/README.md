@@ -2,17 +2,17 @@
 
 Deploy an instance of [alto](../README.md).
 
-This branch is a post-quantum proof of concept. Validators identify themselves with FN-DSA-512
-(Falcon-512) keys, authenticate peer handshakes with them, and sign consensus messages with them, so
-every certificate carries one 666-byte FN-DSA-512 signature per signer. Handshakes use ML-KEM-768
+This branch is a post-quantum proof of concept. Validators identify themselves with experimental
+ellipsoidal Falcon-512 keys, authenticate peer handshakes with them, and sign consensus messages with
+them. Every certificate carries one signature per signer. Handshakes use ML-KEM-768
 for the ephemeral key exchange, and records are encrypted with ChaCha20-Poly1305. Leaders are
 either rotating (a new round-robin leader every view, with no VRF) or stable (each serves a term
 of views in round-robin order).
 
-FN-DSA is implemented against the pre-draft standard (FIPS 206 is unpublished), so its key and
-signature encodings may change. Use these networks for experiments only.
+Ellipsoidal Falcon is a research scheme with its own key generation, sampler, verifier, and wire
+format. Its keys and signatures are distinct from standard FN-DSA. Use these networks for experiments only.
 
-The network identity is the hex-encoded, sorted participant set. Every FN-DSA-512 public key is
+The network identity is the hex-encoded, sorted participant set. Every ellipsoidal Falcon-512 public key is
 897 bytes (1794 hex characters per participant), so the identity of a 50-validator network is
 about 90 KB of hex. Indexers, explorers, followers, and the inspector verify every certificate
 against this participant set. Deployed indexers and followers read the identity from their
