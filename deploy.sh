@@ -10,11 +10,11 @@ usage() {
 [ $# -eq 1 ] || usage
 case "$1" in
     stable)
-        # One round-robin leader per term with a 48-view optimistic window.
+        # One round-robin leader per 100000-view term with a 48-view optimistic window.
         leader_flags=(--leader-mode stable --leader-delay-ms 5 --leader-term-length 100000 --leader-optimistic-views 48)
         ;;
     rotating)
-        # A VRF-seeded leader for every view.
+        # A new round-robin leader for every view.
         leader_flags=(--leader-mode rotating --leader-delay-ms 0)
         ;;
     *)
@@ -71,7 +71,8 @@ if [ -d assets ]; then
 fi
 
 # The c7gd.4xlarge has 16 Graviton3 cores. Use 8 runtime threads and 16 signature
-# threads to overlap network and signature work.
+# threads to overlap network and signature work. The indexer serves the explorer, which
+# verifies FN-DSA-512 certificates against the generated participant set.
 cargo run --locked --bin deploy -- generate \
     --peers 50 \
     --bootstrappers 5 \

@@ -2,17 +2,12 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { DivIcon, LatLng } from "leaflet";
 import "leaflet/dist/leaflet.css";
-import init, { leader_index } from "./alto_types/alto_types.js";
 import {
   getClusterConfig,
-  getClusters,
   getHttpBackendUrl,
-  getInitialCluster,
   getWebSocketBackendUrl,
-  Cluster,
-  MODE,
 } from "./config";
-import { SeedJs, CertifiedBlockJs, ViewData } from "./types";
+import { CertifiedBlockJs, ViewData } from "./types";
 import { hexToUint8Array, hexUint8Array } from "./utils";
 import { resolveLeaderLocation } from "./leaderLocation";
 import {
@@ -21,7 +16,7 @@ import {
 } from "./consensusWorkerPool";
 import { createConsensusWorker } from "./createConsensusWorker";
 import { scaleTimelineWidth } from "./timeline";
-import { getLeaderIndicator, getTimelineIdentifier } from "./timelineIdentifier";
+import { getTimelineIdentifier, LEADER_INDICATOR } from "./timelineIdentifier";
 import "./App.css";
 import AboutModal from './AboutModal';
 import './AboutModal.css';
@@ -54,6 +49,18 @@ const retainNewestViews = (views: ViewData[]): ViewData[] => {
 };
 
 const center = new LatLng(0, 0);
+const markerIcon = new DivIcon({
+  className: "custom-div-icon",
+  html: `<div style="
+        background-color: ${LEADER_INDICATOR.color};
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        "></div>`,
+  iconSize: [12, 12],
+  iconAnchor: [6, 6],
+});
+
 // ASCII Logo animation logic
 const initializeLogoAnimations = () => {
   const horizontalSymbols = [" ", "*", "+", "-", "~"];
@@ -87,23 +94,8 @@ const initializeLogoAnimations = () => {
 };
 
 const App: React.FC = () => {
-  const [selectedCluster, setSelectedCluster] = useState<Cluster>(getInitialCluster());
-  const clusterConfig = useMemo(() => getClusterConfig(selectedCluster), [selectedCluster]);
-  const allConfigs = useMemo(() => getClusters(), []);
+  const clusterConfig = getClusterConfig();
   const { BACKEND_URL, PUBLIC_KEY_HEX, LOCATIONS, PARTICIPANTS } = clusterConfig;
-  const standardCertificates = clusterConfig.CERTIFICATE_MODE === 'standard';
-  const leaderIndicator = getLeaderIndicator(standardCertificates);
-  const markerIcon = useMemo(() => new DivIcon({
-    className: "custom-div-icon",
-    html: `<div style="
-          background-color: ${leaderIndicator.color};
-          width: 16px;
-          height: 16px;
-          border-radius: 50%;
-          "></div>`,
-    iconSize: [12, 12],
-    iconAnchor: [6, 6],
-  }), [leaderIndicator.color]);
   const PUBLIC_KEY = useMemo(() => hexToUint8Array(PUBLIC_KEY_HEX), [PUBLIC_KEY_HEX]);
 
   const [views, setViews] = useState<ViewData[]>([]);
@@ -128,57 +120,6 @@ const App: React.FC = () => {
 
   // Manage WebSocket lifecycle
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const performClusterSwitch = useCallback((cluster: Cluster) => {
-    console.log(`Switching to ${cluster} cluster`);
-
-    // When switching, we close the old socket. The `onclose` handler for that socket
-    // should not trigger a reconnect or error message.
-    if (wsRef.current) {
-      // Temporarily disable the onclose handler to prevent side-effects.
-      wsRef.current.onclose = null;
-      wsRef.current.close();
-    }
-
-    // Update the selected cluster
-    setSelectedCluster(cluster);
-  }, []);
-
-
-  const handleClusterChange = (cluster: Cluster) => {
-    if (cluster !== selectedCluster) {
-      // Update URL and push to history
-      const url = new URL(window.location.href);
-      url.searchParams.set('cluster', cluster);
-      window.history.pushState({ cluster }, '', url.toString());
-
-      // Perform the cluster switch
-      performClusterSwitch(cluster);
-    }
-  };
-
-  // Effect to handle browser navigation (back/forward)
-  useEffect(() => {
-    const handlePopState = () => {
-      const newCluster = getInitialCluster();
-      if (newCluster !== selectedCluster) {
-        performClusterSwitch(newCluster);
-      }
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-    };
-  }, [selectedCluster, performClusterSwitch]);
-
-  // Reset state when the cluster changes
-  useEffect(() => {
-    setViews([]);
-    lastObservedViewRef.current = null;
-    setErrorMessage("");
-    setShowError(false);
-  }, [selectedCluster]);
 
   // Health check function
   const checkHealth = useCallback(async () => {
@@ -254,19 +195,6 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const resolveSeedLocation = useCallback((seed: SeedJs) => {
-    if (MODE !== 'public' || LOCATIONS.length === 0) {
-      return { location: undefined, locationName: undefined };
-    }
-
-    const locationIndex = leader_index(seed, LOCATIONS.length);
-    const location = LOCATIONS[locationIndex];
-    return {
-      location: location?.[0],
-      locationName: location?.[1],
-    };
-  }, [LOCATIONS]);
-
   // Advance the observed maximum outside React's state updater, which StrictMode may invoke twice.
   // Return the previous maximum for gap filling.
   const observeView = useCallback((view: number): number | null => {
@@ -277,8 +205,7 @@ const App: React.FC = () => {
     return lastObservedView;
   }, []);
 
-  // Insert bounded placeholders for locally unobserved views between verified observations.
-  // Both modes use certificates. VRF mode also observes seeds for the next view.
+  // Insert bounded placeholders for locally unobserved views between verified certificates.
   const fillMissedViews = useCallback((
     newViews: ViewData[],
     lastObservedView: number | null,
@@ -314,88 +241,6 @@ const App: React.FC = () => {
       });
     }
   }, []);
-
-  const handleSeed = useCallback((seed: SeedJs, receivedAt: number) => {
-    const view = seed.view + 1; // Next view is determined by seed - 1
-    const observedAt = adjustTime(receivedAt);
-    const lastObservedView = observeView(view);
-
-    setViews((prevViews) => {
-      // Create a copy of the current views that we'll modify
-      let newViews = [...prevViews];
-
-      fillMissedViews(newViews, lastObservedView, view, observedAt);
-
-      // Check if this view already exists
-      const existingIndex = newViews.findIndex(v => v.view === view);
-
-      if (existingIndex !== -1) {
-        // Preserve certified timing and status, preferring its known proposer to the seed prediction.
-        const existing = newViews[existingIndex];
-        if (existing.status === "finalized" || existing.status === "notarized") {
-          const { location, locationName } = resolveSeedLocation(seed);
-          newViews[existingIndex] = {
-            ...existing,
-            location: existing.location ?? location,
-            locationName: existing.locationName ?? locationName,
-            signature: seed.signature,
-          };
-
-          return retainNewestViews(newViews);
-        }
-
-        // If it exists but is in another state, clear its timeout but preserve everything else
-        if (newViews[existingIndex].timeoutId) {
-          clearTimeout(newViews[existingIndex].timeoutId);
-        }
-      }
-
-      // Create the new view data
-      const { location, locationName } = resolveSeedLocation(seed);
-      const newView: ViewData = {
-        view,
-        location,
-        locationName,
-        status: "growing",
-        startTime: observedAt,
-        signature: seed.signature,
-      };
-
-      // Set a timeout for this specific view
-      const timeoutId = setTimeout(() => {
-        setViews((currentViews) => {
-          return currentViews.map((v) => {
-            // Only time out this specific view if it's still in growing state
-            if (v.view === view && v.status === "growing") {
-              return { ...v, status: "timed_out", timeoutId: undefined };
-            }
-            return v;
-          });
-        });
-      }, TIMEOUT_DURATION);
-
-      // Add timeoutId to the new view
-      const viewWithTimeout = { ...newView, timeoutId };
-
-      // Update or add the view
-      if (existingIndex !== -1) {
-        // Only update if necessary - preserve existing data that shouldn't change
-        newViews[existingIndex] = {
-          ...newViews[existingIndex],
-          status: "growing",
-          signature: seed.signature,
-          timeoutId: timeoutId,
-          location,
-          locationName,
-        };
-      } else {
-        // Add as new
-        newViews.unshift(viewWithTimeout);
-      }
-
-      return retainNewestViews(newViews);
-    });
-  }, [adjustTime, resolveSeedLocation, observeView, fillMissedViews]);
 
   const handleNotarization = useCallback((notarized: CertifiedBlockJs, receivedAt: number) => {
     const view = notarized.view;
@@ -532,20 +377,17 @@ const App: React.FC = () => {
           continue;
         }
         switch (kind) {
-          case 0:
-            handleSeed(artifact as SeedJs, receivedAt);
-            break;
           case 1:
-            handleNotarization(artifact as CertifiedBlockJs, receivedAt);
+            handleNotarization(artifact, receivedAt);
             break;
           case 2:
-            handleFinalization(artifact as CertifiedBlockJs, receivedAt);
+            handleFinalization(artifact, receivedAt);
             break;
         }
       }
     }, VIEW_RENDER_INTERVAL);
     return () => clearInterval(interval);
-  }, [adjustTime, handleSeed, handleNotarization, handleFinalization]);
+  }, [adjustTime, handleNotarization, handleFinalization]);
 
   // WebSocket connection management with fixed single-connection approach
   useEffect(() => {
@@ -627,7 +469,7 @@ const App: React.FC = () => {
       ws.onmessage = (event) => {
         const data = new Uint8Array(event.data);
         const kind = data[0];
-        if (kind <= 2) {
+        if (kind === 1 || kind === 2) {
           verifierPool?.verify(kind, data.slice(1), Date.now());
         }
       };
@@ -668,16 +510,11 @@ const App: React.FC = () => {
       };
     };
 
-    const setup = async () => {
-      await init();
-      if (cancelled) {
-        return;
-      }
+    try {
       verifierPool = new ConsensusWorkerPool(
         consensusWorkerCount(navigator.hardwareConcurrency || 4),
         createConsensusWorker,
         PUBLIC_KEY,
-        standardCertificates,
         () => {
           stopConnection();
           setErrorMessage("A consensus verifier stopped unexpectedly. Refresh to reconnect.");
@@ -686,16 +523,11 @@ const App: React.FC = () => {
       );
       currentPoolRef.current = verifierPool;
       connectWebSocket();
-    };
-
-    setup().catch((error) => {
-      if (cancelled) {
-        return;
-      }
+    } catch (error) {
       console.error("Unable to initialize consensus verifiers:", error);
       setErrorMessage("Consensus verification could not start. Refresh to retry.");
       setShowError(true);
-    });
+    }
 
     // Dispose the connection and verifiers when this effect ends.
     return () => {
@@ -703,7 +535,7 @@ const App: React.FC = () => {
       verifierPool?.terminate();
       currentPoolRef.current = null;
     };
-  }, [selectedCluster, isLoading, isInMaintenance, BACKEND_URL, PUBLIC_KEY, standardCertificates]);
+  }, [isLoading, isInMaintenance, BACKEND_URL, PUBLIC_KEY]);
 
   // Loading state - show nothing until we get the result of the health check
   if (isLoading) {
@@ -777,7 +609,7 @@ const App: React.FC = () => {
             ⚷︎
           </button>
           <button
-            className={`about-header-button ${selectedCluster === 'usa' ? 'usa-cluster' : ''}`}
+            className="about-header-button"
             onClick={() => setIsAboutModalOpen(true)}
           >
             🌐︎
@@ -786,10 +618,10 @@ const App: React.FC = () => {
       </header>
 
       <main className="app-main">
-        {/* Map - only show in public mode */}
-        {MODE === 'public' && (
+        {/* Map - only shown for networks with validator locations */}
+        {LOCATIONS.length > 0 && (
           <div className="map-container">
-            <MapContainer key={selectedCluster} center={center} zoom={1} style={{ height: "100%", width: "100%" }} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false} dragging={false}>
+            <MapContainer center={center} zoom={1} style={{ height: "100%", width: "100%" }} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false} dragging={false}>
               <TileLayer
                 url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png?key=cb1_29si_1_944f50395a982fb974c926e1"
                 attribution='&copy; OSM | &copy; CARTO</a>'
@@ -821,19 +653,14 @@ const App: React.FC = () => {
         )}
 
         {/* Stats Section */}
-        <StatsSection
-          views={views}
-          selectedCluster={selectedCluster}
-          onClusterChange={handleClusterChange}
-          configs={allConfigs}
-        />
+        <StatsSection views={views} />
 
         {/* Bars with integrated legend */}
         <div className="bars-container">
           <div className="bars-header">
             <h2 className="bars-title">Timeline</h2>
             <div className="legend-container">
-              <LegendItem color={leaderIndicator.color} label={leaderIndicator.label} />
+              <LegendItem color={LEADER_INDICATOR.color} label={LEADER_INDICATOR.label} />
               <LegendItem color={"#000"} label="Locked" />
               <LegendItem color={"#228B22ff"} label="Finalized" />
             </div>
@@ -846,7 +673,6 @@ const App: React.FC = () => {
                 viewData={viewData}
                 currentTime={currentTime}
                 isMobile={isMobile}
-                standardCertificates={standardCertificates}
               />
             ))}
           </div>
@@ -870,7 +696,7 @@ const App: React.FC = () => {
       <KeyInfoModal
         isOpen={isKeyInfoModalOpen}
         onClose={() => setIsKeyInfoModalOpen(false)}
-        publicKeyHex={clusterConfig.PUBLIC_KEY_HEX}
+        clusterConfig={clusterConfig}
       />
       <SearchModal
         isOpen={isSearchModalOpen}
@@ -899,14 +725,13 @@ interface BarProps {
   viewData: ViewData;
   currentTime: number;
   isMobile: boolean;
-  standardCertificates: boolean;
 }
 
 // Replace the existing Bar component with this updated version
 
-const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, standardCertificates }) => {
-  const { view, status, startTime, notarizationTime, finalizationTime, signature, block, actualNotarizationLatency, actualFinalizationLatency } = viewData;
-  const timelineIdentifier = getTimelineIdentifier(standardCertificates, signature, block?.digest);
+const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile }) => {
+  const { view, status, startTime, notarizationTime, finalizationTime, block, actualNotarizationLatency, actualFinalizationLatency } = viewData;
+  const timelineIdentifier = getTimelineIdentifier(block?.digest);
   const [measuredWidth, setMeasuredWidth] = useState(isMobile ? 200 : 500); // Reasonable default
   const barContainerRef = useRef<HTMLDivElement>(null);
 
@@ -951,7 +776,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, standardCert
   let growingLatencyText = ""; // Text to display below the growing bar tip
 
   // Calculate latencies and set text
-  if (status === "growing" || status === "unknown") {
+  if (status === "unknown") {
     growingLatency = currentTime - startTime;
     if (growingLatency > 1) {
       growingLatencyText = `${Math.round(growingLatency)}ms`;
@@ -993,7 +818,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, standardCert
   }
 
   // Calculate the widths for different bar segments
-  if (status === "growing" || status === "unknown") {
+  if (status === "unknown") {
     totalWidth = scaleTimelineWidth(growingLatency, measuredWidth);
     // Ensure growing bars are visible but don't exceed available width
     totalWidth = Math.min(Math.max(totalWidth, growingLatency > 50 ? minSegmentWidth : 0), measuredWidth);
@@ -1101,12 +926,10 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, standardCert
             width: `${totalWidth}px`,
           }}
         >
-          {/* Timed out or Growing state */}
-          {(status === "timed_out" || status === "growing" || status === "unknown") && (
+          {/* Timed out or unknown state */}
+          {(status === "timed_out" || status === "unknown") && (
             <div
-              className={`bar-segment ${status === "timed_out" ? "timed-out" :
-                status === "unknown" ? "unknown" : "growing"
-                }`}
+              className={`bar-segment ${status === "timed_out" ? "timed-out" : "unknown"}`}
               style={{ width: "100%" }}
             >
               {inBarText}
@@ -1134,7 +957,7 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, standardCert
           {/* Finalized state with notarization */}
           {status === "finalized" && !renderFinalizedWithoutNotarization && (
             <>
-              {/* Base segment (proposal or seed to notarization) */}
+              {/* Base segment (proposal to notarization) */}
               <div
                 className="bar-segment growing"
                 style={{ width: `${notarizedWidth}px` }}
@@ -1186,50 +1009,45 @@ const Bar: React.FC<BarProps> = ({ viewData, currentTime, isMobile, standardCert
 
         {/* Timing information underneath */}
         <div className="timing-info">
-          {/* Show timing for all states that need it */}
-          {(standardCertificates || signature || status === "unknown") && (
-            <>
-              {/* Latency at notarization point - only show if text exists and we have notarization */}
-              {!renderFinalizedWithoutNotarization &&
-                (status === "notarized" || status === "finalized") &&
-                notarizedWidth > 0 &&
-                notarizedLatencyText && (
-                  <div
-                    className="latency-text notarized-latency"
-                    style={{
-                      left: `${notarizedLabelPosition}px`,
-                      color: "#000",
-                    }}
-                  >
-                    {notarizedLatencyText}
-                  </div>
-                )}
+          {/* Latency at notarization point - only show if text exists and we have notarization */}
+          {!renderFinalizedWithoutNotarization &&
+            (status === "notarized" || status === "finalized") &&
+            notarizedWidth > 0 &&
+            notarizedLatencyText && (
+              <div
+                className="latency-text notarized-latency"
+                style={{
+                  left: `${notarizedLabelPosition}px`,
+                  color: "#000",
+                }}
+              >
+                {notarizedLatencyText}
+              </div>
+            )}
 
-              {/* Total latency marker for finalized views - only show if text exists */}
-              {status === "finalized" && finalizedLatencyText && (
-                <div
-                  className="latency-text finalized-latency"
-                  style={{
-                    left: `${finalizedLabelPosition}px`,
-                    color: "#228B22ff",
-                  }}
-                >
-                  {finalizedLatencyText}
-                </div>
-              )}
+          {/* Total latency marker for finalized views - only show if text exists */}
+          {status === "finalized" && finalizedLatencyText && (
+            <div
+              className="latency-text finalized-latency"
+              style={{
+                left: `${finalizedLabelPosition}px`,
+                color: "#228B22ff",
+              }}
+            >
+              {finalizedLatencyText}
+            </div>
+          )}
 
-              {/* Latency for growing bars - follows the tip - only show if text exists */}
-              {(status === "growing" || status === "unknown") && growingLatencyText && (
-                <div
-                  className="latency-text growing-latency"
-                  style={{
-                    left: `${growingLabelPosition}px`,
-                  }}
-                >
-                  {growingLatencyText}
-                </div>
-              )}
-            </>
+          {/* Latency for growing bars - follows the tip - only show if text exists */}
+          {(status === "unknown") && growingLatencyText && (
+            <div
+              className="latency-text growing-latency"
+              style={{
+                left: `${growingLabelPosition}px`,
+              }}
+            >
+              {growingLatencyText}
+            </div>
           )}
         </div>
       </div>

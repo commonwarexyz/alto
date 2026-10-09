@@ -1,10 +1,8 @@
-import type { CertifiedBlockJs, SeedJs } from "./types";
-
-export type ConsensusArtifact = SeedJs | CertifiedBlockJs;
+import type { CertifiedBlockJs } from "./types";
 
 export interface VerifiedConsensusArtifact {
   kind: number;
-  artifact: ConsensusArtifact | null;
+  artifact: CertifiedBlockJs | null;
   receivedAt: number;
   /// Number of artifacts shed immediately before this one because processing fell behind.
   skipped?: number;
@@ -49,7 +47,6 @@ export class ConsensusWorkerPool {
     workerCount: number,
     private readonly createWorker: () => Worker,
     private readonly publicKey: Uint8Array,
-    private readonly standard: boolean,
     private readonly onError: (error: ErrorEvent | Error) => void,
   ) {
     try {
@@ -67,7 +64,7 @@ export class ConsensusWorkerPool {
 
   private configureWorker(worker: Worker) {
     worker.onmessage = (
-      event: MessageEvent<{ artifact: ConsensusArtifact | null; error?: string }>,
+      event: MessageEvent<{ artifact: CertifiedBlockJs | null; error?: string }>,
     ) => {
       // Each worker owns one active job until it replies or is retired.
       const activeJob = this.activeJobs.get(worker);
@@ -210,7 +207,7 @@ export class ConsensusWorkerPool {
       job.attempts += 1;
       this.activeJobs.set(worker, job);
       const { kind, payload } = job;
-      worker.postMessage({ kind, payload, publicKey: this.publicKey, standard: this.standard });
+      worker.postMessage({ kind, payload, publicKey: this.publicKey });
     }
   }
 

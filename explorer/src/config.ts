@@ -1,15 +1,10 @@
-import * as globalConfig from './global_config';
-import * as usaConfig from './usa_config';
 import * as localConfig from './local_config';
 
-export type Cluster = 'global' | 'usa' | 'local';
-export type Mode = 'public' | 'local';
-export type CertificateMode = 'standard' | 'vrf';
-
 export interface ClusterConfig {
+    /** Indexer host and optional port, without a scheme. */
     BACKEND_URL: string;
+    /** Hex-encoded participant set that verifies every certificate. */
     PUBLIC_KEY_HEX: string;
-    CERTIFICATE_MODE: CertificateMode;
     // Validator locations and keys follow consensus public-key order.
     // Null locations keep unmapped validators in the committee.
     LOCATIONS: ([[number, number], string] | null)[];
@@ -18,65 +13,31 @@ export interface ClusterConfig {
     description: string;
 }
 
-interface DeployedClusterConfig extends ClusterConfig {
-    mode: Mode;
-}
-
 declare global {
     interface Window {
         // Null selects standalone hosting after its configuration script loads.
-        ALTO_DEPLOYMENT?: DeployedClusterConfig | null;
+        ALTO_DEPLOYMENT?: ClusterConfig | null;
     }
 }
 
-const deployedConfig = window.ALTO_DEPLOYMENT;
-
-// Use the deployed mode, then the build-time environment variable, defaulting to public.
-// Usage: REACT_APP_MODE=local npm start
-export const MODE: Mode = deployedConfig?.mode || (process.env.REACT_APP_MODE as Mode) || 'public';
-
-// Build configs based on mode
-const defaultPublicConfigs: Record<'global' | 'usa', ClusterConfig> = {
-    global: {
-        ...globalConfig,
-        name: 'Global Cluster',
-        description: `A cluster of <strong>50 validators</strong> running c8g.large (2 vCPU, 4GB RAM) nodes on AWS in <strong>10 regions</strong> (us-west-1, us-east-1, eu-west-1, ap-northeast-1, eu-north-1, ap-south-1, sa-east-1, eu-central-1, ap-northeast-2, ap-southeast-2).`,
-    },
-    usa: {
-        ...usaConfig,
-        name: 'USA Cluster',
-        description: `A cluster of <strong>50 validators</strong> running c8g.large (2 vCPU, 4GB RAM) nodes on AWS in <strong>4 regions</strong> (us-east-1, us-west-1, us-east-2, us-west-2).`,
-    },
-};
-
-const localClusterConfig: ClusterConfig = {
+// An indexer serving the explorer supplies its network at /runtime-config.js. Standalone hosting
+// (including `npm start`) uses the local configuration.
+const clusterConfig: ClusterConfig = window.ALTO_DEPLOYMENT ?? {
     ...localConfig,
     name: 'Local Cluster',
-    description: `A local test cluster running on localhost.`,
+    description: 'A local test cluster running on localhost.',
 };
 
-export const DEFAULT_CLUSTER: Cluster = MODE === 'public' ? 'global' : 'local';
+export const getClusterConfig = (): ClusterConfig => clusterConfig;
 
-const configs: Record<string, ClusterConfig> = deployedConfig
-    ? { [DEFAULT_CLUSTER]: deployedConfig }
-    : MODE === 'local' ? { local: localClusterConfig } : defaultPublicConfigs;
-
-export const getClusterConfig = (cluster: Cluster): ClusterConfig => configs[cluster];
-
-export const getClusters = (): Record<string, ClusterConfig> => configs;
-
-export const getInitialCluster = (): Cluster => {
-    const cluster = new URLSearchParams(window.location.search).get('cluster');
-    return cluster && Object.keys(configs).includes(cluster)
-        ? cluster as Cluster
-        : DEFAULT_CLUSTER;
-};
-
+// An indexer on the page's host serves its API from the page's origin. Any other indexer is
+// reached with the page's scheme, so a plain-http development server reaches a local indexer
+// over http and an https page never requests mixed content.
 export const getHttpBackendUrl = (backendUrl: string): string => {
     if (backendUrl === window.location.host) {
         return window.location.origin;
     }
-    return `${MODE === 'local' ? 'http' : 'https'}://${backendUrl}`;
+    return `${window.location.protocol === 'https:' ? 'https' : 'http'}://${backendUrl}`;
 };
 
 export const getWebSocketBackendUrl = (backendUrl: string): string =>

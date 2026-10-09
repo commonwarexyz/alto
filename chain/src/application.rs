@@ -169,13 +169,13 @@ impl<S: Scheme> Reporter for Application<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alto_types::{VrfScheme, EPOCH};
+    use alto_types::{ConsensusScheme, PrivateKey, EPOCH};
     use bytes::Bytes;
     use commonware_consensus::{
         marshal::ancestry,
         types::{Height, Round, View},
     };
-    use commonware_cryptography::{ed25519, sha256, Digest as _, Hasher, Sha256, Signer};
+    use commonware_cryptography::{sha256, Digest as _, Hasher, Sha256, Signer};
     use commonware_runtime::{deterministic, Runner as _, Supervisor as _};
     use std::sync::Arc;
 
@@ -184,14 +184,14 @@ mod tests {
     fn test_context(view: u64, parent: (View, sha256::Digest)) -> Context {
         Context {
             round: Round::new(EPOCH, View::new(view)),
-            leader: ed25519::PrivateKey::from_seed(view).public_key(),
+            leader: PrivateKey::from_seed(view).public_key(),
             parent,
         }
     }
 
     async fn verify_block(
         context: deterministic::Context,
-        application: &mut Application<VrfScheme>,
+        application: &mut Application<ConsensusScheme>,
         block: &Block,
         parent: &Block,
     ) -> bool {
@@ -201,7 +201,7 @@ mod tests {
 
     async fn propose_child(
         context: deterministic::Context,
-        application: &mut Application<VrfScheme>,
+        application: &mut Application<ConsensusScheme>,
         child_context: Context,
         parent: &Block,
     ) -> Block {

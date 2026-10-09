@@ -1,5 +1,5 @@
 use alto_indexer::{Api, Indexer};
-use alto_types::{CertificateMode, Identity, Scheme, StandardScheme, VrfScheme, NAMESPACE};
+use alto_types::{decode_identity, ConsensusScheme, Scheme, NAMESPACE};
 use axum::{
     body::{Body, Bytes},
     extract::Extension,
@@ -8,7 +8,6 @@ use axum::{
     routing::get,
 };
 use clap::Parser;
-use commonware_codec::DecodeExt;
 use commonware_formatting::from_hex;
 use commonware_parallel::Sequential;
 use serde::Deserialize;
@@ -30,18 +29,9 @@ struct Args {
         long,
         required_unless_present = "config",
         conflicts_with = "config",
-        help = "Identity public key in hex format (BLS12-381 public key)"
+        help = "Network identity in hex format (the encoded participant set)"
     )]
     identity: Option<String>,
-
-    /// Threshold certificate construction used by the network.
-    #[clap(
-        long,
-        required_unless_present = "config",
-        conflicts_with = "config",
-        value_parser = CertificateMode::ALL.map(CertificateMode::as_str)
-    )]
-    certificate_mode: Option<String>,
 
     /// Payload size of the network's blocks in bytes. Uploads carrying a larger payload are
     /// rejected. The request body limit is this size plus 1 MiB, or 5 MiB when omitted.
@@ -61,7 +51,6 @@ struct Args {
 struct DeployerConfig {
     port: u16,
     identity: String,
-    certificate_mode: CertificateMode,
     block_size: u32,
     explorer: ExplorerConfig,
 }
@@ -78,10 +67,8 @@ struct ExplorerConfig {
 struct Settings {
     port: u16,
     identity: String,
-    certificate_mode: CertificateMode,
     block_size: Option<u32>,
     explorer: ExplorerConfig,
-    explorer_mode: &'static str,
 }
 
 fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
@@ -91,10 +78,8 @@ fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
         return Ok(Settings {
             port: config.port,
             identity: config.identity,
-            certificate_mode: config.certificate_mode,
             block_size: Some(config.block_size),
             explorer: config.explorer,
-            explorer_mode: "public",
         });
     }
 
@@ -103,10 +88,6 @@ fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
         identity: args
             .identity
             .expect("clap requires --identity when --config is absent"),
-        certificate_mode: args
-            .certificate_mode
-            .expect("clap requires --certificate-mode when --config is absent")
-            .parse()?,
         block_size: args.block_size,
         explorer: ExplorerConfig {
             name: "Local Indexer".to_string(),
@@ -114,7 +95,6 @@ fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
             participants: Vec::new(),
             locations: Vec::new(),
         },
-        explorer_mode: "local",
     })
 }
 
@@ -123,10 +103,8 @@ fn explorer_script(settings: &Settings) -> String {
         "PUBLIC_KEY_HEX": settings.identity,
         "LOCATIONS": settings.explorer.locations,
         "PARTICIPANTS": settings.explorer.participants,
-        "CERTIFICATE_MODE": settings.certificate_mode,
         "name": settings.explorer.name,
         "description": settings.explorer.description,
-        "mode": settings.explorer_mode,
     });
     format!(
         "window.ALTO_DEPLOYMENT = {config};\nwindow.ALTO_DEPLOYMENT.BACKEND_URL = window.location.host;\n"
@@ -173,23 +151,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    // Parse identity
-    let bytes = from_hex(&settings.identity).ok_or("Invalid identity hex format")?;
-    let identity: Identity =
-        Identity::decode(&mut bytes.as_slice()).map_err(|_| "Failed to decode identity")?;
-
-    match settings.certificate_mode {
-        CertificateMode::Standard => serve::<StandardScheme>(settings, identity, script).await,
-        CertificateMode::Vrf => serve::<VrfScheme>(settings, identity, script).await,
-    }
+    serve(settings, script).await
 }
 
-async fn serve<C: Scheme>(
-    settings: Settings,
-    identity: Identity,
-    script: String,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let verifier = C::certificate_verifier(NAMESPACE, identity);
+async fn serve(settings: Settings, script: String) -> Result<(), Box<dyn std::error::Error>> {
+    // Parse identity
+    let bytes = from_hex(&settings.identity).ok_or("Invalid identity hex format")?;
+    let identity = decode_identity(bytes).map_err(|_| "Failed to decode identity")?;
+    let participants = identity.len();
+    let verifier = ConsensusScheme::certificate_verifier(NAMESPACE, identity);
     let mut indexer = Indexer::new(verifier, Sequential);
     if let Some(block_size) = settings.block_size {
         indexer = indexer.with_block_size(block_size);
@@ -207,7 +177,7 @@ async fn serve<C: Scheme>(
     let addr = format!("0.0.0.0:{}", settings.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!(
-        ?identity,
+        participants,
         ?addr,
         block_size = ?settings.block_size,
         explorer = !EXPLORER_ASSETS.is_empty(),
@@ -220,19 +190,12 @@ async fn serve<C: Scheme>(
 
 #[cfg(test)]
 mod tests {
-    use super::{explorer_script, Args, CertificateMode, ExplorerConfig, Settings};
+    use super::{explorer_script, Args, ExplorerConfig, Settings};
     use clap::Parser;
 
     #[test]
     fn accepts_direct_and_deployer_modes() {
-        assert!(Args::try_parse_from([
-            "indexer",
-            "--identity",
-            "abcd",
-            "--certificate-mode",
-            "standard",
-        ])
-        .is_ok());
+        assert!(Args::try_parse_from(["indexer", "--identity", "abcd"]).is_ok());
         assert!(Args::try_parse_from([
             "indexer",
             "--hosts",
@@ -241,18 +204,11 @@ mod tests {
             "config.yaml",
         ])
         .is_ok());
-        assert!(Args::try_parse_from(["indexer", "--identity", "abcd"]).is_err());
         assert!(Args::try_parse_from(["indexer"]).is_err());
-        assert!(Args::try_parse_from([
-            "indexer",
-            "--identity",
-            "abcd",
-            "--certificate-mode",
-            "vrf",
-            "--block-size",
-            "4096",
-        ])
-        .is_ok());
+        assert!(
+            Args::try_parse_from(["indexer", "--identity", "abcd", "--block-size", "4096",])
+                .is_ok()
+        );
         assert!(Args::try_parse_from([
             "indexer",
             "--hosts",
@@ -270,7 +226,6 @@ mod tests {
         let settings = Settings {
             port: 8080,
             identity: "abcd".to_string(),
-            certificate_mode: CertificateMode::Standard,
             block_size: Some(0),
             explorer: serde_yaml::from_str::<ExplorerConfig>(
                 r#"
@@ -281,13 +236,11 @@ locations: [[[1.0, 2.0], City], null, [[3.0, 4.0], Other]]
 "#,
             )
             .unwrap(),
-            explorer_mode: "public",
         };
 
         let script = explorer_script(&settings);
         assert!(script.contains(r#""PUBLIC_KEY_HEX":"abcd""#));
         assert!(script.contains(r#""PARTICIPANTS":["first","unmapped","last"]"#));
-        assert!(script.contains(r#""CERTIFICATE_MODE":"standard""#));
         assert!(script.contains(r#""LOCATIONS":[[[1.0,2.0],"City"],null,[[3.0,4.0],"Other"]]"#));
         assert!(script.contains("window.location.host"));
     }

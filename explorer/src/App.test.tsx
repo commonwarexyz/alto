@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globa
 import { act, StrictMode } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import App from './App';
-import { leader_index } from './alto_types/alto_types.js';
+import { sha256 } from './alto_types/alto_types.js';
 import { getClusterConfig } from './config';
 import { ConsensusWorkerPool } from './consensusWorkerPool';
 import { createConsensusWorker } from './createConsensusWorker';
 import StatsSection from './StatsSection';
-import { CertifiedBlockJs, SeedJs } from './types';
+import { CertifiedBlockJs } from './types';
+import { hexToUint8Array } from './utils';
 
 jest.mock('./createConsensusWorker', () => {
   const { jest } = require('@jest/globals');
@@ -15,20 +16,20 @@ jest.mock('./createConsensusWorker', () => {
 });
 jest.mock('./alto_types/alto_types.js', () => {
   const { jest } = require('@jest/globals');
-  return { __esModule: true, default: async () => {}, leader_index: jest.fn(() => 0) };
+  return {
+    __esModule: true,
+    default: async () => {},
+    sha256: jest.fn(),
+  };
 });
 jest.mock('./config', () => {
   const { jest } = require('@jest/globals');
   const actual = jest.requireActual('./config') as typeof import('./config');
   const config = {
-    BACKEND_URL: 'localhost', PUBLIC_KEY_HEX: '00', LOCATIONS: [],
-    CERTIFICATE_MODE: 'standard', name: 'Test', description: '',
+    BACKEND_URL: 'localhost', PUBLIC_KEY_HEX: '00', LOCATIONS: [], name: 'Test', description: '',
   };
   return {
-    MODE: 'public',
-    getInitialCluster: () => 'local',
     getClusterConfig: () => config,
-    getClusters: () => ({ local: config }),
     getHttpBackendUrl: actual.getHttpBackendUrl,
     getWebSocketBackendUrl: actual.getWebSocketBackendUrl,
   };
@@ -45,7 +46,6 @@ jest.mock('react-leaflet', () => ({
   Popup: ({ children }: { children: React.ReactNode }) => children,
 }));
 jest.mock('leaflet', () => ({ LatLng: class {}, DivIcon: class {} }));
-jest.mock('./KeyModal', () => () => null);
 jest.mock('./MaintenancePage', () => () => null);
 jest.mock('./SearchModal', () => () => null);
 jest.mock('./StatsSection', () => {
@@ -64,7 +64,7 @@ class FakeWorker {
   postMessage(message: { kind: number; payload: Uint8Array }) { this.pending = message; }
   terminate() { this.terminated = true; }
   fail() { this.onerror?.({ preventDefault() {} } as ErrorEvent); }
-  reply(artifact: CertifiedBlockJs | SeedJs | null) {
+  reply(artifact: CertifiedBlockJs | null) {
     expect(this.pending).not.toBeNull();
     this.pending = null;
     this.onmessage?.({ data: { artifact } } as MessageEvent);
@@ -83,6 +83,8 @@ class FakeWebSocket {
 
 const originalFetch = globalThis.fetch;
 const originalWebSocket = globalThis.WebSocket;
+// Encoded FN-DSA-512 participant set: a varint count of 4, then four 897-byte public keys.
+const fnDsaIdentityHex = '04' + [1, 2, 3, 4].map(key => key.toString(16).padStart(2, '0').repeat(897)).join('');
 let workers: FakeWorker[];
 let sockets: FakeWebSocket[];
 let container: HTMLDivElement;
@@ -95,14 +97,13 @@ beforeEach(() => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
   workers = [];
   sockets = [];
-  const config = getClusterConfig('local');
+  const config = getClusterConfig();
   config.BACKEND_URL = 'localhost';
   config.PUBLIC_KEY_HEX = '00';
-  config.CERTIFICATE_MODE = 'standard';
   config.description = '';
   config.LOCATIONS = [];
   delete config.PARTICIPANTS;
-  jest.mocked(leader_index).mockReset().mockReturnValue(0);
+  jest.mocked(sha256).mockReset().mockReturnValue(new Uint8Array(32).fill(0x5a));
   jest.mocked(StatsSection).mockClear();
   jest.mocked(createConsensusWorker).mockImplementation(() => {
     const worker = new FakeWorker();
@@ -136,7 +137,7 @@ const certifiedBlock = (view: number, leader: number[] = []): CertifiedBlockJs =
   block: { leader, height: view, timestamp: 99_900, digest: [], parent: [] },
 });
 
-async function reply(socket: FakeWebSocket, kind: number, artifact: CertifiedBlockJs | SeedJs | null) {
+async function reply(socket: FakeWebSocket, kind: number, artifact: CertifiedBlockJs | null) {
   await act(async () => {
     socket.onmessage?.({ data: new Uint8Array([kind, 0]).buffer } as MessageEvent);
     const worker = workers.find(worker => !worker.terminated && worker.pending);
@@ -164,23 +165,19 @@ async function close(socket: FakeWebSocket) {
 }
 
 describe.each([false, true])('connection lifecycle (StrictMode: %s)', strict => {
-  test('keeps newest views after overload followed by delayed seeds', async () => {
-    getClusterConfig('local').CERTIFICATE_MODE = 'vrf';
+  test('keeps newest views after overload followed by delayed notarizations', async () => {
     jest.spyOn(console, 'warn').mockImplementation(() => {});
     const socket = await mount(strict);
     for (let view = 300; view <= 427; view++) {
       await deliver(socket, view);
     }
 
-    // Seed and notarization uploads can arrive after their finalizations.
+    // Notarization uploads can arrive after their finalizations.
     const burst = [
       { kind: 2, artifact: certifiedBlock(299) },
       { kind: 2, artifact: certifiedBlock(20) },
-      ...Array.from({ length: 127 }, (_, index) => ({
-        kind: 0, artifact: { view: 300 + index, signature: [] },
-      })),
-      ...Array.from({ length: 128 }, (_, index) => ({
-        kind: 1, artifact: certifiedBlock(300 + index),
+      ...Array.from({ length: 255 }, (_, index) => ({
+        kind: 1, artifact: certifiedBlock(300 + (index % 128)),
       })),
     ];
     const drain = jest.spyOn(ConsensusWorkerPool.prototype, 'drain');
@@ -221,10 +218,11 @@ describe.each([false, true])('connection lifecycle (StrictMode: %s)', strict => 
   });
 
   test('keeps known leader locations aligned across an unmapped validator', async () => {
-    const config = getClusterConfig('local');
+    const config = getClusterConfig();
     config.PARTICIPANTS = ['01', '02', '03'];
     config.LOCATIONS = [[[1, 2], 'First'], null, [[3, 4], 'Third']];
     const socket = await mount(strict);
+    expect(container.querySelector('.map-container')).not.toBeNull();
 
     for (const [view, leader] of [[11, 2], [12, 3], [9, 1]]) {
       await reply(socket, 2, certifiedBlock(view, [leader]));
@@ -238,83 +236,56 @@ describe.each([false, true])('connection lifecycle (StrictMode: %s)', strict => 
     expect(container.querySelector('.overlay-value')?.textContent).toBe('3');
   });
 
-  test.each([false, true])('maps seeded leaders with full cardinality (participant keys: %s)', async withParticipants => {
-    const config = getClusterConfig('local');
-    config.CERTIFICATE_MODE = 'vrf';
-    config.LOCATIONS = [[[1, 2], 'First'], null, [[3, 4], 'Third']];
-    if (withParticipants) config.PARTICIPANTS = ['01', '02', '03'];
-    const socket = await mount(strict);
-
-    for (const index of [1, 2]) {
-      jest.mocked(leader_index).mockReturnValue(index);
-      const seed = { view: 9 + index, signature: [] };
-      await reply(socket, 0, seed);
-      await advance(100);
-      expect(leader_index).toHaveBeenLastCalledWith(seed, 3);
-      if (index === 1) {
-        expect(container.textContent).not.toContain('Location:');
-      } else {
-        expect(container.textContent).toContain('Location: Third');
-      }
-    }
-    expect(container.querySelector('.overlay-value')?.textContent).toBe('3');
-
-    // A seed-only leader remains mapped even when its view times out.
-    await advance(5000);
-    expect(container.textContent).toContain('View: 12');
-    expect(container.textContent).toContain('Location: Third');
-    expect(jest.mocked(StatsSection).mock.calls.slice(-1)[0][0].views
-      .find(view => view.view === 12)?.status).toBe('timed_out');
-
-    if (withParticipants) {
-      // A certified block identifies its proposer independently of the seed prediction.
-      await reply(socket, 2, certifiedBlock(12, [1]));
-      await advance(100);
-      expect(container.textContent).toContain('Location: First');
-      await reply(socket, 0, { view: 11, signature: [] });
-      await advance(100);
-      expect(container.textContent).toContain('Location: First');
-      expect(jest.mocked(StatsSection).mock.calls.slice(-1)[0][0].views
-        .find(view => view.view === 12)?.status).toBe('finalized');
-    }
-  });
-
-  test.each(['standard', 'vrf'] as const)('describes the selected %s deployment in About', async mode => {
-    const config = getClusterConfig('local');
-    config.CERTIFICATE_MODE = mode;
-    config.BACKEND_URL = mode === 'standard' ? window.location.host : 'vrf.example.test';
-    config.PUBLIC_KEY_HEX = (mode === 'standard' ? 'ab' : 'cd').repeat(48);
+  test.each([
+    { backend: 'same-host', indexer: window.location.origin },
+    { backend: 'pq.example.test', indexer: 'http://pq.example.test' },
+  ])('describes a $backend deployment without inlining its participant set', async ({ backend, indexer }) => {
+    const config = getClusterConfig();
+    config.BACKEND_URL = backend === 'same-host' ? window.location.host : backend;
+    config.PUBLIC_KEY_HEX = fnDsaIdentityHex;
     config.description = 'A cluster of <strong>4 validators</strong> running c7gd.4xlarge in <strong>1 region</strong> (us-west-2).';
     await mount(strict);
+    expect(container.querySelector('.map-container')).toBeNull();
     await act(async () => { container.querySelector<HTMLButtonElement>('.about-header-button')!.click(); });
 
-    const modal = container.querySelector('.about-modal');
-    expect(modal).not.toBeNull();
-    const command = Array.from(modal!.querySelectorAll('code'))
-      .find(element => element.textContent?.startsWith('inspector '))!.textContent;
-    const indexer = mode === 'standard' ? window.location.origin : 'https://vrf.example.test';
-    expect(command).toContain(`--certificate-mode '${mode}'`);
-    expect(command).toContain(`--indexer '${indexer}'`);
-    expect(command).toContain(`--identity '${config.PUBLIC_KEY_HEX}'`);
-    expect(modal!.textContent).toContain('4 validators');
-    expect(modal!.textContent).toContain('c7gd.4xlarge');
-    expect(modal!.textContent).toContain('1 region');
-    expect(modal!.textContent).toContain('us-west-2');
-    expect(Array.from(modal!.querySelectorAll('strong')).some(element => element.textContent === '4 validators')).toBe(true);
-    expect(modal!.textContent).not.toMatch(/50 validators|c8g\.large|USA Cluster|exoware::relay/);
-    expect(modal!.querySelector('a[href="https://github.com/commonwarexyz/alto/tree/main/indexer"]')).not.toBeNull();
-    expect(modal!.querySelector('a[href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html"]')).not.toBeNull();
+    const modal = container.querySelector('.about-modal')!;
+    const codes = Array.from(modal.querySelectorAll('code'), element => element.textContent);
+    expect(codes).toContain('cargo install --git https://github.com/commonwarexyz/alto --branch pq alto-inspector');
+    expect(codes).toContain(
+      `inspector get block 10 --indexer '${indexer}' --identity "$(cat identity.hex)"`,
+    );
+    expect(modal.textContent).not.toContain(fnDsaIdentityHex.slice(0, 64));
+    expect(Array.from(modal.querySelectorAll('strong')).some(element => element.textContent === '4 validators')).toBe(true);
+    expect(modal.textContent).toContain('c7gd.4xlarge in 1 region (us-west-2)');
+    expect(modal.textContent).not.toContain('commonware_deployer::aws');
+    expect(modal.querySelector('a[href="https://github.com/commonwarexyz/alto/tree/main/indexer"]')).not.toBeNull();
+    expect(modal.querySelector('a[href="https://github.com/commonwarexyz/monorepo/blob/1950760f8bc64f6d0c45bef3d68c0947c94284b2/cryptography/src/fn_dsa/mod.rs"]')).not.toBeNull();
 
-    await act(async () => { modal!.querySelector<HTMLButtonElement>('.about-button')!.click(); });
+    await act(async () => { modal.querySelector<HTMLButtonElement>('.about-button')!.click(); });
     expect(container.querySelector('.about-modal')).toBeNull();
   });
 
+  test('summarizes an FN-DSA participant set by count and digest', async () => {
+    getClusterConfig().PUBLIC_KEY_HEX = fnDsaIdentityHex;
+    await mount(strict);
+    await act(async () => { container.querySelector<HTMLButtonElement>('.key-header-button')!.click(); });
+
+    const modal = container.querySelector('.about-modal')!;
+    expect(modal.textContent).toContain('contains 4 validators');
+    expect(modal.querySelector('.code-block')?.textContent).toBe('5a'.repeat(32));
+    expect(sha256).toHaveBeenLastCalledWith(hexToUint8Array(fnDsaIdentityHex));
+    expect(modal.textContent).not.toContain(fnDsaIdentityHex.slice(0, 64));
+    const download = modal.querySelector<HTMLAnchorElement>('a[download="identity.hex"]')!;
+    expect(download.getAttribute('href')).toBe(`data:text/plain;charset=utf-8,${fnDsaIdentityHex}`);
+    expect(modal.querySelector('a[href="https://github.com/commonwarexyz/monorepo/blob/1950760f8bc64f6d0c45bef3d68c0947c94284b2/cryptography/src/fn_dsa/mod.rs"]')).not.toBeNull();
+  });
+
   test.each(['idle', 'rejected', 'duplicate'])(
-    'advances growing latency while batches are %s',
+    'advances unknown-view latency while batches are %s',
     async batch => {
-      getClusterConfig('local').CERTIFICATE_MODE = 'vrf';
+      // Finalizing view 12 after view 10 inserts an unknown placeholder for view 11.
       const socket = await mount(strict);
-      await reply(socket, 0, { view: 10, signature: [] });
+      await reply(socket, 2, certifiedBlock(12));
       await advance(100);
       expect(container.querySelector('.growing-latency')?.textContent).toBe('100ms');
 
@@ -322,7 +293,7 @@ describe.each([false, true])('connection lifecycle (StrictMode: %s)', strict => 
         if (batch === 'rejected') {
           await reply(socket, 2, null);
         } else if (batch === 'duplicate') {
-          await reply(socket, 2, certifiedBlock(10));
+          await reply(socket, 2, certifiedBlock(12));
         }
         // Assert each repaint before another timer can conceal a stalled display.
         await advance(100);

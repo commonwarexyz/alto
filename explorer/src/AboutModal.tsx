@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
-import { ClusterConfig, getHttpBackendUrl, MODE } from './config';
-import { getLeaderIndicator, getTimelineIdentifier } from './timelineIdentifier';
+import { ClusterConfig, getHttpBackendUrl } from './config';
+import { getTimelineIdentifier, LEADER_INDICATOR } from './timelineIdentifier';
 
 interface AboutModalProps {
     isOpen: boolean;
@@ -9,9 +9,8 @@ interface AboutModalProps {
 }
 
 const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig }) => {
-    const standardCertificates = clusterConfig.CERTIFICATE_MODE === 'standard';
-    const timelineIdentifier = getTimelineIdentifier(standardCertificates);
-    const leaderIndicator = getLeaderIndicator(standardCertificates);
+    const timelineIdentifier = getTimelineIdentifier();
+    const mapped = clusterConfig.LOCATIONS.length > 0;
     // Add effect to handle link targets
     useEffect(() => {
         if (isOpen) {
@@ -27,11 +26,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
     }, [isOpen]);
     if (!isOpen) return null;
 
-    const [certificateMode, indexer, identity] = [
-        clusterConfig.CERTIFICATE_MODE,
-        getHttpBackendUrl(clusterConfig.BACKEND_URL),
-        clusterConfig.PUBLIC_KEY_HEX,
-    ].map(value => `'${value.replace(/'/g, "'\\''")}'`);
+    const indexer = `'${getHttpBackendUrl(clusterConfig.BACKEND_URL).replace(/'/g, "'\\''")}'`;
 
     return (
         <div className="about-modal-overlay">
@@ -43,9 +38,9 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                     <section>
                         <h3>About</h3>
                         <p>
-                            This explorer visualizes the performance of <a href="https://github.com/commonwarexyz/alto">alto</a>'s consensus, <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/simplex/index.html">simplex</a>, running on the selected cluster.
+                            This explorer visualizes the performance of <a href="https://github.com/commonwarexyz/alto">alto</a>'s consensus, <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/simplex/index.html">simplex</a>, running on this cluster.
                         </p>
-                        {MODE === 'public' && (
+                        {mapped && (
                             <p>
                                 <i>You can replicate this devnet in your own AWS account with <a href="https://docs.rs/commonware-deployer/latest/commonware_deployer/aws/">commonware_deployer::aws</a> by following the
                                     instructions <a href="https://github.com/commonwarexyz/alto/blob/main/deploy/README.md">here</a>.</i>
@@ -78,8 +73,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                             This explorer displays the progression of <i>simplex</i> over time, broken into <strong>views</strong>.
                         </p>
                         <p>
-                            In stable mode, a <strong>term</strong> groups consecutive views under one round-robin leader. In rotating mode,
-                            each term contains one view and a VRF seed selects its leader.
+                            A <strong>term</strong> groups consecutive views under one round-robin leader.
                         </p>
                         <p>
                             A quorum of <i>2f+1</i> votes for a block forms a <strong>notarization</strong>. After successfully certifying the block,
@@ -93,14 +87,11 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                         <ul className="status-list">
                             <li>
                                 <div className="status-indicator-wrapper">
-                                    <div className="about-status-indicator" style={{ backgroundColor: leaderIndicator.color }}></div>
-                                    <strong>{leaderIndicator.label}</strong>
+                                    <div className="about-status-indicator" style={{ backgroundColor: LEADER_INDICATOR.color }}></div>
+                                    <strong>{LEADER_INDICATOR.label}</strong>
                                 </div>
-                                {standardCertificates
-                                    ? 'The stable round-robin leader has proposed a block.'
-                                    : 'Some leader has been elected to propose a block.'}
-                                {MODE === 'public' && " A map dot of the same color shows the leader's region when its location is known."}
-                                {!standardCertificates && ' A new leader is elected for each view.'}
+                                The stable round-robin leader has proposed a block.
+                                {mapped && " A map dot of the same color shows the leader's region when its location is known."}
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">
@@ -119,7 +110,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                             </li>
                         </ul>
                         <p>
-                            The <span style={{ color: timelineIdentifier.color }}>{timelineIdentifier.label}</span> identifier beneath each view number shows {standardCertificates ? 'a shortened hash of the proposed block' : 'a shortened seed signature used for leader election'}.
+                            The <span style={{ color: timelineIdentifier.color }}>{timelineIdentifier.label}</span> identifier beneath each view number shows a shortened hash of the proposed block.
                         </p>
                         <p>
                             You can read more about the design of <i>simplex</i> <a href="https://docs.rs/commonware-consensus/latest/commonware_consensus/simplex/index.html">here</a>.
@@ -133,7 +124,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                             Consensus artifacts stream to your browser in real time. An <a href="https://github.com/commonwarexyz/alto/tree/main/indexer">alto-indexer</a> can serve both this explorer and its consensus stream from the same address.
                         </p>
                         <p>
-                            Before using a consensus artifact, your browser verifies its threshold signatures with <a href="https://docs.rs/commonware-cryptography/latest/commonware_cryptography/bls12381/index.html">cryptography::bls12381</a> compiled to WASM.
+                            Before using a consensus artifact, your browser verifies the <i>FN-DSA-512</i> (Falcon) signature of every quorum signer with <a href="https://github.com/commonwarexyz/monorepo/blob/1950760f8bc64f6d0c45bef3d68c0947c94284b2/cryptography/src/fn_dsa/mod.rs">cryptography::fn_dsa</a> compiled to WASM.
                         </p>
                         <p>
                             Older artifacts may be skipped when verification falls behind the stream. The open source verifier runs on your computer, so the API's consensus claims are checked locally.
@@ -160,14 +151,14 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                     <section>
                         <h3>Can I replay the stream?</h3>
                         <p>
-                            Yes! You can replay the stream or fetch arbitrary data using the <a href="https://docs.rs/alto-inspector/latest/alto_inspector">alto-inspector</a>.
+                            Yes! You can replay the stream or fetch arbitrary data using the <a href="https://github.com/commonwarexyz/alto/tree/pq/inspector">alto-inspector</a>.
                         </p>
                         <p>
                             To download the tool, run:
                         </p>
                         <pre className="code-block">
                             <code>
-                                cargo install alto-inspector
+                                cargo install --git https://github.com/commonwarexyz/alto --branch pq alto-inspector
                             </code>
                         </pre>
                         <p>
@@ -175,9 +166,13 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                         </p>
                         <pre className="code-block">
                             <code>
-                                {`inspector --certificate-mode ${certificateMode} get block 10 --indexer ${indexer} --identity ${identity}`}
+                                {`inspector get block 10 --indexer ${indexer} --identity "$(cat identity.hex)"`}
                             </code>
                         </pre>
+                        <p>
+                            The identity encodes every participant key (about 90 KB of hex for 50 validators), so
+                            download <code>identity.hex</code> (the encoded participant set) from the key panel first.
+                        </p>
                     </section>
 
                     <section>

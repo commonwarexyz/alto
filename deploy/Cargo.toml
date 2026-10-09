@@ -10,11 +10,9 @@ alto-chain = { workspace = true }
 alto-types = { workspace = true }
 clap = { workspace = true }
 commonware-codec = { workspace = true }
-commonware-consensus = { workspace = true, features = ["mocks"] }
-commonware-cryptography = { workspace = true, features = ["mocks"] }
+commonware-cryptography = { workspace = true }
 commonware-deployer = { workspace = true }
 commonware-formatting = { workspace = true }
-commonware-macros = { workspace = true }
 commonware-math = { workspace = true }
 commonware-utils = { workspace = true }
 mimalloc = { workspace = true }

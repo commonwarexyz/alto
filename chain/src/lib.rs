@@ -1,4 +1,3 @@
-use alto_types::CertificateMode;
 use commonware_utils::{NZUsize, Probability, NZU32};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -11,13 +10,15 @@ use std::{
 pub mod application;
 pub mod engine;
 pub mod indexer;
+#[cfg(test)]
+mod simulation;
 pub mod utils;
 
 pub const DEFAULT_BACKFILLER_MAX_ACTIVE: NonZeroUsize = NZUsize!(16);
 pub const DEFAULT_BACKFILLER_RETRY_MS: u64 = 1_000;
 pub const DEFAULT_BLOCKING_THREADS: usize = 512;
 pub const DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(16_384);
-pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(4_096);
+pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(16_384);
 
 /// How long validators wait for a leader's proposal before nullifying the view.
 /// Proposal pacing stays below this deadline to leave time to propose.
@@ -76,9 +77,9 @@ where
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Leader {
-    /// Select a new VRF-derived leader for every view.
+    /// Select a new round-robin leader for every view.
     Rotating { delay_ms: u64 },
-    /// Keep one round-robin leader for a term and pace its proposals.
+    /// Keep one round-robin leader for a term and pipeline its proposals.
     Stable {
         delay_ms: u64,
         #[serde(deserialize_with = "deserialize_term_length")]
@@ -106,11 +107,10 @@ impl Leader {
         }
     }
 
-    /// Threshold certificate construction required by this leader policy.
-    pub const fn certificate_mode(self) -> CertificateMode {
+    /// Minimum interval from the parent's timestamp in milliseconds.
+    pub const fn delay_ms(self) -> u64 {
         match self {
-            Self::Rotating { .. } => CertificateMode::Vrf,
-            Self::Stable { .. } => CertificateMode::Standard,
+            Self::Rotating { delay_ms } | Self::Stable { delay_ms, .. } => delay_ms,
         }
     }
 }
@@ -119,8 +119,6 @@ impl Leader {
 #[derive(Deserialize, Serialize)]
 pub struct Config {
     pub private_key: String,
-    pub share: String,
-    pub polynomial: String,
 
     pub port: u16,
     pub metrics_port: u16,
@@ -153,7 +151,7 @@ pub struct Config {
 
     pub signature_threads: usize,
 
-    /// Required leader policy, which determines the certificate format.
+    /// Required leader policy.
     pub leader: Leader,
 
     #[serde(default = "default_backfiller_max_active")]
@@ -198,113 +196,53 @@ pub struct Peers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alto_types::{Block, NAMESPACE};
-    use commonware_consensus::{
-        marshal,
-        simplex::{
-            elector,
-            scheme::bls12381_threshold::{standard as bls12381_threshold, vrf},
-        },
-        types::ViewDelta,
-    };
-    use commonware_cryptography::{
-        bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519::PublicKey,
-        Digestible, Signer,
-    };
+    use crate::simulation::{self, *};
+    use alto_types::{Block, ConsensusScheme, PrivateKey, PublicKey, NAMESPACE};
+    use commonware_cryptography::{Digestible, Signer};
     use commonware_macros::{select, test_traced};
-    use commonware_p2p::{
-        simulated::{self, Link, Network, Oracle, Receiver, Sender},
-        Manager,
-    };
-    use commonware_parallel::Sequential;
+    use commonware_p2p::simulated::{self, Link, Network, Oracle};
     use commonware_runtime::{
         deterministic::{self, Runner},
         Clock, Metrics, Runner as _, Spawner, Supervisor as _,
     };
-    use commonware_utils::{channel::oneshot, ordered::Set, probability, NZUsize, NZU32};
-    use engine::Engine;
-    use governor::Quota;
+    use commonware_utils::{channel::oneshot, ordered::BiMap, probability, NZUsize};
     use indexer::mocks;
-    use rand::{rngs::StdRng, RngExt, SeedableRng};
-    use std::{collections::HashMap, num::NonZeroU32, time::Duration};
+    use rand::{rngs::StdRng, Rng, RngExt, SeedableRng};
+    use std::time::Duration;
     use tracing::info;
 
-    /// Limit the freezer table size to 1MB because the deterministic runtime stores
-    /// everything in RAM.
-    const FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(14); // 1MB
-
-    /// (Effectively) unlimited quota for tests.
-    const TEST_QUOTA: Quota = Quota::per_second(NZU32!(u32::MAX));
-
-    /// Proposal delay of every simulated validator and the term length of stable leaders.
-    const PROPOSAL_DELAY_MS: u64 = 10;
-    const STABLE_LEADER_TERM_LENGTH: NonZeroU32 = NZU32!(1_000);
-
-    /// Registers all validators using the oracle.
-    async fn register_validators(
-        oracle: &mut Oracle<PublicKey, deterministic::Context>,
-        validators: &[PublicKey],
-    ) -> HashMap<PublicKey, Registration> {
-        oracle
-            .manager()
-            .track(0, Set::from_iter_dedup(validators.iter().cloned()));
-        let mut registrations = HashMap::new();
-        for validator in validators.iter() {
-            let oracle = oracle.control(validator.clone());
-            let (pending_sender, pending_receiver) = oracle.register(0, TEST_QUOTA).await.unwrap();
-            let (recovered_sender, recovered_receiver) =
-                oracle.register(1, TEST_QUOTA).await.unwrap();
-            let (resolver_sender, resolver_receiver) =
-                oracle.register(2, TEST_QUOTA).await.unwrap();
-            let (broadcast_sender, broadcast_receiver) =
-                oracle.register(3, TEST_QUOTA).await.unwrap();
-            let (backfill_sender, backfill_receiver) =
-                oracle.register(4, TEST_QUOTA).await.unwrap();
-            registrations.insert(
-                validator.clone(),
-                (
-                    (pending_sender, pending_receiver),
-                    (recovered_sender, recovered_receiver),
-                    (resolver_sender, resolver_receiver),
-                    (broadcast_sender, broadcast_receiver),
-                    (backfill_sender, backfill_receiver),
-                ),
-            );
-        }
-        registrations
+    /// Validators sorted by identity key, each signing consensus messages with its identity key.
+    #[derive(Clone)]
+    struct Fixture {
+        private_keys: Vec<PrivateKey>,
+        participants: Vec<PublicKey>,
+        schemes: Vec<ConsensusScheme>,
     }
 
-    /// Links (or unlinks) validators using the oracle.
-    ///
-    /// The `action` parameter determines the action (e.g. link, unlink) to take.
-    /// The `restrict_to` function can be used to restrict the linking to certain connections,
-    /// otherwise all validators will be linked to all other validators.
-    async fn link_validators(
-        oracle: &mut Oracle<PublicKey, deterministic::Context>,
-        validators: &[PublicKey],
-        link: Link,
-        restrict_to: Option<fn(usize, usize, usize) -> bool>,
-    ) {
-        for (i1, v1) in validators.iter().enumerate() {
-            for (i2, v2) in validators.iter().enumerate() {
-                // Ignore self
-                if v2 == v1 {
-                    continue;
-                }
-
-                // Restrict to certain connections
-                if let Some(f) = restrict_to {
-                    if !f(validators.len(), i1, i2) {
-                        continue;
-                    }
-                }
-
-                // Add link
-                oracle
-                    .add_link(v1.clone(), v2.clone(), link.clone())
-                    .await
-                    .unwrap();
-            }
+    fn fixture(rng: &mut impl Rng, n: u32) -> Fixture {
+        let mut private_keys: Vec<_> = (0..n)
+            .map(|_| PrivateKey::from_seed(rng.next_u64()))
+            .collect();
+        private_keys.sort_by_key(|key| key.public_key());
+        let participants: Vec<_> = private_keys.iter().map(|key| key.public_key()).collect();
+        let signers = BiMap::try_from(
+            participants
+                .iter()
+                .map(|key| (key.clone(), key.clone()))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let schemes = private_keys
+            .iter()
+            .map(|key| {
+                ConsensusScheme::signer(NAMESPACE, signers.clone(), key.clone())
+                    .expect("key is a participant")
+            })
+            .collect();
+        Fixture {
+            private_keys,
+            participants,
+            schemes,
         }
     }
 
@@ -337,25 +275,6 @@ mod tests {
             .sum()
     }
 
-    fn validator_metric_sample(line: &str) -> Option<(&str, Option<&str>, &str)> {
-        let line = line.trim();
-        if line.starts_with('#') {
-            return None;
-        }
-        let mut parts = line.split_whitespace();
-        let metric = parts.next()?;
-        let value = parts.next()?;
-        let (name, labels) = metric
-            .split_once('{')
-            .map_or((metric, None), |(name, labels)| {
-                (name, Some(labels.trim_end_matches('}')))
-            });
-        if !name.starts_with("validator_") {
-            return None;
-        }
-        Some((name, labels, value))
-    }
-
     fn queue_outstanding(metrics: &str) -> i64 {
         sum_validator_metric::<i64>(metrics, "_queue_tip", None)
             - sum_validator_metric::<i64>(metrics, "_queue_floor", None)
@@ -366,62 +285,11 @@ mod tests {
             - sum_validator_metric::<i64>(metrics, "_queue_floor", None)
     }
 
-    type Registration = (
-        (
-            Sender<PublicKey, deterministic::Context>,
-            Receiver<PublicKey>,
-        ),
-        (
-            Sender<PublicKey, deterministic::Context>,
-            Receiver<PublicKey>,
-        ),
-        (
-            Sender<PublicKey, deterministic::Context>,
-            Receiver<PublicKey>,
-        ),
-        (
-            Sender<PublicKey, deterministic::Context>,
-            Receiver<PublicKey>,
-        ),
-        (
-            Sender<PublicKey, deterministic::Context>,
-            Receiver<PublicKey>,
-        ),
-    );
-
-    #[derive(Clone)]
-    struct ValidatorConfig {
-        leader_timeout: Duration,
-        certification_timeout: Duration,
-        block_size: u32,
-        backfiller_max_active: NonZeroUsize,
-        backfiller_retry: Duration,
-        indexer: Option<mocks::Client>,
-    }
-
-    impl Default for ValidatorConfig {
-        fn default() -> Self {
-            Self {
-                leader_timeout: Duration::from_secs(1),
-                certification_timeout: Duration::from_secs(2),
-                block_size: 0,
-                backfiller_max_active: DEFAULT_BACKFILLER_MAX_ACTIVE,
-                backfiller_retry: Duration::from_millis(DEFAULT_BACKFILLER_RETRY_MS),
-                indexer: None,
-            }
-        }
-    }
-
-    /// Stable-leader election used by every simulation that does not pick its own elector.
-    fn stable_elector() -> engine::StableElector {
-        engine::stable_elector(STABLE_LEADER_TERM_LENGTH, 48)
-    }
-
     async fn start_validator(
         context: &deterministic::Context,
         oracle: &Oracle<PublicKey, deterministic::Context>,
-        signer: &commonware_cryptography::ed25519::PrivateKey,
-        scheme: &bls12381_threshold::Scheme<PublicKey, MinSig>,
+        signer: &PrivateKey,
+        scheme: &ConsensusScheme,
         registration: Registration,
         indexer: Option<mocks::Client>,
     ) {
@@ -440,66 +308,6 @@ mod tests {
         .await;
     }
 
-    /// Starts a validator with an explicit certificate scheme and leader election policy.
-    async fn start_validator_with<CS: alto_types::Scheme, L: elector::Config<CS>>(
-        context: &deterministic::Context,
-        oracle: &Oracle<PublicKey, deterministic::Context>,
-        signer: &commonware_cryptography::ed25519::PrivateKey,
-        scheme: &CS,
-        elector: L,
-        registration: Registration,
-        cfg: ValidatorConfig,
-    ) {
-        let timeout_retry = cfg.certification_timeout + Duration::from_millis(50);
-        let skip_timeout = timeout_retry + Duration::from_millis(50);
-
-        let public_key = signer.public_key();
-        let uid = format!("validator_{public_key}");
-        let config = engine::Config {
-            blocker: oracle.control(public_key.clone()),
-            provider: oracle.manager(),
-            partition_prefix: uid.clone(),
-            blocks_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-            finalized_freezer_table_initial_size: FREEZER_TABLE_INITIAL_SIZE,
-            me: signer.public_key(),
-            scheme: scheme.clone(),
-            elector,
-            mailbox_size: 1024,
-            deque_size: 10,
-            block_size: cfg.block_size,
-            proposal_delay_ms: PROPOSAL_DELAY_MS,
-            leader_timeout: cfg.leader_timeout,
-            certification_timeout: cfg.certification_timeout,
-            nullify_retry: timeout_retry,
-            fetch_timeout: Duration::from_secs(1),
-            activity_timeout: ViewDelta::new(10),
-            skip_timeout,
-            backfiller_max_active: cfg.backfiller_max_active,
-            backfiller_retry: cfg.backfiller_retry,
-            indexer: cfg.indexer,
-            strategy: Sequential,
-        };
-        let validator_context = context.child("validator").with_attribute("id", &uid);
-        let (pending, recovered, resolver, broadcast, backfill) = registration;
-        let marshal_resolver_cfg = marshal::resolver::p2p::Config {
-            public_key: public_key.clone(),
-            peer_provider: oracle.manager(),
-            blocker: oracle.control(public_key.clone()),
-            mailbox_size: NZUsize!(1024),
-            timeout: Duration::from_secs(2),
-            fetch_retry_timeout: Duration::from_millis(100),
-            priority_requests: false,
-            priority_responses: false,
-        };
-        let marshal_resolver = marshal::resolver::p2p::init(
-            validator_context.child("backfill"),
-            marshal_resolver_cfg,
-            backfill,
-        );
-        let engine = Engine::new(validator_context.child("engine"), config).await;
-        engine.start(pending, recovered, resolver, broadcast, marshal_resolver);
-    }
-
     #[test]
     fn traces_sample_probability_preserves_configured_rate() {
         assert!(traces_sample_probability(0.0).is_zero());
@@ -515,70 +323,20 @@ mod tests {
         assert!(!traces_sample_probability(1e-12).is_zero());
     }
 
-    async fn poll_until_height(
-        context: &deterministic::Context,
-        oracle: &Oracle<PublicKey, deterministic::Context>,
+    fn all_online(
+        n: u32,
+        seed: u64,
+        link: Link,
         required: u64,
-    ) {
-        loop {
-            let metrics = context.encode();
-            let mut success = false;
-            for line in metrics.lines() {
-                let Some((metric, _, value)) = validator_metric_sample(line) else {
-                    continue;
-                };
-                if metric.ends_with("_marshal_processed_height") {
-                    let value = value.parse::<u64>().unwrap();
-                    if value >= required {
-                        success = true;
-                        break;
-                    }
-                }
-            }
-
-            // No validator should ever block a peer (checked after the height scan so the
-            // final iteration is covered too).
-            let blocked = oracle.blocked().await.expect("network closed");
-            assert!(blocked.is_empty(), "peers blocked: {blocked:?}");
-            if success {
-                break;
-            }
-            context.sleep(Duration::from_secs(1)).await;
-        }
-    }
-
-    fn all_online(n: u32, seed: u64, link: Link, required: u64) -> String {
-        let cfg = deterministic::Config::default().with_seed(seed);
-        let executor = Runner::from(cfg);
-        executor.start(|mut context| async move {
-            let (network, mut oracle) = Network::new(
-                context.child("network"),
-                simulated::Config {
-                    max_size: 1024 * 1024,
-                    max_peers_per_set: NZUsize!(n as usize),
-                    disconnect_on_block: true,
-                    tracked_peer_sets: NZUsize!(1),
-                },
-            );
-            network.start();
-
+        elector: engine::Elector,
+    ) -> String {
+        simulation::all_online(n, seed, link, required, elector, |context, n| {
             let Fixture {
                 schemes,
                 private_keys,
-                participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
-            let mut registrations = register_validators(&mut oracle, &participants).await;
-
-            link_validators(&mut oracle, &participants, link, None).await;
-
-            for (signer, scheme) in private_keys.iter().zip(schemes.iter()) {
-                let registration = registrations.remove(&signer.public_key()).unwrap();
-                start_validator(&context, &oracle, signer, scheme, registration, None).await;
-            }
-
-            poll_until_height(&context, &oracle, required).await;
-            context.auditor().state()
+            } = fixture(context, n);
+            private_keys.into_iter().zip(schemes).collect()
         })
     }
 
@@ -590,8 +348,11 @@ mod tests {
             success_rate: probability!(1.0),
         };
         for seed in 0..5 {
-            let state = all_online(5, seed, link.clone(), 25);
-            assert_eq!(state, all_online(5, seed, link.clone(), 25));
+            let state = all_online(5, seed, link.clone(), 25, stable_elector());
+            assert_eq!(
+                state,
+                all_online(5, seed, link.clone(), 25, stable_elector())
+            );
         }
     }
 
@@ -603,8 +364,11 @@ mod tests {
             success_rate: probability!(0.75),
         };
         for seed in 0..5 {
-            let state = all_online(5, seed, link.clone(), 25);
-            assert_eq!(state, all_online(5, seed, link.clone(), 25));
+            let state = all_online(5, seed, link.clone(), 25, stable_elector());
+            assert_eq!(
+                state,
+                all_online(5, seed, link.clone(), 25, stable_elector())
+            );
         }
     }
 
@@ -615,7 +379,23 @@ mod tests {
             jitter: Duration::from_millis(10),
             success_rate: probability!(0.98),
         };
-        all_online(10, 0, link.clone(), 1000);
+        all_online(10, 0, link.clone(), 1000, stable_elector());
+    }
+
+    #[test_traced]
+    fn test_good_links_rotating() {
+        let link = Link {
+            latency: Duration::from_millis(10),
+            jitter: Duration::from_millis(1),
+            success_rate: probability!(1.0),
+        };
+        for seed in 0..5 {
+            let state = all_online(5, seed, link.clone(), 25, engine::rotating_elector());
+            assert_eq!(
+                state,
+                all_online(5, seed, link.clone(), 25, engine::rotating_elector())
+            );
+        }
     }
 
     #[test_traced]
@@ -641,7 +421,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = fixture(&mut context, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
 
             // Link all validators (except 0)
@@ -698,9 +478,9 @@ mod tests {
         let n = 5;
         let required_container = 100;
 
-        // Derive threshold
+        // Derive the validator set
         let mut rng = StdRng::seed_from_u64(0);
-        let fixture = bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
+        let fixture = fixture(&mut rng, n);
 
         // Random restarts every x seconds
         let mut runs = 0;
@@ -837,13 +617,10 @@ mod tests {
         info!(runs, "unclean shutdown recovery worked");
     }
 
-    /// Runs validators with an indexer and checks what they upload: certificates always, seeds
-    /// only when the scheme produces them, and bare blocks only for genesis.
-    fn indexer_simulation<CS: alto_types::Scheme, L: elector::Config<CS>>(
-        fixture: impl FnOnce(&mut deterministic::Context, u32) -> Fixture<CS> + Send + 'static,
-        elector: impl Fn() -> L + Send + 'static,
-        expect_seeds: bool,
-    ) {
+    /// Runs validators with an indexer and checks what they upload: certificates always, and bare
+    /// blocks only for genesis.
+    #[test_traced]
+    fn test_indexer() {
         // Create context
         let n = 5;
         let required_container = 10;
@@ -885,17 +662,13 @@ mod tests {
 
             for (signer, scheme) in private_keys.into_iter().zip(schemes) {
                 let registration = registrations.remove(&signer.public_key()).unwrap();
-                start_validator_with(
+                start_validator(
                     &context,
                     &oracle,
                     &signer,
                     &scheme,
-                    elector(),
                     registration,
-                    ValidatorConfig {
-                        indexer: Some(indexer.clone()),
-                        ..Default::default()
-                    },
+                    Some(indexer.clone()),
                 )
                 .await;
             }
@@ -903,10 +676,6 @@ mod tests {
             poll_until_height(&context, &oracle, required_container).await;
 
             // Check indexer uploads
-            assert_eq!(
-                indexer.seed_seen.load(std::sync::atomic::Ordering::Relaxed),
-                expect_seeds
-            );
             assert!(indexer
                 .notarization_seen
                 .load(std::sync::atomic::Ordering::Relaxed));
@@ -928,26 +697,6 @@ mod tests {
                 "non-genesis block uploads should stay idle when certified uploads succeed",
             );
         });
-    }
-
-    #[test_traced]
-    fn test_indexer() {
-        // Standard certificates carry no seed.
-        indexer_simulation(
-            |context, n| bls12381_threshold::fixture::<MinSig, _>(context, NAMESPACE, n),
-            stable_elector,
-            false,
-        );
-    }
-
-    #[test_traced]
-    fn test_indexer_rotating() {
-        // VRF certificates carry seeds, which validators publish to the indexer.
-        indexer_simulation(
-            |context, n| vrf::fixture::<MinSig, _>(context, NAMESPACE, n),
-            || alto_types::ROTATING_ELECTOR,
-            true,
-        );
     }
 
     #[test_traced]
@@ -974,7 +723,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = fixture(&mut context, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
 
             let link = Link {
@@ -1054,7 +803,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = fixture(&mut context, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
 
             let link = Link {
@@ -1180,7 +929,7 @@ mod tests {
                 private_keys,
                 participants,
                 ..
-            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, n);
+            } = fixture(&mut context, n);
             let mut registrations = register_validators(&mut oracle, &participants).await;
 
             let link = Link {
@@ -1317,7 +1066,7 @@ mod tests {
     fn test_drainer_replays_inflight_uploads_after_restart() {
         let n = 5;
         let mut rng = StdRng::seed_from_u64(7);
-        let fixture = bls12381_threshold::fixture::<MinSig, _>(&mut rng, NAMESPACE, n);
+        let fixture = fixture(&mut rng, n);
 
         // Keep these senders alive for the duration of the first run so the
         // corresponding block uploads remain in flight until shutdown.
@@ -1590,7 +1339,7 @@ mod tests {
         let entry = Entry { height: 42, digest };
 
         let encoded = entry.encode();
-        let decoded = Entry::decode(encoded.as_ref()).unwrap();
+        let decoded = Entry::decode(encoded.clone()).unwrap();
         assert_eq!(decoded.height, 42);
         assert_eq!(decoded.digest, digest);
 

@@ -1,4 +1,4 @@
-use super::{Block, Client as IndexerClient, Finalized, Notarized, Scheme, Seed};
+use super::{Block, Client as IndexerClient, Finalized, Notarized, Scheme};
 use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_utils::{channel::oneshot, sync::Mutex};
 use std::sync::{
@@ -17,7 +17,6 @@ impl Drop for InflightGuard {
 /// A mock indexer client for testing.
 #[derive(Clone)]
 pub struct Client {
-    pub seed_seen: Arc<AtomicBool>,
     pub notarization_seen: Arc<AtomicBool>,
     pub finalization_seen: Arc<AtomicBool>,
     pub block_upload_started: Arc<AtomicUsize>,
@@ -35,7 +34,6 @@ pub struct Client {
 impl Client {
     pub fn new() -> Self {
         Self {
-            seed_seen: Arc::new(AtomicBool::new(false)),
             notarization_seen: Arc::new(AtomicBool::new(false)),
             finalization_seen: Arc::new(AtomicBool::new(false)),
             block_upload_started: Arc::new(AtomicUsize::new(0)),
@@ -93,11 +91,6 @@ impl Default for Client {
 
 impl<C: Scheme> IndexerClient<C> for Client {
     type Error = std::io::Error;
-
-    async fn seed_upload(&self, _: Seed) -> Result<(), Self::Error> {
-        self.seed_seen.store(true, Ordering::Relaxed);
-        Ok(())
-    }
 
     async fn notarized_upload(&self, _: Notarized<C>) -> Result<(), Self::Error> {
         if self.fail_certs {

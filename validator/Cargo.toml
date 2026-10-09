@@ -17,6 +17,7 @@ commonware-formatting = { workspace = true }
 commonware-p2p = { workspace = true }
 commonware-parallel = { workspace = true }
 commonware-runtime = { workspace = true }
+commonware-stream = { workspace = true }
 commonware-utils = { workspace = true }
 futures = { workspace = true }
 governor = { workspace = true }

@@ -1,10 +1,7 @@
 use alto_client::consensus::{Message, Payload};
 use alto_client::{ClientBuilder, IndexQuery, Query};
-use alto_types::{
-    CertificateMode, Identity, Notarized, Scheme, StandardScheme, VrfScheme, NAMESPACE,
-};
+use alto_types::{decode_identity, ConsensusScheme, Identity, Notarized, Scheme, NAMESPACE};
 use clap::{Arg, Command};
-use commonware_codec::DecodeExt;
 use commonware_consensus::types::Height;
 use commonware_formatting::from_hex;
 use commonware_macros::select;
@@ -40,7 +37,6 @@ mod test_utils;
 pub struct Config {
     pub source: String,
     pub identity: String,
-    pub certificate_mode: CertificateMode,
     /// Network block payload size used to bound the live feed.
     pub block_size: u32,
     pub directory: String,
@@ -128,8 +124,7 @@ fn main() {
 
     // Parse identity
     let identity_bytes = from_hex(&config.identity).expect("Could not parse identity hex");
-    let identity =
-        Identity::decode(identity_bytes.as_ref()).expect("Could not decode identity public key");
+    let identity = decode_identity(identity_bytes).expect("Could not decode identity");
 
     // Initialize runtime
     let cfg = tokio::Config::default()
@@ -162,19 +157,16 @@ fn main() {
             "starting follower node"
         );
 
-        match config.certificate_mode {
-            CertificateMode::Standard => run::<StandardScheme>(context, config, identity).await,
-            CertificateMode::Vrf => run::<VrfScheme>(context, config, identity).await,
-        }
+        run(context, config, identity).await;
     });
 }
 
-async fn run<C: Scheme>(context: tokio::Context, config: Config, identity: Identity) {
+async fn run(context: tokio::Context, config: Config, identity: Identity) {
     // Create scheme and client.
     //
     // The client leaves certificate verification to the feeder for streamed messages,
     // marshal for resolver deliveries, and the checkpoint path below.
-    let scheme = C::certificate_verifier(NAMESPACE, identity);
+    let scheme = ConsensusScheme::certificate_verifier(NAMESPACE, identity);
     let client = ClientBuilder::new(&config.source, scheme.clone(), Sequential)
         .with_block_size(config.block_size)
         .with_verification_disabled()
@@ -250,12 +242,7 @@ mod tests {
 
     #[test]
     fn examples_include_the_network_block_size() {
-        for yaml in [
-            include_str!("../examples/global.yml"),
-            include_str!("../examples/usa.yml"),
-        ] {
-            let config: Config = serde_yaml::from_str(yaml).unwrap();
-            assert_eq!(config.block_size, 0);
-        }
+        let config: Config = serde_yaml::from_str(include_str!("../examples/local.yml")).unwrap();
+        assert_eq!(config.block_size, 0);
     }
 }

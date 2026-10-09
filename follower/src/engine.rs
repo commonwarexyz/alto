@@ -24,7 +24,10 @@ use commonware_utils::NZUsize;
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
-use std::num::{NonZero, NonZeroUsize};
+use std::{
+    num::{NonZero, NonZeroUsize},
+    sync::Arc,
+};
 use tracing::{error, warn};
 
 const VIEW_RETENTION_TIMEOUT: ViewDelta = ViewDelta::new(2560);
@@ -102,7 +105,7 @@ where
             marshal::Config {
                 provider,
                 epocher,
-                start: marshal::Start::Genesis(Block::genesis()),
+                start: marshal::Start::Genesis(Arc::new(Block::genesis())),
                 partition_prefix: "follower-marshal".to_string(),
                 mailbox_size,
                 view_retention: VIEW_RETENTION_TIMEOUT,
@@ -127,7 +130,11 @@ where
             marshal_mailbox: mailbox.clone(),
             mailbox_size,
         };
-        (engine, mailbox, floor.height())
+        (
+            engine,
+            mailbox,
+            floor.processed().map(|processed| processed.height()),
+        )
     }
 
     /// Start the [Engine].
@@ -174,7 +181,7 @@ mod tests {
 
     async fn start_engine_with_handler(
         context: commonware_runtime::deterministic::Context,
-        scheme: alto_types::VrfScheme,
+        scheme: alto_types::ConsensusScheme,
     ) -> handler::Handler<Digest> {
         let (engine, _, _) = Engine::new(
             context.child("engine"),
@@ -197,7 +204,7 @@ mod tests {
     }
 
     /// Verifies that marshal's Deliver handler rejects a finalization whose
-    /// threshold signature does not match the configured scheme. This is
+    /// certificate does not verify against the configured scheme. This is
     /// the resolver path's signature verification, as opposed to the feeder
     /// path tested in feeder::tests.
     #[test_traced]
@@ -231,7 +238,7 @@ mod tests {
     }
 
     /// Verifies that marshal's Deliver handler rejects a notarization whose
-    /// threshold signature does not match the configured scheme.
+    /// certificate does not verify against the configured scheme.
     #[test_traced]
     fn marshal_rejects_invalid_notarization_from_resolver() {
         let fixture = TestFixture::new();

@@ -36,8 +36,7 @@ _To deploy your own instance of `alto`, read the guide in [deploy](../deploy/REA
 | Field | Description |
 |-------|-------------|
 | `source` | URL of the indexer to fetch blocks and stream certificates from |
-| `identity` | Hex-encoded BLS12-381 threshold public key used to verify consensus signatures |
-| `certificate_mode` | Required certificate construction used by the source: `standard` for stable leaders or `vrf` for rotating leaders |
+| `identity` | Hex-encoded participant set (the ordered FN-DSA-512 public keys of the validators) used to verify every certificate signature |
 | `block_size` | Required network block payload size in bytes, used to bound the live feed |
 | `directory` | Path to store finalized blocks and state |
 | `worker_threads` | Number of runtime worker threads |
@@ -50,7 +49,7 @@ _To deploy your own instance of `alto`, read the guide in [deploy](../deploy/REA
 | `tip` | Start from the tip of the finalized chain instead of backfilling from genesis |
 | `pruning_depth` | Number of finalized blocks to retain before pruning (null to keep all) |
 
-_See [examples/](./examples/) for sample configuration files._
+_See [examples/local.yml](./examples/local.yml) for a sample configuration file._
 
 Set `block_size` to the same value as the validators and indexer. The live feed includes the
 encoding allowance described in the [Rust client](../client/README.md).

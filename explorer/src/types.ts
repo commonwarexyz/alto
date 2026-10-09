@@ -1,8 +1,8 @@
 // View statuses
-export type ViewStatus = "growing" | "notarized" | "finalized" | "timed_out" | "unknown";
+export type ViewStatus = "notarized" | "finalized" | "timed_out" | "unknown";
 
 // Search types
-export type SearchType = 'block' | 'notarization' | 'finalization' | 'seed';
+export type SearchType = 'block' | 'notarization' | 'finalization';
 
 // Block data
 export interface BlockJs {
@@ -14,13 +14,8 @@ export interface BlockJs {
     parent: number[];
 }
 
-// Seed (for leader election)
-export interface SeedJs {
-    view: number;
-    signature: number[];
-}
-
-// Verified notarized or finalized block
+// Verified notarized or finalized block. The signature is the SHA-256 digest of the encoded
+// certificate.
 export interface CertifiedBlockJs {
     view: number;
     signature: number[];
@@ -36,7 +31,6 @@ export interface ViewData {
     startTime: number;
     notarizationTime?: number;
     finalizationTime?: number;
-    signature?: number[];
     block?: BlockJs;
     timeoutId?: NodeJS.Timeout;
     actualNotarizationLatency?: number;
@@ -44,7 +38,7 @@ export interface ViewData {
 }
 
 // Type for search results
-export type SearchResult = SeedJs | CertifiedBlockJs | BlockJs;
+export type SearchResult = CertifiedBlockJs | BlockJs;
 
 // Time constants
 export const MS_PER_SECOND = 1000;

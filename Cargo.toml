@@ -20,22 +20,22 @@ license = "MIT OR Apache-2.0"
 alto-chain = { version = "2026.9.1", path = "chain" }
 alto-client = { version = "2026.9.1", path = "client" }
 alto-types = { version = "2026.9.1", path = "types" }
-commonware-actor = "2026.9.0"
-commonware-broadcast = "2026.9.0"
-commonware-codec = "2026.9.0"
-commonware-consensus = "2026.9.0"
-commonware-cryptography = "2026.9.0"
-commonware-deployer = { version = "2026.9.0", default-features = false }
-commonware-formatting = "2026.9.0"
-commonware-macros = "2026.9.0"
-commonware-p2p = "2026.9.0"
-commonware-resolver = "2026.9.0"
-commonware-runtime = "2026.9.0"
-commonware-storage = "2026.9.0"
-commonware-stream = "2026.9.0"
-commonware-utils = "2026.9.0"
-commonware-math = "2026.9.0"
-commonware-parallel = "2026.9.0"
+commonware-actor = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
+commonware-broadcast = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
+commonware-codec = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
+commonware-consensus = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
+commonware-cryptography = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
+commonware-deployer = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2", default-features = false }
+commonware-formatting = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
+commonware-macros = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
+commonware-p2p = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
+commonware-resolver = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
+commonware-runtime = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
+commonware-storage = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
+commonware-stream = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
+commonware-utils = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
+commonware-math = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
+commonware-parallel = { git = "https://github.com/commonwarexyz/monorepo", rev = "1950760f8bc64f6d0c45bef3d68c0947c94284b2" }
 mimalloc = "0.1.52"
 thiserror = "2.0.12"
 bytes = "1.7.1"
@@ -55,25 +55,3 @@ tower-http = "0.6.2"
 reqwest = { version = "0.12.12", default-features = false }
 tokio-tungstenite = "0.28.0"
 
-[profile.bench]
-# Because we enable overflow checks in "release," we should benchmark with them.
-overflow-checks = true
-
-[profile.dev]
-# Although overflow checks are enabled by default in "dev", we explicitly
-# enable them here for clarity.
-overflow-checks = true
-
-[profile.release]
-# To guard against unexpected behavior in production, we enable overflow checks in
-# "release" although they incur some performance penalty.
-overflow-checks = true
-# Use a single codegen unit for better optimization (slower compile, faster runtime)
-codegen-units = 1
-# Enable link-time optimization across all crates
-lto = true
-
-[profile.test]
-# Although overflow checks are enabled by default in "test", we explicitly
-# enable them here for clarity.
-overflow-checks = true

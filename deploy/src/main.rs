@@ -3,23 +3,14 @@ use alto_chain::{
     DEFAULT_BLOCKING_THREADS, DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS,
     DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS, LEADER_TIMEOUT,
 };
-use alto_types::{CertificateMode, NAMESPACE};
+use alto_types::{host_name, PrivateKey, PublicKey};
 use clap::{value_parser, Arg, ArgAction, ArgMatches, Command};
-use commonware_codec::{Decode, DecodeExt, Encode};
-use commonware_consensus::simplex::scheme::bls12381_threshold::vrf as bls12381_threshold;
-use commonware_cryptography::{
-    bls12381::primitives::{
-        sharing::{ModeVersion, Sharing},
-        variant::MinSig,
-    },
-    certificate::mocks::Fixture,
-    ed25519::{PrivateKey, PublicKey},
-    Signer,
-};
+use commonware_codec::{DecodeExt, Encode};
+use commonware_cryptography::{Hasher, Sha256, Signer};
 use commonware_deployer::aws::{self, METRICS_PORT};
 use commonware_formatting::{from_hex, hex};
 use commonware_math::algebra::Random;
-use commonware_utils::{sys_rng, NZU32};
+use commonware_utils::{ordered::Set, sys_rng};
 use rand::seq::IteratorRandom;
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -91,7 +82,6 @@ struct ConfiguredIndexer {
 struct IndexerConfig {
     port: u16,
     identity: String,
-    certificate_mode: CertificateMode,
     block_size: u32,
     explorer: ExplorerConfig,
 }
@@ -222,6 +212,15 @@ fn parse_leader(matches: &ArgMatches) -> Result<Leader, &'static str> {
         )),
         _ => unreachable!("clap validates leader mode"),
     }
+}
+
+/// Returns the hex-encoded network identity of `signers`: their encoded participant set.
+fn participant_identity(signers: &[PrivateKey]) -> String {
+    let participants = Set::from_iter_dedup(signers.iter().map(|signer| signer.public_key()));
+    let identity = participants.encode();
+    let digest = Sha256::hash(&[identity.as_ref()]);
+    info!(%digest, participants = participants.len(), "generated participant set");
+    hex(&identity)
 }
 
 fn main() {
@@ -398,7 +397,7 @@ fn command() -> Command {
         )
         .subcommand(
             Command::new("explorer")
-                .about("Generate a config.ts for the explorer.")
+                .about("Generate a config.ts for running the explorer from source against a local network.")
                 .arg(
                     Arg::new("dir")
                         .long("dir")
@@ -409,11 +408,9 @@ fn command() -> Command {
                     Arg::new("backend-url")
                         .long("backend-url")
                         .required(true)
-                        .help("Indexer host[:port] without a scheme (the explorer picks http/ws or https/wss by mode)")
+                        .help("Indexer host[:port] without a scheme")
                         .value_parser(parse_backend_url),
-                )
-                .subcommand(Command::new("local").about("Generate explorer config for local deployment"))
-                .subcommand(Command::new("remote").about("Generate explorer config for remote deployment")),
+                ),
         )
 }
 
@@ -504,14 +501,7 @@ fn run(matches: ArgMatches) {
                 .get_one::<String>("backend-url")
                 .unwrap()
                 .clone();
-            match sub_matches.subcommand() {
-                Some(("local", _)) => explorer_local(dir, backend_url),
-                Some(("remote", _)) => explorer_remote(dir, backend_url),
-                _ => {
-                    eprintln!("Invalid subcommand. Use 'local' or 'remote'.");
-                    std::process::exit(1);
-                }
-            }
+            explorer(dir, backend_url);
         }
         _ => {
             eprintln!("Invalid subcommand. Use 'generate' or 'explorer'.");
@@ -575,31 +565,25 @@ fn generate_local(
         .cloned()
         .collect::<Vec<_>>();
 
-    // Generate consensus key
-    let peers_u32 = peers as u32;
-    let Fixture { schemes, .. } =
-        bls12381_threshold::fixture::<MinSig, _>(&mut sys_rng(), NAMESPACE, peers_u32);
-
-    let identity = schemes[0].polynomial().public();
-    info!(%identity, "generated network key");
+    // Generate the network identity
+    let identity = participant_identity(&peer_signers);
 
     // Generate instance configurations
     let mut port = start_port;
     let mut addresses = HashMap::new();
     let mut configurations = Vec::new();
-    for (signer, scheme) in peer_signers.iter().zip(schemes.iter()) {
+    for signer in &peer_signers {
         // Create peer config
-        let name = signer.public_key().to_string();
+        let public_key = signer.public_key();
+        let name = host_name(&public_key);
         addresses.insert(
-            name.clone(),
+            public_key.to_string(),
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
         );
         let peer_config_file = format!("{name}.yaml");
         let directory = format!("{storage_output}/{name}");
         let peer_config = Config {
             private_key: hex(&signer.encode()),
-            share: hex(&scheme.share().unwrap().encode()),
-            polynomial: hex(&scheme.polynomial().encode()),
 
             port,
             metrics_port: port + 1,
@@ -678,9 +662,8 @@ fn generate_local(
         println!("To start local indexers, run:");
         for url in &configured_local_indexers {
             if let Some(port) = local_indexer_port(url) {
-                let certificate_mode = leader.certificate_mode().as_str();
                 let command = format!(
-                    "cargo run --bin indexer -- --port {port} --identity {identity} --certificate-mode {certificate_mode} --block-size {block_size}"
+                    "cargo run --bin {INDEXER_BINARY_NAME} -- --port {port} --identity {identity} --block-size {block_size}"
                 );
                 println!("{url}: {command}");
             }
@@ -798,13 +781,8 @@ fn generate_remote(
         .cloned()
         .collect::<Vec<_>>();
 
-    // Generate consensus key
-    let peers_u32 = peers as u32;
-    let Fixture { schemes, .. } =
-        bls12381_threshold::fixture::<MinSig, _>(&mut sys_rng(), NAMESPACE, peers_u32);
-
-    let identity = schemes[0].polynomial().public();
-    info!(%identity, "generated network key");
+    // Generate the network identity
+    let identity = participant_identity(&peer_signers);
 
     // Generate instance configurations
     assert!(
@@ -813,14 +791,12 @@ fn generate_remote(
     );
     let mut instance_configs = Vec::new();
     let mut peer_configs = Vec::new();
-    for (index, (signer, scheme)) in peer_signers.iter().zip(schemes.iter()).enumerate() {
+    for (index, signer) in peer_signers.iter().enumerate() {
         // Create peer config
-        let name = signer.public_key().to_string();
+        let name = host_name(&signer.public_key());
         let peer_config_file = format!("{name}.yaml");
         let peer_config = Config {
             private_key: hex(&signer.encode()),
-            share: hex(&scheme.share().unwrap().encode()),
-            polynomial: hex(&scheme.polynomial().encode()),
 
             port: PORT,
             metrics_port: METRICS_PORT,
@@ -895,20 +871,16 @@ fn generate_remote(
     }
 
     let indexer_config = deploy_indexer.then(|| {
-        let (participants, locations) = instance_configs
+        // Validator instances follow the sorted participant order of `allowed_peers`.
+        let participants = allowed_peers.clone();
+        let locations = instance_configs
             .iter()
-            .map(|instance| {
-                (
-                    instance.name.clone(),
-                    get_aws_location(&instance.region),
-                )
-            })
-            .unzip();
+            .map(|instance| get_aws_location(&instance.region))
+            .collect();
 
         IndexerConfig {
             port: INDEXER_PORT,
-            identity: hex(&identity.encode()),
-            certificate_mode: leader.certificate_mode(),
+            identity: identity.clone(),
             block_size,
             explorer: ExplorerConfig {
                 name: "Global Cluster".to_string(),
@@ -1013,108 +985,48 @@ fn get_aws_location(region: &str) -> Option<([f64; 2], String)> {
     }
 }
 
-fn explorer_local(dir: String, backend_url: String) {
-    // Read peers.yaml to get participant count
+/// Decodes a hex-encoded validator public key from a generated configuration.
+fn parse_public_key(public_key: &str) -> PublicKey {
+    let public_key = from_hex(public_key).expect("invalid public key");
+    PublicKey::decode(public_key).expect("invalid public key")
+}
+
+/// Returns the hex-encoded network identity of the validators configured by `config`: their
+/// encoded participant set.
+fn network_identity(config: &Config) -> String {
+    let participants = Set::from_iter_dedup(
+        config
+            .allowed_peers
+            .iter()
+            .map(|peer| parse_public_key(peer)),
+    );
+    hex(&participants.encode())
+}
+
+/// Reads a generated validator configuration.
+fn read_peer_config(path: &str) -> Config {
+    let content = fs::read_to_string(path).expect("failed to read peer config");
+    serde_yaml::from_str(&content).expect("failed to parse peer config")
+}
+
+fn explorer(dir: String, backend_url: String) {
+    // Read any validator's configuration, named by the host of its key.
     let peers_path = format!("{dir}/peers.yaml");
     let peers_content = fs::read_to_string(&peers_path).expect("failed to read peers.yaml");
     let peers: Peers = serde_yaml::from_str(&peers_content).expect("failed to parse peers.yaml");
-    let num_peers = peers.addresses.len();
-
-    // Read polynomial from first peer config
     let first_peer = peers.addresses.keys().next().expect("no peers found");
-    let peer_config_path = format!("{dir}/{first_peer}.yaml");
-    let peer_config_content =
-        fs::read_to_string(&peer_config_path).expect("failed to read peer config");
-    let peer_config: Config =
-        serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
-    let certificate_mode = peer_config.leader.certificate_mode().as_str();
-    let polynomial_hex = peer_config.polynomial;
-    let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
-    let polynomial = Sharing::<MinSig>::decode_cfg(
-        polynomial.as_ref(),
-        &(NZU32!(num_peers as u32), ModeVersion::v0()),
-    )
-    .expect("polynomial is invalid");
-    let identity = polynomial.public();
+    let peer_config = read_peer_config(&format!(
+        "{dir}/{}.yaml",
+        host_name(&parse_public_key(first_peer))
+    ));
+    let identity = network_identity(&peer_config);
 
     // Generate config.ts with empty locations (explorer will hide map)
     let config_ts = format!(
         "export const BACKEND_URL = \"{}\";\n\
         export const PUBLIC_KEY_HEX = \"{}\";\n\
-        export const CERTIFICATE_MODE = \"{}\" as const;\n\
         export const LOCATIONS: [[number, number], string][] = [];",
-        backend_url,
-        hex(&identity.encode()),
-        certificate_mode,
-    );
-
-    // Write config.ts
-    let config_ts_path = format!("{dir}/config.ts");
-    fs::write(&config_ts_path, config_ts).expect("failed to write config.ts");
-    info!(path = "config.ts", "wrote explorer configuration file");
-}
-
-fn explorer_remote(dir: String, backend_url: String) {
-    // Collect all locations
-    let config_path = format!("{dir}/config.yaml");
-    let config_content = fs::read_to_string(&config_path).expect("failed to read config.yaml");
-    let config: aws::Config =
-        serde_yaml::from_str(&config_content).expect("failed to parse config.yaml");
-    let validators = config
-        .instances
-        .iter()
-        .filter(|instance| instance.binary == BINARY_NAME)
-        .collect::<Vec<_>>();
-    let mut participants = BTreeMap::new();
-    for instance in &validators {
-        let region = &instance.region;
-        let public_key = from_hex(&instance.name).expect("invalid public key");
-        let public_key = PublicKey::decode(public_key.as_ref()).expect("invalid public key");
-        let location = match get_aws_location(region) {
-            Some((coords, city)) => format!("    [[{}, {}], \"{}\"]", coords[0], coords[1], city),
-            None => "    null".to_string(),
-        };
-        participants.insert(public_key, (format!("    \"{}\"", instance.name), location));
-    }
-
-    // Keep one location slot per participant in public-key order so missing coordinates never
-    // shift another leader's location.
-    let mut keys = Vec::new();
-    let mut locations = Vec::new();
-    for (_, (key, location)) in participants {
-        keys.push(key);
-        locations.push(location);
-    }
-
-    // Generate config.ts
-    let participants_str = keys.join(",\n");
-    let locations_str = locations.join(",\n");
-    let first_instance = validators.first().expect("no validators found");
-    let peer_config_path = format!("{}/{}", dir, first_instance.config);
-    let peer_config_content =
-        fs::read_to_string(&peer_config_path).expect("failed to read peer config");
-    let peer_config: Config =
-        serde_yaml::from_str(&peer_config_content).expect("failed to parse peer config");
-    let certificate_mode = peer_config.leader.certificate_mode().as_str();
-    let polynomial_hex = peer_config.polynomial;
-    let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
-    let polynomial = Sharing::<MinSig>::decode_cfg(
-        polynomial.as_ref(),
-        &(NZU32!(locations.len() as u32), ModeVersion::v0()),
-    )
-    .expect("polynomial is invalid");
-    let identity = polynomial.public();
-    let config_ts = format!(
-        "export const BACKEND_URL = \"{}\";\n\
-        export const PUBLIC_KEY_HEX = \"{}\";\n\
-        export const CERTIFICATE_MODE = \"{}\" as const;\n\
-        export const PARTICIPANTS: string[] = [\n{}\n];\n\
-        export const LOCATIONS: ([[number, number], string] | null)[] = [\n{}\n];",
-        backend_url,
-        hex(&identity.encode()),
-        certificate_mode,
-        participants_str,
-        locations_str
+        backend_url, identity,
     );
 
     // Write config.ts
@@ -1130,12 +1042,85 @@ mod tests {
         traces_sample_rate_arg, ConfiguredIndexer,
     };
     use alto_chain::Leader;
-    use alto_types::CertificateMode;
+    use alto_types::{decode_identity, host_name, PrivateKey, PublicKey};
     use clap::Command;
+    use commonware_codec::{DecodeExt, Encode};
+    use commonware_cryptography::Signer;
+    use commonware_formatting::{from_hex, hex};
     use commonware_utils::NZU32;
     use serde_yaml::Value;
-    use std::fs;
+    use std::{fs, path::Path};
     use uuid::Uuid;
+
+    /// Generator arguments for 5 ms stable leaders with 1000-view terms.
+    const STABLE: &[&str] = &[
+        "--leader-mode",
+        "stable",
+        "--leader-delay-ms",
+        "5",
+        "--leader-term-length",
+        "1000",
+        "--leader-optimistic-views",
+        "48",
+    ];
+
+    /// Generator arguments for unpaced rotating leaders.
+    const ROTATING: &[&str] = &["--leader-mode", "rotating", "--leader-delay-ms", "0"];
+
+    /// Leader generator arguments with the configuration they produce.
+    fn leader_modes() -> [(&'static [&'static str], Leader); 2] {
+        [
+            (STABLE, Leader::stable(5, NZU32!(1_000), 48)),
+            (ROTATING, Leader::rotating(0)),
+        ]
+    }
+
+    /// Generates a four-validator network into `output` with the given leader and deployment
+    /// target arguments.
+    fn generate(output: &Path, leader: &[&str], target: &[&str]) {
+        let mut args = vec![
+            "deploy",
+            "generate",
+            "--peers",
+            "4",
+            "--bootstrappers",
+            "1",
+            "--worker-threads",
+            "1",
+            "--log-level",
+            "info",
+            "--mailbox-size",
+            "16384",
+            "--deque-size",
+            "256",
+            "--signature-threads",
+            "1",
+            "--output",
+            output.to_str().unwrap(),
+        ];
+        args.extend(leader);
+        args.extend(target);
+        run(command().try_get_matches_from(args).unwrap());
+    }
+
+    /// Remote deployment arguments for validators in `regions`.
+    fn remote_args(regions: &str) -> Vec<&str> {
+        vec![
+            "remote",
+            "--regions",
+            regions,
+            "--monitoring-instance-type",
+            "c7gd.4xlarge",
+            "--monitoring-storage-size",
+            "100",
+            "--instance-type",
+            "c7gd.4xlarge",
+            "--storage-size",
+            "25",
+            "--dashboard",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/dashboard.json"),
+        ]
+    }
 
     #[test]
     fn traces_sample_rate_accepts_only_fractions() {
@@ -1166,8 +1151,6 @@ mod tests {
     fn validator_config_defaults_optional_settings() {
         let yaml = r#"
 private_key: key
-share: share
-polynomial: polynomial
 port: 1
 metrics_port: 2
 directory: data
@@ -1181,7 +1164,7 @@ deque_size: 1
 signature_threads: 1
 "#;
 
-        // The leader policy selects the certificate construction, so it is never defaulted.
+        // The leader settings are never defaulted.
         assert!(serde_yaml::from_str::<alto_chain::Config>(yaml).is_err());
         let yaml = &format!(
             "{yaml}\nleader:\n  mode: stable\n  delay_ms: 10\n  term_length: 1000\n  optimistic_views: 48\n"
@@ -1206,10 +1189,10 @@ signature_threads: 1
 
     #[test]
     fn parse_rotating_leader() {
-        let result = Command::new("test")
+        assert!(Command::new("test")
             .args(leader_args())
-            .try_get_matches_from(["test", "--leader-mode", "rotating"]);
-        assert!(result.is_err());
+            .try_get_matches_from(["test", "--leader-mode", "rotating"])
+            .is_err());
 
         for delay_ms in [0, 7] {
             let matches = Command::new("test")
@@ -1227,29 +1210,44 @@ signature_threads: 1
     }
 
     #[test]
+    fn rotating_leader_rejects_stable_settings() {
+        for extra in [
+            ["--leader-term-length", "1000"],
+            ["--leader-optimistic-views", "48"],
+        ] {
+            let mut args = vec![
+                "test",
+                "--leader-mode",
+                "rotating",
+                "--leader-delay-ms",
+                "0",
+            ];
+            args.extend(extra);
+            let matches = Command::new("test")
+                .args(leader_args())
+                .try_get_matches_from(args)
+                .unwrap();
+            assert!(parse_leader(&matches).is_err());
+        }
+    }
+
+    #[test]
     fn leader_delay_must_stay_below_leader_timeout() {
-        for delay in ["1000", "5000"] {
-            assert!(Command::new("test")
+        let parse = |delay: &str| {
+            Command::new("test")
                 .args(leader_args())
                 .try_get_matches_from([
                     "test",
                     "--leader-mode",
                     "rotating",
                     "--leader-delay-ms",
-                    delay
+                    delay,
                 ])
-                .is_err());
+        };
+        for delay in ["1000", "5000"] {
+            assert!(parse(delay).is_err());
         }
-        assert!(Command::new("test")
-            .args(leader_args())
-            .try_get_matches_from([
-                "test",
-                "--leader-mode",
-                "rotating",
-                "--leader-delay-ms",
-                "999"
-            ])
-            .is_ok());
+        assert!(parse("999").is_ok());
     }
 
     #[test]
@@ -1264,14 +1262,6 @@ signature_threads: 1
         );
         assert!(super::parse_backend_url("http://localhost:8080").is_err());
         assert!(super::parse_backend_url("").is_err());
-    }
-
-    #[test]
-    fn indexer_config_and_explorer_spell_certificate_mode_alike() {
-        // indexer.yaml serializes the mode with serde while config.ts is written with `as_str`.
-        for mode in CertificateMode::ALL {
-            assert_eq!(serde_yaml::to_string(&mode).unwrap().trim(), mode.as_str());
-        }
     }
 
     #[test]
@@ -1297,15 +1287,51 @@ signature_threads: 1
     }
 
     #[test]
-    fn stable_leader_requires_all_settings() {
-        let result = Command::new("test")
-            .args(leader_args())
-            .try_get_matches_from(["test", "--leader-mode", "stable"]);
-        assert!(result.is_err());
+    fn generation_names_hosts_by_key_digest() {
+        use commonware_deployer::aws;
 
-        let result = Command::new("test")
-            .args(leader_args())
-            .try_get_matches_from([
+        for (flags, leader) in leader_modes() {
+            let output = std::env::temp_dir().join(format!("alto-deploy-hosts-{}", Uuid::new_v4()));
+            generate(&output, flags, &remote_args("us-east-1,eu-west-1"));
+
+            let deployment: aws::Config =
+                serde_yaml::from_str(&fs::read_to_string(output.join("config.yaml")).unwrap())
+                    .unwrap();
+            assert_eq!(deployment.instances.len(), 4);
+            assert!(!output.join("indexer.yaml").exists());
+            for instance in &deployment.instances {
+                // Hosts and their configuration files are named by a short digest of the key.
+                assert_eq!(instance.name.len(), 32);
+                assert_eq!(instance.config, format!("{}.yaml", instance.name));
+                let raw = fs::read_to_string(output.join(&instance.config)).unwrap();
+                let config: alto_chain::Config = serde_yaml::from_str(&raw).unwrap();
+                let signer = PrivateKey::decode(from_hex(&config.private_key).unwrap()).unwrap();
+                assert_eq!(instance.name, host_name(&signer.public_key()));
+                assert_eq!(config.leader, leader);
+
+                // Peer lists keep full keys, and every peer resolves to a deployed host.
+                assert!(config
+                    .allowed_peers
+                    .contains(&signer.public_key().to_string()));
+                for peer in &config.allowed_peers {
+                    let key = PublicKey::decode(from_hex(peer).unwrap()).unwrap();
+                    assert!(deployment
+                        .instances
+                        .iter()
+                        .any(|instance| instance.name == host_name(&key)));
+                }
+            }
+            fs::remove_dir_all(output).unwrap();
+        }
+    }
+
+    #[test]
+    fn stable_leader_requires_all_settings() {
+        for args in [
+            &["test"][..],
+            &["test", "--leader-delay-ms", "10"][..],
+            &["test", "--leader-mode", "stable", "--leader-delay-ms", "10"][..],
+            &[
                 "test",
                 "--leader-mode",
                 "stable",
@@ -1313,12 +1339,26 @@ signature_threads: 1
                 "10",
                 "--leader-term-length",
                 "1000",
-            ]);
-        assert!(result.is_err());
-
-        let result = Command::new("test")
-            .args(leader_args())
-            .try_get_matches_from([
+            ],
+            &[
+                "test",
+                "--leader-mode",
+                "stable",
+                "--leader-delay-ms",
+                "10",
+                "--leader-optimistic-views",
+                "48",
+            ],
+            &[
+                "test",
+                "--leader-mode",
+                "stable",
+                "--leader-term-length",
+                "1000",
+                "--leader-optimistic-views",
+                "48",
+            ],
+            &[
                 "test",
                 "--leader-mode",
                 "stable",
@@ -1328,39 +1368,13 @@ signature_threads: 1
                 "1",
                 "--leader-optimistic-views",
                 "48",
-            ]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn rotating_leader_rejects_term_length() {
-        let matches = Command::new("test")
-            .args(leader_args())
-            .try_get_matches_from([
-                "test",
-                "--leader-mode",
-                "rotating",
-                "--leader-delay-ms",
-                "10",
-                "--leader-term-length",
-                "1000",
-            ])
-            .unwrap();
-        assert!(parse_leader(&matches).is_err());
-
-        let matches = Command::new("test")
-            .args(leader_args())
-            .try_get_matches_from([
-                "test",
-                "--leader-mode",
-                "rotating",
-                "--leader-delay-ms",
-                "10",
-                "--leader-optimistic-views",
-                "48",
-            ])
-            .unwrap();
-        assert!(parse_leader(&matches).is_err());
+            ],
+        ] {
+            assert!(Command::new("test")
+                .args(leader_args())
+                .try_get_matches_from(args)
+                .is_err());
+        }
     }
 
     #[test]
@@ -1374,10 +1388,23 @@ signature_threads: 1
             let encoded = serde_yaml::to_string(&leader).unwrap();
             assert_eq!(serde_yaml::from_str::<Leader>(&encoded).unwrap(), leader);
         }
+        assert_eq!(
+            serde_yaml::to_string(&Leader::rotating(0)).unwrap(),
+            "mode: rotating\ndelay_ms: 0\n"
+        );
+        assert_eq!(
+            serde_yaml::to_string(&Leader::stable(5, NZU32!(100_000), 48)).unwrap(),
+            "mode: stable\ndelay_ms: 5\nterm_length: 100000\noptimistic_views: 48\n"
+        );
     }
 
     #[test]
     fn leader_config_rejects_invalid_fields() {
+        // The mode is never defaulted.
+        assert!(serde_yaml::from_str::<Leader>(
+            "delay_ms: 10\nterm_length: 1000\noptimistic_views: 48\n"
+        )
+        .is_err());
         assert!(
             serde_yaml::from_str::<Leader>("mode: stable\ndelay_ms: 10\nterm_length: 1000\n")
                 .is_err()
@@ -1391,6 +1418,7 @@ signature_threads: 1
             "mode: rotating\ndelay_ms: 10\nterm_length: 1000\n"
         )
         .is_err());
+        assert!(serde_yaml::from_str::<Leader>("mode: vrf\ndelay_ms: 10\n").is_err());
     }
 
     #[test]
@@ -1440,121 +1468,143 @@ signature_threads: 1
 
     #[test]
     fn indexer_generation_preserves_unmapped_participants() {
-        for (mode, certificate_mode, delay_ms) in
-            [("stable", "standard", "5"), ("rotating", "vrf", "0")]
-        {
-            let output =
-                std::env::temp_dir().join(format!("alto-deploy-region-{}", Uuid::new_v4()));
-            let mut args = vec![
-                "deploy",
-                "generate",
-                "--peers",
-                "4",
-                "--bootstrappers",
-                "1",
-                "--worker-threads",
-                "1",
-                "--log-level",
-                "info",
-                "--mailbox-size",
-                "16384",
-                "--deque-size",
-                "256",
-                "--signature-threads",
-                "1",
-                "--leader-mode",
-                mode,
-                "--leader-delay-ms",
-                delay_ms,
-            ];
-            if mode == "stable" {
-                args.extend([
-                    "--leader-term-length",
-                    "1000",
-                    "--leader-optimistic-views",
-                    "48",
-                ]);
-            }
-            args.extend([
-                "--output",
-                output.to_str().unwrap(),
-                "remote",
-                "--regions",
-                "us-east-1,eu-west-2,us-west-1",
-                "--monitoring-instance-type",
-                "c7gd.4xlarge",
-                "--monitoring-storage-size",
-                "100",
-                "--instance-type",
-                "c7gd.4xlarge",
-                "--storage-size",
-                "25",
-                "--dashboard",
-                concat!(env!("CARGO_MANIFEST_DIR"), "/dashboard.json"),
-                "--indexer",
-            ]);
-            run(command().try_get_matches_from(args).unwrap());
+        let output = std::env::temp_dir().join(format!("alto-deploy-region-{}", Uuid::new_v4()));
+        let mut target = remote_args("us-east-1,eu-west-2,us-west-1");
+        target.push("--indexer");
+        generate(&output, STABLE, &target);
 
-            let deployment: Value =
-                serde_yaml::from_str(&fs::read_to_string(output.join("config.yaml")).unwrap())
-                    .unwrap();
-            let indexer: Value =
-                serde_yaml::from_str(&fs::read_to_string(output.join("indexer.yaml")).unwrap())
-                    .unwrap();
-            let validators = deployment["instances"]
-                .as_sequence()
-                .unwrap()
-                .iter()
-                .filter(|instance| instance["binary"] == "validator")
-                .collect::<Vec<_>>();
-            let participants = indexer["explorer"]["participants"].as_sequence().unwrap();
-            let locations = indexer["explorer"]["locations"].as_sequence().unwrap();
-            assert_eq!(validators.len(), 4);
-            assert_eq!(participants.len(), 4);
-            assert_eq!(locations.len(), 4);
-            assert_eq!(indexer["certificate_mode"], certificate_mode);
-            for (participant, validator) in participants.iter().zip(&validators) {
-                assert_eq!(participant, &validator["name"]);
-                let config: alto_chain::Config = serde_yaml::from_str(
-                    &fs::read_to_string(output.join(validator["config"].as_str().unwrap()))
-                        .unwrap(),
-                )
+        let deployment: Value =
+            serde_yaml::from_str(&fs::read_to_string(output.join("config.yaml")).unwrap()).unwrap();
+        let indexer: Value =
+            serde_yaml::from_str(&fs::read_to_string(output.join("indexer.yaml")).unwrap())
                 .unwrap();
-                let leader = match mode {
-                    "stable" => Leader::stable(5, NZU32!(1_000), 48),
-                    "rotating" => Leader::rotating(0),
-                    _ => unreachable!(),
-                };
-                assert_eq!(config.leader, leader);
-            }
-
-            // Missing coordinates keep their slot between known participants.
-            assert_eq!(locations[0][1], "Ashburn");
-            assert!(locations[1].is_null());
-            assert_eq!(locations[2][1], "San Francisco");
-            assert_eq!(locations[3][1], "Ashburn");
-
-            run(command()
-                .try_get_matches_from([
-                    "deploy",
-                    "explorer",
-                    "--dir",
-                    output.to_str().unwrap(),
-                    "--backend-url",
-                    "localhost:8080",
-                    "remote",
-                ])
-                .unwrap());
-            let config = fs::read_to_string(output.join("config.ts")).unwrap();
-            for (name, field) in [("PARTICIPANTS", "participants"), ("LOCATIONS", "locations")] {
-                let (_, declaration) = config.split_once(&format!("export const {name}:")).unwrap();
-                let (_, value) = declaration.split_once(" = ").unwrap();
-                let exported: Value =
-                    serde_yaml::from_str(value.split(';').next().unwrap()).unwrap();
-                assert_eq!(exported, indexer["explorer"][field]);
-            }
-            fs::remove_dir_all(output).unwrap();
+        let validators = deployment["instances"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .filter(|instance| instance["binary"] == "validator")
+            .collect::<Vec<_>>();
+        let keys = indexer
+            .as_mapping()
+            .unwrap()
+            .keys()
+            .map(|key| key.as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(keys, ["port", "identity", "block_size", "explorer"]);
+        let participants = indexer["explorer"]["participants"].as_sequence().unwrap();
+        let locations = indexer["explorer"]["locations"].as_sequence().unwrap();
+        assert_eq!(validators.len(), 4);
+        assert_eq!(participants.len(), 4);
+        assert_eq!(locations.len(), 4);
+        for (participant, validator) in participants.iter().zip(&validators) {
+            // Participants are full keys in validator order, and each names its host.
+            let config: alto_chain::Config = serde_yaml::from_str(
+                &fs::read_to_string(output.join(validator["config"].as_str().unwrap())).unwrap(),
+            )
+            .unwrap();
+            let public_key = PrivateKey::decode(from_hex(&config.private_key).unwrap())
+                .unwrap()
+                .public_key();
+            assert_eq!(participant.as_str().unwrap(), public_key.to_string());
+            assert_eq!(validator["name"].as_str().unwrap(), host_name(&public_key));
+            assert_eq!(participants.len(), config.allowed_peers.len());
+            assert_eq!(config.leader, Leader::stable(5, NZU32!(1_000), 48));
         }
+
+        // The identity is the encoded participant set.
+        let identity =
+            decode_identity(from_hex(indexer["identity"].as_str().unwrap()).unwrap()).unwrap();
+        let keys = identity
+            .iter()
+            .map(|key| key.to_string())
+            .collect::<Vec<_>>();
+        let participant_keys = participants
+            .iter()
+            .map(|participant| participant.as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(keys, participant_keys);
+        assert_eq!(
+            hex(&identity.encode()),
+            indexer["identity"].as_str().unwrap()
+        );
+
+        // Missing coordinates keep their slot between known participants.
+        assert_eq!(locations[0][1], "Ashburn");
+        assert!(locations[1].is_null());
+        assert_eq!(locations[2][1], "San Francisco");
+        assert_eq!(locations[3][1], "Ashburn");
+
+        fs::remove_dir_all(output).unwrap();
+    }
+
+    #[test]
+    fn local_generation_configures_indexers_and_explorer_identity() {
+        let output = std::env::temp_dir().join(format!("alto-deploy-local-{}", Uuid::new_v4()));
+        generate(
+            &output,
+            ROTATING,
+            &[
+                "local",
+                "--start-port",
+                "3000",
+                "--indexers",
+                "http://localhost:8080:1",
+            ],
+        );
+
+        // Exactly one validator uploads to the indexer.
+        let configs = fs::read_dir(&output)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.file_name().unwrap() != "peers.yaml")
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "yaml")
+            })
+            .map(|path| {
+                serde_yaml::from_str::<alto_chain::Config>(&fs::read_to_string(path).unwrap())
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(configs.len(), 4);
+        assert!(configs
+            .iter()
+            .all(|config| config.leader == Leader::rotating(0)));
+        assert_eq!(
+            configs
+                .iter()
+                .filter(|config| config.indexer.as_deref() == Some("http://localhost:8080"))
+                .count(),
+            1
+        );
+
+        run(command()
+            .try_get_matches_from([
+                "deploy",
+                "explorer",
+                "--dir",
+                output.to_str().unwrap(),
+                "--backend-url",
+                "localhost:8080",
+            ])
+            .unwrap());
+        let config = fs::read_to_string(output.join("config.ts")).unwrap();
+        let (_, value) = config
+            .split_once("export const PUBLIC_KEY_HEX = \"")
+            .unwrap();
+        let encoded = value.split('"').next().unwrap();
+        let identity = decode_identity(from_hex(encoded).unwrap()).unwrap();
+        assert_eq!(hex(&identity.encode()), encoded);
+
+        // The identity is the sorted participant set.
+        assert_eq!(
+            identity
+                .iter()
+                .map(|key| key.to_string())
+                .collect::<Vec<_>>(),
+            configs[0].allowed_peers
+        );
+        fs::remove_dir_all(output).unwrap();
     }
 
     #[cfg(unix)]
@@ -1562,56 +1612,64 @@ signature_threads: 1
     fn scripted_deployment_uses_mode_settings_and_current_frontend() {
         use std::{os::unix::fs::PermissionsExt, process::Command};
 
-        for (mode, delay_ms) in [("stable", 5), ("rotating", 0)] {
-            let tag = format!("alto-build-test-{}", Uuid::new_v4());
-            let output = std::env::temp_dir().join(&tag);
-            for directory in ["bin", "deploy", "explorer/build"] {
-                fs::create_dir_all(output.join(directory)).unwrap();
-            }
-            fs::write(output.join("deploy.sh"), include_str!("../../deploy.sh")).unwrap();
-            fs::write(output.join("deploy/dashboard.json"), "{}").unwrap();
-            fs::write(output.join("explorer/build/index.html"), "old frontend").unwrap();
+        let tag = format!("alto-build-test-{}", Uuid::new_v4());
+        let output = std::env::temp_dir().join(&tag);
+        for directory in ["bin", "deploy", "explorer/build"] {
+            fs::create_dir_all(output.join(directory)).unwrap();
+        }
+        fs::write(output.join("deploy.sh"), include_str!("../../deploy.sh")).unwrap();
+        fs::write(output.join("deploy/dashboard.json"), "{}").unwrap();
+        fs::write(output.join("explorer/build/index.html"), "old frontend").unwrap();
 
-            // Run the real script with isolated tools that expose its producer/consumer handoff.
-            let stub = r#"#!/bin/sh
+        // Run the real script with isolated tools that expose its producer/consumer handoff.
+        let stub = r#"#!/bin/sh
 set -eu
 case "${0##*/}" in
     uname) echo Linux ;;
     cargo)
         mkdir -p assets
         printf 'tag: %s\n' "$ALTO_BUILD_TEST_TAG" > assets/config.yaml
-        while [ "$1" != -- ]; do shift; done
+        cargo_args=
+        while [ "$1" != -- ]; do
+            case "$1" in run|--locked|--bin|deploy) ;; *) cargo_args="$cargo_args $1" ;; esac
+            shift
+        done
+        printf '%s\n' "$cargo_args" > assets/cargo-args
         shift
         printf '%s\n' deploy "$@" > assets/generator-args
         ;;
     npm)
-        if [ "$3" = run ] && [ "$4" = build ]; then
+        if [ "$3" = run ]; then
+            printf '%s\n' "$4" > explorer/npm-script
             mkdir -p "explorer/${BUILD_PATH:-build}"
             frontend_base="${PUBLIC_URL:-}"
             printf '<script src="%s/runtime-config.js"></script>current frontend' "${frontend_base%/}" > "explorer/${BUILD_PATH:-build}/index.html"
         fi
         ;;
-    just) cp explorer/build/index.html assets/embedded.html ;;
+    just)
+        printf '%s\n' "$1" > assets/just-recipe
+        cp explorer/build/index.html assets/embedded.html
+        ;;
     *) ;;
 esac
 "#;
-            for tool in [
-                "cargo",
-                "just",
-                "docker",
-                "deployer",
-                "npm",
-                "wasm-pack",
-                "uname",
-            ] {
-                let path = output.join("bin").join(tool);
-                fs::write(&path, stub).unwrap();
-                fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
-            }
-
-            let result = Command::new("bash")
+        for tool in [
+            "cargo",
+            "just",
+            "docker",
+            "deployer",
+            "npm",
+            "wasm-pack",
+            "uname",
+        ] {
+            let path = output.join("bin").join(tool);
+            fs::write(&path, stub).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let script = |args: &[&str]| {
+            Command::new("bash")
                 .arg(output.join("deploy.sh"))
-                .arg(mode)
+                .args(args)
                 .env(
                     "PATH",
                     format!("{}:/usr/bin:/bin", output.join("bin").display()),
@@ -1620,7 +1678,21 @@ esac
                 .env("PUBLIC_URL", "/alternate")
                 .env("ALTO_BUILD_TEST_TAG", &tag)
                 .output()
-                .unwrap();
+                .unwrap()
+        };
+
+        // The script requires exactly one known leader mode.
+        for args in [&[][..], &["vrf"], &["stable", "rotating"]] {
+            assert!(!script(args).status.success());
+            assert!(!output.join("assets").exists());
+        }
+
+        for (mode, leader) in [
+            ("stable", Leader::stable(5, NZU32!(100_000), 48)),
+            ("rotating", Leader::rotating(0)),
+        ] {
+            fs::write(output.join("explorer/build/index.html"), "old frontend").unwrap();
+            let result = script(&[mode]);
             assert!(
                 result.status.success(),
                 "{}",
@@ -1629,19 +1701,31 @@ esac
             let args = fs::read_to_string(output.join("assets/generator-args")).unwrap();
             let matches = command().try_get_matches_from(args.lines()).unwrap();
             let generate = matches.subcommand_matches("generate").unwrap();
-            assert_eq!(generate.get_one::<String>("leader_mode").unwrap(), mode);
+            assert_eq!(super::parse_leader(generate).unwrap(), leader);
+            let remote = generate.subcommand_matches("remote").unwrap();
+            assert!(remote.get_flag("indexer"));
             assert_eq!(
-                *generate.get_one::<u64>("leader_delay_ms").unwrap(),
-                delay_ms
+                fs::read_to_string(output.join("assets/cargo-args")).unwrap(),
+                "\n"
+            );
+            assert_eq!(
+                fs::read_to_string(output.join("assets/just-recipe")).unwrap(),
+                "graviton-binaries\n"
+            );
+            assert_eq!(
+                fs::read_to_string(output.join("explorer/npm-script")).unwrap(),
+                "build\n"
             );
 
+            // The binaries embed the freshly built frontend.
             let embedded = fs::read_to_string(output.join("assets/embedded.html")).unwrap();
             assert!(embedded.ends_with("current frontend"), "{embedded}");
             assert!(
                 embedded.contains(r#"src="/runtime-config.js""#),
                 "{embedded}"
             );
-            fs::remove_dir_all(output).unwrap();
+            fs::remove_dir_all(output.join("assets")).unwrap();
         }
+        fs::remove_dir_all(output).unwrap();
     }
 }

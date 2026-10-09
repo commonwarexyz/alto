@@ -3,7 +3,7 @@ import './SearchModal.css';
 import { ClusterConfig, getHttpBackendUrl } from './config';
 import { BlockJs, SearchType, SearchResult } from './types';
 import { hexToUint8Array, hexUint8Array, formatAge } from './utils';
-import init, { parse_seed, parse_notarized, parse_finalized, parse_block } from "./alto_types/alto_types.js";
+import init, { parse_notarized, parse_finalized, parse_block } from "./alto_types/alto_types.js";
 
 interface SearchModalProps {
     isOpen: boolean;
@@ -25,13 +25,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
     const [lastSearchType, setLastSearchType] = useState<SearchType | null>(null);
     const [showHelp, setShowHelp] = useState<boolean>(false);
     const [wasmInitialized, setWasmInitialized] = useState<boolean>(false);
-    const standardCertificates = clusterConfig.CERTIFICATE_MODE === 'standard';
-
-    useEffect(() => {
-        if (standardCertificates && searchType === 'seed') {
-            setSearchType('finalization');
-        }
-    }, [searchType, standardCertificates]);
 
     useEffect(() => {
         const initWasm = async () => {
@@ -163,18 +156,15 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
         let result: SearchResult | null;
         try {
             switch (searchType) {
-                case 'seed':
-                    result = parse_seed(PUBLIC_KEY, data);
-                    break;
                 case 'notarization':
-                    result = parse_notarized(PUBLIC_KEY, data, standardCertificates);
+                    result = parse_notarized(PUBLIC_KEY, data);
                     break;
                 case 'finalization':
-                    result = parse_finalized(PUBLIC_KEY, data, standardCertificates);
+                    result = parse_finalized(PUBLIC_KEY, data);
                     break;
                 case 'block':
                     if (query === 'latest' || typeof query === 'number') {
-                        result = parse_finalized(PUBLIC_KEY, data, standardCertificates);
+                        result = parse_finalized(PUBLIC_KEY, data);
                     } else {
                         const block: BlockJs | null = parse_block(data);
                         if (block && hexUint8Array(block.digest, 64) !== query) {
@@ -217,9 +207,11 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
                 timestamp: `${new Date(Number(block.timestamp)).toLocaleString()} (${formatAge(age)})`,
                 view: result.view,
                 digest: hexUint8Array(block.digest, 64),
-                signature: hexUint8Array(result.signature, 64),
+                // FN-DSA certificates hold one signature per signer, so the parser reports a
+                // digest of the encoded certificate instead.
+                certificate: hexUint8Array(result.signature, 64),
             };
-        } else if ('height' in result) {
+        } else {
             resultType = 'Block';
             const block = result;
             const now = Date.now();
@@ -230,12 +222,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
                 parent: hexUint8Array(block.parent, 64),
                 timestamp: `${new Date(Number(block.timestamp)).toLocaleString()} (${formatAge(age)})`,
             };
-        } else {
-            resultType = 'Seed';
-            formattedResult = {
-                view: result.view,
-                signature: hexUint8Array(result.signature, 64)
-            };
         }
 
         const getValueClass = (key: string) => {
@@ -244,7 +230,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
             if (key === 'view') return `${baseClass} view`;
             if (key === 'digest') return `${baseClass} digest`;
             if (key === 'timestamp') return `${baseClass} timestamp`;
-            if (key === 'signature') return `${baseClass} signature`;
+            if (key === 'certificate') return `${baseClass} signature`;
             if (key === 'parent') return `${baseClass} digest`;
             return baseClass;
         };
@@ -299,7 +285,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
                             <li><strong>Block</strong>: by height (number), digest (hex), or "latest"</li>
                             <li><strong>Notarization</strong>: by view number or "latest"</li>
                             <li><strong>Finalization</strong>: by view number or "latest"</li>
-                            {!standardCertificates && <li><strong>Seed</strong>: by view number or "latest"</li>}
                         </ul>
                         <p>You can also search for ranges (e.g., "10..20") to get multiple results.</p>
                     </div>
@@ -314,7 +299,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
                                     value={searchType}
                                     onChange={(e) => setSearchType(e.target.value as SearchType)}
                                 >
-                                    {!standardCertificates && <option value="seed">Seed</option>}
                                     <option value="notarization">Notarization</option>
                                     <option value="finalization">Finalization</option>
                                     <option value="block">Block</option>

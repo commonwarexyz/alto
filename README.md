@@ -19,6 +19,27 @@ _Components are designed for deployment in adversarial environments. If you find
 * [types](./types/README.md): Common types used throughout `alto`.
 * [validator](./validator/README.md): Run a validator node for `alto`.
 
+## Post-Quantum Proof of Concept
+
+This branch is a proof of concept that runs `alto` on post-quantum cryptography:
+
+* Validator identities, peer handshake signatures, and consensus certificates use FN-DSA-512
+  (Falcon-512). Each validator signs consensus messages with its identity key, and a certificate
+  carries one signature from each member of a quorum.
+* Peer handshakes use ML-KEM-768 (FIPS 203) for the ephemeral key exchange, and records are
+  encrypted with ChaCha20-Poly1305.
+* Leaders are either rotating (a new round-robin leader every view; there is no threshold VRF) or
+  stable (one round-robin leader per term, with pipelined optimistic views).
+* The network identity is the ordered participant set. The indexer, follower, inspector, and
+  explorer verify every certificate signature against it.
+* An encoded FN-DSA-512 public key is 897 bytes, so deployment host names are derived from the
+  SHA-256 digest of the key.
+
+FN-DSA is implemented against the pre-draft standard (FIPS 206 is unpublished), so its key and
+signature encodings may change. This branch is for experiments only.
+
+See [deploy](./deploy/README.md) for local and remote deployments.
+
 ## Licensing
 
 This repository is dual-licensed under both the [Apache 2.0](./LICENSE-APACHE) and [MIT](./LICENSE-MIT) licenses. You may choose either license when employing this code.

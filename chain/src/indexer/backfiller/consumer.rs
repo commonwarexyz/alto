@@ -1,4 +1,4 @@
-use super::{Decision, Entry, SharedState};
+use super::{Decision, Entry, Producer, SharedState};
 use crate::indexer::Client;
 use alto_types::{Block, Scheme};
 use commonware_consensus::marshal::{
@@ -13,7 +13,7 @@ use commonware_runtime::{
 };
 use commonware_storage::queue;
 use commonware_utils::futures::{OptionFuture, Pool};
-use std::{num::NonZeroUsize, time::Duration};
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 use tracing::{debug, warn};
 
 /// Final outcome for one backfill queue entry.
@@ -40,7 +40,7 @@ pub struct Consumer<
     marshal: MarshalMailbox<CS, Standard<Block>>,
     upload_results: status::Counter,
     uploads: SharedState,
-    writer: queue::Writer<E, Entry>,
+    producer: Producer,
     reader: queue::Reader<E, Entry>,
     active: Pool<'static, Completion>,
     max_active: NonZeroUsize,
@@ -58,7 +58,7 @@ where
         client: C,
         marshal: MarshalMailbox<CS, Standard<Block>>,
         uploads: SharedState,
-        backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
+        backfiller: (Producer, queue::Reader<E, Entry>),
         max_active: NonZeroUsize,
         retry: Duration,
     ) -> Self {
@@ -66,14 +66,14 @@ where
             "uploads",
             "Total number of finalized block upload attempt outcomes by status",
         );
-        let (writer, reader) = backfiller;
+        let (producer, reader) = backfiller;
         Self {
             context: ContextCell::new(context),
             client,
             marshal,
             upload_results,
             uploads,
-            writer,
+            producer,
             reader,
             active: Pool::default(),
             max_active,
@@ -248,6 +248,7 @@ where
                 NextBlock::Ready(block) => return Some(*block),
                 NextBlock::FetchFromMarshal => {
                     if let Some(block) = marshal.get_block(Identifier::Digest(digest)).await {
+                        let block = Arc::unwrap_or_clone(block);
                         uploads.lock().cache_block(block.clone());
                         return Some(block);
                     }
@@ -276,20 +277,11 @@ where
             Completion::Skipped { position, height } => (position, height),
         };
 
-        // Acknowledge the queue entry and advance the queue floor if needed.
-        let floor = self
-            .reader
-            .ack_floor()
-            .await
-            .expect("failed to read ack floor");
-        self.reader.ack(position).await.expect("failed to ack");
-        let floor_advanced = self
-            .reader
-            .ack_floor()
-            .await
-            .expect("failed to read ack floor")
-            > floor;
-        self.writer.sync().await.expect("failed to sync after ack");
+        // Sync the reader's acknowledgements before advancing the shared height watermark.
+        let floor = self.reader.ack_floor();
+        self.reader.ack(position).expect("failed to ack");
+        let floor_advanced = self.reader.ack_floor() > floor;
+        self.producer.sync().await;
         if floor_advanced {
             self.uploads.lock().advance_queue_floor(height);
         }

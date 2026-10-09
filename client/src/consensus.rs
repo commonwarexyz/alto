@@ -1,6 +1,6 @@
 use crate::{Client, Error, IndexQuery, Query};
-use alto_types::{Block, Finalized, Kind, Notarized, Scheme, Seed};
-use commonware_codec::{Decode, DecodeExt, Encode};
+use alto_types::{Block, Finalized, Kind, Notarized, Scheme};
+use commonware_codec::{Decode, Encode};
 use commonware_consensus::Viewable;
 use commonware_cryptography::Digestible;
 use commonware_parallel::Strategy;
@@ -9,14 +9,6 @@ use tokio_tungstenite::{
     connect_async_tls_with_config,
     tungstenite::{protocol::WebSocketConfig, Message as TMessage},
 };
-
-fn seed_upload_path(base: String) -> String {
-    format!("{base}/seed")
-}
-
-fn seed_get_path(base: String, query: &IndexQuery) -> String {
-    format!("{base}/seed/{}", query.serialize())
-}
 
 fn notarization_upload_path(base: String) -> String {
     format!("{base}/notarization")
@@ -52,55 +44,11 @@ pub enum Payload<C: Scheme> {
 }
 
 pub enum Message<C: Scheme> {
-    Seed(Seed),
     Notarization(Notarized<C>),
     Finalization(Finalized<C>),
 }
 
 impl<S: Strategy, C: Scheme> Client<S, C> {
-    pub async fn seed_upload(&self, seed: Seed) -> Result<(), Error> {
-        let result = self
-            .http_client
-            .post(seed_upload_path(self.uri.clone()))
-            .body(seed.encode().to_vec())
-            .send()
-            .await
-            .map_err(Error::Reqwest)?;
-        if !result.status().is_success() {
-            return Err(Error::Failed(result.status()));
-        }
-        Ok(())
-    }
-
-    pub async fn seed_get(&self, query: IndexQuery) -> Result<Seed, Error> {
-        // Get the seed
-        let result = self
-            .http_client
-            .get(seed_get_path(self.uri.clone(), &query))
-            .send()
-            .await
-            .map_err(Error::Reqwest)?;
-        if !result.status().is_success() {
-            return Err(Error::Failed(result.status()));
-        }
-        let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let seed = Seed::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
-        if self.verify && !self.verifier.verify_seed(&seed) {
-            return Err(Error::InvalidSignature);
-        }
-
-        // Verify the seed matches the query
-        match query {
-            IndexQuery::Latest => {}
-            IndexQuery::Index(index) => {
-                if seed.view().get() != index {
-                    return Err(Error::UnexpectedResponse);
-                }
-            }
-        }
-        Ok(seed)
-    }
-
     pub async fn notarized_upload(&self, notarized: Notarized<C>) -> Result<(), Error> {
         let result = self
             .http_client
@@ -127,9 +75,8 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
             return Err(Error::Failed(result.status()));
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let notarized =
-            Notarized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
-                .map_err(Error::InvalidData)?;
+        let notarized = Notarized::<C>::decode_cfg(bytes, &Block::unbounded_codec_config())
+            .map_err(Error::InvalidData)?;
         if self.verify && !notarized.verify(&self.verifier, &self.strategy) {
             return Err(Error::InvalidSignature);
         }
@@ -172,9 +119,8 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
             return Err(Error::Failed(result.status()));
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let finalized =
-            Finalized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
-                .map_err(Error::InvalidData)?;
+        let finalized = Finalized::<C>::decode_cfg(bytes, &Block::unbounded_codec_config())
+            .map_err(Error::InvalidData)?;
         if self.verify && !finalized.verify(&self.verifier, &self.strategy) {
             return Err(Error::InvalidSignature);
         }
@@ -222,18 +168,16 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
         // Verify the block matches the query
         let result = match query {
             Query::Latest => {
-                let result =
-                    Finalized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
-                        .map_err(Error::InvalidData)?;
+                let result = Finalized::<C>::decode_cfg(bytes, &Block::unbounded_codec_config())
+                    .map_err(Error::InvalidData)?;
                 if self.verify && !result.verify(&self.verifier, &self.strategy) {
                     return Err(Error::InvalidSignature);
                 }
                 Payload::Finalized(Box::new(result))
             }
             Query::Index(index) => {
-                let result =
-                    Finalized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
-                        .map_err(Error::InvalidData)?;
+                let result = Finalized::<C>::decode_cfg(bytes, &Block::unbounded_codec_config())
+                    .map_err(Error::InvalidData)?;
                 if self.verify && !result.verify(&self.verifier, &self.strategy) {
                     return Err(Error::InvalidSignature);
                 }
@@ -243,7 +187,7 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
                 Payload::Finalized(Box::new(result))
             }
             Query::Digest(digest) => {
-                let result = Block::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
+                let result = Block::decode_cfg(bytes, &Block::unbounded_codec_config())
                     .map_err(Error::InvalidData)?;
                 if result.digest() != digest {
                     return Err(Error::UnexpectedResponse);
@@ -288,27 +232,10 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
                                 let _ = sender.unbounded_send(Err(Error::UnexpectedResponse));
                                 return;
                             };
-                            let data = &data[1..];
+                            let data = data.slice(1..);
 
                             // Deserialize the message
                             match kind {
-                                Kind::Seed => {
-                                    let result = Seed::decode(data);
-                                    match result {
-                                        Ok(seed) => {
-                                            if verify && !verifier.verify_seed(&seed) {
-                                                let _ = sender
-                                                    .unbounded_send(Err(Error::InvalidSignature));
-                                                return;
-                                            }
-                                            let _ = sender.unbounded_send(Ok(Message::Seed(seed)));
-                                        }
-                                        Err(e) => {
-                                            let _ =
-                                                sender.unbounded_send(Err(Error::InvalidData(e)));
-                                        }
-                                    }
-                                }
                                 Kind::Notarization => {
                                     let result = Notarized::<C>::decode_cfg(
                                         data,
