@@ -18,7 +18,7 @@ pub const DEFAULT_BACKFILLER_MAX_ACTIVE: NonZeroUsize = NZUsize!(16);
 pub const DEFAULT_BACKFILLER_RETRY_MS: u64 = 1_000;
 pub const DEFAULT_BLOCKING_THREADS: usize = 512;
 pub const DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(16_384);
-pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(4_096);
+pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(16_384);
 
 /// How long validators wait for a leader's proposal before nullifying the view.
 /// Proposal pacing stays below this deadline to leave time to propose.
