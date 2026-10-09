@@ -6,7 +6,7 @@
 # URL of the indexer endpoint
 source: "http://localhost:8080"
 
-# Hex-encoded participant set of the network (the ordered FN-DSA-512 public keys of its
+# Hex-encoded participant set of the network (the ordered ellipsoidal Falcon-512 public keys of its
 # validators), used to verify every certificate signature. Copy the `identity` field of the
 # network's indexer configuration.
 identity: "<hex-encoded participant set>"

@@ -8,7 +8,7 @@ Visualize `alto` activity.
 
 ## Configuration
 
-The explorer verifies every notarization and finalization in the browser: each certificate carries one FN-DSA-512 (Falcon) signature per quorum signer, which the explorer checks (with `alto-types` compiled to WebAssembly) against the network's identity, the encoded set of validator public keys.
+The explorer verifies every notarization and finalization in the browser: each certificate carries one experimental ellipsoidal Falcon-512 signature per quorum signer, which the explorer checks (with `alto-types` compiled to WebAssembly) against the network's identity, the encoded set of validator public keys.
 
 When an indexer serves the explorer, its `/runtime-config.js` supplies the identity, validator keys, validator locations, and description of its network, and requests use the same origin as the explorer page. A map of validator locations appears when the configuration lists locations.
 
@@ -46,7 +46,7 @@ npm start
 npm run build
 ```
 
-_This compiles the WASM module from `alto-types` and checks it against `scripts/fn_dsa_fixture.json` before building the React app. On macOS, set `CC` and `AR` to Homebrew LLVM's `clang` and `llvm-ar`._
+_This compiles the WASM module from `alto-types` and checks it against `scripts/ellipsoidal_falcon_fixture.json` and `scripts/ellipsoidal_falcon_50_fixture.json` before building the React app. On macOS, set `CC` and `AR` to Homebrew LLVM's `clang` and `llvm-ar`._
 
 ### Run the production build
 

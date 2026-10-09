@@ -45,7 +45,7 @@ export function hexUint8Array(arr: ArrayLike<number> | undefined, len: number = 
 
 /**
  * Decodes the LEB128 varint at the start of an encoded sequence, such as the participant count
- * that prefixes an FN-DSA identity.
+ * that prefixes a network identity.
  * @param bytes - The encoded bytes.
  * @returns The decoded value, or null if the varint is truncated or exceeds 32 bits.
  */

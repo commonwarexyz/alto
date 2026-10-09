@@ -83,8 +83,8 @@ class FakeWebSocket {
 
 const originalFetch = globalThis.fetch;
 const originalWebSocket = globalThis.WebSocket;
-// Encoded FN-DSA-512 participant set: a varint count of 4, then four 897-byte public keys.
-const fnDsaIdentityHex = '04' + [1, 2, 3, 4].map(key => key.toString(16).padStart(2, '0').repeat(897)).join('');
+// Encoded ellipsoidal Falcon-512 participant set: a varint count of 4, then four 897-byte public keys.
+const ellipsoidalIdentityHex = '04' + [1, 2, 3, 4].map(key => key.toString(16).padStart(2, '0').repeat(897)).join('');
 let workers: FakeWorker[];
 let sockets: FakeWebSocket[];
 let container: HTMLDivElement;
@@ -242,7 +242,7 @@ describe.each([false, true])('connection lifecycle (StrictMode: %s)', strict => 
   ])('describes a $backend deployment without inlining its participant set', async ({ backend, indexer }) => {
     const config = getClusterConfig();
     config.BACKEND_URL = backend === 'same-host' ? window.location.host : backend;
-    config.PUBLIC_KEY_HEX = fnDsaIdentityHex;
+    config.PUBLIC_KEY_HEX = ellipsoidalIdentityHex;
     config.description = 'A cluster of <strong>4 validators</strong> running c7gd.4xlarge in <strong>1 region</strong> (us-west-2).';
     await mount(strict);
     expect(container.querySelector('.map-container')).toBeNull();
@@ -250,34 +250,34 @@ describe.each([false, true])('connection lifecycle (StrictMode: %s)', strict => 
 
     const modal = container.querySelector('.about-modal')!;
     const codes = Array.from(modal.querySelectorAll('code'), element => element.textContent);
-    expect(codes).toContain('cargo install --git https://github.com/commonwarexyz/alto --branch pq alto-inspector');
+    expect(codes).toContain('cargo install --git https://github.com/commonwarexyz/alto --branch pq-ellipsoidal alto-inspector');
     expect(codes).toContain(
       `inspector get block 10 --indexer '${indexer}' --identity "$(cat identity.hex)"`,
     );
-    expect(modal.textContent).not.toContain(fnDsaIdentityHex.slice(0, 64));
+    expect(modal.textContent).not.toContain(ellipsoidalIdentityHex.slice(0, 64));
     expect(Array.from(modal.querySelectorAll('strong')).some(element => element.textContent === '4 validators')).toBe(true);
     expect(modal.textContent).toContain('c7gd.4xlarge in 1 region (us-west-2)');
     expect(modal.textContent).not.toContain('commonware_deployer::aws');
     expect(modal.querySelector('a[href="https://github.com/commonwarexyz/alto/tree/main/indexer"]')).not.toBeNull();
-    expect(modal.querySelector('a[href="https://github.com/commonwarexyz/monorepo/blob/1950760f8bc64f6d0c45bef3d68c0947c94284b2/cryptography/src/fn_dsa/mod.rs"]')).not.toBeNull();
+    expect(modal.querySelector('a[href="https://github.com/commonwarexyz/monorepo/blob/5471199891843d23658619191ec5f4daf423889f/cryptography/src/fn_dsa/mod.rs"]')).not.toBeNull();
 
     await act(async () => { modal.querySelector<HTMLButtonElement>('.about-button')!.click(); });
     expect(container.querySelector('.about-modal')).toBeNull();
   });
 
-  test('summarizes an FN-DSA participant set by count and digest', async () => {
-    getClusterConfig().PUBLIC_KEY_HEX = fnDsaIdentityHex;
+  test('summarizes an ellipsoidal Falcon participant set by count and digest', async () => {
+    getClusterConfig().PUBLIC_KEY_HEX = ellipsoidalIdentityHex;
     await mount(strict);
     await act(async () => { container.querySelector<HTMLButtonElement>('.key-header-button')!.click(); });
 
     const modal = container.querySelector('.about-modal')!;
     expect(modal.textContent).toContain('contains 4 validators');
     expect(modal.querySelector('.code-block')?.textContent).toBe('5a'.repeat(32));
-    expect(sha256).toHaveBeenLastCalledWith(hexToUint8Array(fnDsaIdentityHex));
-    expect(modal.textContent).not.toContain(fnDsaIdentityHex.slice(0, 64));
+    expect(sha256).toHaveBeenLastCalledWith(hexToUint8Array(ellipsoidalIdentityHex));
+    expect(modal.textContent).not.toContain(ellipsoidalIdentityHex.slice(0, 64));
     const download = modal.querySelector<HTMLAnchorElement>('a[download="identity.hex"]')!;
-    expect(download.getAttribute('href')).toBe(`data:text/plain;charset=utf-8,${fnDsaIdentityHex}`);
-    expect(modal.querySelector('a[href="https://github.com/commonwarexyz/monorepo/blob/1950760f8bc64f6d0c45bef3d68c0947c94284b2/cryptography/src/fn_dsa/mod.rs"]')).not.toBeNull();
+    expect(download.getAttribute('href')).toBe(`data:text/plain;charset=utf-8,${ellipsoidalIdentityHex}`);
+    expect(modal.querySelector('a[href="https://github.com/commonwarexyz/monorepo/blob/5471199891843d23658619191ec5f4daf423889f/cryptography/src/fn_dsa/mod.rs"]')).not.toBeNull();
   });
 
   test.each(['idle', 'rejected', 'duplicate'])(

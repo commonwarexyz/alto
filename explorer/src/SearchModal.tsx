@@ -207,8 +207,6 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
                 timestamp: `${new Date(Number(block.timestamp)).toLocaleString()} (${formatAge(age)})`,
                 view: result.view,
                 digest: hexUint8Array(block.digest, 64),
-                // FN-DSA certificates hold one signature per signer, so the parser reports a
-                // digest of the encoded certificate instead.
                 certificate: hexUint8Array(result.signature, 64),
             };
         } else {

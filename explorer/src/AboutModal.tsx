@@ -124,7 +124,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                             Consensus artifacts stream to your browser in real time. An <a href="https://github.com/commonwarexyz/alto/tree/main/indexer">alto-indexer</a> can serve both this explorer and its consensus stream from the same address.
                         </p>
                         <p>
-                            Before using a consensus artifact, your browser verifies the <i>FN-DSA-512</i> (Falcon) signature of every quorum signer with <a href="https://github.com/commonwarexyz/monorepo/blob/1950760f8bc64f6d0c45bef3d68c0947c94284b2/cryptography/src/fn_dsa/mod.rs">cryptography::fn_dsa</a> compiled to WASM.
+                            Before using a consensus artifact, your browser verifies the experimental <i>ellipsoidal Falcon-512</i> signature of every quorum signer with <a href="https://github.com/commonwarexyz/monorepo/blob/5471199891843d23658619191ec5f4daf423889f/cryptography/src/fn_dsa/mod.rs">cryptography::fn_dsa</a> compiled to WASM.
                         </p>
                         <p>
                             Older artifacts may be skipped when verification falls behind the stream. The open source verifier runs on your computer, so the API's consensus claims are checked locally.
@@ -151,14 +151,14 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                     <section>
                         <h3>Can I replay the stream?</h3>
                         <p>
-                            Yes! You can replay the stream or fetch arbitrary data using the <a href="https://github.com/commonwarexyz/alto/tree/pq/inspector">alto-inspector</a>.
+                            Yes! You can replay the stream or fetch arbitrary data using the <a href="https://github.com/commonwarexyz/alto/tree/pq-ellipsoidal/inspector">alto-inspector</a>.
                         </p>
                         <p>
                             To download the tool, run:
                         </p>
                         <pre className="code-block">
                             <code>
-                                cargo install --git https://github.com/commonwarexyz/alto --branch pq alto-inspector
+                                cargo install --git https://github.com/commonwarexyz/alto --branch pq-ellipsoidal alto-inspector
                             </code>
                         </pre>
                         <p>

@@ -49,9 +49,9 @@ pub fn decode_identity(bytes: impl Input) -> Result<Identity, commonware_codec::
 /// Returns the name of the host that runs the validator identified by `public_key`.
 ///
 /// Deployment instance names, configuration file names, and host lookups use this name, while
-/// peer lists keep the full hex-encoded key. An FN-DSA-512 key encodes to 897 bytes, too long for
-/// instance or file names, so the name is the hex encoding of the first 16 bytes of the SHA-256
-/// digest of the encoded key.
+/// peer lists keep the full hex-encoded key. An ellipsoidal Falcon key encodes to 897 bytes, too
+/// long for instance or file names, so the name is the hex encoding of the first 16 bytes of the
+/// SHA-256 digest of the encoded key.
 pub fn host_name(public_key: &PublicKey) -> String {
     let digest = Sha256::hash(&[public_key.encode().as_ref()]);
     commonware_formatting::hex(&digest.as_ref()[..16])
@@ -78,16 +78,17 @@ impl Kind {
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use commonware_codec::{Copying, EncodeSize, Read};
+    use commonware_codec::{Copying, EncodeSize, FixedSize, Read};
     use commonware_consensus::{
         simplex::types::{Finalize, Notarize, Proposal},
         types::{Height, Round, View},
     };
-    use commonware_cryptography::{sha256, Digest, Digestible, Signer};
+    use commonware_cryptography::{certificate::Scheme as _, sha256, Digest, Digestible, Signer};
     use commonware_parallel::Sequential;
     use commonware_utils::{
         non_empty,
         ordered::{BiMap, Set},
+        Participant,
     };
 
     #[test]
@@ -140,8 +141,7 @@ mod tests {
         assert_eq!(reader.0, suffix);
     }
 
-    /// Returns one signer per participant and the participant set, with each identity key
-    /// doubling as its signing key.
+    /// Returns signers in participant order, with each identity key doubling as its signing key.
     fn fixture(n: u64) -> (Vec<ConsensusScheme>, Identity) {
         let keys: Vec<PrivateKey> = (0..n).map(PrivateKey::from_seed).collect();
         let identity = Set::from_iter_dedup(keys.iter().map(|key| key.public_key()));
@@ -150,15 +150,16 @@ mod tests {
             .map(|key| (key.clone(), key.clone()))
             .collect();
         let participants = BiMap::try_from(participants).unwrap();
-        let schemes = keys
+        let mut schemes: Vec<_> = keys
             .into_iter()
             .map(|key| ConsensusScheme::signer(NAMESPACE, participants.clone(), key).unwrap())
             .collect();
+        schemes.sort_by_key(|scheme| scheme.me());
         (schemes, identity)
     }
 
     #[test]
-    fn fn_dsa_certified_blocks_round_trip_and_verify_against_participants() {
+    fn ellipsoidal_falcon_certified_blocks_round_trip_and_verify_against_participants() {
         let (schemes, identity) = fixture(4);
         let verifier = ConsensusScheme::certificate_verifier(NAMESPACE, identity);
         let (_, other_identity) = fixture(5);
@@ -252,14 +253,10 @@ mod tests {
         assert!(decode_identity((MAX_PARTICIPANTS + 1).encode()).is_err());
     }
 
-    /// The explorer's WASM check (`explorer/scripts/check-wasm.mjs`) verifies these
-    /// artifacts. Run with `ALTO_UPDATE_FIXTURES=1` to rewrite the fixture after a deliberate
-    /// format change.
-    #[test]
-    fn explorer_fn_dsa_fixture_is_current() {
+    fn explorer_fixture(participant_count: u64, signers: &[usize]) -> String {
         use commonware_formatting::hex;
 
-        let (schemes, identity) = fixture(4);
+        let (schemes, identity) = fixture(participant_count);
         let context = Context {
             round: Round::new(EPOCH, View::new(9)),
             leader: identity[1].clone(),
@@ -278,11 +275,9 @@ mod tests {
             block.digest(),
         );
 
-        // Certificates from a quorum that skips the second participant.
-        let quorum = [&schemes[0], &schemes[2], &schemes[3]];
-        let notarizes: Vec<_> = quorum
+        let notarizes: Vec<_> = signers
             .iter()
-            .map(|scheme| Notarize::sign(*scheme, proposal.clone()).unwrap())
+            .map(|&index| Notarize::sign(&schemes[index], proposal.clone()).unwrap())
             .collect();
         let notarization = Notarization::<ConsensusScheme>::from_notarizes(
             &schemes[0],
@@ -290,9 +285,9 @@ mod tests {
             &Sequential,
         )
         .unwrap();
-        let finalizes: Vec<_> = quorum
+        let finalizes: Vec<_> = signers
             .iter()
-            .map(|scheme| Finalize::sign(*scheme, proposal.clone()).unwrap())
+            .map(|&index| Finalize::sign(&schemes[index], proposal.clone()).unwrap())
             .collect();
         let finalization = Finalization::<ConsensusScheme>::from_finalizes(
             &schemes[0],
@@ -300,6 +295,22 @@ mod tests {
             &Sequential,
         )
         .unwrap();
+
+        let expected_signers: Vec<_> = signers
+            .iter()
+            .copied()
+            .map(Participant::from_usize)
+            .collect();
+        assert_eq!(
+            notarization.certificate.signers.iter().collect::<Vec<_>>(),
+            expected_signers
+        );
+        assert_eq!(
+            finalization.certificate.signers,
+            notarization.certificate.signers
+        );
+        assert_eq!(notarization.certificate.signatures.len(), signers.len());
+        assert_eq!(finalization.certificate.signatures.len(), signers.len());
 
         // Offset of the first signature: proposal, signer bitmap, then the signature count.
         let signature_offset = proposal.encode_size()
@@ -319,8 +330,13 @@ mod tests {
                 hex(&block.digest()),
             )
         };
-        let fixture = format!(
-            "{{\n  \"identity\": \"{}\",\n  \"signatureOffset\": {signature_offset},\n  \"blockOffset\": {block_offset},\n{},\n{}\n}}\n",
+        type ConsensusSignature =
+            <ConsensusScheme as commonware_cryptography::certificate::Scheme>::Signature;
+        let public_key_size = PublicKey::SIZE;
+        let signature_size = ConsensusSignature::SIZE;
+        let signer_count = signers.len();
+        format!(
+            "{{\n  \"profile\": \"ellipsoidal-falcon-512\",\n  \"participantCount\": {participant_count},\n  \"signerCount\": {signer_count},\n  \"publicKeySize\": {public_key_size},\n  \"signatureSize\": {signature_size},\n  \"identity\": \"{}\",\n  \"signatureOffset\": {signature_offset},\n  \"blockOffset\": {block_offset},\n{},\n{}\n}}\n",
             hex(&identity.encode()),
             artifact(
                 "notarization",
@@ -332,10 +348,13 @@ mod tests {
                 Finalized::new(finalization.clone(), block.clone()).encode().to_vec(),
                 finalization.certificate.encode().to_vec(),
             ),
-        );
+        )
+    }
 
+    fn check_explorer_fixture(name: &str, fixture: String) {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../explorer/scripts/fn_dsa_fixture.json");
+            .join("../explorer/scripts")
+            .join(name);
         if std::env::var_os("ALTO_UPDATE_FIXTURES").is_some() {
             std::fs::write(&path, fixture).unwrap();
             return;
@@ -345,6 +364,27 @@ mod tests {
             current == fixture,
             "{} is stale; rerun with ALTO_UPDATE_FIXTURES=1",
             path.display()
+        );
+    }
+
+    /// These artifacts exercise the browser's verifier with a noncontiguous quorum.
+    /// Set `ALTO_UPDATE_FIXTURES=1` to regenerate them after a deliberate format change.
+    #[test]
+    fn explorer_ellipsoidal_falcon_fixture_is_current() {
+        check_explorer_fixture(
+            "ellipsoidal_falcon_fixture.json",
+            explorer_fixture(4, &[0, 2, 3]),
+        );
+    }
+
+    /// The browser benchmark verifies all 34 signatures against 50 registered keys.
+    #[test]
+    fn explorer_ellipsoidal_falcon_50_fixture_is_current() {
+        let signers: Vec<_> = (0..50).filter(|index| index % 3 != 2).collect();
+        assert_eq!(signers.len(), 34);
+        check_explorer_fixture(
+            "ellipsoidal_falcon_50_fixture.json",
+            explorer_fixture(50, &signers),
         );
     }
 }

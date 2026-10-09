@@ -33,7 +33,7 @@ cargo install alto-indexer
 indexer --port 8080 --identity <hex-encoded participant set> [--block-size <bytes>]
 ```
 
-The identity is the participant set of the consensus network: the ordered FN-DSA-512 public keys of
+The identity is the participant set of the consensus network: the ordered ellipsoidal Falcon-512 public keys of
 its validators. Every signature in an incoming certificate is verified against its signer's key.
 
 `--block-size` is the payload size of the network's blocks. When set, uploads carrying a larger payload
