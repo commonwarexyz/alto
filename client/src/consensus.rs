@@ -282,9 +282,13 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
                 read.for_each(|message| async {
                     match message {
                         Ok(TMessage::Binary(data)) => {
-                            // Get kind
-                            let kind = data[0];
-                            let Some(kind) = Kind::from_u8(kind) else {
+                            // Guard against empty binary frames: indexing
+                            // past an empty frame here would panic the read
+                            // loop and abort the client on malformed upstream
+                            // input. Treat the frame as an unexpected response
+                            // and keep the stream alive.
+                            let Some(kind) = data.first().and_then(|banner| Kind::from_u8(*banner))
+                            else {
                                 let _ = sender.unbounded_send(Err(Error::UnexpectedResponse));
                                 return;
                             };

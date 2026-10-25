@@ -132,11 +132,16 @@ fn main() {
         Identity::decode(identity_bytes.as_ref()).expect("Could not decode identity public key");
 
     // Initialize runtime
+    //
+    // Catch panics so that a violation of a runtime invariant unwinds and
+    // shuts the node down gracefully (flushing storage and releasing sockets)
+    // instead of aborting the whole process, matching the validator's
+    // restart-on-fail-fast behavior.
     let cfg = tokio::Config::default()
         .with_tcp_nodelay(Some(true))
         .with_worker_threads(config.worker_threads.get())
         .with_storage_directory(PathBuf::from(&config.directory))
-        .with_catch_panics(false);
+        .with_catch_panics(true);
     let executor = tokio::Runner::new(cfg);
 
     // Start runtime

@@ -10,14 +10,19 @@ env:
   UDEPS_VERSION: 0.1.50
   NODE_VERSION: 20
 
+# Restrict the default GITHUB_TOKEN to read-only: CI only needs to check out
+# and build, so no write permissions are granted anywhere in this workflow.
+permissions:
+  contents: read
+
 jobs:
   All:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-    - uses: Swatinem/rust-cache@v2
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}
     - name: Lint
@@ -35,10 +40,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@nightly
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
     - name: Install udeps
-      uses: taiki-e/install-action@cargo-udeps
+      uses: taiki-e/install-action@674a16e7c46f534f2dcf29b1d19862f27b8c3484 # cargo-udeps
+      with:
+        tool: cargo-udeps
     - name: Check for unused dependencies
       run: cargo udeps --all-targets
 
@@ -46,19 +53,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-    - uses: Swatinem/rust-cache@v2
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
         cache-dependency-path: explorer/package-lock.json
     - name: Install wasm-pack
-      uses: taiki-e/install-action@wasm-pack
+      uses: taiki-e/install-action@2bfba383ee9c46ecb3350ba359f2ef5cbcd14b24 # wasm-pack
+      with:
+        tool: wasm-pack
     - name: Install dependencies
       run: cd explorer && npm ci
     - name: Test compilation
@@ -70,16 +79,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       with:
         targets: wasm32-unknown-unknown
-    - uses: Swatinem/rust-cache@v2
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}
     - name: Build types
       run: cargo build --target wasm32-unknown-unknown --release --manifest-path types/Cargo.toml && du -h target/wasm32-unknown-unknown/release/alto_types.wasm
     - name: Install wasm-pack
-      uses: taiki-e/install-action@wasm-pack
+      uses: taiki-e/install-action@2bfba383ee9c46ecb3350ba359f2ef5cbcd14b24 # wasm-pack
+      with:
+        tool: wasm-pack
     - name: Pack types
       run: wasm-pack build types --release --target web
