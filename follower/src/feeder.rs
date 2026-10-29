@@ -6,6 +6,7 @@ use commonware_consensus::{
     simplex::types::Activity,
     Reporter, Viewable,
 };
+use commonware_cryptography::{Digested, Digestible};
 use commonware_parallel::Sequential;
 use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Spawner};
 use futures::StreamExt;
@@ -128,7 +129,10 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
                 // TODO (https://github.com/commonwarexyz/monorepo/pull/2208): create a dedicated cache for storing unverified (but notarized) blocks
                 if !self
                     .marshal_mailbox
-                    .verified(round, notarized.block.clone())
+                    .verified(
+                        round,
+                        Digested::precomputed(notarized.block.clone(), notarized.block.digest()),
+                    )
                     .await
                 {
                     warn!(
@@ -160,7 +164,10 @@ impl<E: Clock + Spawner, C: Source> Feeder<E, C> {
                 let round = finalized.proof.round();
                 if !self
                     .marshal_mailbox
-                    .verified(round, finalized.block.clone())
+                    .verified(
+                        round,
+                        Digested::precomputed(finalized.block.clone(), finalized.block.digest()),
+                    )
                     .await
                 {
                     warn!(

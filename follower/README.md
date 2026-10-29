@@ -37,7 +37,7 @@ _To deploy your own instance of `alto`, read the guide in [deploy](../deploy/REA
 |-------|-------------|
 | `source` | URL of the indexer to fetch blocks and stream certificates from |
 | `identity` | Hex-encoded BLS12-381 threshold public key used to verify consensus signatures |
-| `certificate_mode` | Required certificate construction used by the source: `standard` for stable leaders or `vrf` for rotating leaders |
+| `certificate_mode` | Required certificate construction used by the source: `standard` for round-robin leaders or `vrf` for VRF leaders |
 | `block_size` | Required network block payload size in bytes, used to bound the live feed |
 | `directory` | Path to store finalized blocks and state |
 | `worker_threads` | Number of runtime worker threads |

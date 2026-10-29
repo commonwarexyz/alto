@@ -12,20 +12,25 @@ _To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/
 
 _To configure local indexer upload, add `--indexers '<url>:<count>[;<url>:<count>...]'` to the `generate local` command. For example, `http://localhost:8080:1` assigns one validator to upload to that indexer._
 
-`--leader-mode rotating` selects each view's leader from a VRF seed. Stable mode assigns leaders
-round-robin for terms of `--leader-term-length` views. Stable mode requires a term length of at
-least two and `--leader-optimistic-views`, which limits how far proposals and votes may run ahead
-of directly notarized ancestry. Values above the term length have no further effect. Rotating
-mode rejects both stable-only flags.
+`--leader-mode rotating` elects a new leader for every view, chosen by `--leader-election`. `vrf`
+derives each leader from a seed in the previous view's certificate. `round-robin` takes validators
+in order, so each leader is known in advance: the incoming leader builds, relays, and votes for its
+proposal before the outgoing leader's view certifies. Stable mode assigns leaders round-robin for
+terms of `--leader-term-length` views and pipelines each handoff between terms the same way. Stable
+mode requires a term length of at least two and `--leader-optimistic-views`, which limits how far
+proposals and votes may run ahead of directly notarized ancestry. Values above the term length have
+no further effect. Rotating mode rejects both stable-only flags, and stable mode rejects
+`--leader-election`.
 
 `--leader-delay-ms` sets the minimum interval from the parent's timestamp, from 0 through 999 ms.
 Zero disables pacing and allows equal timestamps. Use 100 ms for local stable networks: shorter
 intervals can cause timeouts and skipped terms.
 
-Certificate mode follows leader mode: `standard` for stable and `vrf` for rotating. The generator
-sets it in indexer commands and configurations and in explorer configurations. Set followers'
-`certificate_mode` and the inspector's `--certificate-mode` to match. Changing certificate mode
-requires a new network identity and matching configurations for every component.
+Certificate mode follows leader election: `vrf` for VRF leaders and `standard` for round-robin
+leaders, rotating or stable. The generator sets it in indexer commands and configurations and in
+explorer configurations. Set followers' `certificate_mode` and the inspector's `--certificate-mode`
+to match. Changing certificate mode requires a new network identity and matching configurations for
+every component.
 
 `--block-size` sets the number of random payload bytes in each proposed block and defaults to `0`.
 All validators must use the same value. Encoded messages must fit the authenticated transport's
@@ -53,12 +58,13 @@ traces_sample_rate: 0.0
 indexer: http://localhost:8080
 ```
 
-Rotating-leader configs carry only the delay:
+Rotating-leader configs carry the delay and the election (`vrf` or `round_robin`):
 
 ```yaml
 leader:
   mode: rotating
   delay_ms: 0
+  election: vrf
 ```
 
 ```bash
@@ -68,7 +74,7 @@ cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 
 For a rotating network:
 
 ```bash
-cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode rotating --leader-delay-ms 0 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
+cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode rotating --leader-election vrf --leader-delay-ms 0 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
 ```
 
 The emitted indexer command includes the network's certificate mode and block size. A deployed

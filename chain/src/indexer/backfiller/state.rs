@@ -1,6 +1,6 @@
 use alto_types::Block;
-use bytes::{Buf, BufMut};
-use commonware_codec::{self, FixedSize, Read, Write};
+use bytes::BufMut;
+use commonware_codec::{self, Buf, FixedSize, Read, Write};
 use commonware_cryptography::{sha256::Digest, Digestible};
 use commonware_utils::{sync::Mutex, PrioritySet};
 use std::{collections::BTreeMap, sync::Arc};

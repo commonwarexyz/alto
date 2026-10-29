@@ -34,8 +34,8 @@ indexer --port 8080 --identity <hex-encoded BLS12-381 public key> --certificate-
 ```
 
 The identity is the threshold public key of the consensus network. It is used to verify incoming
-consensus artifacts. Use `standard` for a stable-leader network and `vrf` for a rotating-leader
-network.
+consensus artifacts. Use `standard` for a network with round-robin leaders and `vrf` for one with VRF
+leaders.
 
 `--block-size` is the payload size of the network's blocks. When set, uploads carrying a larger payload
 are rejected and the request body limit is that size plus 1 MiB. Without it, upload request bodies

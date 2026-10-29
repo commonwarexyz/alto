@@ -4,6 +4,7 @@ use alto_types::{
     CertificateMode, Identity, Notarized, Scheme, StandardScheme, VrfScheme, NAMESPACE,
 };
 use clap::{Arg, Command};
+use commonware_allocator::mimalloc;
 use commonware_codec::DecodeExt;
 use commonware_consensus::types::Height;
 use commonware_formatting::from_hex;
@@ -22,8 +23,14 @@ use std::{
 };
 use tracing::{error, info, warn, Level};
 
+/// Keeps freed memory for a minute before returning it to the operating system. Recurring work
+/// such as metrics scrapes empties pages that mimalloc's default 4 s purge delay would hand back
+/// and the next run would fault in again.
 #[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config {
+    purge: mimalloc::Purge::After(Duration::from_secs(60)),
+    ..mimalloc::Config::DEFAULT
+});
 
 mod application;
 mod archive;
@@ -128,8 +135,7 @@ fn main() {
 
     // Parse identity
     let identity_bytes = from_hex(&config.identity).expect("Could not parse identity hex");
-    let identity =
-        Identity::decode(identity_bytes.as_ref()).expect("Could not decode identity public key");
+    let identity = Identity::decode(identity_bytes).expect("Could not decode identity public key");
 
     // Initialize runtime
     let cfg = tokio::Config::default()

@@ -9,6 +9,7 @@ description = "Deploy an instance of alto."
 alto-chain = { workspace = true }
 alto-types = { workspace = true }
 clap = { workspace = true }
+commonware-allocator = { workspace = true }
 commonware-codec = { workspace = true }
 commonware-consensus = { workspace = true, features = ["mocks"] }
 commonware-cryptography = { workspace = true, features = ["mocks"] }
@@ -17,7 +18,6 @@ commonware-formatting = { workspace = true }
 commonware-macros = { workspace = true }
 commonware-math = { workspace = true }
 commonware-utils = { workspace = true }
-mimalloc = { workspace = true }
 rand = { workspace = true }
 serde = { version = "1.0.218", features = ["derive"] }
 serde_yaml = "0.9.34"

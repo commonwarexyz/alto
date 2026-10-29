@@ -48,10 +48,10 @@ pub struct CertifiedBlockJs {
 
 #[wasm_bindgen]
 pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
-    let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
+    let identity = Identity::decode(identity).expect("invalid identity");
     let verifier = VrfScheme::certificate_verifier(NAMESPACE, identity);
 
-    let Ok(seed) = Seed::decode(bytes.as_ref()) else {
+    let Ok(seed) = Seed::decode(bytes) else {
         return JsValue::NULL;
     };
     if !seed.verify(&verifier) {
@@ -66,7 +66,7 @@ pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 
 #[wasm_bindgen]
 pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsValue {
-    let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
+    let identity = Identity::decode(identity).expect("invalid identity");
     if standard {
         parse_notarized_with::<StandardScheme>(identity, bytes)
     } else {
@@ -77,9 +77,7 @@ pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsV
 fn parse_notarized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValue {
     let verifier = S::certificate_verifier(NAMESPACE, identity);
 
-    let Ok(notarized) =
-        Notarized::<S>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
-    else {
+    let Ok(notarized) = Notarized::<S>::decode_cfg(bytes, &Block::unbounded_codec_config()) else {
         return JsValue::NULL;
     };
     if !notarized.verify(&verifier, &Sequential) {
@@ -98,7 +96,7 @@ fn parse_notarized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValu
 
 #[wasm_bindgen]
 pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsValue {
-    let identity = Identity::decode(identity.as_ref()).expect("invalid identity");
+    let identity = Identity::decode(identity).expect("invalid identity");
     if standard {
         parse_finalized_with::<StandardScheme>(identity, bytes)
     } else {
@@ -108,9 +106,7 @@ pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsV
 
 fn parse_finalized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValue {
     let verifier = S::certificate_verifier(NAMESPACE, identity);
-    let Ok(finalized) =
-        Finalized::<S>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
-    else {
+    let Ok(finalized) = Finalized::<S>::decode_cfg(bytes, &Block::unbounded_codec_config()) else {
         return JsValue::NULL;
     };
     if !finalized.verify(&verifier, &Sequential) {
@@ -129,7 +125,7 @@ fn parse_finalized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValu
 
 #[wasm_bindgen]
 pub fn parse_block(bytes: Vec<u8>) -> JsValue {
-    let Ok(block) = Block::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config()) else {
+    let Ok(block) = Block::decode_cfg(bytes, &Block::unbounded_codec_config()) else {
         return JsValue::NULL;
     };
     let block_js = BlockJs::from(&block);
@@ -144,7 +140,7 @@ pub fn leader_index(seed: JsValue, participants: usize) -> usize {
         return 0;
     };
 
-    let Ok(signature) = Signature::decode(seed.signature.as_ref()) else {
+    let Ok(signature) = Signature::decode(seed.signature) else {
         return 0;
     };
 

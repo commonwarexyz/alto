@@ -9,6 +9,7 @@ description = "Run a follower node for alto."
 alto-client = { workspace = true }
 alto-types = { workspace = true }
 commonware-actor = { workspace = true }
+commonware-allocator = { workspace = true }
 commonware-codec = { workspace = true }
 commonware-consensus = { workspace = true }
 commonware-cryptography = { workspace = true }
@@ -16,12 +17,11 @@ commonware-formatting = { workspace = true }
 commonware-macros = { workspace = true }
 commonware-math = { workspace = true }
 commonware-resolver = { workspace = true }
-commonware-runtime = { workspace = true }
+commonware-runtime = { workspace = true, features = ["mimalloc"] }
 commonware-storage = { workspace = true }
 commonware-utils = { workspace = true }
 commonware-parallel = { workspace = true }
 bytes = { workspace = true }
-mimalloc = { workspace = true }
 rand = { workspace = true }
 futures = { workspace = true }
 thiserror = { workspace = true }

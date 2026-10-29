@@ -56,13 +56,14 @@ impl Kind {
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use commonware_codec::{Decode, Encode, EncodeSize, Read};
+    use commonware_codec::{varint::UInt, Decode, Encode, EncodeSize, MaxEncodeSize, Read};
     use commonware_consensus::{
         simplex::{
             scheme::bls12381_threshold::vrf as bls12381_threshold,
             types::{Finalization, Finalize, Notarization, Notarize, Proposal},
         },
-        types::{Height, Round, View},
+        types::{Epoch, Height, Round, View},
+        BoundedBlock,
     };
     use commonware_cryptography::{
         bls12381::primitives::variant::MinSig, certificate::mocks::Fixture, ed25519, sha256,
@@ -114,12 +115,37 @@ mod tests {
         let mut encoded = block.encode().to_vec();
         let suffix = [1, 2, 3, 4];
         encoded.extend_from_slice(&suffix);
-        let mut reader = encoded.as_slice();
+        let mut reader = Bytes::from(encoded);
         assert_eq!(
             Block::read_cfg(&mut reader, &Block::unbounded_codec_config()).unwrap(),
             block
         );
-        assert_eq!(reader, suffix);
+        assert_eq!(reader, suffix[..]);
+    }
+
+    #[test]
+    fn block_max_encode_size_bounds_widest_blocks() {
+        let context = Context {
+            round: Round::new(Epoch::new(u64::MAX), View::new(u64::MAX)),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::new(u64::MAX), sha256::Digest::EMPTY),
+        };
+        for block_size in [0, 127, 128, 16_383, 16_384, 2_097_151, 2_097_152] {
+            let block = Block::new(
+                context.clone(),
+                sha256::Digest::EMPTY,
+                Height::new(u64::MAX),
+                u64::MAX,
+                Bytes::from(vec![0; usize::try_from(block_size).unwrap()]),
+            );
+            let bound = Block::max_encode_size(&Block::codec_config(block_size));
+
+            // Only the payload's length prefix can encode narrower than its widest form.
+            assert_eq!(
+                bound - block.encode().len(),
+                UInt::<u32>::MAX_ENCODE_SIZE - UInt(block_size).encode_size()
+            );
+        }
     }
 
     #[test]

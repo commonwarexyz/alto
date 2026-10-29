@@ -3,9 +3,9 @@ use alto_types::{Block, Context, Scheme};
 use commonware_actor::Feedback;
 use commonware_consensus::{
     marshal::{ancestry::Ancestry, Update},
-    Application as ConsensusApplication, Heightable, Reporter,
+    Application as ConsensusApplication, Handoff, Heightable, Reporter,
 };
-use commonware_cryptography::Digestible;
+use commonware_cryptography::{Digested, Digestible};
 use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
@@ -46,28 +46,19 @@ impl<S: Scheme> Application<S> {
         self.backfiller = Some(backfiller);
         self
     }
-}
 
-impl<E, S> ConsensusApplication<E> for Application<S>
-where
-    E: Rng + Spawner + Metrics + Clock + Storage,
-    S: Scheme,
-{
-    type SigningScheme = S;
-    type Context = Context;
-    type Block = Block;
-    type Input = ();
-
-    async fn propose(
-        &mut self,
-        (mut runtime_context, context): (E, Self::Context),
-        mut ancestry: impl Ancestry<Self::Block>,
-        _input: Self::Input,
-    ) -> Option<Self::Block> {
+    /// Builds a child of the next block in `ancestry`, paced from the parent's timestamp.
+    async fn build<E: Rng + Clock>(
+        &self,
+        mut runtime_context: E,
+        context: Context,
+        mut ancestry: impl Ancestry<Block>,
+    ) -> Option<Digested<Block>> {
         let parent = ancestry.next().await?;
 
         // Pace each proposal from its parent's timestamp.
         let min_timestamp = parent
+            .inner()
             .timestamp
             .checked_add(self.delay_ms)
             .expect("parent timestamp overflowed");
@@ -92,13 +83,52 @@ where
             StdRng::from_rng(&mut runtime_context).fill_bytes(&mut data);
         }
 
-        Some(Block::new(
+        let block = Block::new(
             context,
             parent.digest(),
-            parent.height.next(),
+            parent.height().next(),
             current,
             data.into(),
-        ))
+        );
+        let digest = block.digest();
+        Some(Digested::precomputed(block, digest))
+    }
+}
+
+impl<E, S> ConsensusApplication<E> for Application<S>
+where
+    E: Rng + Spawner + Metrics + Clock + Storage,
+    S: Scheme,
+{
+    type SigningScheme = S;
+    type Context = Context;
+    type Block = Block;
+    type Input = ();
+
+    /// Builds a term-start block on a parent that has not yet certified and votes for it at once.
+    ///
+    /// Alto validators trust each outgoing leader not to equivocate and to complete its term, so
+    /// the incoming leader relays its proposal and votes while the parent's votes are still in
+    /// flight, saving one network trip per handoff. Consensus asks only when the incoming leader
+    /// is known in advance (round-robin and stable modes), never with VRF leaders.
+    async fn prepare(
+        &mut self,
+        (runtime_context, context): (E, Self::Context),
+        ancestry: impl Ancestry<Self::Block>,
+        _input: Self::Input,
+    ) -> Handoff<Digested<Self::Block>> {
+        self.build(runtime_context, context, ancestry)
+            .await
+            .map_or(Handoff::Wait, Handoff::Vote)
+    }
+
+    async fn propose(
+        &mut self,
+        (runtime_context, context): (E, Self::Context),
+        ancestry: impl Ancestry<Self::Block>,
+        _input: Self::Input,
+    ) -> Option<Digested<Self::Block>> {
+        self.build(runtime_context, context, ancestry).await
     }
 
     async fn verify(
@@ -112,6 +142,7 @@ where
         let Some(parent) = ancestry.next().await else {
             return false;
         };
+        let (block, parent) = (block.inner(), parent.inner());
 
         // Block size is a consensus rule, so every proposal must match the local configuration.
         if block.data.len() != self.block_size {
@@ -150,7 +181,7 @@ impl<S: Scheme> Reporter for Application<S> {
             info!(
                 height = %block.height(),
                 digest = ?block.digest(),
-                timestamp = block.timestamp,
+                timestamp = block.inner().timestamp,
                 "finalized block"
             );
         }
@@ -177,7 +208,6 @@ mod tests {
     };
     use commonware_cryptography::{ed25519, sha256, Digest as _, Hasher, Sha256, Signer};
     use commonware_runtime::{deterministic, Runner as _, Supervisor as _};
-    use std::sync::Arc;
 
     const DELAY_MS: u64 = 10;
 
@@ -189,13 +219,17 @@ mod tests {
         }
     }
 
+    fn digested(block: &Block) -> Digested<Block> {
+        Digested::precomputed(block.clone(), block.digest())
+    }
+
     async fn verify_block(
         context: deterministic::Context,
         application: &mut Application<VrfScheme>,
         block: &Block,
         parent: &Block,
     ) -> bool {
-        let ancestry = ancestry::from_iter([Arc::new(block.clone()), Arc::new(parent.clone())]);
+        let ancestry = ancestry::from_iter([digested(block), digested(parent)]);
         ConsensusApplication::verify(application, (context, block.context.clone()), ancestry).await
     }
 
@@ -205,10 +239,12 @@ mod tests {
         child_context: Context,
         parent: &Block,
     ) -> Block {
-        let ancestry = ancestry::from_iter([Arc::new(parent.clone())]);
+        let ancestry = ancestry::from_iter([digested(parent)]);
         ConsensusApplication::propose(application, (context, child_context), ancestry, ())
             .await
             .expect("expected proposal")
+            .inner()
+            .clone()
     }
 
     #[test]

@@ -22,8 +22,8 @@
 //!
 //! _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
 //!
-//! _The default certificate mode is `vrf` for rotating leaders. Use `--certificate-mode standard` for
-//! a stable-leader network. Stable networks do not publish seed artifacts._
+//! _The default certificate mode is `vrf` for VRF leaders. Use `--certificate-mode standard` for a
+//! network with round-robin leaders. Those networks do not publish seed artifacts._
 //!
 //! Use `--block-size` to set the network's block payload size for streaming. The receive limit adds
 //! 1 MiB for encoding and one message-kind byte. The default payload allowance is 4 MiB.
@@ -88,6 +88,7 @@ use alto_client::{
 };
 use alto_types::{CertificateMode, Identity, Scheme, StandardScheme, VrfScheme, NAMESPACE};
 use clap::{value_parser, Arg, ArgMatches, Command};
+use commonware_allocator::mimalloc;
 use commonware_codec::DecodeExt;
 use commonware_formatting::from_hex;
 use commonware_parallel::Sequential;
@@ -99,7 +100,7 @@ use utils::{
 };
 
 #[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config::DEFAULT);
 
 mod utils;
 
@@ -213,7 +214,7 @@ fn client<C: Scheme>(matches: &ArgMatches) -> Client<Sequential, C> {
     let indexer = matches.get_one::<String>("indexer").unwrap();
     let identity = matches.get_one::<String>("identity").unwrap();
     let identity = from_hex(identity).expect("Failed to decode identity");
-    let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
+    let identity = Identity::decode(identity).expect("Invalid identity");
     let mut builder = ClientBuilder::new(
         indexer,
         C::certificate_verifier(NAMESPACE, identity),

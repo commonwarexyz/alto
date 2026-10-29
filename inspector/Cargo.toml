@@ -11,6 +11,7 @@ repository = "https://github.com/commonwarexyz/alto/tree/main/inspector"
 documentation = "https://docs.rs/alto-inspector"
 
 [dependencies]
+commonware-allocator = { workspace = true }
 commonware-codec = { workspace = true }
 commonware-consensus = { workspace = true }
 commonware-cryptography = { workspace = true }
@@ -20,7 +21,6 @@ commonware-parallel = { workspace = true }
 alto-types = { workspace = true }
 alto-client = { workspace = true }
 bytes =  { workspace = true }
-mimalloc = { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
 clap = { workspace = true }

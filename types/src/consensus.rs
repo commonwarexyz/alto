@@ -18,16 +18,16 @@ use commonware_cryptography::{
 };
 use serde::{Deserialize, Serialize};
 
-/// Threshold certificates with one vote signature for stable leaders.
+/// Threshold certificates with one vote signature for round-robin leaders.
 pub type StandardScheme = standard::Scheme<PublicKey, MinSig>;
 
-/// Threshold certificates with vote and seed signatures for rotating leaders.
+/// Threshold certificates with vote and seed signatures for VRF leaders.
 pub type VrfScheme = vrf::Scheme<PublicKey, MinSig>;
 
 /// Certificate-seeded leader election used with [VrfScheme].
 pub type RotatingElector = Random<Sha256>;
 
-/// Leader election configuration for rotating leaders.
+/// Leader election configuration for VRF leaders.
 ///
 /// Validators and explorers must use the same seed-to-leader mapping. [RandomVersion::V1]
 /// hashes the seed signature before selecting a leader. Changing this configuration requires
@@ -40,7 +40,7 @@ pub const ROTATING_ELECTOR: RotatingElector = Random::new(RandomVersion::V1);
 pub enum CertificateMode {
     /// One threshold signature over each vote.
     Standard,
-    /// Vote and round-seed threshold signatures for certificate-seeded rotating leaders.
+    /// Vote and round-seed threshold signatures for certificate-seeded VRF leaders.
     Vrf,
 }
 

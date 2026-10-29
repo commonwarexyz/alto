@@ -2,19 +2,21 @@ use crate::{
     consensus::{Context, Finalization, Notarization, Scheme},
     EPOCH,
 };
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{BufMut, Bytes};
 use commonware_codec::{
-    varint::UInt, BufsMut, Encode, EncodeSize, Error, RangeCfg, Read, ReadExt, Write,
+    varint::UInt, Buf, BufsMut, Encode, EncodeSize, Error, FixedSize, MaxEncodeSize, RangeCfg,
+    Read, ReadExt, Write,
 };
 use commonware_consensus::{
     types::{Height, Round, View},
-    CertifiableBlock, Heightable,
+    BoundedBlock, CertifiableBlock, Heightable,
 };
 use commonware_cryptography::{
     ed25519, sha256::Digest, Digest as _, Digestible, Hasher, Sha256, Signer,
 };
 use commonware_parallel::Strategy;
 use commonware_utils::sys_rng;
+use std::ops::{Bound, RangeBounds};
 
 const GENESIS: &[u8] = b"commonware is neat";
 
@@ -326,5 +328,23 @@ impl CertifiableBlock for Block {
 
     fn context(&self) -> Self::Context {
         self.context.clone()
+    }
+}
+
+impl BoundedBlock for Block {
+    fn max_encode_size(cfg: &RangeCfg<usize>) -> usize {
+        let max_data = match cfg.end_bound() {
+            Bound::Included(&end) => end,
+            Bound::Excluded(&end) => end.saturating_sub(1),
+            Bound::Unbounded => usize::MAX,
+        };
+
+        // Every field contributes its widest encoding, including the payload's length prefix.
+        let metadata = Context::MAX_ENCODE_SIZE
+            + Digest::SIZE
+            + Height::MAX_ENCODE_SIZE
+            + UInt::<u64>::MAX_ENCODE_SIZE
+            + UInt::<u32>::MAX_ENCODE_SIZE;
+        metadata.saturating_add(max_data)
     }
 }

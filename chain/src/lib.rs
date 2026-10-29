@@ -1,5 +1,5 @@
 use alto_types::CertificateMode;
-use commonware_utils::{NZUsize, Probability, NZU32};
+use commonware_utils::{NZUsize, Probability};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -16,8 +16,6 @@ pub mod utils;
 pub const DEFAULT_BACKFILLER_MAX_ACTIVE: NonZeroUsize = NZUsize!(16);
 pub const DEFAULT_BACKFILLER_RETRY_MS: u64 = 1_000;
 pub const DEFAULT_BLOCKING_THREADS: usize = 512;
-pub const DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(16_384);
-pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(4_096);
 
 /// How long validators wait for a leader's proposal before nullifying the view.
 /// Proposal pacing stays below this deadline to leave time to propose.
@@ -33,14 +31,6 @@ fn default_backfiller_retry_ms() -> u64 {
 
 fn default_blocking_threads() -> usize {
     DEFAULT_BLOCKING_THREADS
-}
-
-fn default_storage_buffer_pool_max_per_class() -> Option<NonZeroU32> {
-    Some(DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS)
-}
-
-fn default_network_buffer_pool_max_per_class() -> Option<NonZeroU32> {
-    Some(DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS)
 }
 
 fn deserialize_traces_sample_rate<'de, D>(deserializer: D) -> Result<f64, D::Error>
@@ -69,6 +59,19 @@ where
     ))
 }
 
+/// How a rotating leader is chosen for each view.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Election {
+    /// Derive each leader from the seed in the previous view's VRF certificate.
+    Vrf,
+    /// Take the next validator in round-robin order.
+    ///
+    /// Because every view's leader is known in advance, each incoming leader builds and votes
+    /// for its proposal before the outgoing leader's view certifies.
+    RoundRobin,
+}
+
 /// Leader election policy for the consensus engine.
 ///
 /// The delay sets the minimum interval from the parent's timestamp in milliseconds.
@@ -76,8 +79,8 @@ where
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Leader {
-    /// Select a new VRF-derived leader for every view.
-    Rotating { delay_ms: u64 },
+    /// Elect a new leader for every view.
+    Rotating { delay_ms: u64, election: Election },
     /// Keep one round-robin leader for a term and pace its proposals.
     Stable {
         delay_ms: u64,
@@ -89,8 +92,8 @@ pub enum Leader {
 
 impl Leader {
     /// Creates a rotating leader configuration.
-    pub const fn rotating(delay_ms: u64) -> Self {
-        Self::Rotating { delay_ms }
+    pub const fn rotating(delay_ms: u64, election: Election) -> Self {
+        Self::Rotating { delay_ms, election }
     }
 
     /// Creates a stable leader configuration.
@@ -109,8 +112,15 @@ impl Leader {
     /// Threshold certificate construction required by this leader policy.
     pub const fn certificate_mode(self) -> CertificateMode {
         match self {
-            Self::Rotating { .. } => CertificateMode::Vrf,
-            Self::Stable { .. } => CertificateMode::Standard,
+            Self::Rotating {
+                election: Election::Vrf,
+                ..
+            } => CertificateMode::Vrf,
+            Self::Rotating {
+                election: Election::RoundRobin,
+                ..
+            }
+            | Self::Stable { .. } => CertificateMode::Standard,
         }
     }
 }
@@ -128,14 +138,6 @@ pub struct Config {
     pub worker_threads: usize,
     #[serde(default = "default_blocking_threads")]
     pub blocking_threads: usize,
-    #[serde(default = "default_storage_buffer_pool_max_per_class")]
-    pub storage_buffer_pool_max_per_class: Option<NonZeroU32>,
-    #[serde(default = "default_network_buffer_pool_max_per_class")]
-    pub network_buffer_pool_max_per_class: Option<NonZeroU32>,
-    #[serde(default)]
-    pub storage_buffer_pool_parallelism: Option<NonZeroUsize>,
-    #[serde(default)]
-    pub network_buffer_pool_parallelism: Option<NonZeroUsize>,
     pub log_level: String,
 
     /// Fraction of traces exported to the configured collector. Zero disables tracing.
@@ -413,7 +415,7 @@ mod tests {
     }
 
     /// Stable-leader election used by every simulation that does not pick its own elector.
-    fn stable_elector() -> engine::StableElector {
+    fn stable_elector() -> engine::RoundRobinElector {
         engine::stable_elector(STABLE_LEADER_TERM_LENGTH, 48)
     }
 
@@ -548,6 +550,18 @@ mod tests {
     }
 
     fn all_online(n: u32, seed: u64, link: Link, required: u64) -> String {
+        all_online_with(n, seed, link, required, stable_elector).0
+    }
+
+    /// Runs `n` connected validators until one processes `required` blocks, returning the
+    /// auditor state and the final metrics.
+    fn all_online_with(
+        n: u32,
+        seed: u64,
+        link: Link,
+        required: u64,
+        elector: fn() -> engine::RoundRobinElector,
+    ) -> (String, String) {
         let cfg = deterministic::Config::default().with_seed(seed);
         let executor = Runner::from(cfg);
         executor.start(|mut context| async move {
@@ -574,11 +588,20 @@ mod tests {
 
             for (signer, scheme) in private_keys.iter().zip(schemes.iter()) {
                 let registration = registrations.remove(&signer.public_key()).unwrap();
-                start_validator(&context, &oracle, signer, scheme, registration, None).await;
+                start_validator_with(
+                    &context,
+                    &oracle,
+                    signer,
+                    scheme,
+                    elector(),
+                    registration,
+                    ValidatorConfig::default(),
+                )
+                .await;
             }
 
             poll_until_height(&context, &oracle, required).await;
-            context.auditor().state()
+            (context.auditor().state(), context.encode())
         })
     }
 
@@ -593,6 +616,25 @@ mod tests {
             let state = all_online(5, seed, link.clone(), 25);
             assert_eq!(state, all_online(5, seed, link.clone(), 25));
         }
+    }
+
+    #[test_traced]
+    fn test_round_robin_pipelines_handoffs() {
+        let link = Link {
+            latency: Duration::from_millis(10),
+            jitter: Duration::from_millis(1),
+            success_rate: probability!(1.0),
+        };
+        let (_, metrics) = all_online_with(5, 0, link, 25, engine::RoundRobinElector::default);
+
+        // Every view starts a new term, so incoming leaders vote for their prepared proposals
+        // before the outgoing leader's view certifies.
+        let early_votes: u64 = sum_validator_metric(
+            &metrics,
+            "_handoff_events_total",
+            Some("VotedBeforeCertification"),
+        );
+        assert!(early_votes > 0, "no handoff voted before certification");
     }
 
     #[test_traced]
@@ -1590,10 +1632,9 @@ mod tests {
         let entry = Entry { height: 42, digest };
 
         let encoded = entry.encode();
-        let decoded = Entry::decode(encoded.as_ref()).unwrap();
+        assert_eq!(encoded.len(), <Entry as commonware_codec::FixedSize>::SIZE);
+        let decoded = Entry::decode(encoded).unwrap();
         assert_eq!(decoded.height, 42);
         assert_eq!(decoded.digest, digest);
-
-        assert_eq!(encoded.len(), <Entry as commonware_codec::FixedSize>::SIZE);
     }
 }

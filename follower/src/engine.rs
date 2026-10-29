@@ -9,17 +9,17 @@ use alto_types::{Block, Scheme, EPOCH_LENGTH};
 use commonware_consensus::{
     marshal::{
         self,
-        core::{Actor as MarshalActor, Mailbox as MarshalMailbox},
+        core::{Actor as MarshalActor, Mailbox as MarshalMailbox, Processed},
         resolver::handler,
         standard::Standard,
     },
     types::{FixedEpocher, Height, ViewDelta},
 };
-use commonware_cryptography::{certificate::ConstantProvider, sha256::Digest};
-use commonware_parallel::Strategy;
-use commonware_runtime::{
-    spawn_cell, BufferPooler, ContextCell, Handle, Metrics, Spawner, Storage,
+use commonware_cryptography::{
+    certificate::ConstantProvider, sha256::Digest, Digested, Digestible as _,
 };
+use commonware_parallel::Strategy;
+use commonware_runtime::{spawn_cell, ContextCell, Handle, Metrics, Spawner, Storage};
 use commonware_utils::NZUsize;
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
@@ -39,14 +39,7 @@ const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(1024);
 #[allow(clippy::type_complexity)]
 pub struct Engine<E, T, C>
 where
-    E: BufferPooler
-        + commonware_runtime::Clock
-        + GClock
-        + Rng
-        + CryptoRng
-        + Spawner
-        + Storage
-        + Metrics,
+    E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     T: Strategy,
     C: Scheme,
 {
@@ -67,14 +60,7 @@ where
 
 impl<E, T, C> Engine<E, T, C>
 where
-    E: BufferPooler
-        + commonware_runtime::Clock
-        + GClock
-        + Rng
-        + CryptoRng
-        + Spawner
-        + Storage
-        + Metrics,
+    E: commonware_runtime::Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     T: Strategy,
     C: Scheme,
 {
@@ -95,6 +81,8 @@ where
         // Create marshal
         let provider = ConstantProvider::new(scheme);
         let epocher = FixedEpocher::new(EPOCH_LENGTH);
+        let genesis = Block::genesis();
+        let genesis_digest = genesis.digest();
         let (marshal, mailbox, floor) = MarshalActor::init(
             context.child("marshal"),
             finalizations_by_height,
@@ -102,7 +90,7 @@ where
             marshal::Config {
                 provider,
                 epocher,
-                start: marshal::Start::Genesis(Block::genesis()),
+                start: marshal::Start::Genesis(Digested::precomputed(genesis, genesis_digest)),
                 partition_prefix: "follower-marshal".to_string(),
                 mailbox_size,
                 view_retention: VIEW_RETENTION_TIMEOUT,
@@ -127,7 +115,7 @@ where
             marshal_mailbox: mailbox.clone(),
             mailbox_size,
         };
-        (engine, mailbox, floor.height())
+        (engine, mailbox, floor.processed().map(Processed::height))
     }
 
     /// Start the [Engine].
@@ -167,7 +155,7 @@ mod tests {
     use commonware_consensus::types::{Round, View};
     use commonware_macros::test_traced;
     use commonware_parallel::Sequential;
-    use commonware_resolver::{Consumer, Delivery};
+    use commonware_resolver::{Consumer, Delivery, Outcome};
     use commonware_runtime::{deterministic::Runner, Runner as _, Supervisor as _};
     use commonware_utils::{vec::NonEmptyVec, NZUsize};
     use std::time::Duration;
@@ -222,9 +210,10 @@ mod tests {
                 value,
             );
 
-            let accepted = response.await.expect("response dropped");
-            assert!(
-                !accepted,
+            let outcome = response.await.expect("response dropped");
+            assert_eq!(
+                outcome,
+                Outcome::Invalid,
                 "marshal should reject finalization with invalid signature"
             );
         });
@@ -254,9 +243,10 @@ mod tests {
                 value,
             );
 
-            let accepted = response.await.expect("response dropped");
-            assert!(
-                !accepted,
+            let outcome = response.await.expect("response dropped");
+            assert_eq!(
+                outcome,
+                Outcome::Invalid,
                 "marshal should reject notarization with invalid signature"
             );
         });

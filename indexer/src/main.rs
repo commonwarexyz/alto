@@ -8,6 +8,7 @@ use axum::{
     routing::get,
 };
 use clap::Parser;
+use commonware_allocator::mimalloc;
 use commonware_codec::DecodeExt;
 use commonware_formatting::from_hex;
 use commonware_parallel::Sequential;
@@ -18,7 +19,7 @@ use tracing::info;
 include!(concat!(env!("OUT_DIR"), "/explorer_assets.rs"));
 
 #[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config::DEFAULT);
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -175,8 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse identity
     let bytes = from_hex(&settings.identity).ok_or("Invalid identity hex format")?;
-    let identity: Identity =
-        Identity::decode(&mut bytes.as_slice()).map_err(|_| "Failed to decode identity")?;
+    let identity: Identity = Identity::decode(bytes).map_err(|_| "Failed to decode identity")?;
 
     match settings.certificate_mode {
         CertificateMode::Standard => serve::<StandardScheme>(settings, identity, script).await,

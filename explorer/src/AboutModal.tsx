@@ -79,7 +79,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                         </p>
                         <p>
                             In stable mode, a <strong>term</strong> groups consecutive views under one round-robin leader. In rotating mode,
-                            each term contains one view and a VRF seed selects its leader.
+                            each term contains one view, and either a VRF seed or round-robin order selects its leader.
                         </p>
                         <p>
                             A quorum of <i>2f+1</i> votes for a block forms a <strong>notarization</strong>. After successfully certifying the block,
@@ -97,7 +97,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                                     <strong>{leaderIndicator.label}</strong>
                                 </div>
                                 {standardCertificates
-                                    ? 'The stable round-robin leader has proposed a block.'
+                                    ? 'The round-robin leader has proposed a block.'
                                     : 'Some leader has been elected to propose a block.'}
                                 {MODE === 'public' && " A map dot of the same color shows the leader's region when its location is known."}
                                 {!standardCertificates && ' A new leader is elected for each view.'}

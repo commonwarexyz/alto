@@ -84,7 +84,7 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
             return Err(Error::Failed(result.status()));
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let seed = Seed::decode(bytes.as_ref()).map_err(Error::InvalidData)?;
+        let seed = Seed::decode(bytes).map_err(Error::InvalidData)?;
         if self.verify && !self.verifier.verify_seed(&seed) {
             return Err(Error::InvalidSignature);
         }
@@ -127,9 +127,8 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
             return Err(Error::Failed(result.status()));
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let notarized =
-            Notarized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
-                .map_err(Error::InvalidData)?;
+        let notarized = Notarized::<C>::decode_cfg(bytes, &Block::unbounded_codec_config())
+            .map_err(Error::InvalidData)?;
         if self.verify && !notarized.verify(&self.verifier, &self.strategy) {
             return Err(Error::InvalidSignature);
         }
@@ -172,9 +171,8 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
             return Err(Error::Failed(result.status()));
         }
         let bytes = result.bytes().await.map_err(Error::Reqwest)?;
-        let finalized =
-            Finalized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
-                .map_err(Error::InvalidData)?;
+        let finalized = Finalized::<C>::decode_cfg(bytes, &Block::unbounded_codec_config())
+            .map_err(Error::InvalidData)?;
         if self.verify && !finalized.verify(&self.verifier, &self.strategy) {
             return Err(Error::InvalidSignature);
         }
@@ -222,18 +220,16 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
         // Verify the block matches the query
         let result = match query {
             Query::Latest => {
-                let result =
-                    Finalized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
-                        .map_err(Error::InvalidData)?;
+                let result = Finalized::<C>::decode_cfg(bytes, &Block::unbounded_codec_config())
+                    .map_err(Error::InvalidData)?;
                 if self.verify && !result.verify(&self.verifier, &self.strategy) {
                     return Err(Error::InvalidSignature);
                 }
                 Payload::Finalized(Box::new(result))
             }
             Query::Index(index) => {
-                let result =
-                    Finalized::<C>::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
-                        .map_err(Error::InvalidData)?;
+                let result = Finalized::<C>::decode_cfg(bytes, &Block::unbounded_codec_config())
+                    .map_err(Error::InvalidData)?;
                 if self.verify && !result.verify(&self.verifier, &self.strategy) {
                     return Err(Error::InvalidSignature);
                 }
@@ -243,7 +239,7 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
                 Payload::Finalized(Box::new(result))
             }
             Query::Digest(digest) => {
-                let result = Block::decode_cfg(bytes.as_ref(), &Block::unbounded_codec_config())
+                let result = Block::decode_cfg(bytes, &Block::unbounded_codec_config())
                     .map_err(Error::InvalidData)?;
                 if result.digest() != digest {
                     return Err(Error::UnexpectedResponse);
@@ -288,7 +284,7 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
                                 let _ = sender.unbounded_send(Err(Error::UnexpectedResponse));
                                 return;
                             };
-                            let data = &data[1..];
+                            let data = data.slice(1..);
 
                             // Deserialize the message
                             match kind {

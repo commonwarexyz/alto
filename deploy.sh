@@ -15,7 +15,7 @@ case "$1" in
         ;;
     rotating)
         # A VRF-seeded leader for every view.
-        leader_flags=(--leader-mode rotating --leader-delay-ms 0)
+        leader_flags=(--leader-mode rotating --leader-election vrf --leader-delay-ms 0)
         ;;
     *)
         usage
@@ -76,7 +76,6 @@ cargo run --locked --bin deploy -- generate \
     --peers 50 \
     --bootstrappers 5 \
     --worker-threads 8 \
-    --network-buffer-pool-max-per-class 16384 \
     --log-level info \
     --traces-sample-rate 0 \
     --mailbox-size 16384 \

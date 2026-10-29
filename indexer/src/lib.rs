@@ -121,7 +121,7 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         } else {
             // Parse as hex-encoded index
             let raw = from_hex(query)?;
-            let index = u64::decode(raw.as_slice()).ok()?;
+            let index = u64::decode(raw).ok()?;
             state.seeds.get(&View::new(index)).cloned()
         }
     }
@@ -167,7 +167,7 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         } else {
             // Parse as hex-encoded index
             let raw = from_hex(query)?;
-            let index = u64::decode(raw.as_slice()).ok()?;
+            let index = u64::decode(raw).ok()?;
             state.notarizations.get(&View::new(index)).cloned()
         }
     }
@@ -216,7 +216,7 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         } else {
             // Parse as hex-encoded index
             let raw = from_hex(query)?;
-            let index = u64::decode(raw.as_slice()).ok()?;
+            let index = u64::decode(raw).ok()?;
             state.finalizations.get(&View::new(index)).cloned()
         }
     }
@@ -233,7 +233,7 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
         } else if let Some(raw) = from_hex(query) {
             // Try to parse as index (8 bytes)
             if raw.len() == u64::SIZE {
-                let index = u64::decode(raw.as_slice()).ok()?;
+                let index = u64::decode(raw).ok()?;
                 state.finalized_height_to_view.get(&index).and_then(|view| {
                     state
                         .finalizations
@@ -242,7 +242,7 @@ impl<C: Scheme, S: Strategy> Indexer<C, S> {
                 })
             } else if raw.len() == Digest::SIZE {
                 // Try to parse as digest
-                let digest = Digest::decode(raw.as_slice()).ok()?;
+                let digest = Digest::decode(raw).ok()?;
                 state
                     .blocks_by_digest
                     .get(&digest)
@@ -308,7 +308,7 @@ async fn seed_upload<C: Scheme, S: Strategy>(
     AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
-    match Seed::decode(&mut body.as_ref()) {
+    match Seed::decode(body) {
         Ok(seed) => match indexer.submit_seed(seed) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
@@ -331,7 +331,7 @@ async fn notarization_upload<C: Scheme, S: Strategy>(
     AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
-    match Notarized::<C>::decode_cfg(body.as_ref(), indexer.block_codec_config()) {
+    match Notarized::<C>::decode_cfg(body, indexer.block_codec_config()) {
         Ok(notarized) => match indexer.submit_notarization(notarized) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
@@ -354,7 +354,7 @@ async fn finalization_upload<C: Scheme, S: Strategy>(
     AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
-    match Finalized::<C>::decode_cfg(body.as_ref(), indexer.block_codec_config()) {
+    match Finalized::<C>::decode_cfg(body, indexer.block_codec_config()) {
         Ok(finalized) => match indexer.submit_finalization(finalized) {
             Ok(_) => StatusCode::OK,
             Err(_) => StatusCode::UNAUTHORIZED,
@@ -377,7 +377,7 @@ async fn block_upload<C: Scheme, S: Strategy>(
     AxumState(indexer): AxumState<Arc<Indexer<C, S>>>,
     body: Bytes,
 ) -> impl IntoResponse {
-    match Block::decode_cfg(body.as_ref(), indexer.block_codec_config()) {
+    match Block::decode_cfg(body, indexer.block_codec_config()) {
         Ok(block) => {
             indexer.submit_block(block);
             StatusCode::OK
