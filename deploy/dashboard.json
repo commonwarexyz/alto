@@ -4070,7 +4070,7 @@
                 "type": "prometheus",
                 "uid": "PBFA97CFB590B2093"
             },
-            "description": "Memory mimalloc has committed, as it accounts it. Purges do not lower this figure on Unix.",
+            "description": "Memory mimalloc has committed, as it accounts it. Pinned reservations are excluded, and purges do not lower this figure on Unix.",
             "fieldConfig": {
                 "defaults": {
                     "color": {

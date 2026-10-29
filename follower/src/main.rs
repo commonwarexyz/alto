@@ -23,12 +23,15 @@ use std::{
 };
 use tracing::{error, info, warn, Level};
 
-/// Keeps freed memory for a minute before returning it to the operating system. Recurring work
-/// such as metrics scrapes empties pages that mimalloc's default 4 s purge delay would hand back
-/// and the next run would fault in again.
+/// Serves allocations from a 1 GiB pinned reservation, which mimalloc never returns to the
+/// operating system, so pages emptied by recurring work such as metrics scrapes are reused
+/// instead of being purged and faulted in again. The reservation is address space until touched:
+/// resident memory grows to the peak working set and stays there. Memory beyond the reservation
+/// is kept for a minute before mimalloc returns it.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config {
     purge: mimalloc::Purge::After(Duration::from_secs(60)),
+    reserve: Some(mimalloc::Reserve::pinned(1 << 30)),
     ..mimalloc::Config::DEFAULT
 });
 
