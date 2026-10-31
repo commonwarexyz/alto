@@ -223,7 +223,9 @@ mod tests {
         deterministic::{self, Runner},
         Clock, Metrics, Runner as _, Spawner, Supervisor as _,
     };
-    use commonware_utils::{channel::oneshot, ordered::Set, probability, NZUsize, NZU32};
+    use commonware_utils::{
+        channel::oneshot, ordered::Set, probability, NZDuration, NZUsize, NZU32,
+    };
     use engine::Engine;
     use governor::Quota;
     use indexer::mocks;
@@ -235,8 +237,9 @@ mod tests {
     /// everything in RAM.
     const FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(14); // 1MB
 
-    /// (Effectively) unlimited quota for tests.
-    const TEST_QUOTA: Quota = Quota::per_second(NZU32!(u32::MAX));
+    /// Per-peer channel quota for tests. The simulated network sizes and preallocates the queue
+    /// behind each receiver from this burst, so it must stay bounded.
+    const TEST_QUOTA: Quota = Quota::per_second(NZU32!(1_024));
 
     /// Proposal delay of every simulated validator and the term length of stable leaders.
     const PROPOSAL_DELAY_MS: u64 = 10;
@@ -473,7 +476,8 @@ mod tests {
             leader_timeout: cfg.leader_timeout,
             certification_timeout: cfg.certification_timeout,
             nullify_retry: timeout_retry,
-            fetch_timeout: Duration::from_secs(1),
+            fetch_timeout: NZDuration!(Duration::from_secs(1)),
+            fetch_retry_delay: Duration::from_millis(100),
             activity_timeout: ViewDelta::new(10),
             skip_timeout,
             backfiller_max_active: cfg.backfiller_max_active,
@@ -488,8 +492,8 @@ mod tests {
             peer_provider: oracle.manager(),
             blocker: oracle.control(public_key.clone()),
             mailbox_size: NZUsize!(1024),
-            timeout: Duration::from_secs(2),
-            fetch_retry_timeout: Duration::from_millis(100),
+            fetch_timeout: NZDuration!(Duration::from_secs(2)),
+            fetch_retry_delay: Duration::from_millis(100),
             priority_requests: false,
             priority_responses: false,
         };

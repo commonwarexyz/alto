@@ -34,7 +34,7 @@ use commonware_stream::{
     sake::{self, Sake},
     SakeCups,
 };
-use commonware_utils::{ordered::Set, union_unique, NZUsize, NZU32};
+use commonware_utils::{ordered::Set, union_unique, NZDuration, NZUsize, NZU32};
 use futures::future::try_join_all;
 use governor::Quota;
 use std::{
@@ -75,6 +75,7 @@ const NULLIFY_RETRY: Duration = Duration::from_secs(10);
 const ACTIVITY_TIMEOUT: ViewDelta = ViewDelta::new(256);
 const SKIP_TIMEOUT: Duration = Duration::from_secs(11);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(2);
+const FETCH_RETRY_DELAY: Duration = Duration::from_millis(100);
 const MARSHAL_RESOLVER_TIMEOUT: Duration = Duration::from_secs(10);
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
@@ -379,8 +380,8 @@ fn main() {
             peer_provider: oracle.clone(),
             blocker: oracle.clone(),
             mailbox_size: NZUsize!(config.mailbox_size),
-            timeout: MARSHAL_RESOLVER_TIMEOUT,
-            fetch_retry_timeout: Duration::from_millis(100),
+            fetch_timeout: NZDuration!(MARSHAL_RESOLVER_TIMEOUT),
+            fetch_retry_delay: FETCH_RETRY_DELAY,
             priority_requests: false,
             priority_responses: false,
         };
@@ -420,7 +421,8 @@ fn main() {
                     nullify_retry: NULLIFY_RETRY,
                     activity_timeout: ACTIVITY_TIMEOUT,
                     skip_timeout: SKIP_TIMEOUT,
-                    fetch_timeout: FETCH_TIMEOUT,
+                    fetch_timeout: NZDuration!(FETCH_TIMEOUT),
+                    fetch_retry_delay: FETCH_RETRY_DELAY,
                     backfiller_max_active: config.backfiller_max_active,
                     backfiller_retry: Duration::from_millis(config.backfiller_retry_ms),
                     indexer,

@@ -33,7 +33,7 @@ use commonware_runtime::{
     spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
 };
 use commonware_storage::{archive::immutable, queue};
-use commonware_utils::{NZUsize, NZU64};
+use commonware_utils::{NZUsize, NonZeroDuration, NZU64};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
@@ -107,7 +107,8 @@ pub struct Config<
     pub leader_timeout: Duration,
     pub certification_timeout: Duration,
     pub nullify_retry: Duration,
-    pub fetch_timeout: Duration,
+    pub fetch_timeout: NonZeroDuration,
+    pub fetch_retry_delay: Duration,
     pub activity_timeout: ViewDelta,
     pub skip_timeout: Duration,
     pub backfiller_max_active: NonZeroUsize,
@@ -372,6 +373,7 @@ where
                 certification_timeout: cfg.certification_timeout,
                 timeout_retry: cfg.nullify_retry,
                 fetch_timeout: cfg.fetch_timeout,
+                fetch_retry_delay: cfg.fetch_retry_delay,
                 view_retention: cfg.activity_timeout,
                 skip: simplex::SkipPolicy::Enabled {
                     timeout: cfg.skip_timeout,
