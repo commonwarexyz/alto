@@ -50,8 +50,7 @@ use tracing::{error, info, Level};
 /// Serves allocations from a 1 GiB pinned reservation, which mimalloc never returns to the
 /// operating system, so pages emptied by recurring work such as metrics scrapes are reused
 /// instead of being purged and faulted in again. The reservation is address space until touched:
-/// resident memory grows to the peak working set and stays there. Memory beyond the reservation
-/// is kept for a minute before mimalloc returns it.
+/// resident memory grows to the peak working set and stays there.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config {
     purge: mimalloc::Purge::After(Duration::from_secs(60)),
