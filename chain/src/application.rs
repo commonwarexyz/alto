@@ -13,11 +13,6 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::{Duration, SystemTime};
 use tracing::info;
 
-/// Fixed consensus cutoff for block timestamps: 2200-01-01T00:00:00Z.
-///
-/// Different platforms have different `SystemTime` limits, so we use a fixed
-/// timestamp to ensure consistent application of block validity rules.
-const MAX_BLOCK_TIMESTAMP_MS: u64 = 7_258_118_400_000;
 const MAX_FUTURE_SKEW_MS: u64 = 1_000;
 
 #[derive(Clone)]
@@ -58,7 +53,9 @@ impl<S: Scheme> Application<S> {
     ) -> Option<Digested<Block>> {
         let parent = ancestry.next().await?;
 
-        // Pace each proposal from its parent's timestamp.
+        // Pace each proposal from its parent's timestamp. Decoding and the assertion below cap
+        // every block's timestamp at `Block::MAX_TIMESTAMP_MS`, so only a delay near `u64::MAX`
+        // can overflow this sum.
         let min_timestamp = parent
             .inner()
             .timestamp
@@ -74,7 +71,7 @@ impl<S: Scheme> Application<S> {
         }
         current = current.max(min_timestamp);
         assert!(
-            current <= MAX_BLOCK_TIMESTAMP_MS,
+            current <= Block::MAX_TIMESTAMP_MS,
             "proposed timestamp exceeded maximum",
         );
 
@@ -160,8 +157,8 @@ where
             return false;
         }
 
-        // Require nondecreasing timestamps within the protocol's fixed range.
-        if block.timestamp < parent.timestamp || block.timestamp > MAX_BLOCK_TIMESTAMP_MS {
+        // Require nondecreasing timestamps.
+        if block.timestamp < parent.timestamp {
             return false;
         }
 
@@ -170,9 +167,8 @@ where
         // keeps the pending certification alive, and finalization cancels it at or below the
         // finalized view.
         //
-        // The timestamp is chosen by an untrusted proposer, but the check above caps it at
-        // `MAX_BLOCK_TIMESTAMP_MS` (year 2200), which `SystemTime` represents on every platform,
-        // so this addition cannot overflow.
+        // An untrusted proposer chooses this timestamp, but decoding caps it at
+        // `Block::MAX_TIMESTAMP_MS`, so this addition cannot overflow.
         let deadline = SystemTime::UNIX_EPOCH
             + Duration::from_millis(block.timestamp.saturating_sub(MAX_FUTURE_SKEW_MS));
         runtime_context.sleep_until(deadline).await;
@@ -433,7 +429,7 @@ mod tests {
 
     #[test]
     fn propose_without_delay_uses_current_or_parent_timestamp() {
-        for parent_timestamp in [0, 10, 15, MAX_BLOCK_TIMESTAMP_MS] {
+        for parent_timestamp in [0, 10, 15, Block::MAX_TIMESTAMP_MS] {
             let runner = deterministic::Runner::default();
             runner.start(|context| async move {
                 let mut application = Application::new(0, 0);
@@ -502,36 +498,6 @@ mod tests {
     }
 
     #[test]
-    fn verify_rejects_timestamp_above_maximum() {
-        let runner = deterministic::Runner::default();
-        runner.start(|context| async move {
-            let mut application = Application::new(DELAY_MS, 0);
-
-            let now = context.current().epoch_millis();
-            let parent = Block::new(
-                test_context(1, (View::zero(), sha256::Digest::EMPTY)),
-                Sha256::hash(&[b"genesis"]),
-                Height::new(1),
-                now,
-                Bytes::new(),
-            );
-
-            // Verification rejects timestamps outside the fixed protocol range before sleeping.
-            let block = Block::new(
-                test_context(2, (View::new(1), parent.digest())),
-                parent.digest(),
-                parent.height.next(),
-                MAX_BLOCK_TIMESTAMP_MS + 1,
-                Bytes::new(),
-            );
-
-            assert!(
-                !verify_block(context.child("verify"), &mut application, &block, &parent).await
-            );
-        });
-    }
-
-    #[test]
     #[should_panic(expected = "proposed timestamp exceeded maximum")]
     fn propose_panics_when_parent_timestamp_is_maximum() {
         let runner = deterministic::Runner::default();
@@ -543,7 +509,7 @@ mod tests {
                 test_context(1, (View::zero(), sha256::Digest::EMPTY)),
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
-                MAX_BLOCK_TIMESTAMP_MS,
+                Block::MAX_TIMESTAMP_MS,
                 Bytes::new(),
             );
             let _ = propose_child(

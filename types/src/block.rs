@@ -43,6 +43,12 @@ pub struct Block {
 }
 
 impl Block {
+    /// Latest block timestamp, in milliseconds since the Unix epoch (2200-01-01T00:00:00Z).
+    ///
+    /// Decoding rejects later timestamps so that every decoded block's timestamp fits in
+    /// `SystemTime` on every platform.
+    pub const MAX_TIMESTAMP_MS: u64 = 7_258_118_400_000;
+
     /// The fixed genesis block shared by validators and followers.
     pub fn genesis() -> Self {
         let context = Context {
@@ -141,6 +147,9 @@ impl Read for Block {
         let parent = Digest::read(reader)?;
         let height = Height::read(reader)?;
         let timestamp = UInt::read(reader)?.0;
+        if timestamp > Self::MAX_TIMESTAMP_MS {
+            return Err(Error::Invalid("types::Block", "timestamp exceeds maximum"));
+        }
         let data = Bytes::read_cfg(reader, cfg)?;
 
         let digest = Self::compute_digest(&context, &parent, height, timestamp, &data);
@@ -348,7 +357,7 @@ impl BoundedBlock for Block {
         let metadata = Context::MAX_ENCODE_SIZE
             + Digest::SIZE
             + Height::MAX_ENCODE_SIZE
-            + UInt::<u64>::MAX_ENCODE_SIZE
+            + UInt(Self::MAX_TIMESTAMP_MS).encode_size()
             + UInt::<u32>::MAX_ENCODE_SIZE;
         metadata
             .checked_add(max_data)

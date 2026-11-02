@@ -124,6 +124,37 @@ mod tests {
     }
 
     #[test]
+    fn block_decoding_rejects_timestamp_above_maximum() {
+        let context = Context {
+            round: Round::new(EPOCH, View::new(9)),
+            leader: ed25519::PrivateKey::from_seed(0).public_key(),
+            parent: (View::new(8), sha256::Digest::EMPTY),
+        };
+        let parent = Sha256::hash(&[b"parent"]);
+
+        // Encoding accepts any timestamp, so decoding alone must accept the maximum and reject
+        // every later value.
+        for (timestamp, decodes) in [
+            (Block::MAX_TIMESTAMP_MS, true),
+            (Block::MAX_TIMESTAMP_MS + 1, false),
+            (u64::MAX, false),
+        ] {
+            let block = Block::new(
+                context.clone(),
+                parent,
+                Height::new(10),
+                timestamp,
+                Bytes::new(),
+            );
+            assert_eq!(
+                Block::decode_cfg(block.encode(), &Block::unbounded_codec_config()).is_ok(),
+                decodes,
+                "timestamp {timestamp} must decode exactly when it is at most the maximum"
+            );
+        }
+    }
+
+    #[test]
     fn block_max_encode_size_bounds_widest_blocks() {
         let context = Context {
             round: Round::new(Epoch::new(u64::MAX), View::new(u64::MAX)),
@@ -135,7 +166,7 @@ mod tests {
                 context.clone(),
                 sha256::Digest::EMPTY,
                 Height::new(u64::MAX),
-                u64::MAX,
+                Block::MAX_TIMESTAMP_MS,
                 Bytes::from(vec![0; usize::try_from(block_size).unwrap()]),
             );
             let bound = Block::max_encode_size(&Block::codec_config(block_size));
