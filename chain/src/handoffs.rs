@@ -1,11 +1,11 @@
-use alto_types::{Activity, Block, Context, Scheme, EPOCH};
+use alto_types::{Activity, Block, Context, Scheme};
 use commonware_actor::Feedback;
 use commonware_consensus::{
     simplex::{
         elector::{Config, Elector, Mode},
         types::Proposal,
     },
-    types::{Participant, Round, TermLength, View},
+    types::{Participant, Round, TermLength},
     Reporter,
 };
 use commonware_cryptography::{sha256::Digest, Digested, Digestible};
@@ -21,10 +21,11 @@ const RATE_SCALE: u64 = 1 << 16;
 
 /// Per-leader success estimates for choosing whether to prepare early.
 ///
-/// Each sampled outcome contributes one eighth of the parent leader's new success estimate.
-/// That estimate sets the chance of preparing early, with a 1/16 minimum so a recovered
-/// leader's estimate can rise again. Ordinary proposals do not update the estimate because
-/// they do not test early preparation.
+/// An early proposal becomes a sample once consensus casts our notarize vote for it. Each
+/// sample's outcome contributes one eighth of the parent leader's new success estimate. That
+/// estimate sets the chance of preparing early, with a 1/16 minimum so a recovered leader's
+/// estimate can rise again. Ordinary proposals do not update the estimate because they do not
+/// test early preparation.
 #[derive(Clone)]
 pub(crate) struct Handoffs<S: Scheme> {
     state: Arc<Mutex<State>>,
@@ -37,7 +38,16 @@ struct State {
     me: Option<Participant>,
     success_rates: Vec<u64>,
     last_outcome: Round,
-    pending: Option<Proposal<Digest>>,
+    pending: Option<Sample>,
+}
+
+/// An early proposal whose outcome is still unknown.
+struct Sample {
+    proposal: Proposal<Digest>,
+    /// Whether we have voted for `proposal`. Consensus can abandon a prepared proposal before
+    /// voting, as when the build outlasts the leader timeout. The view's outcome then says
+    /// nothing about the parent leader, so only a voted proposal counts as a sample.
+    voted: bool,
 }
 
 impl<S: Scheme> Handoffs<S> {
@@ -60,15 +70,10 @@ impl<S: Scheme> Handoffs<S> {
         }
     }
 
+    /// Decides at random whether to prepare early, with the chance set by the parent leader's
+    /// success estimate.
     pub(crate) fn prepare(&self, context: &Context, rng: &mut impl Rng) -> bool {
         let state = self.state.lock().unwrap();
-        if context.round.epoch() != EPOCH
-            || context.round <= state.last_outcome
-            || !context.round.view().is_term_start(state.term_length)
-            || context.parent.0 == View::zero()
-        {
-            return false;
-        }
         let parent = Round::new(context.round.epoch(), context.parent.0);
         let Some(leader) = (state.leader)(parent) else {
             return false;
@@ -87,11 +92,10 @@ impl<S: Scheme> Handoffs<S> {
         if state.pending.is_some() || context.round <= state.last_outcome {
             return;
         }
-        state.pending = Some(Proposal::new(
-            context.round,
-            context.parent.0,
-            block.digest(),
-        ));
+        state.pending = Some(Sample {
+            proposal: Proposal::new(context.round, context.parent.0, block.digest()),
+            voted: false,
+        });
     }
 }
 
@@ -99,7 +103,17 @@ impl<S: Scheme> Reporter for Handoffs<S> {
     type Activity = Activity<S>;
 
     fn report(&mut self, activity: Self::Activity) -> Feedback {
+        let mut state = self.state.lock().unwrap();
         let (round, proposal, finalized) = match activity {
+            Activity::Notarize(vote) => {
+                let me = state.me;
+                if let Some(sample) = &mut state.pending {
+                    if me == Some(vote.attestation.signer) && vote.proposal == sample.proposal {
+                        sample.voted = true;
+                    }
+                }
+                return Feedback::Ok;
+            }
             Activity::Certification(n) => (n.proposal.round, Some(n.proposal), false),
             Activity::Finalization(f) => (f.proposal.round, Some(f.proposal), true),
             Activity::Nullification(n) => (n.round, None, false),
@@ -109,8 +123,7 @@ impl<S: Scheme> Reporter for Handoffs<S> {
         // Finalization cancels certification work through its round. Otherwise, close older
         // samples only on our term-start outcomes. Other rounds' results can arrive before
         // a pending certification.
-        let mut state = self.state.lock().unwrap();
-        if round.epoch() != EPOCH || round <= state.last_outcome {
+        if round <= state.last_outcome {
             return Feedback::Ok;
         }
         let own_term_start = round.view().is_term_start(state.term_length)
@@ -118,16 +131,42 @@ impl<S: Scheme> Reporter for Handoffs<S> {
         if !finalized && !own_term_start {
             return Feedback::Ok;
         }
-        let leader = state
+
+        // Only a voted sample has an outcome, and its own round settles it directly. A certificate
+        // for the exact proposal credits the parent leader, a nullification debits it, and a
+        // certificate for a different proposal leaves the estimate unchanged.
+        //
+        // A later finalization can settle the sample first. An honest leader signs one proposal per
+        // view, so a finalized block whose parent lies in the sampled view proves our proposal
+        // certified. Simplex requires every view between a block and its parent to be nullified, so
+        // a finalized block whose parent precedes the sampled view proves that view was nullified.
+        // A parent after the sampled view reveals nothing.
+        let update = state
             .pending
             .as_ref()
-            .filter(|sample| {
-                sample.round == round && proposal.as_ref().is_none_or(|p| p == *sample)
-            })
-            .and_then(|sample| (state.leader)(Round::new(sample.round.epoch(), sample.parent)));
-        if let Some(leader) = leader {
+            .filter(|sample| sample.voted)
+            .and_then(|sample| {
+                let sampled = sample.proposal.round;
+                let success = if round == sampled {
+                    match &proposal {
+                        Some(proposal) => (*proposal == sample.proposal).then_some(true)?,
+                        None => false,
+                    }
+                } else if finalized && round > sampled {
+                    let parent = proposal.as_ref()?.parent;
+                    if parent > sampled.view() {
+                        return None;
+                    }
+                    parent == sampled.view()
+                } else {
+                    return None;
+                };
+                let parent = Round::new(sampled.epoch(), sample.proposal.parent);
+                Some(((state.leader)(parent)?, success))
+            });
+        if let Some((leader, success)) = update {
             let rate = &mut state.success_rates[usize::from(leader)];
-            *rate = if proposal.is_some() {
+            *rate = if success {
                 *rate + (RATE_SCALE - *rate).div_ceil(8)
             } else {
                 *rate * 7 / 8
@@ -137,7 +176,7 @@ impl<S: Scheme> Reporter for Handoffs<S> {
         if state
             .pending
             .as_ref()
-            .is_some_and(|sample| sample.round <= round)
+            .is_some_and(|sample| sample.proposal.round <= round)
         {
             state.pending = None;
         }
@@ -149,7 +188,7 @@ impl<S: Scheme> Reporter for Handoffs<S> {
 mod tests {
     use super::*;
     use crate::application::Application;
-    use alto_types::{StandardScheme, NAMESPACE};
+    use alto_types::{StandardScheme, EPOCH, NAMESPACE};
     use bytes::Bytes;
     use commonware_consensus::{
         marshal::ancestry,
@@ -158,7 +197,7 @@ mod tests {
             scheme::bls12381_threshold::standard,
             types::{Finalization, Finalize, Notarization, Notarize, Nullification, Nullify},
         },
-        types::{Epoch, Height, ViewDelta},
+        types::{Height, View, ViewDelta},
         Application as ConsensusApplication, Handoff,
     };
     use commonware_cryptography::{
@@ -253,11 +292,33 @@ mod tests {
                 .unwrap()
         }
 
-        /// Records an early proposal so outcome tests can control which attempts are sampled.
-        async fn sample(&mut self, runtime: &deterministic::Context, view: u64) -> Digested<Block> {
+        /// Records an early proposal that consensus has not voted for.
+        async fn candidate(
+            &mut self,
+            runtime: &deterministic::Context,
+            view: u64,
+        ) -> Digested<Block> {
             let block = self.propose(runtime, view).await;
             self.reporter.prepared(&block);
             block
+        }
+
+        /// Records an early proposal and our vote for it, so outcome tests can control which
+        /// attempts are sampled.
+        async fn sample(&mut self, runtime: &deterministic::Context, view: u64) -> Digested<Block> {
+            let block = self.candidate(runtime, view).await;
+            self.reporter.report(self.vote(&block));
+            block
+        }
+
+        fn proposal(block: &Digested<Block>) -> Proposal<Digest> {
+            let context = &block.inner().context;
+            Proposal::new(context.round, context.parent.0, block.digest())
+        }
+
+        /// Validator 2's own notarize vote for `block`.
+        fn vote(&self, block: &Digested<Block>) -> Activity<StandardScheme> {
+            Activity::Notarize(Notarize::sign(&self.schemes[2], Self::proposal(block)).unwrap())
         }
 
         fn nullification(&self, round: Round) -> Activity<StandardScheme> {
@@ -273,8 +334,7 @@ mod tests {
         }
 
         fn certification(&self, block: &Digested<Block>) -> Activity<StandardScheme> {
-            let context = &block.inner().context;
-            let proposal = Proposal::new(context.round, context.parent.0, block.digest());
+            let proposal = Self::proposal(block);
             let votes: Vec<_> = self
                 .schemes
                 .iter()
@@ -287,8 +347,7 @@ mod tests {
         }
 
         fn finalization(&self, block: &Digested<Block>) -> Activity<StandardScheme> {
-            let context = &block.inner().context;
-            let proposal = Proposal::new(context.round, context.parent.0, block.digest());
+            let proposal = Self::proposal(block);
             let votes: Vec<_> = self
                 .schemes
                 .iter()
@@ -359,6 +418,8 @@ mod tests {
                     let before = h.reporter.state.lock().unwrap().success_rates[1];
                     match h.prepare(&runtime, view).await {
                         Handoff::Vote(block) => {
+                            h.reporter.report(h.vote(&block));
+
                             // Judge the latter half of each phase, after the estimate can adapt.
                             if step >= 128 {
                                 late_early_votes += 1;
@@ -446,6 +507,7 @@ mod tests {
             let Handoff::Vote(block) = h.prepare(&runtime, 6).await else {
                 panic!("full confidence must select an early proposal");
             };
+            h.reporter.report(h.vote(&block));
             let context = &block.inner().context;
 
             // Nullifying the parent does not establish the outcome of our early proposal.
@@ -473,8 +535,8 @@ mod tests {
             let block = h.sample(&runtime, 10).await;
             let round = block.inner().context.round;
 
-            // Individual votes, notarizations before application certification, other epochs,
-            // and other leaders' rounds must leave this sample unresolved.
+            // Individual votes, notarizations before application certification, and other
+            // leaders' rounds must leave this sample unresolved.
             h.reporter.report(Activity::Nullify(
                 Nullify::sign::<Digest>(&h.schemes[0], round).unwrap(),
             ));
@@ -482,8 +544,6 @@ mod tests {
                 unreachable!()
             };
             h.reporter.report(Activity::Notarization(notarization));
-            h.reporter
-                .report(h.nullification(Round::new(Epoch::new(1), round.view())));
             h.reporter
                 .report(h.nullification(Round::new(EPOCH, View::new(11))));
             assert_eq!(h.reporter.state.lock().unwrap().success_rates, before);
@@ -586,26 +646,31 @@ mod tests {
     }
 
     #[test]
-    fn higher_finalization_retires_a_sample_and_allows_learning_from_the_next() {
+    fn a_finalized_child_credits_an_unresolved_sample() {
         deterministic::Runner::default().start(|mut runtime| async move {
             // Cover finalizing a later leader's view in rotating mode and a later view of our
-            // own term in stable mode.
-            for (config, sampled, finalized, next) in [
-                (RoundRobin::default(), 6, 7, 10),
+            // own term in stable mode. An earlier failed handoff lowers the estimate so that a
+            // credit is observable.
+            for (config, prior, sampled, finalized, next) in [
+                (RoundRobin::default(), 2, 6, 7, 10),
                 (
                     RoundRobin::default().with_term(
                         TermLength::new(NZU32!(4)),
                         Duration::from_secs(12),
                         ViewDelta::new(4),
                     ),
+                    5,
                     21,
                     22,
                     37,
                 ),
             ] {
                 let mut h = Harness::new(&mut runtime, config);
+                h.fail(&runtime, prior).await;
+                let before = h.reporter.state.lock().unwrap().success_rates[1];
 
-                // A descendant finalizes before the sample's own outcome is reported.
+                // A child of the sampled block finalizes before the sample's own outcome arrives.
+                // That child proves the sampled proposal certified, so the sample earns credit.
                 let stale = h.sample(&runtime, sampled).await;
                 let (mut context, _) = h.inputs(finalized);
                 context.parent = (stale.inner().context.round.view(), stale.digest());
@@ -619,23 +684,109 @@ mod tests {
                     .await
                     .unwrap();
                 h.reporter.report(h.finalization(&block));
-                assert_eq!(
-                    h.reporter.state.lock().unwrap().success_rates,
-                    vec![RATE_SCALE; 4]
-                );
+                let credited = h.reporter.state.lock().unwrap().success_rates[1];
+                assert!(credited > before);
 
                 // Late preparation must not reopen a view that finality has already retired.
                 h.reporter.prepared(&stale);
                 assert!(h.reporter.state.lock().unwrap().pending.is_none());
 
-                // Retiring the unresolved sample must free the slot for the next handoff's outcome.
+                // Retiring the sample must free the slot for the next handoff's outcome.
                 h.fail(&runtime, next).await;
                 assert_eq!(
                     h.reporter.state.lock().unwrap().success_rates[1],
-                    RATE_SCALE * 7 / 8,
+                    credited * 7 / 8,
                     "finalization of view {finalized} must retire the sample from view {sampled}"
                 );
             }
+        });
+    }
+
+    #[test]
+    fn a_finalization_beyond_a_sampled_view_resolves_it_by_ancestry() {
+        deterministic::Runner::default().start(|mut runtime| async move {
+            // A finalized block whose parent lies below the sampled view proves the view was
+            // nullified. One whose parent lies above it reveals nothing and retires the sample
+            // without an outcome.
+            for (finalized, parent_view, nullified) in [(7, 5, true), (8, 7, false)] {
+                let mut h = Harness::new(&mut runtime, RoundRobin::default());
+                h.fail(&runtime, 2).await;
+                let before = h.reporter.state.lock().unwrap().success_rates[1];
+                h.sample(&runtime, 6).await;
+
+                // `inputs(view)` returns a parent from `view - 1`, so this block sits at
+                // `parent_view`.
+                let (_, parent) = h.inputs(parent_view + 1);
+                let (mut context, _) = h.inputs(finalized);
+                context.parent = (parent.inner().context.round.view(), parent.digest());
+                let block = h
+                    .application
+                    .propose(
+                        (runtime.child("finalized"), context),
+                        ancestry::from_iter([parent]),
+                        (),
+                    )
+                    .await
+                    .unwrap();
+                h.reporter.report(h.finalization(&block));
+                let state = h.reporter.state.lock().unwrap();
+                let expected = if nullified { before * 7 / 8 } else { before };
+                assert_eq!(state.success_rates[1], expected);
+                assert!(state.pending.is_none());
+            }
+        });
+    }
+
+    #[test]
+    fn an_unvoted_candidate_does_not_update_the_estimate() {
+        deterministic::Runner::default().start(|mut runtime| async move {
+            let mut h = Harness::new(&mut runtime, RoundRobin::default());
+
+            // Consensus can abandon a prepared proposal before voting, as when the build outlasts
+            // the leader timeout. Another validator's vote for that proposal must not make it a
+            // sample, and nullifying its view must not charge the parent leader.
+            let block = h.candidate(&runtime, 6).await;
+            h.reporter.report(Activity::Notarize(
+                Notarize::sign(&h.schemes[0], Harness::proposal(&block)).unwrap(),
+            ));
+            h.reporter
+                .report(h.nullification(block.inner().context.round));
+            {
+                let state = h.reporter.state.lock().unwrap();
+                assert_eq!(state.success_rates, vec![RATE_SCALE; 4]);
+                assert!(state.pending.is_none());
+            }
+
+            // Our vote for an ordinary rebuild in the same view must not make the abandoned
+            // candidate a sample either.
+            let block = h.candidate(&runtime, 10).await;
+            let (mut context, _) = h.inputs(10);
+            let (_, parent) = h.inputs(9);
+            context.parent = (parent.inner().context.round.view(), parent.digest());
+            let rebuilt = h
+                .application
+                .propose(
+                    (runtime.child("rebuilt"), context),
+                    ancestry::from_iter([parent]),
+                    (),
+                )
+                .await
+                .unwrap();
+            h.reporter.report(h.vote(&rebuilt));
+            h.reporter
+                .report(h.nullification(block.inner().context.round));
+            {
+                let state = h.reporter.state.lock().unwrap();
+                assert_eq!(state.success_rates, vec![RATE_SCALE; 4]);
+                assert!(state.pending.is_none());
+            }
+
+            // The retired candidate frees the slot for a voted sample.
+            h.fail(&runtime, 14).await;
+            assert_eq!(
+                h.reporter.state.lock().unwrap().success_rates[1],
+                RATE_SCALE * 7 / 8
+            );
         });
     }
 
@@ -675,10 +826,6 @@ mod tests {
                 h.reporter.state.lock().unwrap().success_rates[1],
                 RATE_SCALE
             );
-
-            // Preparation is ineligible after the first view of the term.
-            let (context, _) = h.inputs(22);
-            assert!(!h.reporter.prepare(&context, &mut ScriptedRng::new([])));
 
             // The term-start outcome must still lower the estimate and allow waiting at the
             // next handoff to this validator.
@@ -749,9 +896,6 @@ mod tests {
 
             // A late result and its certificate must not create or credit a sample for that view.
             h.reporter.prepared(&block);
-            assert!(!h
-                .reporter
-                .prepare(&block.inner().context, &mut ScriptedRng::new([])));
             h.reporter.report(h.certification(&block));
             let state = h.reporter.state.lock().unwrap();
             assert!(state.pending.is_none());

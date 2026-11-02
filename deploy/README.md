@@ -27,10 +27,13 @@ For each parent leader, a validator estimates how often its sampled early propos
 prepares early with probability equal to this estimate, but never less than one in sixteen, so a
 leader that recovers can raise its estimate again.
 
-A certificate for a sampled early proposal raises the estimate. A nullification of the validator's
-own view lowers it. Each outcome contributes one eighth of the new estimate. A certificate observed
-after that view's nullification does not undo the failure. Ordinary proposals and canceled builds do
-not update the estimate. Estimates reset to one on restart. This local policy affects proposal timing.
+An early proposal is sampled once the validator votes for it. A certificate for the sampled
+proposal, or a finalized block built directly on it, raises the estimate. A nullification of its
+view, or a finalized block that skips that view, lowers the estimate. Each outcome contributes one
+eighth of the new estimate. Only the first outcome counts, so a certificate observed after the
+view's nullification does not undo the failure. Ordinary proposals, canceled builds, and proposals
+the validator never voted for do not update the estimate. Estimates reset to one on restart. This
+local policy affects proposal timing.
 
 `--leader-delay-ms` sets the minimum interval from the parent's timestamp, from 0 through 999 ms.
 Zero disables pacing and allows equal timestamps. Use 100 ms for local stable networks: shorter

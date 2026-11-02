@@ -635,29 +635,47 @@ mod tests {
         }
 
         Runner::timed(Duration::from_secs(220)).start(|mut context| async move {
-            let (network, mut oracle) = Network::new(context.child("network"), simulated::Config {
-                max_size: 1024 * 1024,
-                max_peers_per_set: NZUsize!(4),
-                disconnect_on_block: true,
-                tracked_peer_sets: NZUsize!(1),
-            });
+            let (network, mut oracle) = Network::new(
+                context.child("network"),
+                simulated::Config {
+                    max_size: 1024 * 1024,
+                    max_peers_per_set: NZUsize!(4),
+                    disconnect_on_block: true,
+                    tracked_peer_sets: NZUsize!(1),
+                },
+            );
             network.start();
-            let Fixture { schemes, private_keys, participants, .. } =
-                bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, 4);
+            let Fixture {
+                schemes,
+                private_keys,
+                participants,
+                ..
+            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, 4);
             let a = participants[0].clone();
             let b = participants[1].clone();
             let mut registrations = register_validators(&mut oracle, &participants).await;
-            link_validators(&mut oracle, &participants, Link {
-                latency: Duration::from_millis(10),
-                jitter: Duration::ZERO,
-                success_rate: probability!(1.0),
-            }, None).await;
+            link_validators(
+                &mut oracle,
+                &participants,
+                Link {
+                    latency: Duration::from_millis(10),
+                    jitter: Duration::ZERO,
+                    success_rate: probability!(1.0),
+                },
+                None,
+            )
+            .await;
             let observations = Arc::new(Mutex::new(Observations::default()));
 
             for (signer, scheme) in private_keys.iter().zip(&schemes) {
                 let me = signer.public_key();
-                let ((pending, pending_receiver), (recovered, recovered_receiver), resolver, broadcast, backfill) =
-                    registrations.remove(&me).unwrap();
+                let (
+                    (pending, pending_receiver),
+                    (recovered, recovered_receiver),
+                    resolver,
+                    broadcast,
+                    backfill,
+                ) = registrations.remove(&me).unwrap();
                 let observed = observations.clone();
                 let successor = b.clone();
                 let is_a = me == a;
@@ -668,17 +686,27 @@ mod tests {
                     let mut observed = observed.lock().unwrap();
                     if let Vote::Notarize(vote) = vote {
                         let view = vote.proposal.round.view();
-                        if is_a && usize::from(vote.attestation.signer) == 0 && view.get() % 4 == 0 && !observed.restored {
+                        if is_a
+                            && usize::from(vote.attestation.signer) == 0
+                            && view.get() % 4 == 0
+                            && !observed.restored
+                        {
                             // A sends its proposal only to B. Their two votes cannot meet
                             // the three-vote quorum.
-                            observed.withheld.entry(view).or_insert_with(||
-                                handoff_metric(&metric_context, &successor, "WaitReturned"));
+                            observed.withheld.entry(view).or_insert_with(|| {
+                                handoff_metric(&metric_context, &successor, "WaitReturned")
+                            });
                             return Some(Recipients::One(successor.clone()));
                         }
-                        if is_b && usize::from(vote.attestation.signer) == 1 && view.get() % 4 == 1 {
+                        if is_b && usize::from(vote.attestation.signer) == 1 && view.get() % 4 == 1
+                        {
                             // The voter counts its early vote before publishing the corresponding
                             // Notarize. Match that increment to the exact proposal on the wire.
-                            let count = handoff_metric(&metric_context, &successor, "VotedBeforeCertification");
+                            let count = handoff_metric(
+                                &metric_context,
+                                &successor,
+                                "VotedBeforeCertification",
+                            );
                             if count > observed.early_count {
                                 observed.early_count = count;
                                 observed.early.insert(view, vote.proposal);
@@ -692,22 +720,41 @@ mod tests {
                     let certificate = Certificate::<Scheme, Digest>::decode(bytes.clone()).unwrap();
                     let mut observed = observed.lock().unwrap();
                     match certificate {
-                        Certificate::Nullification(n) if observed.early.get(&n.round.view())
-                            .is_some_and(|proposal| observed.withheld.contains_key(&proposal.parent)) => {
+                        Certificate::Nullification(n)
+                            if observed.early.get(&n.round.view()).is_some_and(|proposal| {
+                                observed.withheld.contains_key(&proposal.parent)
+                            }) =>
+                        {
                             observed.failed.insert(n.round.view());
                         }
-                        Certificate::Finalization(f) if observed.restored && f.proposal.parent.get() % 4 == 0
-                            && observed.early.get(&f.proposal.round.view()) == Some(&f.proposal) => {
+                        Certificate::Finalization(f)
+                            if observed.restored
+                                && f.proposal.parent.get() % 4 == 0
+                                && observed.early.get(&f.proposal.round.view())
+                                    == Some(&f.proposal) =>
+                        {
                             observed.recovered.insert(f.proposal.round.view());
                         }
                         _ => {}
                     }
                     Some(recipients.clone())
                 });
-                start_validator_with(&context, &oracle, signer, scheme,
+                start_validator_with(
+                    &context,
+                    &oracle,
+                    signer,
+                    scheme,
                     engine::RoundRobinElector::default(),
-                    ((pending, pending_receiver), (recovered, recovered_receiver), resolver, broadcast, backfill),
-                    ValidatorConfig::default()).await;
+                    (
+                        (pending, pending_receiver),
+                        (recovered, recovered_receiver),
+                        resolver,
+                        broadcast,
+                        backfill,
+                    ),
+                    ValidatorConfig::default(),
+                )
+                .await;
             }
 
             let mut waited = None;
@@ -718,7 +765,8 @@ mod tests {
                     if observed.failed.len() >= 3 {
                         waited = observed.withheld.iter().find_map(|(parent, before)| {
                             let child = View::new(parent.get() + 1);
-                            (waits > *before && !observed.early.contains_key(&child)).then_some(child)
+                            (waits > *before && !observed.early.contains_key(&child))
+                                .then_some(child)
                         });
                     }
                 }
@@ -727,8 +775,10 @@ mod tests {
                 }
                 context.sleep(Duration::from_millis(50)).await;
             }
-            let waited = waited.expect("B must wait on A after repeated early proposals are nullified");
-            let before = observations.lock().unwrap().early_count;
+            assert!(
+                waited.is_some(),
+                "B must wait on A after repeated early proposals are nullified"
+            );
             observations.lock().unwrap().restored = true;
 
             for _ in 0..2_000 {
@@ -737,14 +787,11 @@ mod tests {
                 }
                 context.sleep(Duration::from_millis(50)).await;
             }
-            assert!(!observations.lock().unwrap().recovered.is_empty(),
-                "B must finalize an early proposal on A after delivery resumes");
+            assert!(
+                !observations.lock().unwrap().recovered.is_empty(),
+                "B must finalize an early proposal on A after delivery resumes"
+            );
             assert!(oracle.blocked().await.unwrap().is_empty());
-            let observed = observations.lock().unwrap();
-            eprintln!("withheld={:?} failed={:?} waited={:?} recovered={:?} waits={} early_before={} early_after={}",
-                observed.withheld, observed.failed, waited, observed.recovered,
-                handoff_metric(&context, &b, "WaitReturned"), before,
-                handoff_metric(&context, &b, "VotedBeforeCertification"));
         });
     }
 
