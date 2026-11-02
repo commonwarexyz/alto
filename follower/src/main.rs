@@ -23,10 +23,8 @@ use std::{
 };
 use tracing::{error, info, warn, Level};
 
-/// Serves allocations from a 1 GiB pinned reservation, which mimalloc never returns to the
-/// operating system, so pages emptied by recurring work such as metrics scrapes are reused
-/// instead of being purged and faulted in again. The reservation is address space until touched:
-/// resident memory grows to the peak working set and stays there.
+/// Requests a 1 GiB pinned arena whose pages are faulted in on first use and retained for
+/// reuse. This avoids repeated page faults for recurring work such as metrics scrapes.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config {
     purge: mimalloc::Purge::After(Duration::from_secs(60)),
@@ -137,7 +135,8 @@ fn main() {
 
     // Parse identity
     let identity_bytes = from_hex(&config.identity).expect("Could not parse identity hex");
-    let identity = Identity::decode(identity_bytes).expect("Could not decode identity public key");
+    let identity =
+        Identity::decode(identity_bytes).expect("identity must encode a valid public key");
 
     // Initialize runtime
     let cfg = tokio::Config::default()

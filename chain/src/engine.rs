@@ -1,5 +1,6 @@
 use crate::{
     application::Application,
+    handoffs::Handoffs,
     indexer::{self, Client},
 };
 use alto_types::{Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH};
@@ -45,7 +46,8 @@ use std::{
 use tracing::{error, info, warn};
 
 /// Reporter type for [simplex::Engine].
-type Reporter<E, C, CS> = Reporters<Option<indexer::Pusher<E, C, CS>>, Marshaled<E, CS>>;
+type Reporter<E, C, CS> =
+    Reporters<Handoffs<CS>, Reporters<Option<indexer::Pusher<E, C, CS>>, Marshaled<E, CS>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -58,10 +60,11 @@ const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // 3MB
 const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
-/// Each sync hands the buffered bytes to the blob and the next write allocates a fresh buffer,
-/// so this stays well under mimalloc's 512 KiB large-object limit to come from thread-local
-/// pages. Appends larger than the buffer go straight to the blob.
+
+/// Keeps write buffers below mimalloc's 512 KiB large-object limit so allocations can reuse
+/// thread-local pages. Each sync drains the buffer, so the next buffered write allocates again.
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(64 * 1024); // 64KB
+
 const PAGE_CACHE_PHYSICAL_PAGE_SIZE: u32 = 4_096;
 const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = page_size(PAGE_CACHE_PHYSICAL_PAGE_SIZE);
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
@@ -312,7 +315,9 @@ where
         // Create the application and, when an indexer is configured, a backfill
         // queue of finalized digests so block uploads can resume after
         // restarts.
-        let mut app = Application::new(proposal_delay_ms, cfg.block_size);
+        let handoffs = Handoffs::new(&scheme, cfg.elector.clone());
+        let mut app =
+            Application::new(proposal_delay_ms, cfg.block_size).with_handoffs(handoffs.clone());
         let (pusher, consumer) = if let Some(indexer) = cfg.indexer {
             let queue = queue::Queue::init(
                 context.child("queue"),
@@ -343,8 +348,8 @@ where
             (None, None)
         };
 
-        // Wrap the application in marshal. Marshal delivers finalized blocks to the application
-        // itself, while consensus drives the wrapper.
+        // Consensus uses the wrapper to build and verify proposals. The marshal actor reports
+        // finalized blocks directly to the application.
         let marshaled = Marshaled::<E, CS>::new(
             context.child("marshaled"),
             app.clone(),
@@ -352,9 +357,10 @@ where
             epocher,
         );
 
-        // Report consensus activity through the marshal wrapper, which releases its per-round
-        // proposal state before forwarding each activity to marshal.
-        let reporter: Reporter<E, C, CS> = (pusher, marshaled.clone()).into();
+        // The wrapper releases retired proposal state before forwarding consensus activity
+        // to marshal.
+        let reporter: Reporter<E, C, CS> =
+            (handoffs, Reporters::from((pusher, marshaled.clone()))).into();
 
         // Create the consensus engine
         let consensus = Consensus::new(

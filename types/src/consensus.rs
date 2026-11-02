@@ -40,7 +40,7 @@ pub const ROTATING_ELECTOR: RotatingElector = Random::new(RandomVersion::V1);
 pub enum CertificateMode {
     /// One threshold signature over each vote.
     Standard,
-    /// Vote and round-seed threshold signatures for certificate-seeded VRF leaders.
+    /// Threshold signatures over each vote and round seed.
     Vrf,
 }
 

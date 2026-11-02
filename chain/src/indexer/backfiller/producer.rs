@@ -81,18 +81,13 @@ impl<E: Clock + Storage + Metrics + Spawner> Actor<E> {
             return queue;
         };
 
-        // Persist a queue entry for each finalized block that is not already
-        // known uploaded. The backfiller retries from durable queue state until
-        // it either uploads successfully or observes that the live certificate
-        // path already uploaded the block.
-        //
-        // The producer owns the queue, so its sync also prunes the sections the
-        // consumer has acknowledged.
+        // Persist the entry before releasing the block's marshal acknowledgement.
+        // Sync also prunes sections below the consumer's acknowledgement floor.
         let (queue, _) = queue
             .append(&entry)
             .await
-            .expect("failed to append finalized digest");
-        queue.sync().await.expect("failed to sync finalized queue")
+            .expect("finalized digest must be appended to the backfill queue");
+        queue.sync().await.expect("backfill queue must sync")
     }
 }
 

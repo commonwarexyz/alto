@@ -10,6 +10,7 @@ use std::{
 
 pub mod application;
 pub mod engine;
+mod handoffs;
 pub mod indexer;
 pub mod utils;
 
@@ -67,8 +68,8 @@ pub enum Election {
     Vrf,
     /// Take the next validator in round-robin order.
     ///
-    /// Because every view's leader is known in advance, each incoming leader builds and votes
-    /// for its proposal before the outgoing leader's view certifies.
+    /// Leaders are known in advance, so the incoming leader can build and vote before
+    /// the outgoing view certifies.
     RoundRobin,
 }
 
@@ -237,8 +238,9 @@ mod tests {
     /// everything in RAM.
     const FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(14); // 1MB
 
-    /// Per-peer channel quota for tests. The simulated network sizes and preallocates the queue
-    /// behind each receiver from this burst, so it must stay bounded.
+    /// Per-peer channel quota for tests.
+    ///
+    /// The simulated network uses the burst allowance to preallocate each receiver's queue.
     const TEST_QUOTA: Quota = Quota::per_second(NZU32!(1_024));
 
     /// Proposal delay of every simulated validator and the term length of stable leaders.
@@ -371,15 +373,12 @@ mod tests {
             - sum_validator_metric::<i64>(metrics, "_queue_floor", None)
     }
 
-    type Registration = (
-        (
-            Sender<PublicKey, deterministic::Context>,
-            Receiver<PublicKey>,
-        ),
-        (
-            Sender<PublicKey, deterministic::Context>,
-            Receiver<PublicKey>,
-        ),
+    type Registration<
+        P = Sender<PublicKey, deterministic::Context>,
+        C = Sender<PublicKey, deterministic::Context>,
+    > = (
+        (P, Receiver<PublicKey>),
+        (C, Receiver<PublicKey>),
         (
             Sender<PublicKey, deterministic::Context>,
             Receiver<PublicKey>,
@@ -452,7 +451,10 @@ mod tests {
         signer: &commonware_cryptography::ed25519::PrivateKey,
         scheme: &CS,
         elector: L,
-        registration: Registration,
+        registration: Registration<
+            impl commonware_p2p::Sender<PublicKey = PublicKey>,
+            impl commonware_p2p::Sender<PublicKey = PublicKey>,
+        >,
         cfg: ValidatorConfig,
     ) {
         let timeout_retry = cfg.certification_timeout + Duration::from_millis(50);
@@ -610,6 +612,165 @@ mod tests {
     }
 
     #[test_traced]
+    fn selective_withholding_discourages_handoffs_and_recovers() {
+        use commonware_codec::DecodeExt;
+        use commonware_consensus::{
+            simplex::types::{Certificate, Proposal, Vote},
+            types::View,
+        };
+        use commonware_cryptography::sha256::Digest;
+        use commonware_p2p::Recipients;
+        use std::{
+            collections::{BTreeMap, BTreeSet},
+            sync::{Arc, Mutex},
+        };
+
+        type Scheme = bls12381_threshold::Scheme<PublicKey, MinSig>;
+
+        #[derive(Default)]
+        struct Observations {
+            restored: bool,
+            withheld: BTreeMap<View, u64>,
+            early_count: u64,
+            early: BTreeMap<View, Proposal<Digest>>,
+            failed: BTreeSet<View>,
+            recovered: BTreeSet<View>,
+        }
+
+        fn handoff_metric(
+            context: &deterministic::Context,
+            validator: &PublicKey,
+            event: &str,
+        ) -> u64 {
+            let id = format!("validator_{validator}");
+            context
+                .encode()
+                .lines()
+                .filter_map(|line| {
+                    let (name, labels, value) = validator_metric_sample(line)?;
+                    (name.ends_with("_handoff_events_total")
+                        && labels
+                            .is_some_and(|labels| labels.contains(&id) && labels.contains(event)))
+                    .then(|| value.parse::<u64>().unwrap())
+                })
+                .sum()
+        }
+
+        Runner::timed(Duration::from_secs(220)).start(|mut context| async move {
+            let (network, mut oracle) = Network::new(context.child("network"), simulated::Config {
+                max_size: 1024 * 1024,
+                max_peers_per_set: NZUsize!(4),
+                disconnect_on_block: true,
+                tracked_peer_sets: NZUsize!(1),
+            });
+            network.start();
+            let Fixture { schemes, private_keys, participants, .. } =
+                bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, 4);
+            let a = participants[0].clone();
+            let b = participants[1].clone();
+            let mut registrations = register_validators(&mut oracle, &participants).await;
+            link_validators(&mut oracle, &participants, Link {
+                latency: Duration::from_millis(10),
+                jitter: Duration::ZERO,
+                success_rate: probability!(1.0),
+            }, None).await;
+            let observations = Arc::new(Mutex::new(Observations::default()));
+
+            for (signer, scheme) in private_keys.iter().zip(&schemes) {
+                let me = signer.public_key();
+                let ((pending, pending_receiver), (recovered, recovered_receiver), resolver, broadcast, backfill) =
+                    registrations.remove(&me).unwrap();
+                let observed = observations.clone();
+                let successor = b.clone();
+                let is_a = me == a;
+                let is_b = me == b;
+                let metric_context = Arc::new(context.child("wire_observer"));
+                let (pending, _) = pending.split_with(move |_, recipients, bytes| {
+                    let vote = Vote::<Scheme, Digest>::decode(bytes.clone()).unwrap();
+                    let mut observed = observed.lock().unwrap();
+                    if let Vote::Notarize(vote) = vote {
+                        let view = vote.proposal.round.view();
+                        if is_a && usize::from(vote.attestation.signer) == 0 && view.get() % 4 == 0 && !observed.restored {
+                            // A sends its proposal only to B. Their two votes cannot meet
+                            // the three-vote quorum.
+                            observed.withheld.entry(view).or_insert_with(||
+                                handoff_metric(&metric_context, &successor, "WaitReturned"));
+                            return Some(Recipients::One(successor.clone()));
+                        }
+                        if is_b && usize::from(vote.attestation.signer) == 1 && view.get() % 4 == 1 {
+                            // The voter counts its early vote before publishing the corresponding
+                            // Notarize. Match that increment to the exact proposal on the wire.
+                            let count = handoff_metric(&metric_context, &successor, "VotedBeforeCertification");
+                            if count > observed.early_count {
+                                observed.early_count = count;
+                                observed.early.insert(view, vote.proposal);
+                            }
+                        }
+                    }
+                    Some(recipients.clone())
+                });
+                let observed = observations.clone();
+                let (recovered, _) = recovered.split_with(move |_, recipients, bytes| {
+                    let certificate = Certificate::<Scheme, Digest>::decode(bytes.clone()).unwrap();
+                    let mut observed = observed.lock().unwrap();
+                    match certificate {
+                        Certificate::Nullification(n) if observed.early.get(&n.round.view())
+                            .is_some_and(|proposal| observed.withheld.contains_key(&proposal.parent)) => {
+                            observed.failed.insert(n.round.view());
+                        }
+                        Certificate::Finalization(f) if observed.restored && f.proposal.parent.get() % 4 == 0
+                            && observed.early.get(&f.proposal.round.view()) == Some(&f.proposal) => {
+                            observed.recovered.insert(f.proposal.round.view());
+                        }
+                        _ => {}
+                    }
+                    Some(recipients.clone())
+                });
+                start_validator_with(&context, &oracle, signer, scheme,
+                    engine::RoundRobinElector::default(),
+                    ((pending, pending_receiver), (recovered, recovered_receiver), resolver, broadcast, backfill),
+                    ValidatorConfig::default()).await;
+            }
+
+            let mut waited = None;
+            for _ in 0..2_000 {
+                let waits = handoff_metric(&context, &b, "WaitReturned");
+                {
+                    let observed = observations.lock().unwrap();
+                    if observed.failed.len() >= 3 {
+                        waited = observed.withheld.iter().find_map(|(parent, before)| {
+                            let child = View::new(parent.get() + 1);
+                            (waits > *before && !observed.early.contains_key(&child)).then_some(child)
+                        });
+                    }
+                }
+                if waited.is_some() {
+                    break;
+                }
+                context.sleep(Duration::from_millis(50)).await;
+            }
+            let waited = waited.expect("B must wait on A after repeated early proposals are nullified");
+            let before = observations.lock().unwrap().early_count;
+            observations.lock().unwrap().restored = true;
+
+            for _ in 0..2_000 {
+                if !observations.lock().unwrap().recovered.is_empty() {
+                    break;
+                }
+                context.sleep(Duration::from_millis(50)).await;
+            }
+            assert!(!observations.lock().unwrap().recovered.is_empty(),
+                "B must finalize an early proposal on A after delivery resumes");
+            assert!(oracle.blocked().await.unwrap().is_empty());
+            let observed = observations.lock().unwrap();
+            eprintln!("withheld={:?} failed={:?} waited={:?} recovered={:?} waits={} early_before={} early_after={}",
+                observed.withheld, observed.failed, waited, observed.recovered,
+                handoff_metric(&context, &b, "WaitReturned"), before,
+                handoff_metric(&context, &b, "VotedBeforeCertification"));
+        });
+    }
+
+    #[test_traced]
     fn test_good_links() {
         let link = Link {
             latency: Duration::from_millis(10),
@@ -638,7 +799,23 @@ mod tests {
             "_handoff_events_total",
             Some("VotedBeforeCertification"),
         );
-        assert!(early_votes > 0, "no handoff voted before certification");
+        assert!(
+            early_votes > 0,
+            "at least one handoff must vote before certification"
+        );
+    }
+
+    #[test_traced]
+    fn test_round_robin_waits_after_failed_handoffs() {
+        let link = Link {
+            latency: Duration::from_millis(200),
+            jitter: Duration::from_millis(150),
+            success_rate: probability!(0.75),
+        };
+        let (_, metrics) = all_online_with(5, 0, link, 50, engine::RoundRobinElector::default);
+        let waits: u64 =
+            sum_validator_metric(&metrics, "_handoff_events_total", Some("WaitReturned"));
+        assert!(waits > 0, "at least one handoff must return Wait");
     }
 
     #[test_traced]

@@ -224,12 +224,12 @@ fn parse_leader(matches: &ArgMatches) -> Result<Leader, &'static str> {
             {
                 "vrf" => Election::Vrf,
                 "round-robin" => Election::RoundRobin,
-                _ => unreachable!("clap validates leader election"),
+                _ => unreachable!("clap must validate leader election"),
             };
             Ok(Leader::rotating(delay_ms, election))
         }
         "stable" => {
-            // Stable terms always rotate their leaders round-robin.
+            // Stable mode uses round-robin leader election.
             if matches.get_one::<String>("leader_election").is_some() {
                 return Err("stable leader mode does not accept --leader-election");
             }
@@ -989,7 +989,7 @@ fn explorer_local(dir: String, backend_url: String) {
     let polynomial = from_hex(&polynomial_hex).expect("invalid polynomial");
     let polynomial =
         Sharing::<MinSig>::decode_cfg(polynomial, &(NZU32!(num_peers as u32), ModeVersion::v0()))
-            .expect("polynomial is invalid");
+            .expect("polynomial must have a valid encoding");
     let identity = polynomial.public();
 
     // Generate config.ts with empty locations (explorer will hide map)
@@ -1024,7 +1024,8 @@ fn explorer_remote(dir: String, backend_url: String) {
     for instance in &validators {
         let region = &instance.region;
         let public_key = from_hex(&instance.name).expect("invalid public key");
-        let public_key = PublicKey::decode(public_key).expect("invalid public key");
+        let public_key =
+            PublicKey::decode(public_key).expect("public key must have a valid encoding");
         let location = match get_aws_location(region) {
             Some((coords, city)) => format!("    [[{}, {}], \"{}\"]", coords[0], coords[1], city),
             None => "    null".to_string(),
@@ -1161,7 +1162,8 @@ signature_threads: 1
 
     #[test]
     fn parse_rotating_leader() {
-        // The election selects the certificate construction, so it is never defaulted.
+        // Both the election and the delay are required. The election selects the certificate
+        // construction, so it has no default.
         for args in [
             [
                 "test",

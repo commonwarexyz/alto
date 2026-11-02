@@ -47,10 +47,8 @@ use std::{
 };
 use tracing::{error, info, Level};
 
-/// Serves allocations from a 1 GiB pinned reservation, which mimalloc never returns to the
-/// operating system, so pages emptied by recurring work such as metrics scrapes are reused
-/// instead of being purged and faulted in again. The reservation is address space until touched:
-/// resident memory grows to the peak working set and stays there.
+/// Requests a 1 GiB pinned arena whose pages are faulted in on first use and retained for
+/// reuse. This avoids repeated page faults for recurring work such as metrics scrapes.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config {
     purge: mimalloc::Purge::After(Duration::from_secs(60)),
@@ -153,7 +151,7 @@ fn main() {
     let mut config: Config =
         serde_yaml::from_str(&config_file).expect("Could not parse config file");
     let key = from_hex(&config.private_key).expect("Could not parse private key");
-    let signer = PrivateKey::decode(key).expect("Private key is invalid");
+    let signer = PrivateKey::decode(key).expect("private key must have a valid encoding");
     let public_key = signer.public_key();
 
     // Initialize runtime
@@ -223,7 +221,8 @@ fn main() {
                         .get(peer)
                         .expect("Could not find peer in hosts file");
                     let key = from_hex(peer).expect("Could not parse peer key");
-                    let key = PublicKey::decode(key).expect("Peer key is invalid");
+                    let key =
+                        PublicKey::decode(key).expect("peer key must encode a valid public key");
                     (key, *ip)
                 })
                 .collect();
@@ -232,7 +231,8 @@ fn main() {
             let mut bootstrappers = Vec::new();
             for bootstrapper in &config.bootstrappers {
                 let key = from_hex(bootstrapper).expect("Could not parse bootstrapper key");
-                let key = PublicKey::decode(key).expect("Bootstrapper key is invalid");
+                let key = PublicKey::decode(key)
+                    .expect("bootstrapper key must encode a valid public key");
                 let ip = peers.get(&key).expect("Could not find bootstrapper in IPs");
                 let bootstrapper_socket = format!("{}:{}", ip, config.port);
                 let bootstrapper_socket = SocketAddr::from_str(&bootstrapper_socket)
@@ -250,7 +250,8 @@ fn main() {
                 .into_iter()
                 .map(|peer| {
                     let key = from_hex(&peer.0).expect("Could not parse peer key");
-                    let key = PublicKey::decode(key).expect("Peer key is invalid");
+                    let key =
+                        PublicKey::decode(key).expect("peer key must encode a valid public key");
                     (key, peer.1)
                 })
                 .collect();
@@ -259,7 +260,8 @@ fn main() {
             let mut bootstrappers = Vec::new();
             for bootstrapper in &config.bootstrappers {
                 let key = from_hex(bootstrapper).expect("Could not parse bootstrapper key");
-                let key = PublicKey::decode(key).expect("Bootstrapper key is invalid");
+                let key = PublicKey::decode(key)
+                    .expect("bootstrapper key must encode a valid public key");
                 let socket = peers.get(&key).expect("Could not find bootstrapper in IPs");
                 bootstrappers.push((key, Ingress::Socket(*socket)));
             }
@@ -274,11 +276,11 @@ fn main() {
 
         // Parse config
         let share = from_hex(&config.share).expect("Could not parse share");
-        let share = group::Share::decode(share).expect("Share is invalid");
+        let share = group::Share::decode(share).expect("share must have a valid encoding");
         let polynomial = from_hex(&config.polynomial).expect("Could not parse polynomial");
         let polynomial =
             Sharing::<MinSig>::decode_cfg(polynomial, &(NZU32!(peers_u32), ModeVersion::v0()))
-                .expect("polynomial is invalid");
+                .expect("polynomial must have a valid encoding");
         let identity = *polynomial.public();
         info!(
             ?public_key,

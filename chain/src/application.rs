@@ -1,4 +1,4 @@
-use crate::indexer;
+use crate::{handoffs::Handoffs, indexer};
 use alto_types::{Block, Context, Scheme};
 use commonware_actor::Feedback;
 use commonware_consensus::{
@@ -10,10 +10,7 @@ use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use std::{
-    marker::PhantomData,
-    time::{Duration, SystemTime},
-};
+use std::time::{Duration, SystemTime};
 use tracing::info;
 
 /// Fixed consensus cutoff for block timestamps: 2200-01-01T00:00:00Z.
@@ -26,24 +23,29 @@ const MAX_FUTURE_SKEW_MS: u64 = 1_000;
 #[derive(Clone)]
 pub struct Application<S: Scheme> {
     backfiller: Option<indexer::Producer>,
+    handoffs: Option<Handoffs<S>>,
     delay_ms: u64,
     block_size: usize,
-    _scheme: PhantomData<S>,
 }
 
 impl<S: Scheme> Application<S> {
     pub fn new(delay_ms: u64, block_size: u32) -> Self {
         Self {
             backfiller: None,
+            handoffs: None,
             delay_ms,
             block_size: usize::try_from(block_size)
                 .expect("configured block size is unsupported on this platform"),
-            _scheme: PhantomData,
         }
     }
 
     pub(crate) fn with_backfiller(mut self, backfiller: indexer::Producer) -> Self {
         self.backfiller = Some(backfiller);
+        self
+    }
+
+    pub(crate) fn with_handoffs(mut self, handoffs: Handoffs<S>) -> Self {
+        self.handoffs = Some(handoffs);
         self
     }
 
@@ -105,21 +107,30 @@ where
     type Block = Block;
     type Input = ();
 
-    /// Builds a term-start block on a parent that has not yet certified and votes for it at once.
+    /// Chooses whether to prepare a term-start proposal before its parent certifies.
     ///
-    /// Alto validators trust each outgoing leader not to equivocate and to complete its term, so
-    /// the incoming leader relays its proposal and votes while the parent's votes are still in
-    /// flight, saving one network trip per handoff. Consensus asks only when the incoming leader
-    /// is known in advance (round-robin and stable modes), never with VRF leaders.
+    /// Overlapping the proposals saves one network trip when the parent certifies. Voting
+    /// early commits us to that parent for this view.
     async fn prepare(
         &mut self,
-        (runtime_context, context): (E, Self::Context),
+        (mut runtime_context, context): (E, Self::Context),
         ancestry: impl Ancestry<Self::Block>,
         _input: Self::Input,
     ) -> Handoff<Digested<Self::Block>> {
-        self.build(runtime_context, context, ancestry)
-            .await
-            .map_or(Handoff::Wait, Handoff::Vote)
+        if self
+            .handoffs
+            .as_ref()
+            .is_some_and(|handoffs| !handoffs.prepare(&context, &mut runtime_context))
+        {
+            return Handoff::Wait;
+        }
+        let Some(block) = self.build(runtime_context, context, ancestry).await else {
+            return Handoff::Wait;
+        };
+        if let Some(handoffs) = &self.handoffs {
+            handoffs.prepared(&block);
+        }
+        Handoff::Vote(block)
     }
 
     async fn propose(

@@ -48,7 +48,7 @@ pub struct CertifiedBlockJs {
 
 #[wasm_bindgen]
 pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
-    let identity = Identity::decode(identity).expect("invalid identity");
+    let identity = Identity::decode(identity).expect("identity must encode a valid public key");
     let verifier = VrfScheme::certificate_verifier(NAMESPACE, identity);
 
     let Ok(seed) = Seed::decode(bytes) else {
@@ -66,7 +66,7 @@ pub fn parse_seed(identity: Vec<u8>, bytes: Vec<u8>) -> JsValue {
 
 #[wasm_bindgen]
 pub fn parse_notarized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsValue {
-    let identity = Identity::decode(identity).expect("invalid identity");
+    let identity = Identity::decode(identity).expect("identity must encode a valid public key");
     if standard {
         parse_notarized_with::<StandardScheme>(identity, bytes)
     } else {
@@ -96,7 +96,7 @@ fn parse_notarized_with<S: Scheme>(identity: Identity, bytes: Vec<u8>) -> JsValu
 
 #[wasm_bindgen]
 pub fn parse_finalized(identity: Vec<u8>, bytes: Vec<u8>, standard: bool) -> JsValue {
-    let identity = Identity::decode(identity).expect("invalid identity");
+    let identity = Identity::decode(identity).expect("identity must encode a valid public key");
     if standard {
         parse_finalized_with::<StandardScheme>(identity, bytes)
     } else {

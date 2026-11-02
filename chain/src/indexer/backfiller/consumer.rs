@@ -272,7 +272,9 @@ where
         // Acknowledge the queue entry and advance the queue floor if needed. The
         // producer's next sync prunes acknowledged sections.
         let floor = self.reader.ack_floor();
-        self.reader.ack(position).expect("failed to ack");
+        self.reader
+            .ack(position)
+            .expect("completed queue position must be published");
         if self.reader.ack_floor() > floor {
             self.uploads.lock().advance_queue_floor(height);
         }

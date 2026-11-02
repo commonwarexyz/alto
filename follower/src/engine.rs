@@ -210,11 +210,11 @@ mod tests {
                 value,
             );
 
-            let outcome = response.await.expect("response dropped");
+            let outcome = response.await.expect("marshal must respond to delivery");
             assert_eq!(
                 outcome,
                 Outcome::Invalid,
-                "marshal should reject finalization with invalid signature"
+                "marshal must reject a finalization with an invalid signature"
             );
         });
     }
@@ -243,11 +243,11 @@ mod tests {
                 value,
             );
 
-            let outcome = response.await.expect("response dropped");
+            let outcome = response.await.expect("marshal must respond to delivery");
             assert_eq!(
                 outcome,
                 Outcome::Invalid,
-                "marshal should reject notarization with invalid signature"
+                "marshal must reject a notarization with an invalid signature"
             );
         });
     }

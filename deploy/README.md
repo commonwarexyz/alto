@@ -14,13 +14,22 @@ _To configure local indexer upload, add `--indexers '<url>:<count>[;<url>:<count
 
 `--leader-mode rotating` elects a new leader for every view, chosen by `--leader-election`. `vrf`
 derives each leader from a seed in the previous view's certificate. `round-robin` takes validators
-in order, so each leader is known in advance: the incoming leader builds, relays, and votes for its
-proposal before the outgoing leader's view certifies. Stable mode assigns leaders round-robin for
-terms of `--leader-term-length` views and pipelines each handoff between terms the same way. Stable
-mode requires a term length of at least two and `--leader-optimistic-views`, which limits how far
-proposals and votes may run ahead of directly notarized ancestry. Values above the term length have
-no further effect. Rotating mode rejects both stable-only flags, and stable mode rejects
-`--leader-election`.
+in order, so each leader is known in advance. The incoming leader can then build, relay, and vote
+for its proposal before the outgoing leader's view certifies. Stable mode assigns leaders
+round-robin for terms of `--leader-term-length` views and pipelines each handoff between terms the
+same way. Stable mode requires a term length of at least two and `--leader-optimistic-views`, which
+limits how far proposals and votes may run ahead of directly notarized ancestry. Values above the
+term length have no further effect. Rotating mode rejects both stable-only flags, and stable mode
+rejects `--leader-election`.
+
+For each parent leader, a validator estimates how often its sampled early proposals succeed. It
+prepares early with probability equal to this estimate, but never less than one in sixteen, so a
+leader that recovers can raise its estimate again.
+
+A certificate for a sampled early proposal raises the estimate. A nullification of the validator's
+own view lowers it. Each outcome contributes one eighth of the new estimate. A certificate observed
+after that view's nullification does not undo the failure. Ordinary proposals and canceled builds do
+not update the estimate. Estimates reset to one on restart. This local policy affects proposal timing.
 
 `--leader-delay-ms` sets the minimum interval from the parent's timestamp, from 0 through 999 ms.
 Zero disables pacing and allows equal timestamps. Use 100 ms for local stable networks: shorter

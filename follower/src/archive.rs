@@ -31,9 +31,9 @@ use std::{num::NonZero, sync::Arc};
 // Shared constants (also used by marshal config in engine.rs)
 pub(crate) const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
 pub(crate) const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
-/// Each sync hands the buffered bytes to the blob and the next write allocates a fresh buffer,
-/// so this stays well under mimalloc's 512 KiB large-object limit to come from thread-local
-/// pages. Appends larger than the buffer go straight to the blob.
+
+/// Keeps write buffers below mimalloc's 512 KiB large-object limit so allocations can reuse
+/// thread-local pages. Each sync drains the buffer, so the next buffered write allocates again.
 pub(crate) const WRITE_BUFFER: NonZero<usize> = NZUsize!(64 * 1024); // 64KB
 
 // Finalized archive constants.
