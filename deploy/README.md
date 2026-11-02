@@ -12,20 +12,20 @@ _To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/
 
 _To configure local indexer upload, add `--indexers '<url>:<count>[;<url>:<count>...]'` to the `generate local` command. For example, `http://localhost:8080:1` assigns one validator to upload to that indexer._
 
-`--leader-mode` is required and accepts `stable`, `rotating-vrf`, or
-`rotating-round-robin`. `rotating-vrf` derives each view's leader from a seed in the previous
-view's certificate. `rotating-round-robin` takes validators in order, so each leader is known in
-advance. The incoming leader can then build, relay, and vote for its proposal before the outgoing
-leader's view certifies. `stable` assigns leaders round-robin for terms of
-`--leader-term-length` views and pipelines each handoff between terms the same way.
+`--leader-mode` is required and accepts `stable`, `rotating-vrf`, or `rotating-round-robin`.
+`rotating-vrf` derives each view's leader from a seed in the previous view's certificate.
+`rotating-round-robin` takes validators in order, so each leader is known in advance. The incoming
+leader can then build, relay, and vote for its proposal before the outgoing leader's view
+certifies. `stable` assigns leaders round-robin for terms of `--leader-term-length` views and
+pipelines each handoff between terms the same way.
 
-Stable mode requires a term length of at least two and `--leader-optimistic-views`, which limits
-how far proposals and votes may run ahead of directly notarized ancestry. Values above the term
-length have no further effect. Both rotating modes reject these stable-only flags.
+Stable mode requires a term length of at least two and `--leader-optimistic-views`. The optimistic
+window limits how far proposals and votes may run ahead of directly notarized ancestry, and values
+above the term length have no further effect. Both rotating modes reject these stable-only flags.
 
-For each parent leader, a validator estimates how often its sampled early proposals succeed. It
-prepares early with probability equal to this estimate, but never less than one in sixteen, so a
-leader that recovers can raise its estimate again.
+For each parent leader, a validator estimates how often its own early proposals built on that
+leader's blocks succeed. It prepares early with probability equal to this estimate, but never less
+than one in sixteen, so a leader that recovers can raise its estimate again.
 
 An early proposal is sampled once the validator votes for it. A certificate for the sampled
 proposal, or a finalized block built directly on it, raises the estimate. A nullification of its
@@ -33,7 +33,7 @@ view, or a finalized block that skips that view, lowers the estimate. Each outco
 eighth of the new estimate. Only the first outcome counts, so a certificate observed after the
 view's nullification does not undo the failure. Ordinary proposals, canceled builds, and proposals
 the validator never voted for do not update the estimate. Estimates reset to one on restart. This
-local policy affects proposal timing.
+policy controls whether a validator prepares a proposal before its parent certifies.
 
 `--leader-delay-ms` sets the minimum interval from the parent's timestamp, from 0 through 999 ms.
 Zero disables pacing and allows equal timestamps. Use 100 ms for local stable networks: shorter
@@ -71,7 +71,7 @@ traces_sample_rate: 0.0
 indexer: http://localhost:8080
 ```
 
-Rotating leader configs carry the complete mode and its delay:
+Rotating leader configs carry only the mode and its delay:
 
 ```yaml
 leader:
@@ -83,7 +83,7 @@ leader:
 cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 100 --leader-term-length 1000 --leader-optimistic-views 48 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
 ```
 
-For a rotating VRF network (use `rotating-round-robin` for a scheduled leader each view):
+For a rotating network, pass `rotating-vrf` or `rotating-round-robin`:
 
 ```bash
 cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode rotating-vrf --leader-delay-ms 0 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
@@ -179,8 +179,8 @@ cluster.
 
 The script deploys 50 validators and one indexer on `c7gd.4xlarge` instances. Each validator uses
 8 worker threads and 16 signature threads. Stable mode uses a 5 ms proposal interval and runs
-100,000-view terms with 48 optimistic views. Both rotating modes use zero proposal delay:
-`rotating-vrf` selects a VRF-seeded leader every view, while `rotating-round-robin` follows the
+100,000-view terms with 48 optimistic views. Both rotating modes use zero proposal delay.
+`rotating-vrf` selects a VRF-seeded leader every view, and `rotating-round-robin` follows the
 validator order. Deployment concurrency is 50.
 
 _Each `c7gd.4xlarge` provides a 950GB ephemeral NVMe instance store, which the deployer mounts at

@@ -12,7 +12,7 @@ The alto explorer can run in two modes: **public** (for deployed clusters) and *
 
 When the indexer serves the explorer, `/runtime-config.js` supplies the mode, network key, leader mode, and validator keys and locations for that deployment. Requests use the same origin as the explorer page. This runtime configuration takes precedence over the static files and `REACT_APP_MODE`.
 
-Stable leaders hold multi-view terms. Rotating modes assign one view per term. The explorer derives certificate verification from the leader mode: `rotating-vrf` uses VRF certificates, and both round-robin modes use standard certificates.
+Stable leaders hold multi-view terms. Rotating modes assign one view per term. The explorer verifies VRF certificates for `rotating-vrf` and standard certificates for both round-robin modes.
 
 For a standalone explorer, the bundled `runtime-config.js` selects the static configurations below. `REACT_APP_MODE` selects the mode and defaults to `public`. If the configuration script fails to load, startup stops with a refresh prompt.
 

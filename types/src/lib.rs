@@ -180,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "maximum block size overflows usize")]
+    #[should_panic(expected = "maximum block size must fit in usize")]
     fn block_max_encode_size_panics_on_overflow() {
         Block::max_encode_size(&Block::unbounded_codec_config());
     }

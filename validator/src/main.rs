@@ -47,8 +47,9 @@ use std::{
 };
 use tracing::{error, info, Level};
 
-/// Requests a 1 GiB pinned arena. Its pages are faulted in on first use and retained
-/// between allocations, reducing page faults during periodic work such as metrics scrapes.
+/// Requests a 1 GiB pinned arena and sets a 60-second purge delay for other arenas. Pinned pages
+/// fault in on first use and are never purged, reducing repeated page faults during periodic work
+/// such as metrics scrapes.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config {
     purge: mimalloc::Purge::After(Duration::from_secs(60)),

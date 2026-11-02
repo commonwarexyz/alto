@@ -63,7 +63,7 @@ where
 /// Leader election policy for the consensus engine.
 ///
 /// The delay sets the minimum interval from the parent's timestamp in milliseconds.
-/// Zero disables proposal pacing and allows timestamps equal to the parent's.
+/// Zero disables proposal pacing, so a proposed timestamp can equal the parent's.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Leader {
@@ -218,7 +218,8 @@ mod tests {
 
     /// Per-peer channel quota for tests.
     ///
-    /// The simulated network uses the burst allowance to preallocate each receiver's queue.
+    /// The simulated network reports each receiver's capacity as a multiple of the burst
+    /// allowance, and consumers size their mailboxes from that capacity.
     const TEST_QUOTA: Quota = Quota::per_second(NZU32!(1_024));
 
     /// Proposal delay of every simulated validator and the term length of stable leaders.
@@ -537,7 +538,7 @@ mod tests {
         all_online_with(n, seed, link, required, stable_elector).0
     }
 
-    /// Runs `n` connected validators until one processes `required` blocks, returning the
+    /// Runs `n` connected validators until one processes `required` blocks and returns the
     /// auditor state and the final metrics.
     fn all_online_with(
         n: u32,
@@ -605,16 +606,24 @@ mod tests {
 
         type Scheme = bls12381_threshold::Scheme<PublicKey, MinSig>;
 
+        /// Wire traffic recorded by the validators' channel filters.
         #[derive(Default)]
         struct Observations {
+            /// Whether A sends its proposals to every validator again.
             restored: bool,
+            /// A's withheld views, with B's `WaitReturned` count when each was first withheld.
             withheld: BTreeMap<View, u64>,
+            /// B's latest `VotedBeforeCertification` count.
             early_count: u64,
+            /// B's early proposals by view.
             early: BTreeMap<View, Proposal<Digest>>,
+            /// Views of B's early proposals on a withheld parent that were nullified.
             failed: BTreeSet<View>,
+            /// Views of B's early proposals on A that finalized after delivery resumed.
             recovered: BTreeSet<View>,
         }
 
+        /// Sums `validator`'s `_handoff_events_total` samples for `event`.
         fn handoff_metric(
             context: &deterministic::Context,
             validator: &PublicKey,
@@ -667,6 +676,9 @@ mod tests {
             .await;
             let observations = Arc::new(Mutex::new(Observations::default()));
 
+            // Start every validator behind wire filters. A sends its proposals only to B until the
+            // test restores delivery, and the filters record B's early proposals on A and the
+            // certificates that resolve them.
             for (signer, scheme) in private_keys.iter().zip(&schemes) {
                 let me = signer.public_key();
                 let (
@@ -757,6 +769,8 @@ mod tests {
                 .await;
             }
 
+            // Withholding must nullify three of B's early proposals on A and then make B wait at
+            // a later handoff from A.
             let mut waited = None;
             for _ in 0..2_000 {
                 let waits = handoff_metric(&context, &b, "WaitReturned");
@@ -779,8 +793,10 @@ mod tests {
                 waited.is_some(),
                 "B must wait on A after repeated early proposals are nullified"
             );
-            observations.lock().unwrap().restored = true;
 
+            // Once A sends its proposals to everyone again, B must finalize an early proposal
+            // on A.
+            observations.lock().unwrap().restored = true;
             for _ in 0..2_000 {
                 if !observations.lock().unwrap().recovered.is_empty() {
                     break;
@@ -817,7 +833,7 @@ mod tests {
         };
         let (_, metrics) = all_online_with(5, 0, link, 25, engine::RoundRobinElector::default);
 
-        // Every view starts a new term, so incoming leaders vote for their prepared proposals
+        // Every view starts a new term, so incoming leaders can vote for their prepared proposals
         // before the outgoing leader's view certifies.
         let early_votes: u64 = sum_validator_metric(
             &metrics,

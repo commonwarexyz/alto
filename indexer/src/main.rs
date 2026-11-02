@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn accepts_direct_and_deployer_modes() {
-        // Direct startup carries the complete leader selection into runtime settings.
+        // Direct startup carries each leader mode into the runtime settings.
         for mode in LeaderMode::ALL {
             let args = Args::try_parse_from([
                 "indexer",
@@ -253,7 +253,7 @@ mod tests {
         ])
         .is_ok());
 
-        // Direct startup requires a complete policy and rejects certificate-format selectors.
+        // Direct startup rejects `--certificate-mode` and values other than the leader modes.
         for selection in [
             ["--certificate-mode", "vrf"],
             ["--leader-mode", "vrf"],
@@ -308,20 +308,20 @@ explorer:
         )
         .unwrap();
 
-        // Deployed settings accept the same complete policies as direct startup.
+        // Deployed settings accept every leader mode.
         for mode in LeaderMode::ALL {
             value["leader_mode"] = mode.as_str().into();
             let config: DeployerConfig = serde_yaml::from_value(value.clone()).unwrap();
             assert_eq!(config.leader_mode, mode);
         }
 
-        // Configuration requires a complete leader mode.
+        // Configuration requires `leader_mode`, and `certificate_mode` cannot replace it.
         value.as_mapping_mut().unwrap().remove("leader_mode");
         assert!(serde_yaml::from_value::<DeployerConfig>(value.clone()).is_err());
         value["certificate_mode"] = "vrf".into();
         assert!(serde_yaml::from_value::<DeployerConfig>(value.clone()).is_err());
 
-        // Certificate-format fields are not part of the deployed configuration.
+        // `certificate_mode` is rejected even alongside `leader_mode`.
         value["leader_mode"] = "rotating-vrf".into();
         assert!(serde_yaml::from_value::<DeployerConfig>(value).is_err());
     }
@@ -353,7 +353,7 @@ locations: [[[1.0, 2.0], City], null, [[3.0, 4.0], Other]]
         assert!(script.contains(r#""LOCATIONS":[[[1.0,2.0],"City"],null,[[3.0,4.0],"Other"]]"#));
         assert!(script.contains("window.location.host"));
 
-        // Browser settings carry the complete leader policy selection.
+        // Browser settings carry each leader mode and no certificate mode.
         for mode in LeaderMode::ALL {
             settings.leader_mode = mode;
             let script = explorer_script(&settings);

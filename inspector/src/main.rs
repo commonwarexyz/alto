@@ -22,7 +22,7 @@
 //!
 //! _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
 //!
-//! The default leader mode is `rotating-vrf`, the policy used by the public network. Select
+//! The default leader mode is `rotating-vrf`, as on the public network. Select
 //! `--leader-mode stable` or `--leader-mode rotating-round-robin` for a network with round-robin
 //! leaders. Those networks do not publish seed artifacts.
 //!
@@ -397,7 +397,7 @@ mod tests {
             DEFAULT_LEADER_MODE.as_str()
         );
 
-        // A global policy selection is available before or after the subcommand.
+        // `--leader-mode` is global, so it can appear before or after the subcommand.
         for mode in LeaderMode::ALL {
             for args in [
                 vec!["inspector", "--leader-mode", mode.as_str(), "listen"],
@@ -418,7 +418,7 @@ mod tests {
             }
         }
 
-        // Partial policies and certificate-format arguments cannot override the selection.
+        // `--certificate-mode` and values other than the leader modes are rejected.
         for selection in [
             ["--certificate-mode", "vrf"],
             ["--leader-mode", "vrf"],

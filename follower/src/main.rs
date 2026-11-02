@@ -23,8 +23,9 @@ use std::{
 };
 use tracing::{error, info, warn, Level};
 
-/// Requests a 1 GiB pinned arena. Its pages are faulted in on first use and retained
-/// between allocations, reducing page faults during periodic work such as metrics scrapes.
+/// Requests a 1 GiB pinned arena and sets a 60-second purge delay for other arenas. Pinned pages
+/// fault in on first use and are never purged, reducing repeated page faults during periodic work
+/// such as metrics scrapes.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config {
     purge: mimalloc::Purge::After(Duration::from_secs(60)),
@@ -274,20 +275,20 @@ mod tests {
         let mut value: serde_yaml::Value =
             serde_yaml::from_str(include_str!("../examples/global.yml")).unwrap();
 
-        // Every complete mode is accepted without requiring consensus pacing settings.
+        // Each leader mode is accepted without the validators' pacing settings.
         for mode in LeaderMode::ALL {
             value["leader_mode"] = mode.as_str().into();
             let config: Config = serde_yaml::from_value(value.clone()).unwrap();
             assert_eq!(config.leader_mode, mode);
         }
 
-        // Configuration requires a complete leader mode.
+        // Configuration requires `leader_mode`, and `certificate_mode` cannot replace it.
         value.as_mapping_mut().unwrap().remove("leader_mode");
         assert!(serde_yaml::from_value::<Config>(value.clone()).is_err());
         value["certificate_mode"] = "vrf".into();
         assert!(serde_yaml::from_value::<Config>(value.clone()).is_err());
 
-        // Certificate-format fields are not part of the follower configuration.
+        // `certificate_mode` is rejected even alongside `leader_mode`.
         value["leader_mode"] = "rotating-vrf".into();
         assert!(serde_yaml::from_value::<Config>(value).is_err());
     }

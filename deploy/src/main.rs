@@ -1150,7 +1150,7 @@ signature_threads: 1
 
     #[test]
     fn parse_rotating_leader() {
-        // Every network must select a complete mode and provide its proposal delay.
+        // Every network must select a leader mode and a proposal delay.
         for args in [vec!["test"], vec!["test", "--leader-delay-ms", "0"]] {
             assert!(Command::new("test")
                 .args(leader_args())
@@ -1185,7 +1185,7 @@ signature_threads: 1
 
     #[test]
     fn leader_delay_must_stay_below_leader_timeout() {
-        // The timeout bound applies to every mode, including zero-delay rotating leaders.
+        // The proposal delay must stay below the leader timeout in every mode.
         for mode in LeaderMode::ALL {
             for delay in ["999", "1000", "5000"] {
                 let mut args = vec![
@@ -1307,7 +1307,7 @@ signature_threads: 1
 
     #[test]
     fn leader_modes_reject_legacy_selection() {
-        // Leader selection is expressed by one complete mode.
+        // The CLI accepts only the three leader modes and no `--leader-election` flag.
         for mode in ["stable", "rotating-vrf", "rotating-round-robin", "rotating"] {
             let mut args = vec!["test", "--leader-mode", mode, "--leader-delay-ms", "0"];
             if mode == "stable" {
@@ -1359,7 +1359,8 @@ signature_threads: 1
 
     #[test]
     fn leader_config_round_trips() {
-        // The validator schema and observer selector identify the same certificate format.
+        // Each leader config round-trips, names its mode, and maps to the expected certificate
+        // format.
         for (leader, certificate_mode) in [
             (Leader::RotatingVrf { delay_ms: 0 }, CertificateMode::Vrf),
             (Leader::RotatingVrf { delay_ms: 7 }, CertificateMode::Vrf),
@@ -1382,7 +1383,7 @@ signature_threads: 1
             assert_eq!(leader.mode().certificate_mode(), certificate_mode);
             assert_eq!(serde_yaml::from_str::<Leader>(&encoded).unwrap(), leader);
 
-            // Every mode rejects a second election selector and unrecognized settings.
+            // Every mode rejects an `election` field and other unknown fields.
             for field in ["election: vrf", "unknown: 1"] {
                 assert!(serde_yaml::from_str::<Leader>(&format!("{encoded}{field}\n")).is_err());
             }
@@ -1399,7 +1400,8 @@ signature_threads: 1
             "mode: stable\ndelay_ms: 10\nterm_length: 1\noptimistic_views: 48\n"
         )
         .is_err());
-        // Rotating modes require a delay and reject fields owned by other modes.
+
+        // Rotating modes require a delay and reject `election` and stable-only fields.
         for mode in ["rotating-vrf", "rotating-round-robin"] {
             assert!(serde_yaml::from_str::<Leader>(&format!("mode: {mode}\n")).is_err());
             for field in ["election: vrf", "term_length: 1000", "optimistic_views: 48"] {

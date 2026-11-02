@@ -43,7 +43,7 @@ pub struct Block {
 }
 
 impl Block {
-    /// Latest block timestamp, in milliseconds since the Unix epoch (2200-01-01T00:00:00Z).
+    /// Latest allowed block timestamp, 2200-01-01T00:00:00Z in milliseconds since the Unix epoch.
     ///
     /// Decoding rejects later timestamps so that every decoded block's timestamp fits in
     /// `SystemTime` on every platform.
@@ -361,6 +361,6 @@ impl BoundedBlock for Block {
             + UInt::<u32>::MAX_ENCODE_SIZE;
         metadata
             .checked_add(max_data)
-            .expect("maximum block size overflows usize")
+            .expect("maximum block size must fit in usize")
     }
 }

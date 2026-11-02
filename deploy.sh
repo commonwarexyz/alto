@@ -18,7 +18,7 @@ case "$1" in
         leader_flags=(--leader-mode rotating-vrf --leader-delay-ms 0)
         ;;
     rotating-round-robin)
-        # A scheduled leader for every view.
+        # A round-robin leader for every view.
         leader_flags=(--leader-mode rotating-round-robin --leader-delay-ms 0)
         ;;
     *)
@@ -69,7 +69,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
 fi
 
 if [ -d assets ]; then
-    read -r -p "./assets exists — remove and regenerate? [y/N] " answer
+    read -r -p "./assets exists. Remove and regenerate? [y/N] " answer
     [ "$answer" = "y" ] || exit 1
     rm -rf ./assets
 fi

@@ -27,9 +27,9 @@ cargo install alto-inspector
 
 _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
 
-The default leader mode is `rotating-vrf`, the policy used by the public network. Select
-`--leader-mode stable` or `--leader-mode rotating-round-robin` for a network with round-robin
-leaders. Those networks do not publish seed artifacts.
+The default leader mode is `rotating-vrf`, as on the public network. Select `--leader-mode stable`
+or `--leader-mode rotating-round-robin` for a network with round-robin leaders. Those networks do
+not publish seed artifacts.
 
 Use `--block-size` to set the network's block payload size for streaming. The receive limit adds
 1 MiB for encoding and one message-kind byte. The default payload allowance is 4 MiB.

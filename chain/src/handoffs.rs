@@ -23,9 +23,9 @@ const RATE_SCALE: u64 = 1 << 16;
 ///
 /// An early proposal becomes a sample once consensus casts our notarize vote for it. Each
 /// sample's outcome contributes one eighth of the parent leader's new success estimate. That
-/// estimate sets the chance of preparing early, with a 1/16 minimum so a recovered leader's
-/// estimate can rise again. Ordinary proposals do not update the estimate because they do not
-/// test early preparation.
+/// estimate sets the chance of preparing early, and a 1/16 floor on that chance lets a leader
+/// that recovers raise its estimate again. Ordinary proposals do not update the estimate because
+/// they do not test early preparation.
 #[derive(Clone)]
 pub(crate) struct Handoffs<S: Scheme> {
     state: Arc<Mutex<State>>,
@@ -132,9 +132,9 @@ impl<S: Scheme> Reporter for Handoffs<S> {
             return Feedback::Ok;
         }
 
-        // Only a voted sample has an outcome, and its own round settles it directly: a certificate
-        // credits the parent leader and a nullification debits it. Our single vote at that view
-        // means any certificate there names the sampled proposal.
+        // Only a voted sample has an outcome. At the sampled round, a certificate credits the
+        // parent leader and a nullification debits it. Our single vote at that view means any
+        // certificate there names the sampled proposal.
         //
         // A later finalization can settle the sample first. An honest leader signs one proposal per
         // view, so a finalized block whose parent lies in the sampled view proves our proposal

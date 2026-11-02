@@ -44,7 +44,7 @@ impl<S: Scheme> Application<S> {
         self
     }
 
-    /// Builds a child of the next block in `ancestry`, paced from the parent's timestamp.
+    /// Builds a child of the next block in `ancestry` and paces its timestamp from the parent's.
     async fn build<E: Rng + Clock>(
         &self,
         mut runtime_context: E,
@@ -104,10 +104,10 @@ where
     type Block = Block;
     type Input = ();
 
-    /// Chooses whether to prepare a term-start proposal before its parent certifies.
+    /// Chooses whether to build and vote for a term-start proposal before its parent certifies.
     ///
-    /// Overlapping the proposals saves one network trip when the parent certifies. Voting
-    /// early commits us to that parent for this view.
+    /// An early vote saves one network trip when the parent certifies, and it commits us to that
+    /// parent for this view.
     async fn prepare(
         &mut self,
         (mut runtime_context, context): (E, Self::Context),

@@ -357,8 +357,8 @@ where
             epocher,
         );
 
-        // The wrapper releases retired proposal state before forwarding consensus activity
-        // to marshal.
+        // Handoffs learns the outcomes of early proposals from consensus activity. The wrapper
+        // releases retired proposal state before forwarding that activity to marshal.
         let reporter: Reporter<E, C, CS> =
             (handoffs, Reporters::from((pusher, marshaled.clone()))).into();
 
