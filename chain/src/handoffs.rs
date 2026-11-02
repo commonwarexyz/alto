@@ -132,9 +132,9 @@ impl<S: Scheme> Reporter for Handoffs<S> {
             return Feedback::Ok;
         }
 
-        // Only a voted sample has an outcome, and its own round settles it directly. A certificate
-        // for the exact proposal credits the parent leader, a nullification debits it, and a
-        // certificate for a different proposal leaves the estimate unchanged.
+        // Only a voted sample has an outcome, and its own round settles it directly: a certificate
+        // credits the parent leader and a nullification debits it. Our single vote at that view
+        // means any certificate there names the sampled proposal.
         //
         // A later finalization can settle the sample first. An honest leader signs one proposal per
         // view, so a finalized block whose parent lies in the sampled view proves our proposal
@@ -148,10 +148,7 @@ impl<S: Scheme> Reporter for Handoffs<S> {
             .and_then(|sample| {
                 let sampled = sample.proposal.round;
                 let success = if round == sampled {
-                    match &proposal {
-                        Some(proposal) => (*proposal == sample.proposal).then_some(true)?,
-                        None => false,
-                    }
+                    proposal.is_some()
                 } else if finalized && round > sampled {
                     let parent = proposal.as_ref()?.parent;
                     if parent > sampled.view() {
@@ -577,9 +574,10 @@ mod tests {
             // A prior loss makes accidental success credit for the replacement observable.
             h.fail(&runtime, 6).await;
             let before = h.reporter.state.lock().unwrap().success_rates.clone();
-            let block = h.sample(&runtime, 10).await;
+            let block = h.candidate(&runtime, 10).await;
 
-            // The same view can certify an ordinary proposal built on an older parent.
+            // Consensus dropped the early request before voting, and the same view certifies an
+            // ordinary proposal built on an older parent.
             let (mut context, _) = h.inputs(10);
             let (_, parent) = h.inputs(9);
             context.parent = (parent.inner().context.round.view(), parent.digest());
@@ -593,8 +591,8 @@ mod tests {
                 .await
                 .unwrap();
 
-            // Resolving the view retires the sample without crediting the replacement.
-            // A later certificate for the sampled block must not reopen it.
+            // Resolving the view retires the candidate without crediting the replacement.
+            // A later certificate for the candidate must not reopen it.
             h.reporter.report(h.certification(&replacement));
             h.reporter.report(h.certification(&block));
             let state = h.reporter.state.lock().unwrap();
