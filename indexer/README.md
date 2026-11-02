@@ -30,12 +30,12 @@ cargo install alto-indexer
 ### Start the indexer
 
 ```bash
-indexer --port 8080 --identity <hex-encoded BLS12-381 public key> --certificate-mode <standard|vrf> [--block-size <bytes>]
+indexer --port 8080 --identity <hex-encoded BLS12-381 public key> --leader-mode <stable|rotating-vrf|rotating-round-robin> [--block-size <bytes>]
 ```
 
 The identity is the threshold public key of the consensus network. It is used to verify incoming
-consensus artifacts. Use `standard` for a network with round-robin leaders and `vrf` for one with VRF
-leaders.
+consensus artifacts. `--leader-mode` selects the network's leader policy. The indexer derives
+the certificate format from this selection.
 
 `--block-size` is the payload size of the network's blocks. When set, uploads carrying a larger payload
 are rejected and the request body limit is that size plus 1 MiB. Without it, upload request bodies

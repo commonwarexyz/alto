@@ -1,4 +1,4 @@
-use alto_chain::{engine, Config, Election, Leader, Peers, LEADER_TIMEOUT};
+use alto_chain::{engine, Config, Leader, Peers, LEADER_TIMEOUT};
 use alto_types::{
     Block, CertificateMode, Scheme, StandardScheme, VrfScheme, EPOCH, NAMESPACE, ROTATING_ELECTOR,
 };
@@ -47,8 +47,8 @@ use std::{
 };
 use tracing::{error, info, Level};
 
-/// Requests a 1 GiB pinned arena whose pages are faulted in on first use and retained for
-/// reuse. This avoids repeated page faults for recurring work such as metrics scrapes.
+/// Requests a 1 GiB pinned arena. Its pages are faulted in on first use and retained
+/// between allocations, reducing page faults during periodic work such as metrics scrapes.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config {
     purge: mimalloc::Purge::After(Duration::from_secs(60)),
@@ -293,7 +293,7 @@ fn main() {
         // Configure network
         let p2p_namespace = union_unique(NAMESPACE, b"_P2P");
         let max_peers_per_set = peer_set_limit(&peers, &public_key);
-        let max_message_size = match config.leader.certificate_mode() {
+        let max_message_size = match config.leader.mode().certificate_mode() {
             CertificateMode::Standard => {
                 configured_max_message_size::<StandardScheme>(peers_u32, config.block_size)
             }
@@ -447,18 +447,14 @@ fn main() {
                 engine::stable_elector(term_length, optimistic_views),
                 delay_ms
             ),
-            Leader::Rotating {
-                delay_ms,
-                election: Election::RoundRobin,
-            } => start_consensus!(
+            Leader::RotatingRoundRobin { delay_ms } => start_consensus!(
                 StandardScheme,
                 engine::RoundRobinElector::default(),
                 delay_ms
             ),
-            Leader::Rotating {
-                delay_ms,
-                election: Election::Vrf,
-            } => start_consensus!(VrfScheme, ROTATING_ELECTOR, delay_ms),
+            Leader::RotatingVrf { delay_ms } => {
+                start_consensus!(VrfScheme, ROTATING_ELECTOR, delay_ms)
+            }
         };
 
         // Wait for any task to error

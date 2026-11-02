@@ -25,7 +25,7 @@ const SearchModal: React.FC<SearchModalProps> = ({ isOpen, onClose, clusterConfi
     const [lastSearchType, setLastSearchType] = useState<SearchType | null>(null);
     const [showHelp, setShowHelp] = useState<boolean>(false);
     const [wasmInitialized, setWasmInitialized] = useState<boolean>(false);
-    const standardCertificates = clusterConfig.CERTIFICATE_MODE === 'standard';
+    const standardCertificates = clusterConfig.LEADER_MODE !== 'rotating-vrf';
 
     useEffect(() => {
         if (standardCertificates && searchType === 'seed') {

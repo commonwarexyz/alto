@@ -1,4 +1,4 @@
-use alto_types::CertificateMode;
+use alto_types::LeaderMode;
 use commonware_utils::{NZUsize, Probability};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -60,28 +60,17 @@ where
     ))
 }
 
-/// How a rotating leader is chosen for each view.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Election {
-    /// Derive each leader from the seed in the previous view's VRF certificate.
-    Vrf,
-    /// Take the next validator in round-robin order.
-    ///
-    /// Leaders are known in advance, so the incoming leader can build and vote before
-    /// the outgoing view certifies.
-    RoundRobin,
-}
-
 /// Leader election policy for the consensus engine.
 ///
 /// The delay sets the minimum interval from the parent's timestamp in milliseconds.
-/// Zero disables proposal pacing; timestamps may equal the parent's in either mode.
+/// Zero disables proposal pacing and allows timestamps equal to the parent's.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "mode", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Leader {
-    /// Elect a new leader for every view.
-    Rotating { delay_ms: u64, election: Election },
+    /// Elect a new leader from a VRF seed for every view.
+    RotatingVrf { delay_ms: u64 },
+    /// Take the next validator in round-robin order for every view.
+    RotatingRoundRobin { delay_ms: u64 },
     /// Keep one round-robin leader for a term and pace its proposals.
     Stable {
         delay_ms: u64,
@@ -92,11 +81,6 @@ pub enum Leader {
 }
 
 impl Leader {
-    /// Creates a rotating leader configuration.
-    pub const fn rotating(delay_ms: u64, election: Election) -> Self {
-        Self::Rotating { delay_ms, election }
-    }
-
     /// Creates a stable leader configuration.
     pub const fn stable(delay_ms: u64, term_length: NonZeroU32, optimistic_views: u64) -> Self {
         assert!(
@@ -110,18 +94,12 @@ impl Leader {
         }
     }
 
-    /// Threshold certificate construction required by this leader policy.
-    pub const fn certificate_mode(self) -> CertificateMode {
+    /// Network mode selected by this leader configuration.
+    pub const fn mode(self) -> LeaderMode {
         match self {
-            Self::Rotating {
-                election: Election::Vrf,
-                ..
-            } => CertificateMode::Vrf,
-            Self::Rotating {
-                election: Election::RoundRobin,
-                ..
-            }
-            | Self::Stable { .. } => CertificateMode::Standard,
+            Self::RotatingVrf { .. } => LeaderMode::RotatingVrf,
+            Self::RotatingRoundRobin { .. } => LeaderMode::RotatingRoundRobin,
+            Self::Stable { .. } => LeaderMode::Stable,
         }
     }
 }

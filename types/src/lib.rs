@@ -9,8 +9,8 @@ pub use block::{Block, Finalized, Notarized};
 
 mod consensus;
 pub use consensus::{
-    Activity, CertificateMode, Context, Finalization, Identity, Notarization, PublicKey,
-    RotatingElector, Scheme, Seed, Seedable, Signature, StandardScheme, VrfScheme,
+    Activity, CertificateMode, Context, Finalization, Identity, LeaderMode, Notarization,
+    PublicKey, RotatingElector, Scheme, Seed, Seedable, Signature, StandardScheme, VrfScheme,
     ROTATING_ELECTOR,
 };
 
@@ -146,6 +146,12 @@ mod tests {
                 UInt::<u32>::MAX_ENCODE_SIZE - UInt(block_size).encode_size()
             );
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "maximum block size overflows usize")]
+    fn block_max_encode_size_panics_on_overflow() {
+        Block::max_encode_size(&Block::unbounded_codec_config());
     }
 
     #[test]

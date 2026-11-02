@@ -10,7 +10,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const config: ClusterConfig = {
     BACKEND_URL: 'localhost',
     PUBLIC_KEY_HEX: '00',
-    CERTIFICATE_MODE: 'standard',
+    LEADER_MODE: 'stable',
     LOCATIONS: [],
     name: 'Test',
     description: '',

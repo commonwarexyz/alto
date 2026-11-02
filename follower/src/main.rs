@@ -1,7 +1,7 @@
 use alto_client::consensus::{Message, Payload};
 use alto_client::{ClientBuilder, IndexQuery, Query};
 use alto_types::{
-    CertificateMode, Identity, Notarized, Scheme, StandardScheme, VrfScheme, NAMESPACE,
+    CertificateMode, Identity, LeaderMode, Notarized, Scheme, StandardScheme, VrfScheme, NAMESPACE,
 };
 use clap::{Arg, Command};
 use commonware_allocator::mimalloc;
@@ -23,8 +23,8 @@ use std::{
 };
 use tracing::{error, info, warn, Level};
 
-/// Requests a 1 GiB pinned arena whose pages are faulted in on first use and retained for
-/// reuse. This avoids repeated page faults for recurring work such as metrics scrapes.
+/// Requests a 1 GiB pinned arena. Its pages are faulted in on first use and retained
+/// between allocations, reducing page faults during periodic work such as metrics scrapes.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config {
     purge: mimalloc::Purge::After(Duration::from_secs(60)),
@@ -44,10 +44,11 @@ mod test_utils;
 
 /// Configuration for the follower binary.
 #[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub source: String,
     pub identity: String,
-    pub certificate_mode: CertificateMode,
+    pub leader_mode: LeaderMode,
     /// Network block payload size used to bound the live feed.
     pub block_size: u32,
     pub directory: String,
@@ -169,7 +170,7 @@ fn main() {
             "starting follower node"
         );
 
-        match config.certificate_mode {
+        match config.leader_mode.certificate_mode() {
             CertificateMode::Standard => run::<StandardScheme>(context, config, identity).await,
             CertificateMode::Vrf => run::<VrfScheme>(context, config, identity).await,
         }
@@ -253,16 +254,41 @@ async fn run<C: Scheme>(context: tokio::Context, config: Config, identity: Ident
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, LeaderMode};
 
     #[test]
-    fn examples_include_the_network_block_size() {
+    fn examples_select_the_network() {
         for yaml in [
             include_str!("../examples/global.yml"),
             include_str!("../examples/usa.yml"),
         ] {
+            // Public examples select the VRF network and its configured payload size.
             let config: Config = serde_yaml::from_str(yaml).unwrap();
+            assert_eq!(config.leader_mode, LeaderMode::RotatingVrf);
             assert_eq!(config.block_size, 0);
         }
+    }
+
+    #[test]
+    fn configuration_requires_one_leader_selector() {
+        let mut value: serde_yaml::Value =
+            serde_yaml::from_str(include_str!("../examples/global.yml")).unwrap();
+
+        // Every complete mode is accepted without requiring consensus pacing settings.
+        for mode in LeaderMode::ALL {
+            value["leader_mode"] = mode.as_str().into();
+            let config: Config = serde_yaml::from_value(value.clone()).unwrap();
+            assert_eq!(config.leader_mode, mode);
+        }
+
+        // Configuration requires a complete leader mode.
+        value.as_mapping_mut().unwrap().remove("leader_mode");
+        assert!(serde_yaml::from_value::<Config>(value.clone()).is_err());
+        value["certificate_mode"] = "vrf".into();
+        assert!(serde_yaml::from_value::<Config>(value.clone()).is_err());
+
+        // Certificate-format fields are not part of the follower configuration.
+        value["leader_mode"] = "rotating-vrf".into();
+        assert!(serde_yaml::from_value::<Config>(value).is_err());
     }
 }

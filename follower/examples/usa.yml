@@ -12,9 +12,8 @@ source: "https://usa.alto.exoware.xyz"
 # This is the threshold public key used to verify finalization signatures
 identity: "aa6af77571b1b75d6c202ab59f3e63245e978b0a1fe1d405f7941f215fd14e2fc32b1430da902cfac3f9ddd2d420d1d7171132e4c36ac86858508e5edbf58f7f5b333d652f06f70868fcf83d77172c6921d8f2d06098f5b6372259fa3f6b5ebe"
 
-# Certificate construction used by this network: "standard" for round-robin leaders,
-# "vrf" for VRF leaders (must match the validators)
-certificate_mode: "vrf"
+# Leader policy used by this network.
+leader_mode: "rotating-vrf"
 
 # Set to the network's configured block payload size in bytes.
 block_size: 0

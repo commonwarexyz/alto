@@ -332,7 +332,12 @@ impl CertifiableBlock for Block {
 }
 
 impl BoundedBlock for Block {
+    /// # Panics
+    ///
+    /// Panics if the maximum encoded size exceeds `usize::MAX`.
     fn max_encode_size(cfg: &RangeCfg<usize>) -> usize {
+        // Convert the payload range to an inclusive upper bound. An excluded zero
+        // leaves no valid payload length, so zero is a conservative bound.
         let max_data = match cfg.end_bound() {
             Bound::Included(&end) => end,
             Bound::Excluded(&end) => end.saturating_sub(1),
@@ -345,6 +350,8 @@ impl BoundedBlock for Block {
             + Height::MAX_ENCODE_SIZE
             + UInt::<u64>::MAX_ENCODE_SIZE
             + UInt::<u32>::MAX_ENCODE_SIZE;
-        metadata.saturating_add(max_data)
+        metadata
+            .checked_add(max_data)
+            .expect("maximum block size overflows usize")
     }
 }

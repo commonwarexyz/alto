@@ -10,7 +10,9 @@ Visualize `alto` activity.
 
 The alto explorer can run in two modes: **public** (for deployed clusters) and **local** (for local development).
 
-When the indexer serves the explorer, `/runtime-config.js` supplies the mode, network key, certificate mode, and validator keys and locations for that deployment. Requests use the same origin as the explorer page. This runtime configuration takes precedence over the static files and `REACT_APP_MODE`.
+When the indexer serves the explorer, `/runtime-config.js` supplies the mode, network key, leader mode, and validator keys and locations for that deployment. Requests use the same origin as the explorer page. This runtime configuration takes precedence over the static files and `REACT_APP_MODE`.
+
+Stable leaders hold multi-view terms. Rotating modes assign one view per term. The explorer derives certificate verification from the leader mode: `rotating-vrf` uses VRF certificates, and both round-robin modes use standard certificates.
 
 For a standalone explorer, the bundled `runtime-config.js` selects the static configurations below. `REACT_APP_MODE` selects the mode and defaults to `public`. If the configuration script fails to load, startup stops with a refresh prompt.
 
@@ -32,11 +34,11 @@ export const BACKEND_URL = "global.alto.example.com";
 // Consensus threshold key (hex-encoded)
 export const PUBLIC_KEY_HEX = "92b050b6...";
 
-// Certificate construction: standard for round-robin leaders, vrf for VRF leaders
-export const CERTIFICATE_MODE = "standard" as const;
+// Leader selection: stable, rotating-vrf, or rotating-round-robin
+export const LEADER_MODE = "stable" as const;
 
 // Validator public keys (hex, sorted) used to place certified block leaders on the map.
-// Required for map placement in standard-certificate networks.
+// Required for map placement in stable and rotating-round-robin networks.
 export const PARTICIPANTS: string[] = [
     "0ba766c9...",
     "34bc98b6...",
@@ -79,8 +81,8 @@ export const BACKEND_URL = "localhost:8080";
 // Consensus threshold key (hex-encoded)
 export const PUBLIC_KEY_HEX = "82f8a77b...";
 
-// Certificate construction: standard for round-robin leaders, vrf for VRF leaders
-export const CERTIFICATE_MODE = "standard" as const;
+// Leader selection: stable, rotating-vrf, or rotating-round-robin
+export const LEADER_MODE = "stable" as const;
 
 // Empty locations array (map will be hidden)
 export const LOCATIONS: [[number, number], string][] = [];

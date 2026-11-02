@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 usage() {
-    echo "usage: $0 <stable|rotating>" >&2
+    echo "usage: $0 <stable|rotating-vrf|rotating-round-robin>" >&2
     exit 1
 }
 [ $# -eq 1 ] || usage
@@ -13,9 +13,13 @@ case "$1" in
         # One round-robin leader per term with a 48-view optimistic window.
         leader_flags=(--leader-mode stable --leader-delay-ms 5 --leader-term-length 100000 --leader-optimistic-views 48)
         ;;
-    rotating)
+    rotating-vrf)
         # A VRF-seeded leader for every view.
-        leader_flags=(--leader-mode rotating --leader-election vrf --leader-delay-ms 0)
+        leader_flags=(--leader-mode rotating-vrf --leader-delay-ms 0)
+        ;;
+    rotating-round-robin)
+        # A scheduled leader for every view.
+        leader_flags=(--leader-mode rotating-round-robin --leader-delay-ms 0)
         ;;
     *)
         usage

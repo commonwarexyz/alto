@@ -28,9 +28,11 @@ use commonware_storage::{
 use commonware_utils::{NZUsize, NZU64};
 use std::{num::NonZero, sync::Arc};
 
-// Shared constants (also used by marshal config in engine.rs)
+/// Number of items stored in each prunable journal section.
 pub(crate) const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
-pub(crate) const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
+
+/// Number of bytes buffered while replaying journals at startup.
+pub(crate) const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024);
 
 /// Keeps write buffers below mimalloc's 512 KiB large-object limit so allocations can reuse
 /// thread-local pages. Each sync drains the buffer, so the next buffered write allocates again.

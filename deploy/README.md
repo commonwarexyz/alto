@@ -12,15 +12,16 @@ _To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/
 
 _To configure local indexer upload, add `--indexers '<url>:<count>[;<url>:<count>...]'` to the `generate local` command. For example, `http://localhost:8080:1` assigns one validator to upload to that indexer._
 
-`--leader-mode rotating` elects a new leader for every view, chosen by `--leader-election`. `vrf`
-derives each leader from a seed in the previous view's certificate. `round-robin` takes validators
-in order, so each leader is known in advance. The incoming leader can then build, relay, and vote
-for its proposal before the outgoing leader's view certifies. Stable mode assigns leaders
-round-robin for terms of `--leader-term-length` views and pipelines each handoff between terms the
-same way. Stable mode requires a term length of at least two and `--leader-optimistic-views`, which
-limits how far proposals and votes may run ahead of directly notarized ancestry. Values above the
-term length have no further effect. Rotating mode rejects both stable-only flags, and stable mode
-rejects `--leader-election`.
+`--leader-mode` is required and accepts `stable`, `rotating-vrf`, or
+`rotating-round-robin`. `rotating-vrf` derives each view's leader from a seed in the previous
+view's certificate. `rotating-round-robin` takes validators in order, so each leader is known in
+advance. The incoming leader can then build, relay, and vote for its proposal before the outgoing
+leader's view certifies. `stable` assigns leaders round-robin for terms of
+`--leader-term-length` views and pipelines each handoff between terms the same way.
+
+Stable mode requires a term length of at least two and `--leader-optimistic-views`, which limits
+how far proposals and votes may run ahead of directly notarized ancestry. Values above the term
+length have no further effect. Both rotating modes reject these stable-only flags.
 
 For each parent leader, a validator estimates how often its sampled early proposals succeed. It
 prepares early with probability equal to this estimate, but never less than one in sixteen, so a
@@ -35,11 +36,11 @@ not update the estimate. Estimates reset to one on restart. This local policy af
 Zero disables pacing and allows equal timestamps. Use 100 ms for local stable networks: shorter
 intervals can cause timeouts and skipped terms.
 
-Certificate mode follows leader election: `vrf` for VRF leaders and `standard` for round-robin
-leaders, rotating or stable. The generator sets it in indexer commands and configurations and in
-explorer configurations. Set followers' `certificate_mode` and the inspector's `--certificate-mode`
-to match. Changing certificate mode requires a new network identity and matching configurations for
-every component.
+The generator includes the selected leader mode in indexer commands and configurations and in
+explorer configurations. Followers use `leader_mode` and the inspector uses `--leader-mode`, with
+the same three values. Each component derives its certificate format from the selected mode.
+Changing between VRF and round-robin leaders requires a new network identity and updated
+configurations for every component.
 
 `--block-size` sets the number of random payload bytes in each proposed block and defaults to `0`.
 All validators must use the same value. Encoded messages must fit the authenticated transport's
@@ -67,26 +68,25 @@ traces_sample_rate: 0.0
 indexer: http://localhost:8080
 ```
 
-Rotating-leader configs carry the delay and the election (`vrf` or `round_robin`):
+Rotating leader configs carry the complete mode and its delay:
 
 ```yaml
 leader:
-  mode: rotating
+  mode: rotating-vrf
   delay_ms: 0
-  election: vrf
 ```
 
 ```bash
 cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 100 --leader-term-length 1000 --leader-optimistic-views 48 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
 ```
 
-For a rotating network:
+For a rotating VRF network (use `rotating-round-robin` for a scheduled leader each view):
 
 ```bash
-cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode rotating --leader-election vrf --leader-delay-ms 0 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
+cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode rotating-vrf --leader-delay-ms 0 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
 ```
 
-The emitted indexer command includes the network's certificate mode and block size. A deployed
+The emitted indexer command includes the network's leader mode and block size. A deployed
 indexer reads these values from `indexer.yaml`.
 
 The generator prints the network identity, startup commands for indexers and validators, and
@@ -107,7 +107,7 @@ _It is necessary to start at least one bootstrapper for any other peers to conne
 The indexer embeds `explorer/build` at compile time. To browse a local network at
 `http://localhost:8080`, first [build the embedded explorer](#build-the-embedded-explorer), then
 compile and start (or restart) the indexer using the emitted `cargo run` command. Its network
-identity and certificate mode are injected automatically. To run the explorer from source,
+identity and leader mode are injected automatically. To run the explorer from source,
 generate its configuration (pass the indexer as `host:port` without a scheme)
 and copy it over `explorer/src/local_config.ts`:
 
@@ -165,7 +165,8 @@ indexer: https://your-indexer.example.com
 
 ```bash
 ./deploy.sh stable
-./deploy.sh rotating
+./deploy.sh rotating-vrf
+./deploy.sh rotating-round-robin
 ```
 
 `deploy.sh` takes the leader mode as its only argument. It generates the configuration, tests and
@@ -175,8 +176,9 @@ cluster.
 
 The script deploys 50 validators and one indexer on `c7gd.4xlarge` instances. Each validator uses
 8 worker threads and 16 signature threads. Stable mode uses a 5 ms proposal interval and runs
-100,000-view terms with 48 optimistic views. Rotating mode uses zero proposal delay and elects a
-VRF-seeded leader every view. Deployment concurrency is 50.
+100,000-view terms with 48 optimistic views. Both rotating modes use zero proposal delay:
+`rotating-vrf` selects a VRF-seeded leader every view, while `rotating-round-robin` follows the
+validator order. Deployment concurrency is 50.
 
 _Each `c7gd.4xlarge` provides a 950GB ephemeral NVMe instance store, which the deployer mounts at
 `/home/ubuntu` for validator data. The 25GB storage setting sizes the gp3 root volume. Terminating
@@ -206,11 +208,11 @@ Build and deploy the hosted explorer from the same revision as the validators.
 
 #### [Optional] Configure Followers and Inspector
 
-Use the generated network identity, certificate mode, and block size for every client.
+Use the generated network identity, leader mode, and block size for every client.
 Deployments with `--indexer` store these values in `assets/indexer.yaml`.
 
-Set `source`, `identity`, `certificate_mode`, and `block_size` in the follower configuration. Pass
-`--indexer`, `--identity`, `--certificate-mode`, and `--block-size` to the inspector. Use fresh
+Set `source`, `identity`, `leader_mode`, and `block_size` in the follower configuration. Pass
+`--indexer`, `--identity`, `--leader-mode`, and `--block-size` to the inspector. Use fresh
 follower data directories when connecting to a newly generated network.
 
 #### Build the Embedded Explorer
