@@ -279,8 +279,8 @@ impl<S: Strategy, C: Scheme> Client<S, C> {
                     match message {
                         Ok(TMessage::Binary(data)) => {
                             // Get kind
-                            let kind = data[0];
-                            let Some(kind) = Kind::from_u8(kind) else {
+                            let Some(kind) = data.first().and_then(|&kind| Kind::from_u8(kind))
+                            else {
                                 let _ = sender.unbounded_send(Err(Error::UnexpectedResponse));
                                 return;
                             };

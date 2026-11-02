@@ -282,6 +282,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn empty_messages_are_rejected_as_unexpected() {
+        // An empty binary message has no kind byte. The stream must report it as an unexpected
+        // response and keep streaming.
+        assert!(matches!(
+            receive_error(Some(0), vec![0x82, 0x00]).await,
+            Error::UnexpectedResponse
+        ));
+    }
+
+    #[tokio::test]
     async fn fragmented_messages_share_the_receive_budget() {
         // Each frame fits by itself, but their combined payload exceeds the message budget.
         let length = 1024 * 1024;
