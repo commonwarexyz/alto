@@ -1,9 +1,10 @@
 use alto_client::consensus::{Message, Payload};
 use alto_client::{ClientBuilder, IndexQuery, Query};
 use alto_types::{
-    CertificateMode, Identity, Notarized, Scheme, StandardScheme, VrfScheme, NAMESPACE,
+    CertificateMode, Identity, LeaderMode, Notarized, Scheme, StandardScheme, VrfScheme, NAMESPACE,
 };
 use clap::{Arg, Command};
+use commonware_allocator::mimalloc;
 use commonware_codec::DecodeExt;
 use commonware_consensus::types::Height;
 use commonware_formatting::from_hex;
@@ -22,8 +23,15 @@ use std::{
 };
 use tracing::{error, info, warn, Level};
 
+/// Requests a 1 GiB pinned arena and sets a 60-second purge delay for other arenas. Pinned pages
+/// fault in on first use and are never purged, reducing repeated page faults during periodic work
+/// such as metrics scrapes.
 #[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config {
+    purge: mimalloc::Purge::After(Duration::from_secs(60)),
+    reserve: Some(mimalloc::Reserve::pinned(1 << 30)),
+    ..mimalloc::Config::DEFAULT
+});
 
 mod application;
 mod archive;
@@ -37,10 +45,11 @@ mod test_utils;
 
 /// Configuration for the follower binary.
 #[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub source: String,
     pub identity: String,
-    pub certificate_mode: CertificateMode,
+    pub leader_mode: LeaderMode,
     /// Network block payload size used to bound the live feed.
     pub block_size: u32,
     pub directory: String,
@@ -129,7 +138,7 @@ fn main() {
     // Parse identity
     let identity_bytes = from_hex(&config.identity).expect("Could not parse identity hex");
     let identity =
-        Identity::decode(identity_bytes.as_ref()).expect("Could not decode identity public key");
+        Identity::decode(identity_bytes).expect("identity must encode a valid public key");
 
     // Initialize runtime
     let cfg = tokio::Config::default()
@@ -162,7 +171,7 @@ fn main() {
             "starting follower node"
         );
 
-        match config.certificate_mode {
+        match config.leader_mode.certificate_mode() {
             CertificateMode::Standard => run::<StandardScheme>(context, config, identity).await,
             CertificateMode::Vrf => run::<VrfScheme>(context, config, identity).await,
         }
@@ -246,16 +255,41 @@ async fn run<C: Scheme>(context: tokio::Context, config: Config, identity: Ident
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, LeaderMode};
 
     #[test]
-    fn examples_include_the_network_block_size() {
+    fn examples_select_the_network() {
         for yaml in [
             include_str!("../examples/global.yml"),
             include_str!("../examples/usa.yml"),
         ] {
+            // Public examples select the VRF network and its configured payload size.
             let config: Config = serde_yaml::from_str(yaml).unwrap();
+            assert_eq!(config.leader_mode, LeaderMode::RotatingVrf);
             assert_eq!(config.block_size, 0);
         }
+    }
+
+    #[test]
+    fn configuration_requires_one_leader_selector() {
+        let mut value: serde_yaml::Value =
+            serde_yaml::from_str(include_str!("../examples/global.yml")).unwrap();
+
+        // Each leader mode is accepted without the validators' pacing settings.
+        for mode in LeaderMode::ALL {
+            value["leader_mode"] = mode.as_str().into();
+            let config: Config = serde_yaml::from_value(value.clone()).unwrap();
+            assert_eq!(config.leader_mode, mode);
+        }
+
+        // Configuration requires `leader_mode`, and `certificate_mode` cannot replace it.
+        value.as_mapping_mut().unwrap().remove("leader_mode");
+        assert!(serde_yaml::from_value::<Config>(value.clone()).is_err());
+        value["certificate_mode"] = "vrf".into();
+        assert!(serde_yaml::from_value::<Config>(value.clone()).is_err());
+
+        // `certificate_mode` is rejected even alongside `leader_mode`.
+        value["leader_mode"] = "rotating-vrf".into();
+        assert!(serde_yaml::from_value::<Config>(value).is_err());
     }
 }

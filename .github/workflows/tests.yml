@@ -8,6 +8,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   UDEPS_VERSION: 0.1.50
+  NIGHTLY_VERSION: nightly-2026-08-20
   NODE_VERSION: 20
 
 jobs:
@@ -37,6 +38,8 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@nightly
+      with:
+        toolchain: ${{ env.NIGHTLY_VERSION }}
     - name: Install udeps
       uses: taiki-e/install-action@cargo-udeps
     - name: Check for unused dependencies

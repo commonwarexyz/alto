@@ -9,6 +9,7 @@ description = "Run a validator node for alto."
 alto-chain = { workspace = true }
 alto-client = { workspace = true }
 alto-types = { workspace = true }
+commonware-allocator = { workspace = true }
 commonware-codec = { workspace = true }
 commonware-consensus = { workspace = true }
 commonware-cryptography = { workspace = true }
@@ -16,12 +17,12 @@ commonware-deployer = { workspace = true }
 commonware-formatting = { workspace = true }
 commonware-p2p = { workspace = true }
 commonware-parallel = { workspace = true }
-commonware-runtime = { workspace = true }
+commonware-runtime = { workspace = true, features = ["mimalloc"] }
+commonware-stream = { workspace = true }
 commonware-utils = { workspace = true }
 futures = { workspace = true }
 governor = { workspace = true }
 clap = { workspace = true }
-mimalloc = { workspace = true }
 tracing = { workspace = true }
 serde_yaml = "0.9.34"
 

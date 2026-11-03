@@ -4,12 +4,12 @@ import * as localConfig from './local_config';
 
 export type Cluster = 'global' | 'usa' | 'local';
 export type Mode = 'public' | 'local';
-export type CertificateMode = 'standard' | 'vrf';
+export type LeaderMode = 'stable' | 'rotating-vrf' | 'rotating-round-robin';
 
 export interface ClusterConfig {
     BACKEND_URL: string;
     PUBLIC_KEY_HEX: string;
-    CERTIFICATE_MODE: CertificateMode;
+    LEADER_MODE: LeaderMode;
     // Validator locations and keys follow consensus public-key order.
     // Null locations keep unmapped validators in the committee.
     LOCATIONS: ([[number, number], string] | null)[];

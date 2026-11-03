@@ -91,7 +91,7 @@ const App: React.FC = () => {
   const clusterConfig = useMemo(() => getClusterConfig(selectedCluster), [selectedCluster]);
   const allConfigs = useMemo(() => getClusters(), []);
   const { BACKEND_URL, PUBLIC_KEY_HEX, LOCATIONS, PARTICIPANTS } = clusterConfig;
-  const standardCertificates = clusterConfig.CERTIFICATE_MODE === 'standard';
+  const standardCertificates = clusterConfig.LEADER_MODE !== 'rotating-vrf';
   const leaderIndicator = getLeaderIndicator(standardCertificates);
   const markerIcon = useMemo(() => new DivIcon({
     className: "custom-div-icon",
@@ -278,7 +278,7 @@ const App: React.FC = () => {
   }, []);
 
   // Insert bounded placeholders for locally unobserved views between verified observations.
-  // Both modes use certificates. VRF mode also observes seeds for the next view.
+  // All leader modes use certificates. Rotating VRF also observes seeds for the next view.
   const fillMissedViews = useCallback((
     newViews: ViewData[],
     lastObservedView: number | null,

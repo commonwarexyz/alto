@@ -1,5 +1,7 @@
 use alto_indexer::{Api, Indexer};
-use alto_types::{CertificateMode, Identity, Scheme, StandardScheme, VrfScheme, NAMESPACE};
+use alto_types::{
+    CertificateMode, Identity, LeaderMode, Scheme, StandardScheme, VrfScheme, NAMESPACE,
+};
 use axum::{
     body::{Body, Bytes},
     extract::Extension,
@@ -8,6 +10,7 @@ use axum::{
     routing::get,
 };
 use clap::Parser;
+use commonware_allocator::mimalloc;
 use commonware_codec::DecodeExt;
 use commonware_formatting::from_hex;
 use commonware_parallel::Sequential;
@@ -18,7 +21,7 @@ use tracing::info;
 include!(concat!(env!("OUT_DIR"), "/explorer_assets.rs"));
 
 #[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config::DEFAULT);
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -34,14 +37,14 @@ struct Args {
     )]
     identity: Option<String>,
 
-    /// Threshold certificate construction used by the network.
+    /// Leader policy used by the network.
     #[clap(
         long,
         required_unless_present = "config",
         conflicts_with = "config",
-        value_parser = CertificateMode::ALL.map(CertificateMode::as_str)
+        value_parser = LeaderMode::ALL.map(LeaderMode::as_str)
     )]
-    certificate_mode: Option<String>,
+    leader_mode: Option<String>,
 
     /// Payload size of the network's blocks in bytes. Uploads carrying a larger payload are
     /// rejected. The request body limit is this size plus 1 MiB, or 5 MiB when omitted.
@@ -58,10 +61,11 @@ struct Args {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DeployerConfig {
     port: u16,
     identity: String,
-    certificate_mode: CertificateMode,
+    leader_mode: LeaderMode,
     block_size: u32,
     explorer: ExplorerConfig,
 }
@@ -78,7 +82,7 @@ struct ExplorerConfig {
 struct Settings {
     port: u16,
     identity: String,
-    certificate_mode: CertificateMode,
+    leader_mode: LeaderMode,
     block_size: Option<u32>,
     explorer: ExplorerConfig,
     explorer_mode: &'static str,
@@ -91,7 +95,7 @@ fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
         return Ok(Settings {
             port: config.port,
             identity: config.identity,
-            certificate_mode: config.certificate_mode,
+            leader_mode: config.leader_mode,
             block_size: Some(config.block_size),
             explorer: config.explorer,
             explorer_mode: "public",
@@ -103,9 +107,9 @@ fn load_settings(args: Args) -> Result<Settings, Box<dyn std::error::Error>> {
         identity: args
             .identity
             .expect("clap requires --identity when --config is absent"),
-        certificate_mode: args
-            .certificate_mode
-            .expect("clap requires --certificate-mode when --config is absent")
+        leader_mode: args
+            .leader_mode
+            .expect("leader mode must be present when config is absent")
             .parse()?,
         block_size: args.block_size,
         explorer: ExplorerConfig {
@@ -123,7 +127,7 @@ fn explorer_script(settings: &Settings) -> String {
         "PUBLIC_KEY_HEX": settings.identity,
         "LOCATIONS": settings.explorer.locations,
         "PARTICIPANTS": settings.explorer.participants,
-        "CERTIFICATE_MODE": settings.certificate_mode,
+        "LEADER_MODE": settings.leader_mode,
         "name": settings.explorer.name,
         "description": settings.explorer.description,
         "mode": settings.explorer_mode,
@@ -175,10 +179,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse identity
     let bytes = from_hex(&settings.identity).ok_or("Invalid identity hex format")?;
-    let identity: Identity =
-        Identity::decode(&mut bytes.as_slice()).map_err(|_| "Failed to decode identity")?;
+    let identity: Identity = Identity::decode(bytes).map_err(|_| "Failed to decode identity")?;
 
-    match settings.certificate_mode {
+    match settings.leader_mode.certificate_mode() {
         CertificateMode::Standard => serve::<StandardScheme>(settings, identity, script).await,
         CertificateMode::Vrf => serve::<VrfScheme>(settings, identity, script).await,
     }
@@ -220,19 +223,27 @@ async fn serve<C: Scheme>(
 
 #[cfg(test)]
 mod tests {
-    use super::{explorer_script, Args, CertificateMode, ExplorerConfig, Settings};
+    use super::{
+        explorer_script, load_settings, Args, DeployerConfig, ExplorerConfig, LeaderMode, Settings,
+    };
     use clap::Parser;
 
     #[test]
     fn accepts_direct_and_deployer_modes() {
-        assert!(Args::try_parse_from([
-            "indexer",
-            "--identity",
-            "abcd",
-            "--certificate-mode",
-            "standard",
-        ])
-        .is_ok());
+        // Direct startup carries each leader mode into the runtime settings.
+        for mode in LeaderMode::ALL {
+            let args = Args::try_parse_from([
+                "indexer",
+                "--identity",
+                "abcd",
+                "--leader-mode",
+                mode.as_str(),
+            ])
+            .unwrap();
+            assert_eq!(load_settings(args).unwrap().leader_mode, mode);
+        }
+
+        // A deployed configuration supplies the network settings as one input.
         assert!(Args::try_parse_from([
             "indexer",
             "--hosts",
@@ -241,14 +252,29 @@ mod tests {
             "config.yaml",
         ])
         .is_ok());
+
+        // Direct startup rejects `--certificate-mode` and values other than the leader modes.
+        for selection in [
+            ["--certificate-mode", "vrf"],
+            ["--leader-mode", "vrf"],
+            ["--leader-mode", "standard"],
+            ["--leader-mode", "rotating"],
+        ] {
+            assert!(Args::try_parse_from(
+                ["indexer", "--identity", "abcd"]
+                    .into_iter()
+                    .chain(selection)
+            )
+            .is_err());
+        }
         assert!(Args::try_parse_from(["indexer", "--identity", "abcd"]).is_err());
         assert!(Args::try_parse_from(["indexer"]).is_err());
         assert!(Args::try_parse_from([
             "indexer",
             "--identity",
             "abcd",
-            "--certificate-mode",
-            "vrf",
+            "--leader-mode",
+            "rotating-vrf",
             "--block-size",
             "4096",
         ])
@@ -266,11 +292,46 @@ mod tests {
     }
 
     #[test]
+    fn deployed_config_requires_one_leader_selector() {
+        let mut value: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+port: 8080
+identity: abcd
+block_size: 0
+leader_mode: stable
+explorer:
+  name: Test
+  description: test
+  participants: []
+  locations: []
+"#,
+        )
+        .unwrap();
+
+        // Deployed settings accept every leader mode.
+        for mode in LeaderMode::ALL {
+            value["leader_mode"] = mode.as_str().into();
+            let config: DeployerConfig = serde_yaml::from_value(value.clone()).unwrap();
+            assert_eq!(config.leader_mode, mode);
+        }
+
+        // Configuration requires `leader_mode`, and `certificate_mode` cannot replace it.
+        value.as_mapping_mut().unwrap().remove("leader_mode");
+        assert!(serde_yaml::from_value::<DeployerConfig>(value.clone()).is_err());
+        value["certificate_mode"] = "vrf".into();
+        assert!(serde_yaml::from_value::<DeployerConfig>(value.clone()).is_err());
+
+        // `certificate_mode` is rejected even alongside `leader_mode`.
+        value["leader_mode"] = "rotating-vrf".into();
+        assert!(serde_yaml::from_value::<DeployerConfig>(value).is_err());
+    }
+
+    #[test]
     fn runtime_config_uses_deployed_identity_and_locations() {
-        let settings = Settings {
+        let mut settings = Settings {
             port: 8080,
             identity: "abcd".to_string(),
-            certificate_mode: CertificateMode::Standard,
+            leader_mode: LeaderMode::Stable,
             block_size: Some(0),
             explorer: serde_yaml::from_str::<ExplorerConfig>(
                 r#"
@@ -284,11 +345,20 @@ locations: [[[1.0, 2.0], City], null, [[3.0, 4.0], Other]]
             explorer_mode: "public",
         };
 
+        // The served browser settings preserve the network identity and committee ordering.
         let script = explorer_script(&settings);
         assert!(script.contains(r#""PUBLIC_KEY_HEX":"abcd""#));
         assert!(script.contains(r#""PARTICIPANTS":["first","unmapped","last"]"#));
-        assert!(script.contains(r#""CERTIFICATE_MODE":"standard""#));
+        assert!(script.contains(r#""LEADER_MODE":"stable""#));
         assert!(script.contains(r#""LOCATIONS":[[[1.0,2.0],"City"],null,[[3.0,4.0],"Other"]]"#));
         assert!(script.contains("window.location.host"));
+
+        // Browser settings carry each leader mode and no certificate mode.
+        for mode in LeaderMode::ALL {
+            settings.leader_mode = mode;
+            let script = explorer_script(&settings);
+            assert!(script.contains(&format!(r#""LEADER_MODE":"{}""#, mode.as_str())));
+            assert!(!script.contains("CERTIFICATE_MODE"));
+        }
     }
 }

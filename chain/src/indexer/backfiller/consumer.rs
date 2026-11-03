@@ -9,11 +9,11 @@ use commonware_macros::select_loop;
 use commonware_runtime::{
     spawn_cell,
     telemetry::metrics::{status, MetricsExt as _},
-    BufferPooler, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
+    Clock, ContextCell, Handle, Metrics, Spawner, Storage,
 };
 use commonware_storage::queue;
 use commonware_utils::futures::{OptionFuture, Pool};
-use std::{num::NonZeroUsize, time::Duration};
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 use tracing::{debug, warn};
 
 /// Final outcome for one backfill queue entry.
@@ -30,17 +30,12 @@ enum Completion {
     Skipped { position: u64, height: u64 },
 }
 
-pub struct Consumer<
-    E: Spawner + Clock + Storage + Metrics + BufferPooler,
-    C: Client<CS>,
-    CS: Scheme,
-> {
+pub struct Consumer<E: Spawner + Clock + Storage + Metrics, C: Client<CS>, CS: Scheme> {
     context: ContextCell<E>,
     client: C,
     marshal: MarshalMailbox<CS, Standard<Block>>,
     upload_results: status::Counter,
     uploads: SharedState,
-    writer: queue::Writer<E, Entry>,
     reader: queue::Reader<E, Entry>,
     active: Pool<'static, Completion>,
     max_active: NonZeroUsize,
@@ -49,7 +44,7 @@ pub struct Consumer<
 
 impl<E, C, CS> Consumer<E, C, CS>
 where
-    E: Spawner + Clock + Storage + Metrics + BufferPooler,
+    E: Spawner + Clock + Storage + Metrics,
     C: Client<CS>,
     CS: Scheme,
 {
@@ -58,7 +53,7 @@ where
         client: C,
         marshal: MarshalMailbox<CS, Standard<Block>>,
         uploads: SharedState,
-        backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
+        reader: queue::Reader<E, Entry>,
         max_active: NonZeroUsize,
         retry: Duration,
     ) -> Self {
@@ -66,14 +61,12 @@ where
             "uploads",
             "Total number of finalized block upload attempt outcomes by status",
         );
-        let (writer, reader) = backfiller;
         Self {
             context: ContextCell::new(context),
             client,
             marshal,
             upload_results,
             uploads,
-            writer,
             reader,
             active: Pool::default(),
             max_active,
@@ -102,7 +95,7 @@ where
             },
             on_stopped => {},
             completion = self.active.next_completed() => {
-                self.complete(completion).await;
+                self.complete(completion);
             },
             item = item => {
                 match item.expect("failed to recv from finalized queue") {
@@ -138,8 +131,7 @@ where
     async fn start_upload(&mut self, position: u64, entry: Entry) {
         let Entry { height, digest } = entry;
         if matches!(self.uploads.lock().should_upload(&digest), Decision::Skip) {
-            self.complete(Completion::Skipped { position, height })
-                .await;
+            self.complete(Completion::Skipped { position, height });
             debug!(?digest, "consumer skipping already-uploaded block");
             return;
         }
@@ -248,6 +240,7 @@ where
                 NextBlock::Ready(block) => return Some(*block),
                 NextBlock::FetchFromMarshal => {
                     if let Some(block) = marshal.get_block(Identifier::Digest(digest)).await {
+                        let block = Arc::unwrap_or_clone(Arc::<Block>::from(block));
                         uploads.lock().cache_block(block.clone());
                         return Some(block);
                     }
@@ -261,7 +254,7 @@ where
         }
     }
 
-    async fn complete(&mut self, completion: Completion) {
+    fn complete(&mut self, completion: Completion) {
         // Record the success before acking so the in-memory dedupe tracker
         // stays aligned with the queue state.
         let (position, height) = match completion {
@@ -276,21 +269,13 @@ where
             Completion::Skipped { position, height } => (position, height),
         };
 
-        // Acknowledge the queue entry and advance the queue floor if needed.
-        let floor = self
-            .reader
-            .ack_floor()
-            .await
-            .expect("failed to read ack floor");
-        self.reader.ack(position).await.expect("failed to ack");
-        let floor_advanced = self
-            .reader
-            .ack_floor()
-            .await
-            .expect("failed to read ack floor")
-            > floor;
-        self.writer.sync().await.expect("failed to sync after ack");
-        if floor_advanced {
+        // Acknowledge the queue entry and advance the queue floor if needed. The
+        // producer's next sync prunes acknowledged sections.
+        let floor = self.reader.ack_floor();
+        self.reader
+            .ack(position)
+            .expect("completed queue position must be published");
+        if self.reader.ack_floor() > floor {
             self.uploads.lock().advance_queue_floor(height);
         }
     }

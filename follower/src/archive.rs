@@ -16,22 +16,27 @@
 
 use alto_types::{Block, Finalization, Scheme};
 use commonware_consensus::{marshal, types::Height};
-use commonware_cryptography::{sha256::Digest, Digestible};
+use commonware_cryptography::sha256::Digest;
 use commonware_runtime::{
     buffer::paged::{page_size, CacheRef},
-    BufferPooler, Clock, Metrics, Storage,
+    Clock, Metrics, Storage,
 };
 use commonware_storage::{
     archive::{self, immutable, prunable, Archive, Identifier},
     translator::FourCap,
 };
 use commonware_utils::{NZUsize, NZU64};
-use std::num::NonZero;
+use std::{num::NonZero, sync::Arc};
 
-// Shared constants (also used by marshal config in engine.rs)
+/// Number of items stored in each prunable journal section.
 pub(crate) const PRUNABLE_ITEMS_PER_SECTION: NonZero<u64> = NZU64!(4_096);
-pub(crate) const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
-pub(crate) const WRITE_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
+
+/// Number of bytes buffered while replaying journals at startup.
+pub(crate) const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024);
+
+/// Keeps write buffers below mimalloc's 512 KiB large-object limit so allocations can reuse
+/// thread-local pages. Each sync drains the buffer, so the next buffered write allocates again.
+pub(crate) const WRITE_BUFFER: NonZero<usize> = NZUsize!(64 * 1024); // 64KB
 
 // Finalized archive constants.
 const FINALIZED_COMPRESSION: Option<u8> = Some(3);
@@ -87,10 +92,10 @@ pub(crate) async fn init<E, C>(
     pruning_depth: Option<u64>,
 ) -> (Certificates<E, C>, Blocks<E>, CacheRef)
 where
-    E: BufferPooler + Storage + Metrics + Clock,
+    E: Storage + Metrics + Clock,
     C: Scheme,
 {
-    let page_cache = CacheRef::from_pooler(context, PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
+    let page_cache = CacheRef::new(PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
 
     if pruning_depth.is_some() {
         let fbh = prunable::Archive::init(
@@ -198,14 +203,14 @@ where
 /// Wrapper over [immutable::Archive] and [prunable::Archive] for finalization
 /// certificates. Implements [marshal::store::Certificates].
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum Certificates<E: BufferPooler + Storage + Metrics + Clock, C: Scheme> {
+pub(crate) enum Certificates<E: Storage + Metrics + Clock, C: Scheme> {
     Immutable(immutable::Archive<E, Digest, Finalization<C>>),
     Prunable(prunable::Archive<FourCap, E, Digest, Finalization<C>>),
 }
 
 impl<E, C> marshal::store::Certificates for Certificates<E, C>
 where
-    E: BufferPooler + Storage + Metrics + Clock,
+    E: Storage + Metrics + Clock,
     C: Scheme,
 {
     type BlockDigest = Digest;
@@ -217,7 +222,7 @@ where
         self,
         height: Height,
         commitment: Digest,
-        finalization: Finalization<C>,
+        finalization: &Finalization<C>,
     ) -> Result<Self, Self::Error> {
         match self {
             Self::Immutable(a) => Archive::put(a, height.get(), commitment, finalization)
@@ -285,18 +290,17 @@ where
 /// Wrapper over [immutable::Archive] and [prunable::Archive] for finalized
 /// blocks. Implements [marshal::store::Blocks].
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum Blocks<E: BufferPooler + Storage + Metrics + Clock> {
-    Immutable(immutable::Archive<E, Digest, Block>),
-    Prunable(prunable::Archive<FourCap, E, Digest, Block>),
+pub(crate) enum Blocks<E: Storage + Metrics + Clock> {
+    Immutable(immutable::Archive<E, Digest, Arc<Block>>),
+    Prunable(prunable::Archive<FourCap, E, Digest, Arc<Block>>),
 }
 
-impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Blocks for Blocks<E> {
-    type Block = Block;
+impl<E: Storage + Metrics + Clock> marshal::store::Blocks for Blocks<E> {
+    type Block = Arc<Block>;
     type Error = archive::Error;
 
-    async fn put(self, block: Block) -> Result<Self, Self::Error> {
+    async fn put(self, digest: Digest, block: &Arc<Block>) -> Result<Self, Self::Error> {
         let height = block.height.get();
-        let digest = block.digest();
         match self {
             Self::Immutable(a) => Archive::put(a, height, digest, block)
                 .await
@@ -314,7 +318,7 @@ impl<E: BufferPooler + Storage + Metrics + Clock> marshal::store::Blocks for Blo
         }
     }
 
-    async fn get(&self, id: Identifier<'_, Digest>) -> Result<Option<Block>, Self::Error> {
+    async fn get(&self, id: Identifier<'_, Digest>) -> Result<Option<Arc<Block>>, Self::Error> {
         match self {
             Self::Immutable(a) => Archive::get(a, id).await,
             Self::Prunable(a) => Archive::get(a, id).await,

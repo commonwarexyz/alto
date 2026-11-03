@@ -130,7 +130,7 @@ impl<E: Spawner + Metrics, C: Client<CS>, CS: Scheme> Pusher<E, C, CS> {
                     warn!(%view, "subscription for block cancelled");
                     return;
                 };
-                let block = Arc::unwrap_or_clone(block);
+                let block = Arc::unwrap_or_clone(Arc::<Block>::from(block));
                 let height = block.height.get();
                 guard.cache_block(block.clone());
                 if let Err(e) = upload_fn(client, block).await {

@@ -1,13 +1,14 @@
 use crate::{
     application::Application,
+    handoffs::Handoffs,
     indexer::{self, Client},
 };
-use alto_types::{Activity, Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH};
+use alto_types::{Block, Finalization, Scheme, EPOCH, EPOCH_LENGTH};
 use commonware_broadcast::buffered;
 use commonware_consensus::{
     marshal::{
         self,
-        core::{Actor as MarshalActor, Mailbox as MarshalMailbox},
+        core::Actor as MarshalActor,
         resolver::handler,
         standard::{Deferred, Standard},
     },
@@ -23,29 +24,30 @@ use commonware_cryptography::{
     certificate::ConstantProvider,
     ed25519::PublicKey,
     sha256::{Digest, Sha256},
-    Digestible as _,
+    Digested, Digestible as _,
 };
 use commonware_p2p::{Blocker, Provider, Receiver, Sender};
 use commonware_parallel::Strategy;
 use commonware_resolver::TargetedResolver;
 use commonware_runtime::{
     buffer::paged::{page_size, CacheRef},
-    spawn_cell, BufferPooler, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
+    spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner, Storage,
 };
 use commonware_storage::{archive::immutable, queue};
-use commonware_utils::{NZUsize, NZU64};
+use commonware_utils::{NZUsize, NonZeroDuration, NZU64};
 use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use rand::{CryptoRng, Rng};
 use std::{
     num::{NonZero, NonZeroUsize},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{error, info, warn};
 
 /// Reporter type for [simplex::Engine].
 type Reporter<E, C, CS> =
-    Reporters<Activity<CS>, Option<indexer::Pusher<E, C, CS>>, MarshalMailbox<CS, Standard<Block>>>;
+    Reporters<Handoffs<CS>, Reporters<Option<indexer::Pusher<E, C, CS>>, Marshaled<E, CS>>>;
 
 /// To better support peers near tip during network instability, we multiply
 /// the consensus activity timeout by this factor.
@@ -58,7 +60,7 @@ const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // 3MB
 const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
-const WRITE_BUFFER: NonZero<usize> = NZUsize!(1024 * 1024); // 1MB
+const WRITE_BUFFER: NonZero<usize> = NZUsize!(64 * 1024); // 64KB
 const PAGE_CACHE_PHYSICAL_PAGE_SIZE: u32 = 4_096;
 const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = page_size(PAGE_CACHE_PHYSICAL_PAGE_SIZE);
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB
@@ -67,10 +69,10 @@ const MAX_PENDING_ACKS: NonZero<usize> = NZUsize!(16);
 const STABLE_LEADER_STALL_TIMEOUT: Duration = Duration::from_secs(12);
 
 /// Round-robin leader election used with native standard certificates.
-pub type StableElector = RoundRobin<Sha256>;
+pub type RoundRobinElector = RoundRobin<Sha256>;
 
 /// Builds stable leader election with a bounded optimistic view window.
-pub fn stable_elector(term_length: NonZero<u32>, optimistic_views: u64) -> StableElector {
+pub fn stable_elector(term_length: NonZero<u32>, optimistic_views: u64) -> RoundRobinElector {
     RoundRobin::default().with_term(
         TermLength::new(term_length),
         STABLE_LEADER_STALL_TIMEOUT,
@@ -104,7 +106,8 @@ pub struct Config<
     pub leader_timeout: Duration,
     pub certification_timeout: Duration,
     pub nullify_retry: Duration,
-    pub fetch_timeout: Duration,
+    pub fetch_timeout: NonZeroDuration,
+    pub fetch_retry_delay: Duration,
     pub activity_timeout: ViewDelta,
     pub skip_timeout: Duration,
     pub backfiller_max_active: NonZeroUsize,
@@ -121,7 +124,7 @@ type Marshaled<E, CS> = Deferred<E, CS, Application<CS>, Block, FixedEpocher>;
 #[allow(clippy::type_complexity)]
 pub struct Engine<E, B, P, S, C, CS, L>
 where
-    E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+    E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     P: Provider<PublicKey = PublicKey>,
     S: Strategy,
@@ -131,18 +134,18 @@ where
 {
     context: ContextCell<E>,
 
-    buffer: buffered::Engine<E, PublicKey, Block, P>,
+    buffer: buffered::Engine<E, PublicKey, Block, P, S>,
     buffer_mailbox: buffered::Mailbox<PublicKey, Block>,
     marshal: MarshalActor<
         E,
         Standard<Block>,
         ConstantProvider<CS, Epoch>,
         immutable::Archive<E, Digest, Finalization<CS>>,
-        immutable::Archive<E, Digest, Block>,
+        immutable::Archive<E, Digest, Arc<Block>>,
         FixedEpocher,
         S,
     >,
-    marshaled: Marshaled<E, CS>,
+    application: Application<CS>,
 
     consensus:
         Consensus<E, CS, L, B, Digest, Marshaled<E, CS>, Marshaled<E, CS>, Reporter<E, C, CS>, S>,
@@ -152,7 +155,7 @@ where
 
 impl<E, B, P, S, C, CS, L> Engine<E, B, P, S, C, CS, L>
 where
-    E: BufferPooler + Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
+    E: Clock + GClock + Rng + CryptoRng + Spawner + Storage + Metrics,
     B: Blocker<PublicKey = PublicKey>,
     P: Provider<PublicKey = PublicKey>,
     S: Strategy,
@@ -183,11 +186,12 @@ where
                 priority: true,
                 codec_config: Block::codec_config(cfg.block_size),
                 peer_provider: cfg.provider,
+                strategy: cfg.strategy.clone(),
             },
         );
 
         // Create the page cache
-        let page_cache = CacheRef::from_pooler(&context, PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
+        let page_cache = CacheRef::new(PAGE_CACHE_PAGE_SIZE, PAGE_CACHE_CAPACITY);
 
         // Validators retain all finalized history, so both archives are immutable: they never
         // prune and keep their key index on disk rather than in memory.
@@ -290,7 +294,7 @@ where
                         .get()
                         .saturating_mul(SYNCER_ACTIVITY_TIMEOUT_MULTIPLIER),
                 ),
-                start: marshal::Start::Genesis(genesis),
+                start: marshal::Start::Genesis(Digested::precomputed(genesis, genesis_digest)),
                 prunable_items_per_section: PRUNABLE_ITEMS_PER_SECTION,
                 replay_buffer: REPLAY_BUFFER,
                 key_write_buffer: WRITE_BUFFER,
@@ -307,9 +311,11 @@ where
         // Create the application and, when an indexer is configured, a backfill
         // queue of finalized digests so block uploads can resume after
         // restarts.
-        let mut app = Application::new(proposal_delay_ms, cfg.block_size);
+        let handoffs = Handoffs::new(&scheme, cfg.elector.clone());
+        let mut app =
+            Application::new(proposal_delay_ms, cfg.block_size).with_handoffs(handoffs.clone());
         let (pusher, consumer) = if let Some(indexer) = cfg.indexer {
-            let queue = queue::shared::init(
+            let queue = queue::Queue::init(
                 context.child("queue"),
                 queue::Config {
                     partition: format!("{}-finalized-queue", cfg.partition_prefix),
@@ -338,16 +344,19 @@ where
             (None, None)
         };
 
-        // Wrap the application in marshal
+        // Consensus uses the wrapper to build and verify proposals. The marshal actor reports
+        // finalized blocks directly to the application.
         let marshaled = Marshaled::<E, CS>::new(
             context.child("marshaled"),
-            app,
+            app.clone(),
             marshal_mailbox.clone(),
             epocher,
         );
 
-        // Create the reporter.
-        let reporter: Reporter<E, C, CS> = (pusher, marshal_mailbox.clone()).into();
+        // Handoffs learns the outcomes of early proposals from consensus activity. The wrapper
+        // releases retired proposal state before forwarding that activity to marshal.
+        let reporter: Reporter<E, C, CS> =
+            (handoffs, Reporters::from((pusher, marshaled.clone()))).into();
 
         // Create the consensus engine
         let consensus = Consensus::new(
@@ -366,6 +375,7 @@ where
                 certification_timeout: cfg.certification_timeout,
                 timeout_retry: cfg.nullify_retry,
                 fetch_timeout: cfg.fetch_timeout,
+                fetch_retry_delay: cfg.fetch_retry_delay,
                 view_retention: cfg.activity_timeout,
                 skip: simplex::SkipPolicy::Enabled {
                     timeout: cfg.skip_timeout,
@@ -388,7 +398,7 @@ where
             buffer,
             buffer_mailbox,
             marshal,
-            marshaled,
+            application: app,
             consensus,
 
             consumer,
@@ -464,7 +474,7 @@ where
         // Start marshal
         let marshal_handle = self
             .marshal
-            .start(self.marshaled, self.buffer_mailbox, marshal);
+            .start(self.application, self.buffer_mailbox, marshal);
 
         // Start draining queued block uploads before consensus so recovered work
         // resumes immediately on startup.

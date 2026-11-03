@@ -10,26 +10,62 @@ _To run a deploy, you must first install [Rust](https://www.rust-lang.org/tools/
 
 #### Create Artifacts
 
-_To configure local indexer upload, add `--indexers '<url>:<count>[;<url>:<count>...]'` to the `generate local` command. For example, `http://localhost:8080:1` assigns one validator to upload to that indexer._
+Generate a five-validator stable network in `test/`:
 
-`--leader-mode rotating` selects each view's leader from a VRF seed. Stable mode assigns leaders
-round-robin for terms of `--leader-term-length` views. Stable mode requires a term length of at
-least two and `--leader-optimistic-views`, which limits how far proposals and votes may run ahead
-of directly notarized ancestry. Values above the term length have no further effect. Rotating
-mode rejects both stable-only flags.
+```bash
+cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 100 --leader-term-length 1000 --leader-optimistic-views 48 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
+```
+
+For a rotating network, pass `rotating-vrf` or `rotating-round-robin` and omit the stable-only flags:
+
+```bash
+cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode rotating-vrf --leader-delay-ms 0 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
+```
+
+The generator prints the network identity, startup commands for indexers and validators, and
+commands for reading each validator's metrics. The emitted indexer command includes the network's
+leader mode and block size.
+
+`--indexers '<url>:<count>[;<url>:<count>...]'` assigns validators, in order, to upload to each
+indexer. In these examples, `http://localhost:8080:1` assigns one validator to the indexer on port 8080.
+
+`--leader-mode` is required and accepts `stable`, `rotating-vrf`, or `rotating-round-robin`.
+`rotating-vrf` derives each view's leader from a seed in the previous view's certificate.
+`rotating-round-robin` takes validators in order, so each leader is known in advance. The incoming
+leader can then build, relay, and vote for its proposal before the outgoing leader's view
+certifies. `stable` assigns leaders round-robin for terms of `--leader-term-length` views and
+pipelines each handoff between terms the same way.
+
+Stable mode requires a term length of at least two and `--leader-optimistic-views`. The optimistic
+window limits how far proposals and votes may run ahead of directly notarized ancestry, and values
+above the term length have no further effect. Both rotating modes reject these stable-only flags.
+
+In `stable` and `rotating-round-robin` networks, each incoming leader decides at random whether
+to prepare its proposal before its parent certifies. For each parent leader, a validator estimates
+how often its own early proposals built on that leader's blocks succeed. It prepares early with
+probability equal to this estimate, but never less than one in sixteen, so a leader that recovers
+can raise its estimate again.
+
+An early proposal is sampled once the validator votes for it. A certificate for the sampled
+proposal, or a finalized block built directly on it, raises the estimate. A nullification of its
+view, or a finalized block that skips that view, lowers the estimate. Each outcome contributes one
+eighth of the new estimate. Only the first outcome counts, so a certificate observed after the
+view's nullification does not undo the failure. Ordinary proposals, canceled builds, and proposals
+the validator never voted for do not update the estimate. Estimates reset to one on restart.
 
 `--leader-delay-ms` sets the minimum interval from the parent's timestamp, from 0 through 999 ms.
-Zero disables pacing and allows equal timestamps. Use 100 ms for local stable networks: shorter
-intervals can cause timeouts and skipped terms.
+Zero disables pacing and allows equal timestamps. Use 100 ms for local stable networks, because
+shorter intervals can cause timeouts and skipped terms.
 
-Certificate mode follows leader mode: `standard` for stable and `vrf` for rotating. The generator
-sets it in indexer commands and configurations and in explorer configurations. Set followers'
-`certificate_mode` and the inspector's `--certificate-mode` to match. Changing certificate mode
-requires a new network identity and matching configurations for every component.
+The generator includes the selected leader mode in indexer commands and configurations and in
+explorer configurations. Followers use `leader_mode` and the inspector uses `--leader-mode`, with
+the same three values. Each component derives its certificate format from the selected mode.
+Changing between VRF and round-robin leaders requires a new network identity and updated
+configurations for every component.
 
 `--block-size` sets the number of random payload bytes in each proposed block and defaults to `0`.
 All validators must use the same value. Encoded messages must fit the authenticated transport's
-size limit; validators also reject incoming blocks with payloads larger than their configured size.
+size limit, and validators reject incoming blocks with payloads larger than their configured size.
 Use the same `block_size` for Rust clients so their WebSocket receive limits include the block
 payload and the indexer's encoding allowance.
 
@@ -40,7 +76,7 @@ empty.
 `--traces-sample-rate` sets the fraction of traces exported by each validator and accepts values
 from `0` through `1`. It defaults to `0`, which disables trace export.
 
-The stable local example uses:
+In the stable example, the validator that uploads to the indexer has:
 
 ```yaml
 leader:
@@ -53,33 +89,17 @@ traces_sample_rate: 0.0
 indexer: http://localhost:8080
 ```
 
-Rotating-leader configs carry only the delay:
+Rotating leader configs carry only the mode and its delay:
 
 ```yaml
 leader:
-  mode: rotating
+  mode: rotating-vrf
   delay_ms: 0
 ```
 
-```bash
-cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode stable --leader-delay-ms 100 --leader-term-length 1000 --leader-optimistic-views 48 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
-```
-
-For a rotating network:
-
-```bash
-cargo run --bin deploy -- generate --peers 5 --bootstrappers 1 --worker-threads 3 --log-level info --traces-sample-rate 0 --mailbox-size 16384 --deque-size 256 --signature-threads 2 --leader-mode rotating --leader-delay-ms 0 --output test local --start-port 3000 --indexers 'http://localhost:8080:1'
-```
-
-The emitted indexer command includes the network's certificate mode and block size. A deployed
-indexer reads these values from `indexer.yaml`.
-
-The generator prints the network identity, startup commands for indexers and validators, and
-commands for reading each validator's metrics.
-
 #### Start Validators
 
-Run the emitted start commands in separate terminals:
+Run each emitted indexer and validator command in its own terminal. A validator command looks like:
 
 ```bash
 cargo run --bin validator -- --peers test/peers.yaml --config test/<validator-public-key>.yaml
@@ -89,12 +109,35 @@ _It is necessary to start at least one bootstrapper for any other peers to conne
 
 #### [Optional] Configure Explorer
 
-The indexer embeds `explorer/build` at compile time. To browse a local network at
-`http://localhost:8080`, first [build the embedded explorer](#build-the-embedded-explorer), then
-compile and start (or restart) the indexer using the emitted `cargo run` command. Its network
-identity and certificate mode are injected automatically. To run the explorer from source,
-generate its configuration (pass the indexer as `host:port` without a scheme)
-and copy it over `explorer/src/local_config.ts`:
+The indexer embeds `explorer/build` at compile time and serves the explorer with its network
+identity and leader mode. To browse a local network at `http://localhost:8080`,
+[build the embedded explorer](#build-the-embedded-explorer), then compile and start (or restart)
+the indexer using the emitted `cargo run` command.
+
+##### Build the Embedded Explorer
+
+Install [Node.js with npm](https://nodejs.org/) and
+[wasm-pack](https://rustwasm.github.io/wasm-pack/installer/), then run from the repository root
+before compiling an indexer that will serve the explorer:
+
+```bash
+npm --prefix explorer ci
+npm --prefix explorer run build
+```
+
+On macOS, install Homebrew LLVM (`brew install llvm`) and replace the second command with:
+
+```bash
+CC="$(brew --prefix llvm)/bin/clang" AR="$(brew --prefix llvm)/bin/llvm-ar" npm --prefix explorer run build
+```
+
+An indexer compiled without `explorer/build` serves only the API. Building the frontend afterward
+requires recompiling and restarting the indexer. `deploy.sh` performs this step automatically.
+
+##### Run the Explorer from Source
+
+To run the explorer from source instead, generate its configuration (pass the indexer as
+`host:port` without a scheme) and copy it over `explorer/src/local_config.ts`:
 
 ```bash
 cargo run --bin deploy -- explorer --dir test --backend-url localhost:8080 local
@@ -106,13 +149,13 @@ cd explorer && REACT_APP_MODE=local npm start
 
 ##### Too Many Open Files
 
-If you see an error like `unable to append to journal: Runtime(BlobOpenFailed("engine-consensus", "00000000000000ee", Os { code: 24, kind: Uncategorized, message: "Too many open files" }))`, you may need to increase the maximum number of open files. You can do this by running:
+If a validator fails with `BlobOpenFailed` and `Too many open files` (OS error 24), raise the maximum number of open files:
 
 ```bash
 ulimit -n 65536
 ```
 
-_MacOS defaults to 256 open files, which is too low for the default settings (where 1 journal file is maintained per recent view)._
+_The default settings keep one journal file open per recent view, so a low limit such as 256 is too small. Check the current limit with `ulimit -n`._
 
 ### Remote
 
@@ -148,9 +191,12 @@ indexer: https://your-indexer.example.com
 
 ##### Global (scripted)
 
+Run the script once with the network's leader mode:
+
 ```bash
 ./deploy.sh stable
-./deploy.sh rotating
+./deploy.sh rotating-vrf
+./deploy.sh rotating-round-robin
 ```
 
 `deploy.sh` takes the leader mode as its only argument. It generates the configuration, tests and
@@ -160,12 +206,13 @@ cluster.
 
 The script deploys 50 validators and one indexer on `c7gd.4xlarge` instances. Each validator uses
 8 worker threads and 16 signature threads. Stable mode uses a 5 ms proposal interval and runs
-100,000-view terms with 48 optimistic views. Rotating mode uses zero proposal delay and elects a
-VRF-seeded leader every view. Deployment concurrency is 50.
+100,000-view terms with 48 optimistic views. Both rotating modes use zero proposal delay.
+`rotating-vrf` selects a VRF-seeded leader every view, and `rotating-round-robin` follows the
+validator order. Deployment concurrency is 50.
 
 _Each `c7gd.4xlarge` provides a 950GB ephemeral NVMe instance store, which the deployer mounts at
-`/home/ubuntu` for validator data. The 25GB storage setting sizes the gp3 root volume. Terminating
-or replacing an instance discards its NVMe data._
+`/home/ubuntu` for validator data. The 25GB storage setting sizes the gp3 root volume. Stopping,
+terminating, or replacing an instance discards its NVMe data._
 
 ##### USA
 
@@ -189,34 +236,6 @@ Copy the generated exports into `explorer/src/global_config.ts` or `explorer/src
 Keep `PARTICIPANTS` and `LOCATIONS` in their generated order so each validator maps to its location.
 Build and deploy the hosted explorer from the same revision as the validators.
 
-#### [Optional] Configure Followers and Inspector
-
-Use the generated network identity, certificate mode, and block size for every client.
-Deployments with `--indexer` store these values in `assets/indexer.yaml`.
-
-Set `source`, `identity`, `certificate_mode`, and `block_size` in the follower configuration. Pass
-`--indexer`, `--identity`, `--certificate-mode`, and `--block-size` to the inspector. Use fresh
-follower data directories when connecting to a newly generated network.
-
-#### Build the Embedded Explorer
-
-Install Node.js/npm and `wasm-pack`, then run from the repository root before compiling an indexer
-that will serve the explorer:
-
-```bash
-npm --prefix explorer ci
-npm --prefix explorer run build
-```
-
-On macOS, install Homebrew LLVM (`brew install llvm`) and replace the second command with:
-
-```bash
-CC="$(brew --prefix llvm)/bin/clang" AR="$(brew --prefix llvm)/bin/llvm-ar" npm --prefix explorer run build
-```
-
-`deploy.sh` performs this step automatically. An indexer compiled without `explorer/build` serves
-only the API. Building the frontend afterward requires recompiling and restarting the indexer.
-
 #### Build Deployment Binaries
 
 Before building an indexer that serves the explorer, complete
@@ -233,8 +252,7 @@ Run the recipe for the deployment's instance type from the repository root:
 Each recipe writes `assets/validator`, `assets/indexer`, and their debug-symbol variants. Graviton 4
 binaries require CPU features unavailable on earlier Graviton generations.
 
-The builder runs on the local Docker architecture and cross-compiles the binaries, so no
-`--platform` argument is needed on an ARM64 development machine.
+The builder image runs on the local Docker architecture and cross-compiles to the recipe's target.
 
 ##### Local Compilation
 
@@ -265,13 +283,24 @@ _If your deployer machine has limited bandwidth, use `--concurrency <concurrency
 Visit `http://<monitoring-ip>:3000/d/chain`
 
 _This dashboard is only accessible from the IP used to deploy the infrastructure. When an indexer
-is deployed, its Prometheus target shows as down: the indexer exposes no metrics endpoint._
+is deployed, its Prometheus target shows as down because the indexer exposes no metrics endpoint._
+
+#### [Optional] Configure Followers and Inspector
+
+Use the generated network identity, leader mode, and block size for every client.
+Deployments with `--indexer` store these values in `assets/indexer.yaml`.
+
+Set `source`, `identity`, `leader_mode`, and `block_size` in the follower configuration. Pass
+`--indexer`, `--identity`, `--leader-mode`, and `--block-size` to the inspector. Use fresh
+follower data directories when connecting to a newly generated network.
 
 #### [Optional] Update Validator Binary
 
 ##### Re-Compile Binary
 
-Choose the recipe for the deployment's instance type:
+Choose the recipe for the deployment's instance type. When the deployment includes an indexer, use
+the matching `*-binaries` recipe from [Build Deployment Binaries](#build-deployment-binaries)
+instead, so `assets/indexer` is rebuilt too.
 
 | Instance type | Recipe |
 | --- | --- |
@@ -286,9 +315,9 @@ deployer aws update --config config.yaml
 ```
 
 _`deployer aws update` replaces and restarts the binary on every instance in `config.yaml`,
-including an indexer deployed with `--indexer` (its in-memory history is reset). Every binary named
-in `config.yaml` must exist under `assets/`, so rebuild `assets/indexer` alongside the validator
-(otherwise the existing file is pushed again)._
+including an indexer deployed with `--indexer`. The indexer restarts with empty in-memory history.
+Every binary named in `config.yaml` must exist under `assets/`, and an indexer binary that was not
+rebuilt is pushed again unchanged._
 
 #### [Optional] Profile Validator
 
@@ -308,14 +337,12 @@ deployer aws destroy --config config.yaml
 
 #### Debugging
 
-##### Missing AWS Credentials
+##### Request Has Expired
 
-If `commonware-deployer` can't detect your AWS credentials, you'll see a "Request has expired." error:
-
-```
-2025-03-05T01:36:47.550105Z  INFO deployer::ec2::create: created EC2 client region="eu-west-1"
-2025-03-05T01:36:48.268330Z ERROR deployer: failed to create EC2 deployment error=AwsEc2(Unhandled(Unhandled { source: ErrorMetadata { code: Some("RequestExpired"), message: Some("Request has expired."), extras: Some({"aws_request_id": "006f6b92-4965-470d-8eac-7c9644744bdf"}) }, meta: ErrorMetadata { code: Some("RequestExpired"), message: Some("Request has expired."), extras: Some({"aws_request_id": "006f6b92-4965-470d-8eac-7c9644744bdf"}) } }))
-```
+If a deployer command fails with `RequestExpired` ("Request has expired."), AWS received a request
+whose timestamp was more than 15 minutes in the past or future, or a pre-signed URL that had expired.
+Check that the deployer machine's clock is synchronized, then rerun the command so it sends fresh
+requests. See [EC2 common errors](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/CommonErrors.html).
 
 ##### EC2 Throttling
 

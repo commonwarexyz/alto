@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 usage() {
-    echo "usage: $0 <stable|rotating>" >&2
+    echo "usage: $0 <stable|rotating-vrf|rotating-round-robin>" >&2
     exit 1
 }
 [ $# -eq 1 ] || usage
@@ -13,9 +13,13 @@ case "$1" in
         # One round-robin leader per term with a 48-view optimistic window.
         leader_flags=(--leader-mode stable --leader-delay-ms 5 --leader-term-length 100000 --leader-optimistic-views 48)
         ;;
-    rotating)
+    rotating-vrf)
         # A VRF-seeded leader for every view.
-        leader_flags=(--leader-mode rotating --leader-delay-ms 0)
+        leader_flags=(--leader-mode rotating-vrf --leader-delay-ms 0)
+        ;;
+    rotating-round-robin)
+        # A round-robin leader for every view.
+        leader_flags=(--leader-mode rotating-round-robin --leader-delay-ms 0)
         ;;
     *)
         usage
@@ -65,7 +69,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
 fi
 
 if [ -d assets ]; then
-    read -r -p "./assets exists — remove and regenerate? [y/N] " answer
+    read -r -p "./assets exists. Remove and regenerate? [y/N] " answer
     [ "$answer" = "y" ] || exit 1
     rm -rf ./assets
 fi
@@ -76,7 +80,6 @@ cargo run --locked --bin deploy -- generate \
     --peers 50 \
     --bootstrappers 5 \
     --worker-threads 8 \
-    --network-buffer-pool-max-per-class 16384 \
     --log-level info \
     --traces-sample-rate 0 \
     --mailbox-size 16384 \

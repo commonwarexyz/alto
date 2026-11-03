@@ -1,44 +1,37 @@
-use crate::indexer;
+use crate::{handoffs::Handoffs, indexer};
 use alto_types::{Block, Context, Scheme};
 use commonware_actor::Feedback;
 use commonware_consensus::{
     marshal::{ancestry::Ancestry, Update},
-    Application as ConsensusApplication, Heightable, Reporter,
+    Application as ConsensusApplication, Handoff, Heightable, Reporter,
 };
-use commonware_cryptography::Digestible;
+use commonware_cryptography::{Digested, Digestible};
 use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use commonware_utils::{Acknowledgement, SystemTimeExt};
 use futures::StreamExt;
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use std::{
-    marker::PhantomData,
-    time::{Duration, SystemTime},
-};
+use std::time::{Duration, SystemTime};
 use tracing::info;
 
-/// Fixed consensus cutoff for block timestamps: 2200-01-01T00:00:00Z.
-///
-/// Different platforms have different `SystemTime` limits, so we use a fixed
-/// timestamp to ensure consistent application of block validity rules.
-const MAX_BLOCK_TIMESTAMP_MS: u64 = 7_258_118_400_000;
+/// How far a block timestamp may lead the local clock before verification must wait.
 const MAX_FUTURE_SKEW_MS: u64 = 1_000;
 
 #[derive(Clone)]
 pub struct Application<S: Scheme> {
     backfiller: Option<indexer::Producer>,
+    handoffs: Option<Handoffs<S>>,
     delay_ms: u64,
     block_size: usize,
-    _scheme: PhantomData<S>,
 }
 
 impl<S: Scheme> Application<S> {
     pub fn new(delay_ms: u64, block_size: u32) -> Self {
         Self {
             backfiller: None,
+            handoffs: None,
             delay_ms,
             block_size: usize::try_from(block_size)
                 .expect("configured block size is unsupported on this platform"),
-            _scheme: PhantomData,
         }
     }
 
@@ -46,28 +39,26 @@ impl<S: Scheme> Application<S> {
         self.backfiller = Some(backfiller);
         self
     }
-}
 
-impl<E, S> ConsensusApplication<E> for Application<S>
-where
-    E: Rng + Spawner + Metrics + Clock + Storage,
-    S: Scheme,
-{
-    type SigningScheme = S;
-    type Context = Context;
-    type Block = Block;
-    type Input = ();
+    pub(crate) fn with_handoffs(mut self, handoffs: Handoffs<S>) -> Self {
+        self.handoffs = Some(handoffs);
+        self
+    }
 
-    async fn propose(
-        &mut self,
-        (mut runtime_context, context): (E, Self::Context),
-        mut ancestry: impl Ancestry<Self::Block>,
-        _input: Self::Input,
-    ) -> Option<Self::Block> {
+    /// Builds a child of the next block in `ancestry` and paces its timestamp from the parent's.
+    async fn build<E: Rng + Clock>(
+        &self,
+        mut runtime_context: E,
+        context: Context,
+        mut ancestry: impl Ancestry<Block>,
+    ) -> Option<Digested<Block>> {
         let parent = ancestry.next().await?;
 
-        // Pace each proposal from its parent's timestamp.
+        // Pace each proposal from its parent's timestamp. Decoding and the assertion below cap
+        // every block's timestamp at `Block::MAX_TIMESTAMP_MS`, so only a delay near `u64::MAX`
+        // can overflow this sum.
         let min_timestamp = parent
+            .inner()
             .timestamp
             .checked_add(self.delay_ms)
             .expect("parent timestamp overflowed");
@@ -81,7 +72,7 @@ where
         }
         current = current.max(min_timestamp);
         assert!(
-            current <= MAX_BLOCK_TIMESTAMP_MS,
+            current <= Block::MAX_TIMESTAMP_MS,
             "proposed timestamp exceeded maximum",
         );
 
@@ -92,13 +83,61 @@ where
             StdRng::from_rng(&mut runtime_context).fill_bytes(&mut data);
         }
 
-        Some(Block::new(
+        let block = Block::new(
             context,
             parent.digest(),
-            parent.height.next(),
+            parent.height().next(),
             current,
             data.into(),
-        ))
+        );
+        let digest = block.digest();
+        Some(Digested::precomputed(block, digest))
+    }
+}
+
+impl<E, S> ConsensusApplication<E> for Application<S>
+where
+    E: Rng + Spawner + Metrics + Clock + Storage,
+    S: Scheme,
+{
+    type SigningScheme = S;
+    type Context = Context;
+    type Block = Block;
+    type Input = ();
+
+    /// Chooses whether to build and vote for a term-start proposal before its parent certifies.
+    ///
+    /// An early vote saves one network trip when the parent certifies, and it commits us to that
+    /// parent for this view.
+    async fn prepare(
+        &mut self,
+        (mut runtime_context, context): (E, Self::Context),
+        ancestry: impl Ancestry<Self::Block>,
+        _input: Self::Input,
+    ) -> Handoff<Digested<Self::Block>> {
+        if self
+            .handoffs
+            .as_ref()
+            .is_some_and(|handoffs| !handoffs.prepare(&context, &mut runtime_context))
+        {
+            return Handoff::Wait;
+        }
+        let Some(block) = self.build(runtime_context, context, ancestry).await else {
+            return Handoff::Wait;
+        };
+        if let Some(handoffs) = &self.handoffs {
+            handoffs.prepared(&block);
+        }
+        Handoff::Vote(block)
+    }
+
+    async fn propose(
+        &mut self,
+        (runtime_context, context): (E, Self::Context),
+        ancestry: impl Ancestry<Self::Block>,
+        _input: Self::Input,
+    ) -> Option<Digested<Self::Block>> {
+        self.build(runtime_context, context, ancestry).await
     }
 
     async fn verify(
@@ -112,14 +151,15 @@ where
         let Some(parent) = ancestry.next().await else {
             return false;
         };
+        let (block, parent) = (block.inner(), parent.inner());
 
         // Block size is a consensus rule, so every proposal must match the local configuration.
         if block.data.len() != self.block_size {
             return false;
         }
 
-        // Require nondecreasing timestamps within the protocol's fixed range.
-        if block.timestamp < parent.timestamp || block.timestamp > MAX_BLOCK_TIMESTAMP_MS {
+        // Require nondecreasing timestamps.
+        if block.timestamp < parent.timestamp {
             return false;
         }
 
@@ -128,9 +168,8 @@ where
         // keeps the pending certification alive, and finalization cancels it at or below the
         // finalized view.
         //
-        // The timestamp is chosen by an untrusted proposer, but the check above caps it at
-        // `MAX_BLOCK_TIMESTAMP_MS` (year 2200), which `SystemTime` represents on every platform,
-        // so this addition cannot overflow.
+        // An untrusted proposer chooses this timestamp, but decoding caps it at
+        // `Block::MAX_TIMESTAMP_MS`, so this addition cannot overflow.
         let deadline = SystemTime::UNIX_EPOCH
             + Duration::from_millis(block.timestamp.saturating_sub(MAX_FUTURE_SKEW_MS));
         runtime_context.sleep_until(deadline).await;
@@ -150,7 +189,7 @@ impl<S: Scheme> Reporter for Application<S> {
             info!(
                 height = %block.height(),
                 digest = ?block.digest(),
-                timestamp = block.timestamp,
+                timestamp = block.inner().timestamp,
                 "finalized block"
             );
         }
@@ -177,7 +216,6 @@ mod tests {
     };
     use commonware_cryptography::{ed25519, sha256, Digest as _, Hasher, Sha256, Signer};
     use commonware_runtime::{deterministic, Runner as _, Supervisor as _};
-    use std::sync::Arc;
 
     const DELAY_MS: u64 = 10;
 
@@ -189,13 +227,17 @@ mod tests {
         }
     }
 
+    fn digested(block: &Block) -> Digested<Block> {
+        Digested::precomputed(block.clone(), block.digest())
+    }
+
     async fn verify_block(
         context: deterministic::Context,
         application: &mut Application<VrfScheme>,
         block: &Block,
         parent: &Block,
     ) -> bool {
-        let ancestry = ancestry::from_iter([Arc::new(block.clone()), Arc::new(parent.clone())]);
+        let ancestry = ancestry::from_iter([digested(block), digested(parent)]);
         ConsensusApplication::verify(application, (context, block.context.clone()), ancestry).await
     }
 
@@ -205,10 +247,12 @@ mod tests {
         child_context: Context,
         parent: &Block,
     ) -> Block {
-        let ancestry = ancestry::from_iter([Arc::new(parent.clone())]);
+        let ancestry = ancestry::from_iter([digested(parent)]);
         ConsensusApplication::propose(application, (context, child_context), ancestry, ())
             .await
             .expect("expected proposal")
+            .inner()
+            .clone()
     }
 
     #[test]
@@ -386,7 +430,7 @@ mod tests {
 
     #[test]
     fn propose_without_delay_uses_current_or_parent_timestamp() {
-        for parent_timestamp in [0, 10, 15, MAX_BLOCK_TIMESTAMP_MS] {
+        for parent_timestamp in [0, 10, 15, Block::MAX_TIMESTAMP_MS] {
             let runner = deterministic::Runner::default();
             runner.start(|context| async move {
                 let mut application = Application::new(0, 0);
@@ -455,36 +499,6 @@ mod tests {
     }
 
     #[test]
-    fn verify_rejects_timestamp_above_maximum() {
-        let runner = deterministic::Runner::default();
-        runner.start(|context| async move {
-            let mut application = Application::new(DELAY_MS, 0);
-
-            let now = context.current().epoch_millis();
-            let parent = Block::new(
-                test_context(1, (View::zero(), sha256::Digest::EMPTY)),
-                Sha256::hash(&[b"genesis"]),
-                Height::new(1),
-                now,
-                Bytes::new(),
-            );
-
-            // Verification rejects timestamps outside the fixed protocol range before sleeping.
-            let block = Block::new(
-                test_context(2, (View::new(1), parent.digest())),
-                parent.digest(),
-                parent.height.next(),
-                MAX_BLOCK_TIMESTAMP_MS + 1,
-                Bytes::new(),
-            );
-
-            assert!(
-                !verify_block(context.child("verify"), &mut application, &block, &parent).await
-            );
-        });
-    }
-
-    #[test]
     #[should_panic(expected = "proposed timestamp exceeded maximum")]
     fn propose_panics_when_parent_timestamp_is_maximum() {
         let runner = deterministic::Runner::default();
@@ -496,7 +510,7 @@ mod tests {
                 test_context(1, (View::zero(), sha256::Digest::EMPTY)),
                 Sha256::hash(&[b"genesis"]),
                 Height::new(1),
-                MAX_BLOCK_TIMESTAMP_MS,
+                Block::MAX_TIMESTAMP_MS,
                 Bytes::new(),
             );
             let _ = propose_child(

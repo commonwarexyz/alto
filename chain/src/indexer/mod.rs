@@ -13,7 +13,7 @@
 use alto_types::{Block, Finalized, Notarized, Scheme, Seed};
 use commonware_consensus::marshal::{core::Mailbox as MarshalMailbox, standard::Standard};
 use commonware_parallel::Strategy;
-use commonware_runtime::{BufferPooler, Clock, Metrics, Spawner, Storage};
+use commonware_runtime::{Clock, Metrics, Spawner, Storage};
 use commonware_storage::queue;
 use commonware_utils::sync::Mutex;
 use std::{future::Future, num::NonZeroUsize, sync::Arc, time::Duration};
@@ -84,13 +84,13 @@ pub(crate) fn init<E, C, CS>(
     context: E,
     client: C,
     marshal: MarshalMailbox<CS, Standard<Block>>,
-    backfiller: (queue::Writer<E, Entry>, queue::Reader<E, Entry>),
+    backfiller: (queue::Queue<E, Entry>, queue::Reader<E, Entry>),
     mailbox_size: NonZeroUsize,
     backfiller_max_active: NonZeroUsize,
     backfiller_retry: Duration,
 ) -> (Producer, Pusher<E, C, CS>, Consumer<E, C, CS>)
 where
-    E: Spawner + Clock + Storage + Metrics + BufferPooler,
+    E: Spawner + Clock + Storage + Metrics,
     C: Client<CS>,
     CS: Scheme,
 {
@@ -101,11 +101,11 @@ where
         marshal.clone(),
         uploads.clone(),
     );
-    let (writer, reader) = backfiller;
+    let (queue, reader) = backfiller;
     let producer = backfiller::producer::init(
         context.child("producer"),
         uploads.clone(),
-        writer.clone(),
+        queue,
         mailbox_size,
     );
     let consumer = Consumer::new(
@@ -113,7 +113,7 @@ where
         client,
         marshal,
         uploads,
-        (writer, reader),
+        reader,
         backfiller_max_active,
         backfiller_retry,
     );

@@ -7,7 +7,7 @@ use commonware_actor::{
 use commonware_consensus::{
     marshal::{core::Mailbox as MarshalMailbox, standard::Standard, Update},
     types::Height,
-    Reporter,
+    Heightable, Reporter,
 };
 use commonware_runtime::{spawn_cell, Clock, ContextCell, Handle, Metrics, Spawner};
 use commonware_utils::Acknowledgement;
@@ -112,7 +112,7 @@ impl<E: Clock + Spawner + Metrics, C: Scheme> Application<E, C> {
                     // This is where an application would process the
                     // finalized block (e.g. update state, index transactions,
                     // serve queries, etc.).
-                    let height = block.height.get();
+                    let height = block.height().get();
                     let bps = self.throughput.record(self.context.current());
                     let remaining = self.tip.map(|t| t.get().saturating_sub(height));
                     info!(

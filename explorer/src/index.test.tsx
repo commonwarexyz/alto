@@ -35,7 +35,7 @@ beforeEach(() => {
     const React = require('react');
     const { getClusterConfig, getInitialCluster } = require('./config');
     const config = getClusterConfig(getInitialCluster());
-    return React.createElement('p', null, [config.name, config.BACKEND_URL, config.CERTIFICATE_MODE].join(' | '));
+    return React.createElement('p', null, [config.name, config.BACKEND_URL, config.LEADER_MODE].join(' | '));
   });
 });
 
@@ -76,10 +76,10 @@ test('loaded deployment settings take precedence over standalone settings', () =
   window.history.replaceState(null, '', '/?cluster=usa');
   window.ALTO_DEPLOYMENT = {
     mode: 'public', name: 'Fixture deployment', description: '',
-    BACKEND_URL: 'fixture.invalid', PUBLIC_KEY_HEX: '00', CERTIFICATE_MODE: 'standard',
+    BACKEND_URL: 'fixture.invalid', PUBLIC_KEY_HEX: '00', LEADER_MODE: 'stable',
     PARTICIPANTS: [], LOCATIONS: [],
   };
   start();
   expect(mockApp).toHaveBeenCalled();
-  expect(document.body.textContent).toContain('Fixture deployment | fixture.invalid | standard');
+  expect(document.body.textContent).toContain('Fixture deployment | fixture.invalid | stable');
 });

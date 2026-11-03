@@ -22,7 +22,7 @@ jest.mock('./config', () => {
   const actual = jest.requireActual('./config') as typeof import('./config');
   const config = {
     BACKEND_URL: 'localhost', PUBLIC_KEY_HEX: '00', LOCATIONS: [],
-    CERTIFICATE_MODE: 'standard', name: 'Test', description: '',
+    LEADER_MODE: 'stable', name: 'Test', description: '',
   };
   return {
     MODE: 'public',
@@ -98,7 +98,7 @@ beforeEach(() => {
   const config = getClusterConfig('local');
   config.BACKEND_URL = 'localhost';
   config.PUBLIC_KEY_HEX = '00';
-  config.CERTIFICATE_MODE = 'standard';
+  config.LEADER_MODE = 'stable';
   config.description = '';
   config.LOCATIONS = [];
   delete config.PARTICIPANTS;
@@ -165,7 +165,7 @@ async function close(socket: FakeWebSocket) {
 
 describe.each([false, true])('connection lifecycle (StrictMode: %s)', strict => {
   test('keeps newest views after overload followed by delayed seeds', async () => {
-    getClusterConfig('local').CERTIFICATE_MODE = 'vrf';
+    getClusterConfig('local').LEADER_MODE = 'rotating-vrf';
     jest.spyOn(console, 'warn').mockImplementation(() => {});
     const socket = await mount(strict);
     for (let view = 300; view <= 427; view++) {
@@ -240,7 +240,7 @@ describe.each([false, true])('connection lifecycle (StrictMode: %s)', strict => 
 
   test.each([false, true])('maps seeded leaders with full cardinality (participant keys: %s)', async withParticipants => {
     const config = getClusterConfig('local');
-    config.CERTIFICATE_MODE = 'vrf';
+    config.LEADER_MODE = 'rotating-vrf';
     config.LOCATIONS = [[[1, 2], 'First'], null, [[3, 4], 'Third']];
     if (withParticipants) config.PARTICIPANTS = ['01', '02', '03'];
     const socket = await mount(strict);
@@ -279,23 +279,42 @@ describe.each([false, true])('connection lifecycle (StrictMode: %s)', strict => 
     }
   });
 
-  test.each(['standard', 'vrf'] as const)('describes the selected %s deployment in About', async mode => {
+  test.each(['stable', 'rotating-vrf', 'rotating-round-robin'] as const)('describes the selected %s deployment in About', async mode => {
     const config = getClusterConfig('local');
-    config.CERTIFICATE_MODE = mode;
-    config.BACKEND_URL = mode === 'standard' ? window.location.host : 'vrf.example.test';
-    config.PUBLIC_KEY_HEX = (mode === 'standard' ? 'ab' : 'cd').repeat(48);
+    config.LEADER_MODE = mode;
+    config.BACKEND_URL = mode === 'stable' ? window.location.host : 'vrf.example.test';
+    config.PUBLIC_KEY_HEX = (mode === 'stable' ? 'ab' : 'cd').repeat(48);
     config.description = 'A cluster of <strong>4 validators</strong> running c7gd.4xlarge in <strong>1 region</strong> (us-west-2).';
+    const postMessage = jest.spyOn(FakeWorker.prototype, 'postMessage');
     await mount(strict);
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ standard: mode !== 'rotating-vrf' }));
     await act(async () => { container.querySelector<HTMLButtonElement>('.about-header-button')!.click(); });
 
     const modal = container.querySelector('.about-modal');
     expect(modal).not.toBeNull();
     const command = Array.from(modal!.querySelectorAll('code'))
       .find(element => element.textContent?.startsWith('inspector '))!.textContent;
-    const indexer = mode === 'standard' ? window.location.origin : 'https://vrf.example.test';
-    expect(command).toContain(`--certificate-mode '${mode}'`);
+    const indexer = mode === 'stable' ? window.location.origin : 'https://vrf.example.test';
+    expect(command).toContain(`--leader-mode '${mode}'`);
     expect(command).toContain(`--indexer '${indexer}'`);
     expect(command).toContain(`--identity '${config.PUBLIC_KEY_HEX}'`);
+    expect(modal!.textContent).toContain(mode === 'stable'
+      ? 'contains multiple consecutive views assigned to the same leader.'
+      : 'contains one view.');
+    expect(modal!.textContent).toContain(mode === 'stable'
+      ? 'A nullification advances consensus to the first view of the next term.'
+      : 'A nullification advances consensus to the next view.');
+    if (mode === 'stable') {
+      expect(modal!.textContent).toContain('or an earlier view in the same term');
+    } else {
+      expect(modal!.textContent).not.toContain('or an earlier view in the same term');
+    }
+    expect(modal!.textContent).toContain(mode === 'rotating-vrf'
+      ? 'The leader for this view has been elected.'
+      : 'The scheduled leader has proposed a block.');
+    expect(modal!.textContent).toContain(mode === 'rotating-vrf'
+      ? 'a shortened seed signature used for leader election'
+      : 'a shortened hash of the proposed block');
     expect(modal!.textContent).toContain('4 validators');
     expect(modal!.textContent).toContain('c7gd.4xlarge');
     expect(modal!.textContent).toContain('1 region');
@@ -312,7 +331,7 @@ describe.each([false, true])('connection lifecycle (StrictMode: %s)', strict => 
   test.each(['idle', 'rejected', 'duplicate'])(
     'advances growing latency while batches are %s',
     async batch => {
-      getClusterConfig('local').CERTIFICATE_MODE = 'vrf';
+      getClusterConfig('local').LEADER_MODE = 'rotating-vrf';
       const socket = await mount(strict);
       await reply(socket, 0, { view: 10, signature: [] });
       await advance(100);

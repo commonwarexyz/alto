@@ -9,7 +9,8 @@ interface AboutModalProps {
 }
 
 const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig }) => {
-    const standardCertificates = clusterConfig.CERTIFICATE_MODE === 'standard';
+    const stableLeader = clusterConfig.LEADER_MODE === 'stable';
+    const standardCertificates = clusterConfig.LEADER_MODE !== 'rotating-vrf';
     const timelineIdentifier = getTimelineIdentifier(standardCertificates);
     const leaderIndicator = getLeaderIndicator(standardCertificates);
     // Add effect to handle link targets
@@ -27,8 +28,8 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
     }, [isOpen]);
     if (!isOpen) return null;
 
-    const [certificateMode, indexer, identity] = [
-        clusterConfig.CERTIFICATE_MODE,
+    const [leaderMode, indexer, identity] = [
+        clusterConfig.LEADER_MODE,
         getHttpBackendUrl(clusterConfig.BACKEND_URL),
         clusterConfig.PUBLIC_KEY_HEX,
     ].map(value => `'${value.replace(/'/g, "'\\''")}'`);
@@ -78,13 +79,24 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                             This explorer displays the progression of <i>simplex</i> over time, broken into <strong>views</strong>.
                         </p>
                         <p>
-                            In stable mode, a <strong>term</strong> groups consecutive views under one round-robin leader. In rotating mode,
-                            each term contains one view and a VRF seed selects its leader.
+                            {stableLeader ? (
+                                <>
+                                    Leaders take turns in round-robin order. Each <strong>term</strong> contains multiple consecutive views assigned to the same leader.
+                                </>
+                            ) : clusterConfig.LEADER_MODE === 'rotating-round-robin' ? (
+                                <>
+                                    Leaders take turns in round-robin order. Each <strong>term</strong> contains one view.
+                                </>
+                            ) : (
+                                <>
+                                    A VRF seed selects the leader for each view. Each <strong>term</strong> contains one view.
+                                </>
+                            )}
                         </p>
                         <p>
-                            A quorum of <i>2f+1</i> votes for a block forms a <strong>notarization</strong>. After successfully certifying the block,
-                            validators advance to the next view without waiting for finalization. A quorum of <i>2f+1</i> nullifies forms a <strong>nullification</strong>,
-                            which abandons the remaining term and advances to the first view of the next term.
+                            A quorum of <i>2f+1</i> votes for a block forms a <strong>notarization</strong>. After certifying the block,
+                            validators advance to the next view without waiting for finalization. A quorum of <i>2f+1</i> nullifies forms a <strong>nullification</strong>.
+                            A nullification advances consensus to {stableLeader ? 'the first view of the next term' : 'the next view'}.
                             Validators finalize a block when they observe <i>2f+1</i> finalizes for it.
                         </p>
                         <p>
@@ -97,10 +109,9 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                                     <strong>{leaderIndicator.label}</strong>
                                 </div>
                                 {standardCertificates
-                                    ? 'The stable round-robin leader has proposed a block.'
-                                    : 'Some leader has been elected to propose a block.'}
+                                    ? 'The scheduled leader has proposed a block.'
+                                    : 'The leader for this view has been elected.'}
                                 {MODE === 'public' && " A map dot of the same color shows the leader's region when its location is known."}
-                                {!standardCertificates && ' A new leader is elected for each view.'}
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">
@@ -108,7 +119,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                                     <strong>Locked</strong>
                                 </div>
                                 Block <i>b</i> has received <i>2f+1</i> votes in view <i>v</i>, so no other block can be notarized in that view.
-                                It must appear in the canonical chain unless a nullification covers <i>v</i>, from <i>v</i> itself or an earlier view in the same term.
+                                It must appear in the canonical chain unless <i>v</i>{stableLeader && ' or an earlier view in the same term'} is nullified.
                             </li>
                             <li>
                                 <div className="status-indicator-wrapper">
@@ -175,7 +186,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, clusterConfig 
                         </p>
                         <pre className="code-block">
                             <code>
-                                {`inspector --certificate-mode ${certificateMode} get block 10 --indexer ${indexer} --identity ${identity}`}
+                                {`inspector --leader-mode ${leaderMode} get block 10 --indexer ${indexer} --identity ${identity}`}
                             </code>
                         </pre>
                     </section>

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, jest, test } from '@jest/globals';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import SearchModal from './SearchModal';
-import { CertificateMode, ClusterConfig } from './config';
+import { LeaderMode, ClusterConfig } from './config';
 import { BlockJs, SearchType } from './types';
 import { parse_block, parse_finalized, parse_notarized, parse_seed } from './alto_types/alto_types.js';
 import { hexToUint8Array } from './utils';
@@ -55,11 +55,11 @@ afterEach(async () => {
     jest.restoreAllMocks();
 });
 
-async function search(query: string, mode: CertificateMode, type: SearchType = 'block') {
+async function search(query: string, mode: LeaderMode, type: SearchType = 'block') {
     const config: ClusterConfig = {
         BACKEND_URL: window.location.host,
         PUBLIC_KEY_HEX: '00',
-        CERTIFICATE_MODE: mode,
+        LEADER_MODE: mode,
         LOCATIONS: [],
         name: 'Test',
         description: '',
@@ -80,7 +80,7 @@ async function search(query: string, mode: CertificateMode, type: SearchType = '
     });
 }
 
-test.each(['standard', 'vrf'] as const)('rejects a different block for a digest query in %s mode', async mode => {
+test.each(['stable', 'rotating-vrf', 'rotating-round-robin'] as const)('rejects a different block for a digest query in %s mode', async mode => {
     await search('cd' + digest.slice(2), mode);
 
     expect(container.querySelector('.search-result-item')).toBeNull();
@@ -90,7 +90,7 @@ test.each(['standard', 'vrf'] as const)('rejects a different block for a digest 
 test.each([digest, digest.toUpperCase(), `0x${digest}`, `0x${digest.toUpperCase()}`])(
     'accepts the matching block for digest query %s',
     async query => {
-        await search(query, 'standard');
+        await search(query, 'stable');
 
         expect(container.querySelector('.search-error')).toBeNull();
         expect(container.querySelector('.search-result-header')?.textContent).toContain('Block');
@@ -98,14 +98,17 @@ test.each([digest, digest.toUpperCase(), `0x${digest}`, `0x${digest.toUpperCase(
     },
 );
 
-const indexedSearches: [SearchType, CertificateMode][] = [
-    ['notarization', 'standard'],
-    ['finalization', 'standard'],
-    ['block', 'standard'],
-    ['seed', 'vrf'],
-    ['notarization', 'vrf'],
-    ['finalization', 'vrf'],
-    ['block', 'vrf'],
+const indexedSearches: [SearchType, LeaderMode][] = [
+    ['notarization', 'stable'],
+    ['finalization', 'stable'],
+    ['block', 'stable'],
+    ['notarization', 'rotating-round-robin'],
+    ['finalization', 'rotating-round-robin'],
+    ['block', 'rotating-round-robin'],
+    ['seed', 'rotating-vrf'],
+    ['notarization', 'rotating-vrf'],
+    ['finalization', 'rotating-vrf'],
+    ['block', 'rotating-vrf'],
 ];
 
 test.each(indexedSearches)('does not display a %s rejected by verification in %s mode', async (type, mode) => {
@@ -119,7 +122,7 @@ test.each(indexedSearches)('does not display a %s rejected by verification in %s
         expect(parse_seed).toHaveBeenCalledWith(publicKey, payload);
     } else {
         const parse = type === 'notarization' ? parse_notarized : parse_finalized;
-        expect(parse).toHaveBeenCalledWith(publicKey, payload, mode === 'standard');
+        expect(parse).toHaveBeenCalledWith(publicKey, payload, mode !== 'rotating-vrf');
     }
 });
 
@@ -164,7 +167,7 @@ test.each([
 ])('rejects invalid numeric query %s without fetching', async query => {
     // A pending response prevents an invalid range from issuing repeated requests.
     jest.mocked(globalThis.fetch).mockImplementation(() => new Promise<Response>(() => {}));
-    await search(query, 'standard');
+    await search(query, 'stable');
 
     expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(container.querySelector('.search-error')?.textContent).toContain('Invalid query');
@@ -180,7 +183,7 @@ test.each([
         signature: [],
         block: { ...block, height: height++ },
     }));
-    await search(`${start}..${end}`, 'standard');
+    await search(`${start}..${end}`, 'stable');
 
     expect(container.querySelector('.search-error')).toBeNull();
     expect(container.querySelectorAll('.search-result-item')).toHaveLength(count);
@@ -193,9 +196,28 @@ test.each([
 test('does not display a repeated block for other heights in a range', async () => {
     returnArtifact('block');
     jest.spyOn(console, 'error').mockImplementation(() => {});
-    await search('11..12', 'standard');
+    await search('11..12', 'stable');
 
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     expect(container.querySelector('.search-result-item')).toBeNull();
     expect(container.querySelector('.search-error')?.textContent).toContain('No results found for range 11..12');
+});
+
+test.each(['stable', 'rotating-round-robin'] as const)('removes seed search after switching to %s', async mode => {
+    await search('latest', 'rotating-vrf', 'seed');
+    expect(container.querySelector('select')?.value).toBe('seed');
+
+    await act(async () => {
+        root.render(<SearchModal isOpen onClose={() => {}} clusterConfig={{
+            BACKEND_URL: window.location.host,
+            PUBLIC_KEY_HEX: '00',
+            LEADER_MODE: mode,
+            LOCATIONS: [],
+            name: 'Test',
+            description: '',
+        }} />);
+    });
+
+    expect(container.querySelector('select')?.value).toBe('finalization');
+    expect(container.querySelector('option[value="seed"]')).toBeNull();
 });

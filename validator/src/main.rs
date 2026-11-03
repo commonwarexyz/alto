@@ -1,8 +1,16 @@
 use alto_chain::{engine, Config, Leader, Peers, LEADER_TIMEOUT};
-use alto_types::{Scheme, StandardScheme, VrfScheme, EPOCH, NAMESPACE, ROTATING_ELECTOR};
+use alto_types::{
+    Block, CertificateMode, Scheme, StandardScheme, VrfScheme, EPOCH, NAMESPACE, ROTATING_ELECTOR,
+};
 use clap::{Arg, Command};
-use commonware_codec::{varint::UInt, Decode, DecodeExt, EncodeSize};
-use commonware_consensus::{marshal, types::ViewDelta};
+use commonware_allocator::mimalloc;
+use commonware_codec::{Decode, DecodeExt};
+use commonware_consensus::{
+    marshal::{self, standard::Standard},
+    simplex,
+    types::ViewDelta,
+    BoundedBlock,
+};
 use commonware_cryptography::{
     bls12381::primitives::{
         group,
@@ -10,7 +18,8 @@ use commonware_cryptography::{
         variant::MinSig,
     },
     ed25519::{PrivateKey, PublicKey},
-    Signer,
+    sha256::Digest,
+    ChaCha20Poly1305, Signer,
 };
 use commonware_deployer::aws::Hosts;
 use commonware_formatting::from_hex;
@@ -19,8 +28,13 @@ use commonware_p2p::{
     Ingress, Manager,
 };
 use commonware_parallel::Rayon;
-use commonware_runtime::{tokio, BufferPoolConfig, Runner, Supervisor as _};
-use commonware_utils::{ordered::Set, union_unique, NZUsize, NZU32};
+use commonware_runtime::{tokio, Runner, Supervisor as _};
+use commonware_stream::{
+    cups::{self, Cups},
+    sake::{self, Sake},
+    SakeCups,
+};
+use commonware_utils::{ordered::Set, union_unique, NZDuration, NZUsize, NZU32};
 use futures::future::try_join_all;
 use governor::Quota;
 use std::{
@@ -33,8 +47,15 @@ use std::{
 };
 use tracing::{error, info, Level};
 
+/// Requests a 1 GiB pinned arena and sets a 60-second purge delay for other arenas. Pinned pages
+/// fault in on first use and are never purged, reducing repeated page faults during periodic work
+/// such as metrics scrapes.
 #[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config {
+    purge: mimalloc::Purge::After(Duration::from_secs(60)),
+    reserve: Some(mimalloc::Reserve::pinned(1 << 30)),
+    ..mimalloc::Config::DEFAULT
+});
 
 const PENDING_CHANNEL: u64 = 0;
 const RECOVERED_CHANNEL: u64 = 1;
@@ -52,21 +73,34 @@ const NULLIFY_RETRY: Duration = Duration::from_secs(10);
 const ACTIVITY_TIMEOUT: ViewDelta = ViewDelta::new(256);
 const SKIP_TIMEOUT: Duration = Duration::from_secs(11);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(2);
+const FETCH_RETRY_DELAY: Duration = Duration::from_millis(100);
 const MARSHAL_RESOLVER_TIMEOUT: Duration = Duration::from_secs(10);
-const BASE_MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
 const BLOCKS_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 const FINALIZED_FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(21); // 100MB
 
-fn configured_max_message_size(block_size: u32) -> u32 {
-    // Block data contributes its bytes and the codec's variable-length prefix to each message.
-    // The total must remain within the authenticated transport payload limit.
-    let size = u64::from(BASE_MAX_MESSAGE_SIZE)
-        + u64::from(block_size)
-        + UInt(block_size).encode_size() as u64;
-    u32::try_from(size)
-        .ok()
-        .filter(|size| *size <= authenticated::MAX_SIZE)
-        .expect("block size exceeds authenticated transport maximum")
+/// Authenticated transport handshake shared by every validator.
+type Handshake = SakeCups<PrivateKey, ChaCha20Poly1305>;
+
+/// Returns the P2P `max_message_size` that admits every payload a validator sends in a network of
+/// `participants` validators whose blocks carry at most `block_size` payload bytes.
+///
+/// # Panics
+///
+/// Panics if a block of `block_size` payload bytes would not fit the authenticated transport.
+fn configured_max_message_size<S: Scheme>(participants: u32, block_size: u32) -> u32 {
+    let codec_config = Block::codec_config(block_size);
+    assert!(
+        u32::try_from(Block::max_encode_size(&codec_config))
+            .is_ok_and(|block| block <= authenticated::max_size::<Handshake>()),
+        "block size exceeds authenticated transport maximum"
+    );
+
+    // Votes, certificates, and their fetches share the network with block broadcasts and
+    // marshal's backfill.
+    commonware_p2p::max_message_size(&[
+        simplex::max_payload_size::<S, Digest>(participants),
+        marshal::max_payload_size::<Standard<Block>, S>(participants, &codec_config),
+    ])
 }
 
 fn resolve_named_http_url(url: &str, hosts: &HashMap<String, IpAddr>) -> String {
@@ -117,46 +151,16 @@ fn main() {
     let config_file = std::fs::read_to_string(config_file).expect("Could not read config file");
     let mut config: Config =
         serde_yaml::from_str(&config_file).expect("Could not parse config file");
-    let max_message_size = configured_max_message_size(config.block_size);
     let key = from_hex(&config.private_key).expect("Could not parse private key");
-    let signer = PrivateKey::decode(key.as_ref()).expect("Private key is invalid");
+    let signer = PrivateKey::decode(key).expect("private key must have a valid encoding");
     let public_key = signer.public_key();
 
     // Initialize runtime
-    let network_buffer_pool_parallelism = config
-        .worker_threads
-        .checked_add(config.signature_threads)
-        .expect("network buffer pool parallelism overflowed");
-
-    // Storage I/O runs on Tokio's blocking pool. Include those threads in the
-    // pool parallelism calculation so buffers cannot be stranded in too few
-    // thread-local caches and surface as exhaustion under restart pressure.
-    let storage_buffer_pool_parallelism = network_buffer_pool_parallelism
-        .checked_add(config.blocking_threads)
-        .expect("storage buffer pool parallelism overflowed");
-    let mut storage_buffer_pool_cfg = BufferPoolConfig::for_storage().with_parallelism(
-        config
-            .storage_buffer_pool_parallelism
-            .unwrap_or(NZUsize!(storage_buffer_pool_parallelism)),
-    );
-    if let Some(max_per_class) = config.storage_buffer_pool_max_per_class {
-        storage_buffer_pool_cfg = storage_buffer_pool_cfg.with_max_per_class(max_per_class);
-    }
-    let mut network_buffer_pool_cfg = BufferPoolConfig::for_network().with_parallelism(
-        config
-            .network_buffer_pool_parallelism
-            .unwrap_or(NZUsize!(network_buffer_pool_parallelism)),
-    );
-    if let Some(max_per_class) = config.network_buffer_pool_max_per_class {
-        network_buffer_pool_cfg = network_buffer_pool_cfg.with_max_per_class(max_per_class);
-    }
     let cfg = tokio::Config::default()
         .with_tcp_nodelay(Some(true))
         .with_worker_threads(config.worker_threads)
         .with_max_blocking_threads(config.blocking_threads)
         .with_storage_directory(PathBuf::from(&config.directory))
-        .with_storage_buffer_pool_config(storage_buffer_pool_cfg)
-        .with_network_buffer_pool_config(network_buffer_pool_cfg)
         .with_catch_panics(false);
     let executor = tokio::Runner::new(cfg);
 
@@ -218,7 +222,8 @@ fn main() {
                         .get(peer)
                         .expect("Could not find peer in hosts file");
                     let key = from_hex(peer).expect("Could not parse peer key");
-                    let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
+                    let key =
+                        PublicKey::decode(key).expect("peer key must encode a valid public key");
                     (key, *ip)
                 })
                 .collect();
@@ -227,7 +232,8 @@ fn main() {
             let mut bootstrappers = Vec::new();
             for bootstrapper in &config.bootstrappers {
                 let key = from_hex(bootstrapper).expect("Could not parse bootstrapper key");
-                let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
+                let key = PublicKey::decode(key)
+                    .expect("bootstrapper key must encode a valid public key");
                 let ip = peers.get(&key).expect("Could not find bootstrapper in IPs");
                 let bootstrapper_socket = format!("{}:{}", ip, config.port);
                 let bootstrapper_socket = SocketAddr::from_str(&bootstrapper_socket)
@@ -245,7 +251,8 @@ fn main() {
                 .into_iter()
                 .map(|peer| {
                     let key = from_hex(&peer.0).expect("Could not parse peer key");
-                    let key = PublicKey::decode(key.as_ref()).expect("Peer key is invalid");
+                    let key =
+                        PublicKey::decode(key).expect("peer key must encode a valid public key");
                     (key, peer.1)
                 })
                 .collect();
@@ -254,7 +261,8 @@ fn main() {
             let mut bootstrappers = Vec::new();
             for bootstrapper in &config.bootstrappers {
                 let key = from_hex(bootstrapper).expect("Could not parse bootstrapper key");
-                let key = PublicKey::decode(key.as_ref()).expect("Bootstrapper key is invalid");
+                let key = PublicKey::decode(key)
+                    .expect("bootstrapper key must encode a valid public key");
                 let socket = peers.get(&key).expect("Could not find bootstrapper in IPs");
                 bootstrappers.push((key, Ingress::Socket(*socket)));
             }
@@ -269,13 +277,11 @@ fn main() {
 
         // Parse config
         let share = from_hex(&config.share).expect("Could not parse share");
-        let share = group::Share::decode(share.as_ref()).expect("Share is invalid");
+        let share = group::Share::decode(share).expect("share must have a valid encoding");
         let polynomial = from_hex(&config.polynomial).expect("Could not parse polynomial");
-        let polynomial = Sharing::<MinSig>::decode_cfg(
-            polynomial.as_ref(),
-            &(NZU32!(peers_u32), ModeVersion::v0()),
-        )
-        .expect("polynomial is invalid");
+        let polynomial =
+            Sharing::<MinSig>::decode_cfg(polynomial, &(NZU32!(peers_u32), ModeVersion::v0()))
+                .expect("polynomial must have a valid encoding");
         let identity = *polynomial.public();
         info!(
             ?public_key,
@@ -288,28 +294,49 @@ fn main() {
         // Configure network
         let p2p_namespace = union_unique(NAMESPACE, b"_P2P");
         let max_peers_per_set = peer_set_limit(&peers, &public_key);
+        let max_message_size = match config.leader.mode().certificate_mode() {
+            CertificateMode::Standard => {
+                configured_max_message_size::<StandardScheme>(peers_u32, config.block_size)
+            }
+            CertificateMode::Vrf => {
+                configured_max_message_size::<VrfScheme>(peers_u32, config.block_size)
+            }
+        };
+        let handshake: Handshake = Cups::new(
+            Sake {
+                signer: signer.clone(),
+                synchrony_bound: Duration::from_secs(5),
+                max_handshake_age: Duration::from_secs(10),
+                version: sake::Version::V1,
+            },
+            cups::Version::V1,
+        );
+        let listen = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port);
+        let dialable = SocketAddr::new(ip, config.port);
+        let mailbox_size = NZUsize!(config.mailbox_size);
         let mut p2p_cfg = if config.local {
             authenticated::Config::local(
-                signer.clone(),
+                handshake,
                 &p2p_namespace,
-                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
-                SocketAddr::new(ip, config.port),
+                listen,
+                dialable,
                 bootstrappers,
                 max_peers_per_set,
                 max_message_size,
+                mailbox_size,
             )
         } else {
             authenticated::Config::recommended(
-                signer.clone(),
+                handshake,
                 &p2p_namespace,
-                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
-                SocketAddr::new(ip, config.port),
+                listen,
+                dialable,
                 bootstrappers,
                 max_peers_per_set,
                 max_message_size,
+                mailbox_size,
             )
         };
-        p2p_cfg.mailbox_size = NZUsize!(config.mailbox_size);
         p2p_cfg.tracked_peer_sets = NZUsize!(1);
 
         // Start p2p
@@ -355,8 +382,8 @@ fn main() {
             peer_provider: oracle.clone(),
             blocker: oracle.clone(),
             mailbox_size: NZUsize!(config.mailbox_size),
-            timeout: MARSHAL_RESOLVER_TIMEOUT,
-            fetch_retry_timeout: Duration::from_millis(100),
+            fetch_timeout: NZDuration!(MARSHAL_RESOLVER_TIMEOUT),
+            fetch_retry_delay: FETCH_RETRY_DELAY,
             priority_requests: false,
             priority_responses: false,
         };
@@ -396,7 +423,8 @@ fn main() {
                     nullify_retry: NULLIFY_RETRY,
                     activity_timeout: ACTIVITY_TIMEOUT,
                     skip_timeout: SKIP_TIMEOUT,
-                    fetch_timeout: FETCH_TIMEOUT,
+                    fetch_timeout: NZDuration!(FETCH_TIMEOUT),
+                    fetch_retry_delay: FETCH_RETRY_DELAY,
                     backfiller_max_active: config.backfiller_max_active,
                     backfiller_retry: Duration::from_millis(config.backfiller_retry_ms),
                     indexer,
@@ -420,7 +448,12 @@ fn main() {
                 engine::stable_elector(term_length, optimistic_views),
                 delay_ms
             ),
-            Leader::Rotating { delay_ms } => {
+            Leader::RotatingRoundRobin { delay_ms } => start_consensus!(
+                StandardScheme,
+                engine::RoundRobinElector::default(),
+                delay_ms
+            ),
+            Leader::RotatingVrf { delay_ms } => {
                 start_consensus!(VrfScheme, ROTATING_ELECTOR, delay_ms)
             }
         };
@@ -437,18 +470,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn max_message_size_includes_block_data() {
-        assert_eq!(configured_max_message_size(0), BASE_MAX_MESSAGE_SIZE + 1);
-        assert_eq!(
-            configured_max_message_size(2 * 1024 * 1024),
-            BASE_MAX_MESSAGE_SIZE + 2 * 1024 * 1024 + 4
-        );
+    fn max_message_size_carries_whole_blocks() {
+        // The broadcast channel sends each block whole, so the limit must admit the largest one.
+        for block_size in [0, 2 * 1024 * 1024] {
+            let block = Block::max_encode_size(&Block::codec_config(block_size));
+            for limit in [
+                configured_max_message_size::<StandardScheme>(50, block_size),
+                configured_max_message_size::<VrfScheme>(50, block_size),
+            ] {
+                assert!(usize::try_from(limit).unwrap() >= block);
+            }
+        }
     }
 
     #[test]
     #[should_panic(expected = "block size exceeds authenticated transport maximum")]
     fn max_message_size_rejects_unsupported_block_size() {
-        configured_max_message_size(u32::MAX);
+        configured_max_message_size::<StandardScheme>(50, u32::MAX);
     }
 
     #[test]

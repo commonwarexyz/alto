@@ -1,5 +1,5 @@
-use alto_types::CertificateMode;
-use commonware_utils::{NZUsize, Probability, NZU32};
+use alto_types::LeaderMode;
+use commonware_utils::{NZUsize, Probability};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -10,14 +10,13 @@ use std::{
 
 pub mod application;
 pub mod engine;
+mod handoffs;
 pub mod indexer;
 pub mod utils;
 
 pub const DEFAULT_BACKFILLER_MAX_ACTIVE: NonZeroUsize = NZUsize!(16);
 pub const DEFAULT_BACKFILLER_RETRY_MS: u64 = 1_000;
 pub const DEFAULT_BLOCKING_THREADS: usize = 512;
-pub const DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(16_384);
-pub const DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS: NonZeroU32 = NZU32!(4_096);
 
 /// How long validators wait for a leader's proposal before nullifying the view.
 /// Proposal pacing stays below this deadline to leave time to propose.
@@ -33,14 +32,6 @@ fn default_backfiller_retry_ms() -> u64 {
 
 fn default_blocking_threads() -> usize {
     DEFAULT_BLOCKING_THREADS
-}
-
-fn default_storage_buffer_pool_max_per_class() -> Option<NonZeroU32> {
-    Some(DEFAULT_STORAGE_BUFFER_POOL_MAX_PER_CLASS)
-}
-
-fn default_network_buffer_pool_max_per_class() -> Option<NonZeroU32> {
-    Some(DEFAULT_NETWORK_BUFFER_POOL_MAX_PER_CLASS)
 }
 
 fn deserialize_traces_sample_rate<'de, D>(deserializer: D) -> Result<f64, D::Error>
@@ -72,12 +63,14 @@ where
 /// Leader election policy for the consensus engine.
 ///
 /// The delay sets the minimum interval from the parent's timestamp in milliseconds.
-/// Zero disables proposal pacing; timestamps may equal the parent's in either mode.
+/// Zero disables proposal pacing, so a proposed timestamp can equal the parent's.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "mode", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Leader {
-    /// Select a new VRF-derived leader for every view.
-    Rotating { delay_ms: u64 },
+    /// Elect a new leader from a VRF seed for every view.
+    RotatingVrf { delay_ms: u64 },
+    /// Take the next validator in round-robin order for every view.
+    RotatingRoundRobin { delay_ms: u64 },
     /// Keep one round-robin leader for a term and pace its proposals.
     Stable {
         delay_ms: u64,
@@ -88,11 +81,6 @@ pub enum Leader {
 }
 
 impl Leader {
-    /// Creates a rotating leader configuration.
-    pub const fn rotating(delay_ms: u64) -> Self {
-        Self::Rotating { delay_ms }
-    }
-
     /// Creates a stable leader configuration.
     pub const fn stable(delay_ms: u64, term_length: NonZeroU32, optimistic_views: u64) -> Self {
         assert!(
@@ -106,11 +94,12 @@ impl Leader {
         }
     }
 
-    /// Threshold certificate construction required by this leader policy.
-    pub const fn certificate_mode(self) -> CertificateMode {
+    /// Network mode selected by this leader configuration.
+    pub const fn mode(self) -> LeaderMode {
         match self {
-            Self::Rotating { .. } => CertificateMode::Vrf,
-            Self::Stable { .. } => CertificateMode::Standard,
+            Self::RotatingVrf { .. } => LeaderMode::RotatingVrf,
+            Self::RotatingRoundRobin { .. } => LeaderMode::RotatingRoundRobin,
+            Self::Stable { .. } => LeaderMode::Stable,
         }
     }
 }
@@ -128,14 +117,6 @@ pub struct Config {
     pub worker_threads: usize,
     #[serde(default = "default_blocking_threads")]
     pub blocking_threads: usize,
-    #[serde(default = "default_storage_buffer_pool_max_per_class")]
-    pub storage_buffer_pool_max_per_class: Option<NonZeroU32>,
-    #[serde(default = "default_network_buffer_pool_max_per_class")]
-    pub network_buffer_pool_max_per_class: Option<NonZeroU32>,
-    #[serde(default)]
-    pub storage_buffer_pool_parallelism: Option<NonZeroUsize>,
-    #[serde(default)]
-    pub network_buffer_pool_parallelism: Option<NonZeroUsize>,
     pub log_level: String,
 
     /// Fraction of traces exported to the configured collector. Zero disables tracing.
@@ -221,7 +202,9 @@ mod tests {
         deterministic::{self, Runner},
         Clock, Metrics, Runner as _, Spawner, Supervisor as _,
     };
-    use commonware_utils::{channel::oneshot, ordered::Set, probability, NZUsize, NZU32};
+    use commonware_utils::{
+        channel::oneshot, ordered::Set, probability, NZDuration, NZUsize, NZU32,
+    };
     use engine::Engine;
     use governor::Quota;
     use indexer::mocks;
@@ -233,8 +216,11 @@ mod tests {
     /// everything in RAM.
     const FREEZER_TABLE_INITIAL_SIZE: u32 = 2u32.pow(14); // 1MB
 
-    /// (Effectively) unlimited quota for tests.
-    const TEST_QUOTA: Quota = Quota::per_second(NZU32!(u32::MAX));
+    /// Per-peer channel quota for tests.
+    ///
+    /// The simulated network reports each receiver's capacity as a multiple of the burst
+    /// allowance, and consumers size their mailboxes from that capacity.
+    const TEST_QUOTA: Quota = Quota::per_second(NZU32!(1_024));
 
     /// Proposal delay of every simulated validator and the term length of stable leaders.
     const PROPOSAL_DELAY_MS: u64 = 10;
@@ -366,15 +352,12 @@ mod tests {
             - sum_validator_metric::<i64>(metrics, "_queue_floor", None)
     }
 
-    type Registration = (
-        (
-            Sender<PublicKey, deterministic::Context>,
-            Receiver<PublicKey>,
-        ),
-        (
-            Sender<PublicKey, deterministic::Context>,
-            Receiver<PublicKey>,
-        ),
+    type Registration<
+        P = Sender<PublicKey, deterministic::Context>,
+        C = Sender<PublicKey, deterministic::Context>,
+    > = (
+        (P, Receiver<PublicKey>),
+        (C, Receiver<PublicKey>),
         (
             Sender<PublicKey, deterministic::Context>,
             Receiver<PublicKey>,
@@ -413,7 +396,7 @@ mod tests {
     }
 
     /// Stable-leader election used by every simulation that does not pick its own elector.
-    fn stable_elector() -> engine::StableElector {
+    fn stable_elector() -> engine::RoundRobinElector {
         engine::stable_elector(STABLE_LEADER_TERM_LENGTH, 48)
     }
 
@@ -447,7 +430,10 @@ mod tests {
         signer: &commonware_cryptography::ed25519::PrivateKey,
         scheme: &CS,
         elector: L,
-        registration: Registration,
+        registration: Registration<
+            impl commonware_p2p::Sender<PublicKey = PublicKey>,
+            impl commonware_p2p::Sender<PublicKey = PublicKey>,
+        >,
         cfg: ValidatorConfig,
     ) {
         let timeout_retry = cfg.certification_timeout + Duration::from_millis(50);
@@ -471,7 +457,8 @@ mod tests {
             leader_timeout: cfg.leader_timeout,
             certification_timeout: cfg.certification_timeout,
             nullify_retry: timeout_retry,
-            fetch_timeout: Duration::from_secs(1),
+            fetch_timeout: NZDuration!(Duration::from_secs(1)),
+            fetch_retry_delay: Duration::from_millis(100),
             activity_timeout: ViewDelta::new(10),
             skip_timeout,
             backfiller_max_active: cfg.backfiller_max_active,
@@ -486,8 +473,8 @@ mod tests {
             peer_provider: oracle.manager(),
             blocker: oracle.control(public_key.clone()),
             mailbox_size: NZUsize!(1024),
-            timeout: Duration::from_secs(2),
-            fetch_retry_timeout: Duration::from_millis(100),
+            fetch_timeout: NZDuration!(Duration::from_secs(2)),
+            fetch_retry_delay: Duration::from_millis(100),
             priority_requests: false,
             priority_responses: false,
         };
@@ -548,6 +535,18 @@ mod tests {
     }
 
     fn all_online(n: u32, seed: u64, link: Link, required: u64) -> String {
+        all_online_with(n, seed, link, required, stable_elector).0
+    }
+
+    /// Runs `n` connected validators until one processes `required` blocks and returns the
+    /// auditor state and the final metrics.
+    fn all_online_with(
+        n: u32,
+        seed: u64,
+        link: Link,
+        required: u64,
+        elector: fn() -> engine::RoundRobinElector,
+    ) -> (String, String) {
         let cfg = deterministic::Config::default().with_seed(seed);
         let executor = Runner::from(cfg);
         executor.start(|mut context| async move {
@@ -574,12 +573,242 @@ mod tests {
 
             for (signer, scheme) in private_keys.iter().zip(schemes.iter()) {
                 let registration = registrations.remove(&signer.public_key()).unwrap();
-                start_validator(&context, &oracle, signer, scheme, registration, None).await;
+                start_validator_with(
+                    &context,
+                    &oracle,
+                    signer,
+                    scheme,
+                    elector(),
+                    registration,
+                    ValidatorConfig::default(),
+                )
+                .await;
             }
 
             poll_until_height(&context, &oracle, required).await;
-            context.auditor().state()
+            (context.auditor().state(), context.encode())
         })
+    }
+
+    #[test_traced]
+    fn selective_withholding_discourages_handoffs_and_recovers() {
+        use commonware_codec::DecodeExt;
+        use commonware_consensus::{
+            simplex::types::{Certificate, Proposal, Vote},
+            types::View,
+        };
+        use commonware_cryptography::sha256::Digest;
+        use commonware_p2p::Recipients;
+        use std::{
+            collections::{BTreeMap, BTreeSet},
+            sync::{Arc, Mutex},
+        };
+
+        type Scheme = bls12381_threshold::Scheme<PublicKey, MinSig>;
+
+        /// Wire traffic recorded by the validators' channel filters.
+        #[derive(Default)]
+        struct Observations {
+            /// Whether A sends its proposals to every validator again.
+            restored: bool,
+            /// A's withheld views, with B's `WaitReturned` count when each was first withheld.
+            withheld: BTreeMap<View, u64>,
+            /// B's latest `VotedBeforeCertification` count.
+            early_count: u64,
+            /// B's early proposals by view.
+            early: BTreeMap<View, Proposal<Digest>>,
+            /// Views of B's early proposals on a withheld parent that were nullified.
+            failed: BTreeSet<View>,
+            /// Views of B's early proposals on A that finalized after delivery resumed.
+            recovered: BTreeSet<View>,
+        }
+
+        /// Sums `validator`'s `_handoff_events_total` samples for `event`.
+        fn handoff_metric(
+            context: &deterministic::Context,
+            validator: &PublicKey,
+            event: &str,
+        ) -> u64 {
+            let id = format!("validator_{validator}");
+            context
+                .encode()
+                .lines()
+                .filter_map(|line| {
+                    let (name, labels, value) = validator_metric_sample(line)?;
+                    (name.ends_with("_handoff_events_total")
+                        && labels
+                            .is_some_and(|labels| labels.contains(&id) && labels.contains(event)))
+                    .then(|| value.parse::<u64>().unwrap())
+                })
+                .sum()
+        }
+
+        Runner::timed(Duration::from_secs(220)).start(|mut context| async move {
+            let (network, mut oracle) = Network::new(
+                context.child("network"),
+                simulated::Config {
+                    max_size: 1024 * 1024,
+                    max_peers_per_set: NZUsize!(4),
+                    disconnect_on_block: true,
+                    tracked_peer_sets: NZUsize!(1),
+                },
+            );
+            network.start();
+            let Fixture {
+                schemes,
+                private_keys,
+                participants,
+                ..
+            } = bls12381_threshold::fixture::<MinSig, _>(&mut context, NAMESPACE, 4);
+            let a = participants[0].clone();
+            let b = participants[1].clone();
+            let mut registrations = register_validators(&mut oracle, &participants).await;
+            link_validators(
+                &mut oracle,
+                &participants,
+                Link {
+                    latency: Duration::from_millis(10),
+                    jitter: Duration::ZERO,
+                    success_rate: probability!(1.0),
+                },
+                None,
+            )
+            .await;
+            let observations = Arc::new(Mutex::new(Observations::default()));
+
+            // Start every validator behind wire filters. A sends its proposals only to B until the
+            // test restores delivery, and the filters record B's early proposals on A and the
+            // certificates that resolve them.
+            for (signer, scheme) in private_keys.iter().zip(&schemes) {
+                let me = signer.public_key();
+                let (
+                    (pending, pending_receiver),
+                    (recovered, recovered_receiver),
+                    resolver,
+                    broadcast,
+                    backfill,
+                ) = registrations.remove(&me).unwrap();
+                let observed = observations.clone();
+                let successor = b.clone();
+                let is_a = me == a;
+                let is_b = me == b;
+                let metric_context = Arc::new(context.child("wire_observer"));
+                let (pending, _) = pending.split_with(move |_, recipients, bytes| {
+                    let vote = Vote::<Scheme, Digest>::decode(bytes.clone()).unwrap();
+                    let mut observed = observed.lock().unwrap();
+                    if let Vote::Notarize(vote) = vote {
+                        let view = vote.proposal.round.view();
+                        if is_a
+                            && usize::from(vote.attestation.signer) == 0
+                            && view.get() % 4 == 0
+                            && !observed.restored
+                        {
+                            // A sends its proposal only to B. Their two votes cannot meet
+                            // the three-vote quorum.
+                            observed.withheld.entry(view).or_insert_with(|| {
+                                handoff_metric(&metric_context, &successor, "WaitReturned")
+                            });
+                            return Some(Recipients::One(successor.clone()));
+                        }
+                        if is_b && usize::from(vote.attestation.signer) == 1 && view.get() % 4 == 1
+                        {
+                            // The voter counts its early vote before publishing the corresponding
+                            // Notarize. Match that increment to the exact proposal on the wire.
+                            let count = handoff_metric(
+                                &metric_context,
+                                &successor,
+                                "VotedBeforeCertification",
+                            );
+                            if count > observed.early_count {
+                                observed.early_count = count;
+                                observed.early.insert(view, vote.proposal);
+                            }
+                        }
+                    }
+                    Some(recipients.clone())
+                });
+                let observed = observations.clone();
+                let (recovered, _) = recovered.split_with(move |_, recipients, bytes| {
+                    let certificate = Certificate::<Scheme, Digest>::decode(bytes.clone()).unwrap();
+                    let mut observed = observed.lock().unwrap();
+                    match certificate {
+                        Certificate::Nullification(n)
+                            if observed.early.get(&n.round.view()).is_some_and(|proposal| {
+                                observed.withheld.contains_key(&proposal.parent)
+                            }) =>
+                        {
+                            observed.failed.insert(n.round.view());
+                        }
+                        Certificate::Finalization(f)
+                            if observed.restored
+                                && f.proposal.parent.get() % 4 == 0
+                                && observed.early.get(&f.proposal.round.view())
+                                    == Some(&f.proposal) =>
+                        {
+                            observed.recovered.insert(f.proposal.round.view());
+                        }
+                        _ => {}
+                    }
+                    Some(recipients.clone())
+                });
+                start_validator_with(
+                    &context,
+                    &oracle,
+                    signer,
+                    scheme,
+                    engine::RoundRobinElector::default(),
+                    (
+                        (pending, pending_receiver),
+                        (recovered, recovered_receiver),
+                        resolver,
+                        broadcast,
+                        backfill,
+                    ),
+                    ValidatorConfig::default(),
+                )
+                .await;
+            }
+
+            // Withholding must nullify three of B's early proposals on A and then make B wait at
+            // a later handoff from A.
+            let mut waited = None;
+            for _ in 0..2_000 {
+                let waits = handoff_metric(&context, &b, "WaitReturned");
+                {
+                    let observed = observations.lock().unwrap();
+                    if observed.failed.len() >= 3 {
+                        waited = observed.withheld.iter().find_map(|(parent, before)| {
+                            let child = View::new(parent.get() + 1);
+                            (waits > *before && !observed.early.contains_key(&child))
+                                .then_some(child)
+                        });
+                    }
+                }
+                if waited.is_some() {
+                    break;
+                }
+                context.sleep(Duration::from_millis(50)).await;
+            }
+            assert!(
+                waited.is_some(),
+                "B must wait on A after repeated early proposals are nullified"
+            );
+
+            // Once A sends its proposals to everyone again, B must finalize an early proposal
+            // on A.
+            observations.lock().unwrap().restored = true;
+            for _ in 0..2_000 {
+                if !observations.lock().unwrap().recovered.is_empty() {
+                    break;
+                }
+                context.sleep(Duration::from_millis(50)).await;
+            }
+            assert!(
+                !observations.lock().unwrap().recovered.is_empty(),
+                "B must finalize an early proposal on A after delivery resumes"
+            );
+            assert!(oracle.blocked().await.unwrap().is_empty());
+        });
     }
 
     #[test_traced]
@@ -593,6 +822,41 @@ mod tests {
             let state = all_online(5, seed, link.clone(), 25);
             assert_eq!(state, all_online(5, seed, link.clone(), 25));
         }
+    }
+
+    #[test_traced]
+    fn test_round_robin_pipelines_handoffs() {
+        let link = Link {
+            latency: Duration::from_millis(10),
+            jitter: Duration::from_millis(1),
+            success_rate: probability!(1.0),
+        };
+        let (_, metrics) = all_online_with(5, 0, link, 25, engine::RoundRobinElector::default);
+
+        // Every view starts a new term, so incoming leaders can vote for their prepared proposals
+        // before the outgoing leader's view certifies.
+        let early_votes: u64 = sum_validator_metric(
+            &metrics,
+            "_handoff_events_total",
+            Some("VotedBeforeCertification"),
+        );
+        assert!(
+            early_votes > 0,
+            "at least one handoff must vote before certification"
+        );
+    }
+
+    #[test_traced]
+    fn test_round_robin_waits_after_failed_handoffs() {
+        let link = Link {
+            latency: Duration::from_millis(200),
+            jitter: Duration::from_millis(150),
+            success_rate: probability!(0.75),
+        };
+        let (_, metrics) = all_online_with(5, 0, link, 50, engine::RoundRobinElector::default);
+        let waits: u64 =
+            sum_validator_metric(&metrics, "_handoff_events_total", Some("WaitReturned"));
+        assert!(waits > 0, "at least one handoff must return Wait");
     }
 
     #[test_traced]
@@ -1590,10 +1854,9 @@ mod tests {
         let entry = Entry { height: 42, digest };
 
         let encoded = entry.encode();
-        let decoded = Entry::decode(encoded.as_ref()).unwrap();
+        assert_eq!(encoded.len(), <Entry as commonware_codec::FixedSize>::SIZE);
+        let decoded = Entry::decode(encoded).unwrap();
         assert_eq!(decoded.height, 42);
         assert_eq!(decoded.digest, digest);
-
-        assert_eq!(encoded.len(), <Entry as commonware_codec::FixedSize>::SIZE);
     }
 }

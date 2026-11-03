@@ -1,6 +1,6 @@
 export const BACKEND_URL = "global.alto.exoware.xyz";
 export const PUBLIC_KEY_HEX = "9145617d764aef25219fa0ba3fc44ae2ce7f2eb5952499cd2d58117124fd15c87186abf59eddafe8ccfaaec85b978c010290b8c6b8308cf6a54e3ea7659bf407d5528cb0d690b9e7943d39a52043c86500cf0c558425dec357743b6b53471a13";
-export const CERTIFICATE_MODE = "vrf" as const;
+export const LEADER_MODE = "rotating-vrf" as const;
 export const PARTICIPANTS: string[] = [
     "053dbe878e06151799905246c92f2ac62c28357ca66267dbd6c361f569d3b60c",
     "08e6511beda42a15c340b27ab9b237605c8481be7ed0eafa3135bb528b4f8c5e",

@@ -22,8 +22,12 @@
 //!
 //! _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
 //!
-//! _The default certificate mode is `vrf` for rotating leaders. Use `--certificate-mode standard` for
-//! a stable-leader network. Stable networks do not publish seed artifacts._
+//! By default, the inspector reads from the public Global network at `https://global.alto.exoware.xyz`.
+//! Pass `--indexer` and `--identity` after `get` or `listen` to inspect another network.
+//!
+//! The default leader mode is `rotating-vrf`, as on the public network. Select
+//! `--leader-mode stable` or `--leader-mode rotating-round-robin` for a network with round-robin
+//! leaders. Those networks do not publish seed artifacts.
 //!
 //! Use `--block-size` to set the network's block payload size for streaming. The receive limit adds
 //! 1 MiB for encoding and one message-kind byte. The default payload allowance is 4 MiB.
@@ -40,7 +44,7 @@
 //! inspector get notarization 100
 //! ```
 //!
-//! ## Get the notarizations between views 100 to 110
+//! ## Get the notarizations for views 100 through 109
 //!
 //! ```bash
 //! inspector get notarization 100..110
@@ -64,7 +68,7 @@
 //! inspector get block 10
 //! ```
 //!
-//! ## Get the blocks between heights 10 and 20
+//! ## Get the blocks at heights 10 through 19
 //!
 //! ```bash
 //! inspector get block 10..20
@@ -86,8 +90,11 @@ use alto_client::{
     consensus::{Message, Payload},
     Client, ClientBuilder, IndexQuery, Query,
 };
-use alto_types::{CertificateMode, Identity, Scheme, StandardScheme, VrfScheme, NAMESPACE};
+use alto_types::{
+    CertificateMode, Identity, LeaderMode, Scheme, StandardScheme, VrfScheme, NAMESPACE,
+};
 use clap::{value_parser, Arg, ArgMatches, Command};
+use commonware_allocator::mimalloc;
 use commonware_codec::DecodeExt;
 use commonware_formatting::from_hex;
 use commonware_parallel::Sequential;
@@ -99,17 +106,18 @@ use utils::{
 };
 
 #[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc::new(mimalloc::Config::DEFAULT);
 
 mod utils;
 
 const DEFAULT_INDEXER: &str = "https://global.alto.exoware.xyz";
 const DEFAULT_IDENTITY: &str = "9145617d764aef25219fa0ba3fc44ae2ce7f2eb5952499cd2d58117124fd15c87186abf59eddafe8ccfaaec85b978c010290b8c6b8308cf6a54e3ea7659bf407d5528cb0d690b9e7943d39a52043c86500cf0c558425dec357743b6b53471a13";
-const DEFAULT_CERTIFICATE_MODE: &str = "vrf";
 
-#[tokio::main]
-async fn main() {
-    let matches = Command::new("inspector")
+/// Leader policy of the default public network.
+const DEFAULT_LEADER_MODE: LeaderMode = LeaderMode::RotatingVrf;
+
+fn command() -> Command {
+    Command::new("inspector")
         .about("Inspect alto activity.")
         .arg(
             Arg::new("verbose")
@@ -127,12 +135,12 @@ async fn main() {
                 .help("Network block payload size in bytes for streaming (default allowance: 4 MiB)"),
         )
         .arg(
-            Arg::new("certificate_mode")
-                .long("certificate-mode")
-                .value_parser(CertificateMode::ALL.map(CertificateMode::as_str))
-                .default_value(DEFAULT_CERTIFICATE_MODE)
+            Arg::new("leader_mode")
+                .long("leader-mode")
+                .value_parser(LeaderMode::ALL.map(LeaderMode::as_str))
+                .default_value(DEFAULT_LEADER_MODE.as_str())
                 .global(true)
-                .help("Threshold certificate construction used by the network"),
+                .help("Leader policy used by the network"),
         )
         .subcommand(
             Command::new("listen")
@@ -189,21 +197,24 @@ async fn main() {
                         .action(clap::ArgAction::SetTrue),
                 ),
         )
-        .get_matches();
+}
 
+#[tokio::main]
+async fn main() {
+    let matches = command().get_matches();
     let log_level = if matches.get_flag("verbose") {
         Level::DEBUG
     } else {
         Level::INFO
     };
     tracing_subscriber::fmt().with_max_level(log_level).init();
-    let mode: CertificateMode = matches
-        .get_one::<String>("certificate_mode")
-        .expect("certificate mode has a default")
+    let mode: LeaderMode = matches
+        .get_one::<String>("leader_mode")
+        .expect("leader mode must have a default")
         .parse()
-        .expect("clap validates certificate mode");
+        .expect("leader mode must be one of the accepted values");
 
-    match mode {
+    match mode.certificate_mode() {
         CertificateMode::Standard => run::<StandardScheme>(&matches).await,
         CertificateMode::Vrf => run::<VrfScheme>(&matches).await,
     }
@@ -213,7 +224,7 @@ fn client<C: Scheme>(matches: &ArgMatches) -> Client<Sequential, C> {
     let indexer = matches.get_one::<String>("indexer").unwrap();
     let identity = matches.get_one::<String>("identity").unwrap();
     let identity = from_hex(identity).expect("Failed to decode identity");
-    let identity = Identity::decode(identity.as_ref()).expect("Invalid identity");
+    let identity = Identity::decode(identity).expect("identity must encode a valid public key");
     let mut builder = ClientBuilder::new(
         indexer,
         C::certificate_verifier(NAMESPACE, identity),
@@ -370,6 +381,56 @@ async fn run<C: Scheme>(matches: &ArgMatches) {
                 }
             }
             _ => unreachable!(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{command, LeaderMode, DEFAULT_LEADER_MODE};
+
+    #[test]
+    fn leader_selection_supports_the_public_network_and_all_policies() {
+        // The default belongs to the public network selected by the other defaults.
+        let matches = command()
+            .try_get_matches_from(["inspector", "listen"])
+            .unwrap();
+        assert_eq!(
+            matches.get_one::<String>("leader_mode").unwrap(),
+            DEFAULT_LEADER_MODE.as_str()
+        );
+
+        // `--leader-mode` is global, so it can appear before or after the subcommand.
+        for mode in LeaderMode::ALL {
+            for args in [
+                vec!["inspector", "--leader-mode", mode.as_str(), "listen"],
+                vec![
+                    "inspector",
+                    "get",
+                    "block",
+                    "latest",
+                    "--leader-mode",
+                    mode.as_str(),
+                ],
+            ] {
+                let matches = command().try_get_matches_from(args).unwrap();
+                assert_eq!(
+                    matches.get_one::<String>("leader_mode").unwrap(),
+                    mode.as_str()
+                );
+            }
+        }
+
+        // `--certificate-mode` and values other than the leader modes are rejected.
+        for selection in [
+            ["--certificate-mode", "vrf"],
+            ["--leader-mode", "vrf"],
+            ["--leader-mode", "standard"],
+            ["--leader-mode", "rotating"],
+        ] {
+            assert!(command()
+                .try_get_matches_from(["inspector", "listen"].into_iter().chain(selection))
+                .is_err());
         }
     }
 }

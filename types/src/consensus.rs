@@ -18,54 +18,77 @@ use commonware_cryptography::{
 };
 use serde::{Deserialize, Serialize};
 
-/// Threshold certificates with one vote signature for stable leaders.
+/// Threshold certificates with one vote signature for round-robin leaders.
 pub type StandardScheme = standard::Scheme<PublicKey, MinSig>;
 
-/// Threshold certificates with vote and seed signatures for rotating leaders.
+/// Threshold certificates with vote and seed signatures for VRF leaders.
 pub type VrfScheme = vrf::Scheme<PublicKey, MinSig>;
 
 /// Certificate-seeded leader election used with [VrfScheme].
 pub type RotatingElector = Random<Sha256>;
 
-/// Leader election configuration for rotating leaders.
+/// Leader election configuration for VRF leaders.
 ///
 /// Validators and explorers must use the same seed-to-leader mapping. [RandomVersion::V1]
 /// hashes the seed signature before selecting a leader. Changing this configuration requires
 /// a fresh network deployment.
 pub const ROTATING_ELECTOR: RotatingElector = Random::new(RandomVersion::V1);
 
-/// Certificate construction used by a consensus network.
+/// Leader schedule and certificate construction used by a consensus network.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CertificateMode {
-    /// One threshold signature over each vote.
-    Standard,
-    /// Vote and round-seed threshold signatures for certificate-seeded rotating leaders.
-    Vrf,
+#[serde(rename_all = "kebab-case")]
+pub enum LeaderMode {
+    /// Keep one round-robin leader for each multi-view term.
+    Stable,
+    /// Choose a leader for every view using the previous view's VRF seed.
+    RotatingVrf,
+    /// Visit validators in order, changing leader every view.
+    ///
+    /// Leaders are known in advance, so the incoming leader can build and vote before
+    /// the outgoing view certifies.
+    RotatingRoundRobin,
 }
 
-impl CertificateMode {
+impl LeaderMode {
     /// Every mode, in the order offered on the command line.
-    pub const ALL: [Self; 2] = [Self::Standard, Self::Vrf];
+    pub const ALL: [Self; 3] = [Self::Stable, Self::RotatingVrf, Self::RotatingRoundRobin];
 
     /// Name used on the command line and in configuration files.
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Standard => "standard",
-            Self::Vrf => "vrf",
+            Self::Stable => "stable",
+            Self::RotatingVrf => "rotating-vrf",
+            Self::RotatingRoundRobin => "rotating-round-robin",
+        }
+    }
+
+    /// Threshold certificate construction required by this schedule.
+    pub const fn certificate_mode(self) -> CertificateMode {
+        match self {
+            Self::Stable | Self::RotatingRoundRobin => CertificateMode::Standard,
+            Self::RotatingVrf => CertificateMode::Vrf,
         }
     }
 }
 
-impl std::str::FromStr for CertificateMode {
+impl std::str::FromStr for LeaderMode {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::ALL
             .into_iter()
             .find(|mode| mode.as_str() == s)
-            .ok_or_else(|| format!("unknown certificate mode: {s}"))
+            .ok_or_else(|| format!("unknown leader mode: {s}"))
     }
+}
+
+/// Threshold certificate construction derived from a network's [LeaderMode].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CertificateMode {
+    /// One threshold signature over each vote.
+    Standard,
+    /// Threshold signatures over each vote and round seed.
+    Vrf,
 }
 
 /// Consensus schemes with certificate verification and optional round seeds.

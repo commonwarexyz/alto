@@ -2,19 +2,21 @@ use crate::{
     consensus::{Context, Finalization, Notarization, Scheme},
     EPOCH,
 };
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{BufMut, Bytes};
 use commonware_codec::{
-    varint::UInt, BufsMut, Encode, EncodeSize, Error, RangeCfg, Read, ReadExt, Write,
+    varint::UInt, Buf, BufsMut, Encode, EncodeSize, Error, FixedSize, MaxEncodeSize, RangeCfg,
+    Read, ReadExt, Write,
 };
 use commonware_consensus::{
     types::{Height, Round, View},
-    CertifiableBlock, Heightable,
+    BoundedBlock, CertifiableBlock, Heightable,
 };
 use commonware_cryptography::{
     ed25519, sha256::Digest, Digest as _, Digestible, Hasher, Sha256, Signer,
 };
 use commonware_parallel::Strategy;
 use commonware_utils::sys_rng;
+use std::ops::{Bound, RangeBounds};
 
 const GENESIS: &[u8] = b"commonware is neat";
 
@@ -41,6 +43,12 @@ pub struct Block {
 }
 
 impl Block {
+    /// Latest allowed block timestamp, 2200-01-01T00:00:00Z in milliseconds since the Unix epoch.
+    ///
+    /// Decoding rejects later timestamps so that every decoded block's timestamp fits in
+    /// `SystemTime` on every platform.
+    pub const MAX_TIMESTAMP_MS: u64 = 7_258_118_400_000;
+
     /// The fixed genesis block shared by validators and followers.
     pub fn genesis() -> Self {
         let context = Context {
@@ -139,6 +147,9 @@ impl Read for Block {
         let parent = Digest::read(reader)?;
         let height = Height::read(reader)?;
         let timestamp = UInt::read(reader)?.0;
+        if timestamp > Self::MAX_TIMESTAMP_MS {
+            return Err(Error::Invalid("types::Block", "timestamp exceeds maximum"));
+        }
         let data = Bytes::read_cfg(reader, cfg)?;
 
         let digest = Self::compute_digest(&context, &parent, height, timestamp, &data);
@@ -326,5 +337,30 @@ impl CertifiableBlock for Block {
 
     fn context(&self) -> Self::Context {
         self.context.clone()
+    }
+}
+
+impl BoundedBlock for Block {
+    /// # Panics
+    ///
+    /// Panics if the maximum encoded size exceeds `usize::MAX`.
+    fn max_encode_size(cfg: &RangeCfg<usize>) -> usize {
+        // Convert the payload range to an inclusive upper bound. An excluded zero
+        // leaves no valid payload length, so zero is a conservative bound.
+        let max_data = match cfg.end_bound() {
+            Bound::Included(&end) => end,
+            Bound::Excluded(&end) => end.saturating_sub(1),
+            Bound::Unbounded => usize::MAX,
+        };
+
+        // Every field contributes its widest encoding, including the payload's length prefix.
+        let metadata = Context::MAX_ENCODE_SIZE
+            + Digest::SIZE
+            + Height::MAX_ENCODE_SIZE
+            + UInt(Self::MAX_TIMESTAMP_MS).encode_size()
+            + UInt::<u32>::MAX_ENCODE_SIZE;
+        metadata
+            .checked_add(max_data)
+            .expect("maximum block size must fit in usize")
     }
 }
