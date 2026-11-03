@@ -27,6 +27,9 @@ cargo install alto-inspector
 
 _Use `-v` or `--verbose` to enable verbose logging (like request latency). Use `--prepare` to initialize the connection before making the request (for accurate latency measurement)._
 
+By default, the inspector reads from the public Global network at `https://global.alto.exoware.xyz`.
+Pass `--indexer` and `--identity` after `get` or `listen` to inspect another network.
+
 The default leader mode is `rotating-vrf`, as on the public network. Select `--leader-mode stable`
 or `--leader-mode rotating-round-robin` for a network with round-robin leaders. Those networks do
 not publish seed artifacts.
@@ -46,7 +49,7 @@ inspector get seed latest
 inspector get notarization 100
 ```
 
-### Get the notarizations between views 100 to 110
+### Get the notarizations for views 100 through 109
 
 ```bash
 inspector get notarization 100..110
@@ -70,7 +73,7 @@ inspector get block latest
 inspector get block 10
 ```
 
-### Get the blocks between heights 10 and 20
+### Get the blocks at heights 10 through 19
 
 ```bash
 inspector get block 10..20

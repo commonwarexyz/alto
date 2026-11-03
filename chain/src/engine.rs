@@ -60,11 +60,7 @@ const FREEZER_TABLE_RESIZE_CHUNK_SIZE: u32 = 2u32.pow(16); // 3MB
 const FREEZER_JOURNAL_TARGET_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 const FREEZER_JOURNAL_COMPRESSION: Option<u8> = Some(3);
 const REPLAY_BUFFER: NonZero<usize> = NZUsize!(8 * 1024 * 1024); // 8MB
-
-/// Keeps write buffers below mimalloc's 512 KiB large-object limit so allocations can reuse
-/// thread-local pages. Each sync drains the buffer, so the next buffered write allocates again.
 const WRITE_BUFFER: NonZero<usize> = NZUsize!(64 * 1024); // 64KB
-
 const PAGE_CACHE_PHYSICAL_PAGE_SIZE: u32 = 4_096;
 const PAGE_CACHE_PAGE_SIZE: NonZero<u16> = page_size(PAGE_CACHE_PHYSICAL_PAGE_SIZE);
 const PAGE_CACHE_CAPACITY: NonZero<usize> = NZUsize!(8_192); // 32MB

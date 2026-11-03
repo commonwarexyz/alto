@@ -37,8 +37,8 @@ _To deploy your own instance of `alto`, read the guide in [deploy](../deploy/REA
 |-------|-------------|
 | `source` | URL of the indexer to fetch blocks and stream certificates from |
 | `identity` | Hex-encoded BLS12-381 threshold public key used to verify consensus signatures |
-| `leader_mode` | Required network leader policy: `stable`, `rotating-vrf`, or `rotating-round-robin` |
-| `block_size` | Required network block payload size in bytes, used to bound the live feed |
+| `leader_mode` | Network leader policy: `stable`, `rotating-vrf`, or `rotating-round-robin` |
+| `block_size` | Network block payload size in bytes, used to bound the live feed |
 | `directory` | Path to store finalized blocks and state |
 | `worker_threads` | Number of runtime worker threads |
 | `signature_threads` | Number of threads for signature verification |
@@ -47,10 +47,14 @@ _To deploy your own instance of `alto`, read the guide in [deploy](../deploy/REA
 | `mailbox_size` | Capacity of internal actor mailboxes |
 | `max_repair` | Maximum concurrent block fetches during backfill |
 | `fetch_retry_timeout_ms` | Milliseconds between follower resolver retries for failed backfill requests |
-| `tip` | Start from the tip of the finalized chain instead of backfilling from genesis |
+| `tip` | On a fresh follower, start from the latest finalized block instead of backfilling from genesis |
 | `pruning_depth` | Number of finalized blocks to retain before pruning (null to keep all) |
 
-_See [examples/](./examples/) for sample configuration files._
+All fields except `pruning_depth` are required. See [examples/](./examples/) for sample configuration files.
+
+With `tip` set, a follower that has processed no blocks beyond genesis starts from the indexer's
+latest finalization, falling back to genesis if that request fails. A follower with stored progress
+resumes from it.
 
 Set `block_size` to the same value as the validators and indexer. The live feed includes the
 encoding allowance described in the [Rust client](../client/README.md).

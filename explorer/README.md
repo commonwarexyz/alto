@@ -10,9 +10,11 @@ Visualize `alto` activity.
 
 The alto explorer can run in two modes: **public** (for deployed clusters) and **local** (for local development).
 
+Run the `npm` commands in this guide from the `explorer/` directory after installing dependencies with `npm ci`.
+
 When the indexer serves the explorer, `/runtime-config.js` supplies the mode, network key, leader mode, and validator keys and locations for that deployment. Requests use the same origin as the explorer page. This runtime configuration takes precedence over the static files and `REACT_APP_MODE`.
 
-Stable leaders hold multi-view terms. Rotating modes assign one view per term. The explorer verifies VRF certificates for `rotating-vrf` and standard certificates for both round-robin modes.
+The leader mode selects the certificate format the explorer verifies: VRF certificates for `rotating-vrf`, and standard certificates for `stable` and `rotating-round-robin`.
 
 For a standalone explorer, the bundled `runtime-config.js` selects the static configurations below. `REACT_APP_MODE` selects the mode and defaults to `public`. If the configuration script fails to load, startup stops with a refresh prompt.
 
@@ -20,7 +22,7 @@ For a standalone explorer, the bundled `runtime-config.js` selects the static co
 
 Public mode is used for deployed clusters (e.g., Global and USA clusters on AWS). It shows:
 - A world map with validator locations
-- A cluster dropdown to switch between clusters
+- A cluster dropdown listing Global and USA in the bundled standalone configuration, or only the serving deployment when an indexer serves the explorer
 - Full documentation about the deployed infrastructure
 
 The bundled Global and USA configurations use [exoware::relay](https://exoware.xyz), which streams consensus artifacts from those clusters to the browser.
@@ -53,7 +55,7 @@ export const LOCATIONS: ([[number, number], string] | null)[] = [
 ];
 ```
 
-You can generate these configurations using `deploy explorer remote`:
+Generate each configuration from that deployment's output directory with `deploy explorer remote`, then copy the generated `config.ts` exports into the matching file:
 ```bash
 cargo run --bin deploy -- explorer --dir <config-dir> --backend-url <url> remote
 ```
@@ -112,7 +114,7 @@ npm run build
 REACT_APP_MODE=local npm run build
 ```
 
-_This will compile the WASM module from `alto-types` before building the React app._
+_`npm run build` first compiles the WASM module from `alto-types` with `wasm-pack` and checks it, then builds the React app. On macOS, see [Build the Embedded Explorer](../deploy/README.md#build-the-embedded-explorer) for the required LLVM toolchain._
 
 ### Run the production build
 

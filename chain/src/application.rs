@@ -13,6 +13,7 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::{Duration, SystemTime};
 use tracing::info;
 
+/// How far a block timestamp may lead the local clock before verification must wait.
 const MAX_FUTURE_SKEW_MS: u64 = 1_000;
 
 #[derive(Clone)]
